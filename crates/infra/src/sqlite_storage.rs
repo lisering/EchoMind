@@ -141,6 +141,23 @@ impl SqliteStorage {
                 .context("迁移失败：删除旧 documents 表失败")?;
         }
 
+        // chunks 表：旧版含 session_id 列，新版不含；列结构不一致直接重建
+        if Self::table_exists(conn, "chunks")? && Self::has_column(conn, "chunks", "session_id")? {
+            eprintln!("schema 迁移：chunks 表含旧版 session_id 列，重建表");
+            conn.execute_batch("DROP TABLE IF EXISTS chunks;")
+                .context("迁移失败：删除旧 chunks 表失败")?;
+        }
+
+        // embeddings 表：旧版列名为 embedding（非 vector），含 session_id / model_name 列
+        // 新版仅 chunk_id + vector；列名不匹配会导致 vector_search SQL 崩溃
+        if Self::table_exists(conn, "embeddings")?
+            && !Self::has_column(conn, "embeddings", "vector")?
+        {
+            eprintln!("schema 迁移：embeddings 表列名不匹配（旧版 embedding → 新版 vector），重建表");
+            conn.execute_batch("DROP TABLE IF EXISTS embeddings;")
+                .context("迁移失败：删除旧 embeddings 表失败")?;
+        }
+
         // messages 表：conversation_id 列在 Phase 6 新增，旧库可能缺失
         if Self::table_exists(conn, "messages")?
             && !Self::has_column(conn, "messages", "conversation_id")?

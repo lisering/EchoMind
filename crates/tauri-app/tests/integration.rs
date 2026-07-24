@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! QA 红灯集成测试（L2：Tauri Mock + 真实 SQLite，体系二阶段 2 先于实现编写）。
 //! 覆盖：TC-UI-001 配置持久化（REQ-UI-008）/ TC-UI-002 空知识库拦截（REQ-RAG-003-AC-2）。
 
@@ -662,4 +662,107 @@ fn tc_acl_001_dialog_capability_exists() {
         perm_strs.contains(&"core:default"),
         "capabilities/default.json 必须包含 'core:default' 权限（事件系统等基础能力）"
     );
+}
+
+// ================== 向量化+检索完整链路测试（防回归） ==================
+// 教训：Phase 8.5 混沌测试覆盖了 import+index（load+split+chunks 入库），
+// 但 **未覆盖 embed+search 链路**。真实用户旧数据库 embeddings 表列名不匹配
+// （embedding → vector）导致 add_embedding INSERT 崩溃 + vector_search SELECT 崩溃。
+// 本模块补全：import → index → embed → vector_search 完整链路验证。
+
+mod embed_search_tests {
+    use super::*;
+    use echomind_core::import::{ImportOutcome, ImportService};
+
+    /// TC-VEC-001 完整向量化+检索链路：导入文档 → 索引 → 向量化 → 检索，不断崩溃。
+    ///
+    /// 这正是用户报告的 bug 路径：上传文档后发送消息，vector_search 因
+    /// embeddings 表列名不匹配而崩溃。本测试确保完整链路在全新数据库上正常工作。
+    #[tokio::test]
+    async fn tc_vec_001_import_embed_search_full_pipeline() {
+        let dir = TempDir::new().unwrap();
+        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+        let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
+
+        // 创建测试文档
+        let md_path = dir.path().join("knowledge.md");
+        std::fs::write(&md_path, "# 知识库文档\n\nRust 是一门系统级编程语言，注重安全与性能。").unwrap();
+        let path_str = md_path.canonicalize().unwrap().to_string_lossy().into_owned();
+
+        // 步骤 1：导入
+        let outcome = service.import_one(&path_str, true).await.unwrap();
+        let doc = match outcome {
+            ImportOutcome::Imported(d) => d,
+            ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+        };
+
+        // 步骤 2：索引（load → split → chunks 入库）
+        service.index_document(&doc).await.unwrap();
+        let chunks = state.storage.list_chunks(&doc.id).await.unwrap();
+        assert!(!chunks.is_empty(), "索引后必须有 chunks");
+
+        // 步骤 3：向量化（embed_batch → add_embedding）
+        // 直接调用 storage.add_embedding 模拟向量化写入（绕过 LocalEmbedder 模型加载）
+        for chunk in &chunks {
+            state
+                .storage
+                .add_embedding(&chunk.id, &[0.1, 0.2, 0.3, 0.4])
+                .await
+                .expect("add_embedding 不应崩溃（embeddings 表 vector 列必须存在）");
+        }
+
+        // 步骤 4：检索（vector_search）——这是用户崩溃的关键点
+        let hits = state
+            .storage
+            .vector_search(&[0.1, 0.2, 0.3, 0.4], 5)
+            .await
+            .expect("vector_search 不应崩溃（e.vector 列必须存在）");
+
+        assert_eq!(hits.len(), chunks.len(), "检索结果数应等于 chunk 数");
+        assert!(
+            hits[0].score > 0.99,
+            "自身向量余弦相似度应接近 1.0，实际: {}",
+            hits[0].score
+        );
+        assert!(
+            hits[0].doc_name.ends_with("knowledge.md"),
+            "doc_name 应为 knowledge.md（含 hash 前缀），实际: {}",
+            hits[0].doc_name
+        );
+    }
+
+    /// TC-VEC-002 旧 schema 迁移后向量化+检索不崩溃（端到端守卫）。
+    ///
+    /// 模拟用户从旧版本升级：数据库 embeddings 表列名为 `embedding`（非 `vector`），
+    /// 验证 migrate_schema 正确重建表后，add_embedding + vector_search 正常工作。
+    /// 注：旧 schema 构造在 infra crate 的 `tc_db_003_old_schema_embeddings_migration` 中覆盖，
+    /// 此处聚焦端到端完整链路。
+    #[tokio::test]
+    async fn tc_vec_002_full_pipeline_with_real_storage() {
+        let dir = TempDir::new().unwrap();
+        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+        let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
+
+        // 多文档导入 + 索引 + 向量化 + 检索
+        for i in 0..3 {
+            let path = dir.path().join("doc{i}.md");
+            std::fs::write(&path, format!("文档 {i} 的内容，关于主题 {i}。")).unwrap();
+            let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
+            let outcome = service.import_one(&canon, true).await.unwrap();
+            if let ImportOutcome::Imported(doc) = outcome {
+                service.index_document(&doc).await.unwrap();
+                let chunks = state.storage.list_chunks(&doc.id).await.unwrap();
+                for chunk in &chunks {
+                    state.storage.add_embedding(&chunk.id, &[i as f32, 0.0, 0.0]).await.unwrap();
+                }
+            }
+        }
+
+        // 检索：用与 doc-0 相同的向量，应召回 doc-0 的 chunks
+        let hits = state.storage.vector_search(&[0.0, 0.0, 0.0], 10).await.unwrap();
+        assert!(!hits.is_empty(), "至少应召回 1 条结果");
+        // 所有 3 个文档的 chunks 都应被召回（向量不完全正交，top-k=10 覆盖全部）
+        let doc_names: std::collections::HashSet<_> = hits.iter().map(|h| h.doc_name.clone()).collect();
+        assert_eq!(doc_names.len(), 3, "应召回 3 个不同文档的 chunks");
+    }
 }
