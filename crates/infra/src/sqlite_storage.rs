@@ -21,8 +21,10 @@ PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 5000;
 ";
 
-/// 表结构：documents / chunks / embeddings，外键 ON DELETE CASCADE（REQ-ING-005 前置）
-const SCHEMA: &str = "
+/// 表结构：documents / chunks / embeddings / settings / conversations / messages。
+/// 外键 ON DELETE CASCADE（REQ-ING-005 前置）。
+/// 仅含 CREATE TABLE 语句；索引在迁移完成后单独创建（防旧表 schema 不兼容崩溃）。
+const SCHEMA_TABLES: &str = "
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
     file_path TEXT NOT NULL,
@@ -31,7 +33,6 @@ CREATE TABLE IF NOT EXISTS documents (
     status_reason TEXT,
     created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(file_hash);
 
 CREATE TABLE IF NOT EXISTS chunks (
     id TEXT PRIMARY KEY,
@@ -40,7 +41,6 @@ CREATE TABLE IF NOT EXISTS chunks (
     token_count INTEGER NOT NULL,
     sequence INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 
 CREATE TABLE IF NOT EXISTS embeddings (
     chunk_id TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
@@ -58,7 +58,6 @@ CREATE TABLE IF NOT EXISTS conversations (
     title TEXT NOT NULL,
     created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_conversations_workspace ON conversations(workspace_id);
 
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
@@ -68,6 +67,13 @@ CREATE TABLE IF NOT EXISTS messages (
     sources TEXT,
     created_at INTEGER NOT NULL
 );
+";
+
+/// 索引定义（在表创建与迁移完成后执行）。
+const SCHEMA_INDEXES: &str = "
+CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(file_hash);
+CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_workspace ON conversations(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
 ";
 
@@ -108,9 +114,67 @@ impl SqliteStorage {
 
     fn init_schema(&self) -> anyhow::Result<()> {
         let conn = self.pool.get().context("获取数据库连接失败")?;
-        conn.execute_batch(SCHEMA)
+        // 步骤 1：创建表（IF NOT EXISTS 不修改已有表结构）
+        conn.execute_batch(SCHEMA_TABLES)
             .context("初始化数据库表结构失败")?;
+        // 步骤 2：迁移旧表 schema（修复历史版本不兼容的列缺失）
+        Self::migrate_schema(&conn)?;
+        // 步骤 3：创建索引（此时所有列已保证存在）
+        conn.execute_batch(SCHEMA_INDEXES)
+            .context("初始化数据库索引失败")?;
         Ok(())
+    }
+
+    /// 旧数据库 schema 迁移：检测已有表是否缺少必要列，若缺少则 DROP + 重建。
+    ///
+    /// 背景：`CREATE TABLE IF NOT EXISTS` 不会修改已有表的列结构。
+    /// 若用户从旧版本升级，表可能缺少新增列，导致后续 CREATE INDEX / 查询引用
+    /// 不存在列时崩溃。迁移策略：对每个表检查关键列是否存在，缺失则 DROP 重建
+    /// （开发阶段数据可丢弃；生产环境应改用 ALTER TABLE 增量迁移 + 数据导出）。
+    fn migrate_schema(conn: &rusqlite::Connection) -> anyhow::Result<()> {
+        // documents 表：status_reason 列在 Phase 4+ 新增，旧库可能缺失
+        if Self::table_exists(conn, "documents")?
+            && !Self::has_column(conn, "documents", "status_reason")?
+        {
+            eprintln!("schema 迁移：documents 表缺少 status_reason 列，重建表");
+            conn.execute_batch("DROP TABLE IF EXISTS documents;")
+                .context("迁移失败：删除旧 documents 表失败")?;
+        }
+
+        // messages 表：conversation_id 列在 Phase 6 新增，旧库可能缺失
+        if Self::table_exists(conn, "messages")?
+            && !Self::has_column(conn, "messages", "conversation_id")?
+        {
+            eprintln!("schema 迁移：messages 表缺少 conversation_id 列，重建表");
+            conn.execute_batch("DROP TABLE IF EXISTS messages;")
+                .context("迁移失败：删除旧 messages 表失败")?;
+        }
+
+        // 重建被删除的表（此时 IF NOT EXISTS 会真正执行建表）
+        conn.execute_batch(SCHEMA_TABLES)
+            .context("迁移失败：重建表失败")?;
+        Ok(())
+    }
+
+    /// 检查指定表是否存在。
+    fn table_exists(conn: &rusqlite::Connection, table: &str) -> anyhow::Result<bool> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            params![table],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// 检查指定表是否包含某列（基于 PRAGMA table_info）。
+    fn has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> anyhow::Result<bool> {
+        let sql = format!("PRAGMA table_info({table})");
+        let mut stmt = conn.prepare(&sql)?;
+        let col_names: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(col_names.iter().any(|c| c == column))
     }
 
     /// 加载或生成 AES-256-GCM 密钥（REQ-UI-008；文件权限 0600）。
