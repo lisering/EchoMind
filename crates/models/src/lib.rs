@@ -97,6 +97,41 @@ pub struct ChatMessage {
     pub sources: Option<Vec<RetrievalResult>>,
 }
 
+/// 会话（REQ-RAG-006）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Conversation {
+    /// 会话唯一标识（UUID v4）
+    pub id: String,
+    /// 工作区标识（v1.0 单工作区 "default"）
+    pub workspace_id: String,
+    /// 会话标题（首轮问答后自动提取自用户问题前缀）
+    pub title: String,
+    /// 创建时间（Unix 秒级时间戳）
+    pub created_at: i64,
+}
+
+impl Conversation {
+    /// 创建新会话：自动生成 UUID 与时间戳。
+    pub fn new(workspace_id: String, title: String) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            workspace_id,
+            title,
+            created_at: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    /// 以指定 ID 构造（chat 兜底幂等创建用，REQ-RAG-006）。
+    pub fn with_id(id: String, workspace_id: String, title: String) -> Self {
+        Self {
+            id,
+            workspace_id,
+            title,
+            created_at: chrono::Utc::now().timestamp(),
+        }
+    }
+}
+
 /// 文档索引状态事件负载（Tauri Event `doc-status-changed`，REQ-ING-001 冻结契约）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocStatusPayload {

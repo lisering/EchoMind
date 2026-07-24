@@ -1,6 +1,7 @@
-//! 应用状态组装（Phase 5：LLM 配置经 SQLite settings 加密持久化，REQ-UI-008）。
+//! 应用状态组装（Phase 6：会话级流中断令牌，REQ-RAG-005）。
 //! 存储为 crates/infra 的 SQLite 适配器（REQ-DB-001）。
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::Context;
@@ -8,6 +9,7 @@ use echomind_core::Storage;
 use echomind_infra::local_embedder::LocalEmbedder;
 use echomind_infra::sqlite_storage::SqliteStorage;
 use echomind_models::LlmConfig;
+use tokio_util::sync::CancellationToken;
 
 /// Tauri 全局状态。
 pub struct AppState {
@@ -19,6 +21,8 @@ pub struct AppState {
     pub llm_config: tokio::sync::RwLock<Option<LlmConfig>>,
     /// 向量化引擎（首次使用时初始化：模型下载可能耗时，严禁阻塞启动）
     embedder: tokio::sync::OnceCell<LocalEmbedder>,
+    /// 每个会话的流中断令牌（REQ-RAG-005；会话结束清理）
+    abort_tokens: tokio::sync::Mutex<HashMap<String, CancellationToken>>,
 }
 
 impl AppState {
@@ -45,6 +49,7 @@ impl AppState {
             data_dir,
             llm_config: tokio::sync::RwLock::new(llm_config),
             embedder: tokio::sync::OnceCell::new(),
+            abort_tokens: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -65,5 +70,28 @@ impl AppState {
         self.embedder
             .get_or_try_init(|| async { LocalEmbedder::new(self.data_dir.join("models")).await })
             .await
+    }
+
+    /// 获取（或创建）指定会话的中断令牌（REQ-RAG-005）。
+    pub async fn abort_token_for(&self, conversation_id: &str) -> CancellationToken {
+        self.abort_tokens
+            .lock()
+            .await
+            .entry(conversation_id.to_string())
+            .or_default()
+            .clone()
+    }
+
+    /// 触发指定会话的中断（abort_chat 命令行为）。
+    pub async fn abort_chat(&self, conversation_id: &str) {
+        let token = self.abort_tokens.lock().await.get(conversation_id).cloned();
+        if let Some(token) = token {
+            token.cancel();
+        }
+    }
+
+    /// 清理指定会话的中断令牌（对话结束或会话删除后调用）。
+    pub async fn clear_abort(&self, conversation_id: &str) {
+        self.abort_tokens.lock().await.remove(conversation_id);
     }
 }

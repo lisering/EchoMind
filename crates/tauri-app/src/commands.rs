@@ -1,4 +1,4 @@
-//! Tauri Command 层（契约见 SRS：REQ-ING-001、REQ-RAG-001、REQ-LLM-002、REQ-UI-008）。
+//! Tauri Command 层（契约见 SRS：REQ-ING-001、REQ-RAG-001/005/006、REQ-LLM-002、REQ-UI-008）。
 //! 体系三：全部 Result 显式处理，零 unwrap；错误以可读消息返回前端（不泄露敏感信息）。
 //! `*_inner` 函数泛型化 Runtime，供 Tauri 命令与 L2 集成测试（MockRuntime）复用。
 
@@ -9,15 +9,24 @@ use echomind_core::chat::{ChatEngine, ChatOutcome};
 use echomind_core::import::{ImportOutcome, ImportService};
 use echomind_core::retriever::VectorRetriever;
 use echomind_infra::openai_provider::OpenAIProvider;
-use echomind_models::{ChatMessage, DocStatusPayload, LlmConfig, RetrievalResult, SettingsPayload};
+use echomind_models::{
+    ChatMessage, Conversation, DocStatusPayload, LlmConfig, RetrievalResult, SettingsPayload,
+};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use tauri::{AppHandle, Emitter, Runtime, State};
+use tokio_util::sync::CancellationToken;
 
 use crate::state::AppState;
 
 /// RAG 检索默认 top-k（REQ-RAG-003）
 const DEFAULT_TOP_K: usize = 5;
+/// 会话标题自动提取的最大字符数（REQ-RAG-006）
+const TITLE_MAX_CHARS: usize = 24;
+/// 新建会话占位标题（REQ-RAG-006）
+const PLACEHOLDER_TITLE: &str = "新会话";
+/// 单工作区标识（v1.0）
+const DEFAULT_WORKSPACE: &str = "default";
 
 /// 从原始路径提取展示用文件名。
 fn display_name(raw_path: &str) -> String {
@@ -98,10 +107,10 @@ pub async fn import_files(
     Ok(imported)
 }
 
-// ---- chat（REQ-RAG-001）----
+// ---- chat（REQ-RAG-001/005/006）----
 
 /// 流式对话。事件序列：`chat_sources?` → `chat_token*` → `chat_done`；
-/// 任何失败先推 `chat_error` 再返回 Err。`conversation_id` 为会话持久化预留（REQ-RAG-006）。
+/// 失败先推 `chat_error` 再返回 Err；中断时推「已中断」+ `chat_done` 并照常落库。
 #[tauri::command]
 pub async fn chat(
     app: AppHandle,
@@ -117,12 +126,12 @@ pub async fn chat(
     result
 }
 
-/// 对话编排（命令与集成测试复用）：空库拦截 → 配置检查 → 引擎初始化 → 检索对话。
+/// 对话编排（命令与集成测试复用）：空库拦截 → 配置检查 → 引擎初始化 → 检索对话 → 落库。
 pub async fn chat_inner<R: Runtime>(
     app: &AppHandle<R>,
     query: &str,
     history: &[ChatMessage],
-    _conversation_id: &str,
+    conversation_id: &str,
     state: &AppState,
 ) -> Result<(), String> {
     // 空知识库前置拦截（REQ-RAG-003-AC-2）：明确引导，不触碰向量化引擎与网络
@@ -147,6 +156,18 @@ pub async fn chat_inner<R: Runtime>(
         .await
         .map_err(|e| format!("向量化引擎不可用: {e:#}"))?;
 
+    // 兜底：会话不存在时幂等创建（正常流程前端先 create_conversation）
+    let conversation = Conversation::with_id(
+        conversation_id.to_string(),
+        DEFAULT_WORKSPACE.to_string(),
+        derive_title(query),
+    );
+    state
+        .storage
+        .create_conversation(&conversation)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
     let retriever = VectorRetriever::new(embedder.clone(), state.storage.clone());
     let provider = OpenAIProvider::new(
         llm_config.api_key.clone(),
@@ -160,27 +181,219 @@ pub async fn chat_inner<R: Runtime>(
         .await
         .map_err(|e| format!("{e:#}"))?;
 
-    match outcome {
+    let (sources, stream) = match outcome {
         ChatOutcome::Answered { sources, stream } => {
             emit_chat_sources(app, &sources);
-            forward_stream(app, stream).await
+            (Some(sources), stream)
         }
-        ChatOutcome::NoContext { stream } => forward_stream(app, stream).await,
+        ChatOutcome::NoContext { stream } => (None, stream),
+    };
+
+    let abort_token = state.abort_token_for(conversation_id).await;
+    let result = forward_stream(app, stream, abort_token).await?;
+    // 正常结束或被中断：均已生成内容照常落库（REQ-RAG-005/006）
+    persist_exchange(state, conversation_id, query, &result.content, sources).await?;
+    state.clear_abort(conversation_id).await;
+    Ok(())
+}
+
+/// 流转发结果（REQ-RAG-005：completed=false 表示被中断，content 为已生成部分）。
+pub struct ForwardResult {
+    pub completed: bool,
+    pub content: String,
+}
+
+/// 将 token 流逐条转发为 chat_token；abort 令牌触发立即中断（丢弃流即中止 HTTP 连接）。
+pub async fn forward_stream<R: Runtime>(
+    app: &AppHandle<R>,
+    mut stream: BoxStream<'static, anyhow::Result<String>>,
+    abort_token: CancellationToken,
+) -> Result<ForwardResult, String> {
+    let mut content = String::new();
+    let mut completed = false;
+
+    loop {
+        tokio::select! {
+            biased;
+            _ = abort_token.cancelled() => break,
+            item = stream.next() => {
+                match item {
+                    None => {
+                        completed = true;
+                        break;
+                    }
+                    Some(Ok(token)) => {
+                        content.push_str(&token);
+                        emit_chat_token(app, token);
+                    }
+                    Some(Err(err)) => {
+                        // 错误经返回值上交，由 chat 包装层统一发射 chat_error（避免重复推送）
+                        return Err(format!("{err:#}"));
+                    }
+                }
+            }
+        }
+    }
+
+    if !completed {
+        // 中断语义（REQ-RAG-005 冻结契约）：已生成内容保留并标记
+        emit_chat_error(app, "⏹ 生成已中断".to_string());
+    }
+    emit_chat_done(app);
+    Ok(ForwardResult { completed, content })
+}
+
+/// 一轮问答落库（REQ-RAG-006）：首轮自动提取标题；空回答（秒中断）跳过 assistant 记录。
+pub async fn persist_exchange(
+    state: &AppState,
+    conversation_id: &str,
+    query: &str,
+    answer: &str,
+    sources: Option<Vec<RetrievalResult>>,
+) -> Result<(), String> {
+    // 首轮问答后提取标题（仅在尚无历史消息时执行，避免覆盖后续标题）
+    let existing = state
+        .storage
+        .list_messages(conversation_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if existing.is_empty() {
+        state
+            .storage
+            .update_conversation_title(conversation_id, &derive_title(query))
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+    }
+
+    let user_msg = ChatMessage {
+        role: "user".to_string(),
+        content: query.to_string(),
+        sources: None,
+    };
+    state
+        .storage
+        .add_message(conversation_id, &user_msg)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    if !answer.is_empty() {
+        let assistant_msg = ChatMessage {
+            role: "assistant".to_string(),
+            content: answer.to_string(),
+            sources,
+        };
+        state
+            .storage
+            .add_message(conversation_id, &assistant_msg)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+    }
+    Ok(())
+}
+
+/// 标题提取：取问题前 24 个字符，超长追加省略号（REQ-RAG-006）。
+fn derive_title(query: &str) -> String {
+    let trimmed = query.trim();
+    if trimmed.chars().count() <= TITLE_MAX_CHARS {
+        trimmed.to_string()
+    } else {
+        format!(
+            "{}…",
+            trimmed.chars().take(TITLE_MAX_CHARS).collect::<String>()
+        )
     }
 }
 
-/// 将 token 流逐条转发为 chat_token 事件，结束时发射 chat_done。
-async fn forward_stream<R: Runtime>(
-    app: &AppHandle<R>,
-    mut stream: BoxStream<'static, anyhow::Result<String>>,
-) -> Result<(), String> {
-    while let Some(item) = stream.next().await {
-        match item {
-            Ok(token) => emit_chat_token(app, token),
-            Err(err) => return Err(format!("{err:#}")),
-        }
-    }
-    emit_chat_done(app);
+// ---- 会话管理（REQ-RAG-006）----
+
+/// 新建会话，返回唯一 ID（占位标题「新会话」）。
+#[tauri::command]
+pub async fn create_conversation(
+    workspace_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    create_conversation_inner(workspace_id, state.inner()).await
+}
+
+/// 新建会话逻辑（命令与集成测试复用）。
+pub async fn create_conversation_inner(
+    workspace_id: String,
+    state: &AppState,
+) -> Result<String, String> {
+    let conversation = Conversation::new(workspace_id, PLACEHOLDER_TITLE.to_string());
+    state
+        .storage
+        .create_conversation(&conversation)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(conversation.id)
+}
+
+/// 列出工作区会话（倒序）。
+#[tauri::command]
+pub async fn get_conversations(
+    workspace_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<Conversation>, String> {
+    get_conversations_inner(&workspace_id, state.inner()).await
+}
+
+/// 会话列表逻辑（命令与集成测试复用）。
+pub async fn get_conversations_inner(
+    workspace_id: &str,
+    state: &AppState,
+) -> Result<Vec<Conversation>, String> {
+    state
+        .storage
+        .list_conversations(workspace_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 列出会话消息（正序，含引用块）。
+#[tauri::command]
+pub async fn get_messages(
+    conversation_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ChatMessage>, String> {
+    get_messages_inner(&conversation_id, state.inner()).await
+}
+
+/// 消息列表逻辑（命令与集成测试复用）。
+pub async fn get_messages_inner(
+    conversation_id: &str,
+    state: &AppState,
+) -> Result<Vec<ChatMessage>, String> {
+    state
+        .storage
+        .list_messages(conversation_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 删除会话（级联清理消息与中断令牌）。
+#[tauri::command]
+pub async fn delete_conversation(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    delete_conversation_inner(&id, state.inner()).await
+}
+
+/// 删除会话逻辑（命令与集成测试复用）。
+pub async fn delete_conversation_inner(id: &str, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .delete_conversation(id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state.clear_abort(id).await;
+    Ok(())
+}
+
+// ---- abort_chat（REQ-RAG-005）----
+
+/// 停止生成：触发指定会话的中断令牌，流循环立即 break 并中止网络拉取。
+#[tauri::command]
+pub async fn abort_chat(conversation_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.abort_chat(&conversation_id).await;
     Ok(())
 }
 

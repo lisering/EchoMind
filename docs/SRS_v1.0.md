@@ -5,7 +5,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0.5（含配置向导、主界面与配置持久化） |
+| 文档版本 | v1.0.6（含会话持久化与流中断控制） |
 | 生效日期 | 2026-07-24 |
 | 维护者 | PM（状态流转由 TPM 统一登记） |
 
@@ -233,20 +233,23 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 契约：TBD ｜ 关联测试：TBD
 
 #### REQ-RAG-005 停止生成
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-RAG-001
-- 描述：流式生成过程中用户可一键停止。
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-RAG-001
+- 描述：流式生成过程中用户可一键停止；后端为每个 conversation_id 维护一个 CancellationToken，abort_chat 触发后流循环立即 break，丢弃流即中止 HTTP 连接与事件推送；已生成部分内容保留并标记「已中断」，且照常落库（REQ-RAG-006）。
 - 验收标准：
-  - AC-1：点击停止后 500ms 内事件流终止，已生成内容保留并标记「已中断」。
+  - AC-1：abort 后事件流立即终止（TC-RAG-005），无 Panic，部分内容保留。
   - AC-2：停止后输入框恢复「空闲」态，可立即再次提问。
-- 契约：TBD ｜ 关联测试：TBD
+- 契约（TPM 冻结，2026-07-24）：Command `abort_chat(conversation_id: String, state) -> Result<(), String>`；中断事件语义复用已冻结契约：`chat_error("⏹ 生成已中断")` + `chat_done`（不新增事件类型）。
+- 关联测试：TC-RAG-005
 
-#### REQ-RAG-006 会话持久化
-- 优先级：P1 ｜ 状态：Draft ｜ 依赖：REQ-RAG-001
-- 描述：会话历史本地持久化，重启后可继续查看与续聊。
+#### REQ-RAG-006 会话持久化与多轮记忆
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-RAG-001、REQ-DB-001
+- 描述：新增 `conversations` 表（id, workspace_id, title, created_at）与 `messages` 表（id, conversation_id, role, content, sources，外键级联）；新建对话生成唯一 ID（占位标题「新会话」）；AI 回答完成（含被中断）后将用户问题与 AI 回复存入 messages；首轮问答后自动提取用户问题前 24 字符作为会话标题；前端左侧栏展示历史会话，点击加载历史消息并恢复多轮上下文；重启后完整可读可续聊。
 - 验收标准：
-  - AC-1：重启应用后历史会话完整可读（含引用块）。
-  - AC-2：续聊时上下文包含该会话历史。
-- 契约：TBD ｜ 关联测试：TBD
+  - AC-1：会话 CRUD 状态正确（TC-RAG-003：新建 → 列表 → 删除级联清理消息）。
+  - AC-2：完成一次对话后 messages 表新增 user 与 assistant 两条记录，标题自动提取（TC-RAG-004）。
+  - AC-3：重启应用后历史会话完整可读（含引用块 sources），续聊上下文包含该会话历史。
+- 契约（TPM 冻结，2026-07-24）：Command `create_conversation(workspace_id: String) -> Result<String, String>`；`get_conversations(workspace_id: String) -> Result<Vec<Conversation>, String>`；`get_messages(conversation_id: String) -> Result<Vec<ChatMessage>, String>`；`delete_conversation(id: String) -> Result<(), String>`。chat 命令复用既有 `conversation_id` 参数（Phase 4 契约已含）。
+- 关联测试：TC-RAG-003、TC-RAG-004
 
 #### REQ-RAG-007 BYOK Provider 管理
 - 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-SEC-001
@@ -493,3 +496,4 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 | v1.0.3 | 2026-07-24 | 新增 DB / PDF 域；REQ-DB-001（SQLite 持久化）、REQ-PDF-001（lopdf 解析）、REQ-VEC-002（fastembed 本地引擎）契约冻结；新增 crates/infra 适配器层；登记 TC-DB-001/002、TC-PDF-001、TC-VEC-001 | PM / TPM |
 | v1.0.4 | 2026-07-24 | 新增 LLM 域；REQ-RAG-001 对话命令契约冻结（chat + 四事件）；REQ-RAG-003 检索引擎细化（阈值过滤 / 空上下文拒答）；新增 REQ-LLM-001（OpenAI 兼容流式）、REQ-LLM-002（连接测试）；登记 TC-RAG-001/002、TC-LLM-001 | PM / TPM |
 | v1.0.5 | 2026-07-24 | REQ-UI-001/002/003/004 契约冻结；新增 REQ-UI-007（配置向导）、REQ-UI-008（settings 加密持久化）；裁决前端库本地化（禁 CDN）；REQ-RAG-007 部分交付；登记 TC-UI-001/002 | PM / TPM |
+| v1.0.6 | 2026-07-24 | REQ-RAG-005（停止生成，abort_chat + CancellationToken）、REQ-RAG-006（会话持久化，conversations/messages 表）契约冻结；中断事件语义复用 chat_error/chat_done；登记 TC-RAG-003/004/005 | PM / TPM |

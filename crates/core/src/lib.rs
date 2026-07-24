@@ -15,7 +15,7 @@ pub mod retriever;
 pub mod splitter;
 pub mod stream_parse;
 
-use echomind_models::{ChatMessage, Chunk, DocStatus, Document, RetrievalResult};
+use echomind_models::{ChatMessage, Chunk, Conversation, DocStatus, Document, RetrievalResult};
 use futures::stream::BoxStream;
 
 /// 文档加载端口：从文件路径提取纯文本（对应 REQ-ING-001/002）。
@@ -74,6 +74,25 @@ pub trait Storage: Send + Sync {
 
     /// 读取设置项（REQ-UI-008）。
     async fn get_setting(&self, key: &str) -> anyhow::Result<Option<String>>;
+
+    /// 创建会话（REQ-RAG-006；重复 ID 忽略，保证幂等）。
+    async fn create_conversation(&self, conversation: &Conversation) -> anyhow::Result<()>;
+
+    /// 列出工作区会话（按创建时间倒序）。
+    async fn list_conversations(&self, workspace_id: &str) -> anyhow::Result<Vec<Conversation>>;
+
+    /// 删除会话（外键级联清理其消息）。
+    async fn delete_conversation(&self, id: &str) -> anyhow::Result<()>;
+
+    /// 更新会话标题（首轮问答后自动提取）。
+    async fn update_conversation_title(&self, id: &str, title: &str) -> anyhow::Result<()>;
+
+    /// 写入一条消息。
+    async fn add_message(&self, conversation_id: &str, message: &ChatMessage)
+    -> anyhow::Result<()>;
+
+    /// 列出会话消息（按写入顺序正序）。
+    async fn list_messages(&self, conversation_id: &str) -> anyhow::Result<Vec<ChatMessage>>;
 }
 
 /// 大模型端口（对应 REQ-RAG-001/007）：token 级流式输出。

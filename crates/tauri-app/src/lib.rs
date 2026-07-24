@@ -23,6 +23,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::import_files,
             commands::chat,
+            commands::create_conversation,
+            commands::get_conversations,
+            commands::get_messages,
+            commands::delete_conversation,
+            commands::abort_chat,
             commands::test_llm_connection,
             commands::update_llm_config,
             commands::get_settings,

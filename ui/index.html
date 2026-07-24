@@ -27,8 +27,6 @@
       .scrollbar-thin::-webkit-scrollbar-thumb { border-radius: 3px; background: rgba(255,255,255,0.12); }
       .fade-in { animation: fadeIn 0.25s ease-out; }
       @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-      .pulse-dot { animation: pulseDot 1.2s ease-in-out infinite; }
-      @keyframes pulseDot { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
       pre { position: relative; }
       .copy-btn { position: absolute; top: 6px; right: 8px; font-size: 12px; padding: 2px 8px; border-radius: 6px; opacity: 0; transition: opacity 0.15s; }
       pre:hover .copy-btn { opacity: 1; }
@@ -79,7 +77,7 @@
 
         <div class="mt-6 flex items-center justify-between">
           <button id="wizKeyLink" class="text-sm text-accent hover:underline">去获取 API Key →</button>
-          <button id="wizStart" class="bg-accent text-base font-medium text-sm rounded-xl px-6 py-3 hover:opacity-90 transition-opacity disabled:opacity-40" style="color:#0C1116">
+          <button id="wizStart" class="bg-accent font-medium text-sm rounded-xl px-6 py-3 hover:opacity-90 transition-opacity disabled:opacity-40" style="color:#0C1116">
             验证并开始
           </button>
         </div>
@@ -88,7 +86,7 @@
 
     <!-- ============ 主界面（REQ-UI-001/002/003） ============ -->
     <div id="app" class="hidden h-full flex">
-      <!-- 左侧折叠栏 -->
+      <!-- 左侧折叠栏（REQ-RAG-006：历史会话） -->
       <aside id="sidebar" class="w-60 shrink-0 bg-panel border-r border-line flex flex-col transition-all duration-200">
         <div class="px-4 py-4 flex items-center justify-between">
           <span class="side-label font-semibold tracking-wide">灵犀 <span class="text-accent">·</span></span>
@@ -107,13 +105,7 @@
 
       <!-- 右侧主区域 -->
       <main class="flex-1 flex flex-col min-w-0">
-        <div id="chatArea" class="flex-1 overflow-y-auto scrollbar-thin px-6 py-6">
-          <div id="emptyState" class="h-full flex flex-col items-center justify-center text-center select-none">
-            <div class="text-5xl mb-5 text-accent">◈</div>
-            <div class="text-lg font-medium">向你的知识库提问</div>
-            <p class="mt-2 text-sm text-slate-500 max-w-sm">回答仅基于本地数据与你自己配置的模型。<br />点击左下角 ＋ 或直接把文件拖进来，开始构建知识库。</p>
-          </div>
-        </div>
+        <div id="chatArea" class="flex-1 overflow-y-auto scrollbar-thin px-6 py-6"></div>
 
         <!-- 底部控制台式输入框（REQ-UI-003） -->
         <div class="px-6 pb-5 pt-2">
@@ -122,6 +114,7 @@
             <textarea id="queryInput" rows="1" placeholder="输入问题，Enter 发送 · Shift+Enter 换行"
               class="flex-1 bg-transparent resize-none outline-none text-sm leading-6 max-h-40 scrollbar-thin"></textarea>
             <button id="sendBtn" class="shrink-0 h-9 px-4 rounded-xl bg-accent text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-30" style="color:#0C1116">发送</button>
+            <button id="stopBtn" title="停止生成" class="hidden shrink-0 h-9 px-4 rounded-xl bg-red-500/15 text-red-300 border border-red-400/40 text-sm hover:bg-red-500/25 transition-colors">■ 停止</button>
           </div>
           <div id="inputHint" class="mt-2 px-1 text-[11px] text-slate-500 h-4"></div>
         </div>
@@ -147,14 +140,16 @@
       const tauriDialog = window.__TAURI__.dialog;
       const tauriOpener = window.__TAURI__.opener;
 
+      const WORKSPACE = 'default';
+
       // ================== 全局状态 ==================
-      let history = [];                       // 多轮上下文（REQ-RAG-004）
+      let history = [];                       // 多轮上下文（REQ-RAG-004/006）
       let currentRawMarkdown = '';            // 流式累积原文（REQ-UI-003）
       let lastSources = null;
       let streaming = false;
       let currentAssistantEl = null;
       let renderScheduled = false;
-      let conversationId = crypto.randomUUID();
+      let currentConversationId = null;       // 当前会话（REQ-RAG-006）
       let activePreset = 'deepseek';
 
       const PRESETS = {
@@ -228,15 +223,108 @@
           $('wizStart').textContent = '验证并开始';
           return;
         }
+        $('wizStart').disabled = false;
+        $('wizStart').textContent = '验证并开始';
         showApp();
         toast('配置完成，开始构建你的知识库吧', 'success');
+        await initConversations();
       }
 
-      // ================== 主界面 ==================
-      function showWizard() { $('wizard').classList.remove('hidden'); $('app').classList.add('hidden'); }
-      function showApp() { $('wizard').classList.add('hidden'); $('app').classList.remove('hidden'); $('queryInput').focus(); }
+      // ================== 会话生命周期（REQ-RAG-006） ==================
+      async function initConversations() {
+        try {
+          const list = await invoke('get_conversations', { workspaceId: WORKSPACE });
+          if (list.length === 0) await newChat();
+          else await loadConversation(list[0].id);
+        } catch (err) {
+          toast('会话加载失败：' + String(err), 'error');
+        }
+      }
 
-      function hideEmptyState() { const e = $('emptyState'); if (e) e.remove(); }
+      async function newChat() {
+        if (streaming) { toast('正在生成，请先停止或等待完成', 'info'); return; }
+        currentConversationId = await invoke('create_conversation', { workspaceId: WORKSPACE });
+        history = [];
+        resetChatArea('新会话已开始', '上下文已清空，向你的知识库提问吧。');
+        await loadConversations();
+        $('queryInput').focus();
+      }
+
+      async function loadConversation(id) {
+        if (streaming) { toast('正在生成，请先停止或等待完成', 'info'); return; }
+        const messages = await invoke('get_messages', { conversationId: id });
+        currentConversationId = id;
+        history = messages;
+        $('chatArea').innerHTML = '';
+        if (messages.length === 0) {
+          resetChatArea('暂无消息', '开始提问吧。');
+        }
+        for (const m of messages) {
+          if (m.role === 'user') {
+            appendUserBlock(m.content);
+          } else {
+            currentAssistantEl = appendBlock('assistant');
+            currentRawMarkdown = m.content;
+            renderMarkdown();
+            if (m.sources && m.sources.length > 0) renderSources(m.sources);
+          }
+        }
+        currentAssistantEl = null;
+        currentRawMarkdown = '';
+        scrollToBottom();
+        await loadConversations();
+      }
+
+      async function removeConversation(id) {
+        await invoke('delete_conversation', { id });
+        if (id === currentConversationId) await newChat();
+        else await loadConversations();
+      }
+
+      async function loadConversations() {
+        const list = await invoke('get_conversations', { workspaceId: WORKSPACE });
+        const box = $('convList');
+        box.innerHTML = '';
+        for (const c of list) {
+          const item = document.createElement('div');
+          const active = c.id === currentConversationId;
+          item.className = `group flex items-center justify-between px-3 py-2.5 rounded-xl text-sm cursor-pointer ${active ? 'bg-accent/15 text-accent' : 'text-slate-300 hover:bg-white/5'}`;
+          const title = document.createElement('span');
+          title.className = 'truncate';
+          title.textContent = c.title;
+          title.onclick = () => loadConversation(c.id);
+          const del = document.createElement('button');
+          del.className = 'invisible group-hover:visible text-slate-500 hover:text-red-400 ml-2 shrink-0 px-1';
+          del.textContent = '×';
+          del.title = '删除会话';
+          del.onclick = async (ev) => { ev.stopPropagation(); await removeConversation(c.id); };
+          item.appendChild(title);
+          item.appendChild(del);
+          item.onclick = () => loadConversation(c.id);
+          box.appendChild(item);
+        }
+      }
+
+      // ================== 主界面渲染 ==================
+      function showWizard() { $('wizard').classList.remove('hidden'); $('app').classList.add('hidden'); }
+      function showApp() { $('wizard').classList.add('hidden'); $('app').classList.remove('hidden'); }
+
+      function resetChatArea(title, desc) {
+        $('chatArea').innerHTML = '';
+        const e = document.createElement('div');
+        e.className = 'h-full flex flex-col items-center justify-center text-center select-none fade-in';
+        e.innerHTML = `<div class="text-5xl mb-5 text-accent">◈</div><div class="text-lg font-medium"></div><p class="mt-2 text-sm text-slate-500 max-w-sm"></p>`;
+        e.querySelector('.text-lg').textContent = title;
+        e.querySelector('p').textContent = desc;
+        $('chatArea').appendChild(e);
+      }
+
+      function hideEmptyState() {
+        const area = $('chatArea');
+        if (area.children.length === 1 && area.firstElementChild?.classList.contains('h-full')) {
+          area.innerHTML = '';
+        }
+      }
 
       function appendBlock(role) {
         hideEmptyState();
@@ -244,7 +332,6 @@
         wrap.className = 'mb-5 fade-in';
         if (role === 'user') {
           wrap.innerHTML = `<div class="flex justify-end"><div class="max-w-[78%] bg-accent/15 border border-accent/30 rounded-2xl rounded-br-md px-4 py-3 text-sm leading-6 whitespace-pre-wrap"></div></div>`;
-          wrap.querySelector('div div').textContent = '';
         } else {
           wrap.innerHTML = `<div class="max-w-[92%] bg-panel border border-line rounded-2xl rounded-tl-md px-5 py-4">
               <div class="md text-sm"></div>
@@ -313,15 +400,14 @@
         area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' });
       }
 
+      // ================== 发送与流控制（REQ-UI-003 / REQ-RAG-005） ==================
       function setInputState(state, hint = '') {
-        const input = $('queryInput');
-        const send = $('sendBtn');
         streaming = state === 'streaming';
-        input.disabled = streaming;
-        send.disabled = streaming;
-        send.textContent = streaming ? '生成中…' : '发送';
+        $('queryInput').disabled = streaming;
+        $('sendBtn').classList.toggle('hidden', streaming);
+        $('stopBtn').classList.toggle('hidden', !streaming);
         $('inputHint').textContent = hint;
-        if (!streaming) input.focus();
+        if (!streaming) $('queryInput').focus();
       }
 
       function finalizeStream(ok) {
@@ -331,7 +417,6 @@
         currentRawMarkdown = '';
         lastSources = null;
         currentAssistantEl = null;
-        if (ok) setInputState('idle');
       }
 
       async function send() {
@@ -351,7 +436,7 @@
           await invoke('chat', {
             query,
             history: history.slice(0, -1),
-            conversationId,
+            conversationId: currentConversationId,
           });
         } catch (err) {
           // chat_error 事件已由后端推送；此处兜底状态复位
@@ -360,20 +445,41 @@
         }
       }
 
-      // ---- 事件监听（契约：REQ-RAG-001 / REQ-ING-001）----
+      $('stopBtn').onclick = async () => {
+        try {
+          await invoke('abort_chat', { conversationId: currentConversationId });
+        } catch (err) {
+          toast(String(err), 'error');
+        }
+      };
+
+      // ---- 事件监听（契约：REQ-RAG-001/005 / REQ-ING-001）----
       listen('chat_token', (e) => {
         currentRawMarkdown += e.payload;
         scheduleRender();
       });
       listen('chat_sources', (e) => renderSources(e.payload));
       listen('chat_error', (e) => {
-        toast(String(e.payload), 'error');
-        finalizeStream(false);
-        setInputState('error', String(e.payload));
+        const msg = String(e.payload);
+        if (msg.includes('已中断')) {
+          // 中断语义（REQ-RAG-005）：内容保留并标记，不视为错误
+          if (currentAssistantEl) {
+            const badge = document.createElement('div');
+            badge.className = 'mt-2 text-[11px] text-slate-500';
+            badge.textContent = '⏹ 已中断';
+            currentAssistantEl.querySelector('.md').appendChild(badge);
+          }
+          toast('生成已中断', 'info');
+        } else {
+          toast(msg, 'error');
+          finalizeStream(false);
+          setInputState('error', msg);
+        }
       });
-      listen('chat_done', () => {
+      listen('chat_done', async () => {
         finalizeStream(true);
         setInputState('idle');
+        await loadConversations(); // 首轮后标题可能已更新（REQ-RAG-006）
       });
       listen('doc-status-changed', (e) => {
         const p = e.payload;
@@ -429,24 +535,8 @@
         sb.querySelectorAll('.side-label').forEach((el) => el.classList.toggle('hidden'));
         $('collapseBtn').textContent = sb.classList.contains('w-14') ? '›' : '‹';
       };
-      $('newChatBtn').onclick = () => {
-        history = [];
-        conversationId = crypto.randomUUID();
-        $('chatArea').innerHTML = '';
-        $('chatArea').appendChild(document.createElement('div')).outerHTML =
-          '<div id="emptyState" class="h-full flex flex-col items-center justify-center text-center select-none"><div class="text-5xl mb-5 text-accent">◈</div><div class="text-lg font-medium">新会话已开始</div><p class="mt-2 text-sm text-slate-500 max-w-sm">上下文已清空，向你的知识库提问吧。</p></div>';
-        renderConvList();
-      };
+      $('newChatBtn').onclick = newChat;
       $('settingsBtn').onclick = () => { showWizard(); };
-
-      function renderConvList() {
-        const list = $('convList');
-        list.innerHTML = '';
-        const item = document.createElement('div');
-        item.className = 'px-3 py-2.5 rounded-xl bg-white/5 text-sm text-slate-300 truncate';
-        item.textContent = '当前会话';
-        list.appendChild(item);
-      }
 
       // ---- 向导按钮 ----
       $('wizStart').onclick = startWizard;
@@ -460,11 +550,16 @@
       marked.setOptions({ breaks: true, gfm: true });
       renderPresetCards();
       applyPreset();
-      renderConvList();
+      resetChatArea('向你的知识库提问', '回答仅基于本地数据与你自己配置的模型。点击左下角 ＋ 或直接把文件拖进来，开始构建知识库。');
       (async () => {
         try {
           const settings = await invoke('get_settings');
-          if (settings.has_llm_config) showApp(); else showWizard();
+          if (settings.has_llm_config) {
+            showApp();
+            await initConversations();
+          } else {
+            showWizard();
+          }
         } catch (_) {
           showWizard();
         }

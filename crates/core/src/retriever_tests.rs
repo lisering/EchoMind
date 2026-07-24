@@ -2,7 +2,7 @@
 //! QA 红灯测试：TC-RAG-001 相关度阈值过滤（REQ-RAG-003-AC-1）。
 
 use anyhow::Result;
-use echomind_models::{Chunk, DocStatus, Document, RetrievalResult};
+use echomind_models::{ChatMessage, Chunk, DocStatus, Document, RetrievalResult};
 
 use crate::retriever::{DEFAULT_SCORE_THRESHOLD, VectorRetriever};
 use crate::{Embedder, Retriever, Storage};
@@ -78,6 +78,36 @@ impl Storage for MockStorage {
 
     async fn get_setting(&self, _key: &str) -> Result<Option<String>> {
         Ok(None)
+    }
+
+    async fn create_conversation(
+        &self,
+        _conversation: &echomind_models::Conversation,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn list_conversations(
+        &self,
+        _workspace_id: &str,
+    ) -> Result<Vec<echomind_models::Conversation>> {
+        Ok(vec![])
+    }
+
+    async fn delete_conversation(&self, _id: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn update_conversation_title(&self, _id: &str, _title: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn add_message(&self, _conversation_id: &str, _message: &ChatMessage) -> Result<()> {
+        Ok(())
+    }
+
+    async fn list_messages(&self, _conversation_id: &str) -> Result<Vec<ChatMessage>> {
+        Ok(vec![])
     }
 }
 

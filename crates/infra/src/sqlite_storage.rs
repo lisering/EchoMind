@@ -9,7 +9,7 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use anyhow::{Context, anyhow, bail};
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use echomind_core::Storage;
-use echomind_models::{Chunk, DocStatus, Document, RetrievalResult};
+use echomind_models::{ChatMessage, Chunk, Conversation, DocStatus, Document, RetrievalResult};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 
@@ -51,6 +51,24 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_workspace ON conversations(workspace_id);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    sources TEXT,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
 ";
 
 const DOC_COLS: &str = "id, file_path, file_hash, status, status_reason, created_at";
@@ -425,5 +443,133 @@ impl Storage for SqliteStorage {
             Some(v) => Ok(Some(self.decrypt(&v)?)),
             None => Ok(None),
         }
+    }
+
+    async fn create_conversation(&self, conversation: &Conversation) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let c = conversation.clone();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "INSERT OR IGNORE INTO conversations (id, workspace_id, title, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![c.id, c.workspace_id, c.title, c.created_at],
+            )
+            .context("写入会话失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn list_conversations(&self, workspace_id: &str) -> anyhow::Result<Vec<Conversation>> {
+        let pool = self.pool.clone();
+        let workspace_id = workspace_id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let mut stmt = conn.prepare(
+                "SELECT id, workspace_id, title, created_at FROM conversations WHERE workspace_id = ?1 ORDER BY created_at DESC, rowid DESC",
+            )?;
+            let rows = stmt.query_map(params![workspace_id], |row| {
+                Ok(Conversation {
+                    id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    title: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    async fn delete_conversation(&self, id: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            // 外键级联：messages 随会话一并清理（PRAGMA foreign_keys = ON）
+            conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])
+                .context("删除会话失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn update_conversation_title(&self, id: &str, title: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        let title = title.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "UPDATE conversations SET title = ?1 WHERE id = ?2",
+                params![title, id],
+            )
+            .context("更新会话标题失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn add_message(
+        &self,
+        conversation_id: &str,
+        message: &ChatMessage,
+    ) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let conversation_id = conversation_id.to_string();
+        let message = message.clone();
+        run_db(move || {
+            let sources_json = match &message.sources {
+                Some(sources) => Some(serde_json::to_string(sources).context("序列化引用来源失败")?),
+                None => None,
+            };
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "INSERT INTO messages (id, conversation_id, role, content, sources, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    conversation_id,
+                    message.role,
+                    message.content,
+                    sources_json,
+                    chrono::Utc::now().timestamp(),
+                ],
+            )
+            .context("写入消息失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn list_messages(&self, conversation_id: &str) -> anyhow::Result<Vec<ChatMessage>> {
+        let pool = self.pool.clone();
+        let conversation_id = conversation_id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let mut stmt = conn.prepare(
+                "SELECT role, content, sources FROM messages WHERE conversation_id = ?1 ORDER BY rowid ASC",
+            )?;
+            let rows = stmt.query_map(params![conversation_id], |row| {
+                let sources_json: Option<String> = row.get(2)?;
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, sources_json))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (role, content, sources_json) = row?;
+                let sources = match sources_json {
+                    Some(json) => Some(
+                        serde_json::from_str(&json).context("反序列化引用来源失败")?,
+                    ),
+                    None => None,
+                };
+                out.push(ChatMessage { role, content, sources });
+            }
+            Ok(out)
+        })
+        .await
     }
 }
