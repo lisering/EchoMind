@@ -116,6 +116,12 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | REQ | AC | 用例编号 | 层级 | 状态 |
 | --- | --- | --- | --- | --- |
 | REQ-ARCH-000 | AC-1/2/3 | CI-BUILD（cargo check + clippy + 依赖树审计） | CI | 绿灯 |
+| REQ-ING-001 / REQ-ING-002 | AC-3 / AC-3 | TC-ING-001（.jpg 格式白名单拦截） | L1 | 红灯→绿灯 |
+| REQ-ING-002 | AC-1 | TC-ING-004（免费版 PDF 付费门） | L1 | 红灯→绿灯 |
+| REQ-ING-004 | AC-1 | TC-ING-002（MD5 指纹去重跳过） | L1 | 红灯→绿灯 |
+| REQ-LIC-001 | AC-1 | TC-ING-003（免费版第 51 文件拦截） | L1 | 红灯→绿灯 |
+| REQ-ING-001（加载链路） | AC-1 旁证 | TC-ING-005 / TC-ING-006（Markdown / Text 加载器） | L1 | 红灯→绿灯 |
+| REQ-VEC-001 | AC-2 / AC-3（前置） | TC-ING-007（token 窗口分块器） | L1 | 红灯→绿灯 |
 | （其余条目待 QA 阶段登记） | | | | |
 
 | 版本 | 日期 | 修订摘要 | 批准 |

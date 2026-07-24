@@ -9,6 +9,13 @@ echomind-models = { path = "../models" }
 anyhow = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 futures = "0.3"
+# 纯计算解析/分词库（无 I/O、无网络），经架构评审准入 core（见 SRS REQ-ARCH-000）
+pulldown-cmark = { version = "0.13", default-features = false }
+tiktoken-rs = "0.12"
+md-5 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

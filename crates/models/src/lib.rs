@@ -26,7 +26,7 @@ pub struct Document {
     pub id: String,
     /// 入库后的本地路径
     pub file_path: String,
-    /// 内容指纹（SHA-256，对应 REQ-ING-004 去重）
+    /// 内容指纹（MD5，对应 REQ-ING-004 去重；v1.0.2 由 SHA-256 修订）
     pub file_hash: String,
     /// 索引状态
     pub status: DocStatus,
@@ -95,4 +95,13 @@ pub struct ChatMessage {
     pub content: String,
     /// 助手消息的引用来源（用户消息为 None）
     pub sources: Option<Vec<RetrievalResult>>,
+}
+
+/// 文档索引状态事件负载（Tauri Event `doc-status-changed`，REQ-ING-001 冻结契约）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocStatusPayload {
+    /// 状态标识：indexing / done / error
+    pub status: String,
+    /// 可读消息（进度说明或错误原因）
+    pub message: String,
 }

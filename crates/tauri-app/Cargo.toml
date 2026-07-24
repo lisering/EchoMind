@@ -9,6 +9,7 @@ echomind-core = { path = "../core" }
 echomind-models = { path = "../models" }
 tauri = { version = "2.0", features = [] }
 tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
 
 # generate_context! 宏依赖构建脚本提供 OUT_DIR（tauri-build 与 tauri 主版本对齐）
 [build-dependencies]

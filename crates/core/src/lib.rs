@@ -8,6 +8,10 @@
 // 属经架构评审的刻意豁免，非疏漏。
 #![allow(async_fn_in_trait)]
 
+pub mod import;
+pub mod loader;
+pub mod splitter;
+
 use echomind_models::{ChatMessage, Chunk, DocStatus, Document, RetrievalResult};
 use futures::stream::BoxStream;
 
@@ -52,6 +56,12 @@ pub trait Storage: Send + Sync {
         query_embedding: &[f32],
         top_k: usize,
     ) -> anyhow::Result<Vec<RetrievalResult>>;
+
+    /// 按内容指纹查找文档（REQ-ING-004 去重）。
+    async fn find_document_by_hash(&self, hash: &str) -> anyhow::Result<Option<Document>>;
+
+    /// 统计已入库文档总数（REQ-LIC-001 配额判定）。
+    async fn count_documents(&self) -> anyhow::Result<usize>;
 }
 
 /// 大模型端口（对应 REQ-RAG-001/007）：token 级流式输出。
@@ -70,3 +80,10 @@ pub trait Retriever: Send + Sync {
     /// 对查询做向量化并检索最相关的 top_k 个分块。
     async fn retrieve(&self, query: &str, top_k: usize) -> anyhow::Result<Vec<RetrievalResult>>;
 }
+
+#[cfg(test)]
+mod import_tests;
+#[cfg(test)]
+mod loader_tests;
+#[cfg(test)]
+mod splitter_tests;
