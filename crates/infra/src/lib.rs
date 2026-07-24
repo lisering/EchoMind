@@ -2,6 +2,7 @@
 //! 本 crate 实现 `crates/core` 定义的端口 Trait，依赖方向：infra → core，严禁反转。
 
 pub mod local_embedder;
+pub mod openai_provider;
 pub mod sqlite_storage;
 
 #[cfg(test)]

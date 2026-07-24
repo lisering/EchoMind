@@ -105,3 +105,15 @@ pub struct DocStatusPayload {
     /// 可读消息（进度说明或错误原因）
     pub message: String,
 }
+
+/// BYOK LLM 配置（REQ-RAG-007 前置；当前经数据目录 `llm_config.json` 加载，
+/// 设置界面交付后改由安全存储承载，REQ-SEC-001）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmConfig {
+    /// API Key（允许为空串：兼容本地 Ollama，REQ-LLM-001）
+    pub api_key: String,
+    /// OpenAI 兼容端点（如 https://api.openai.com 或 http://localhost:11434/v1 的 host 部分）
+    pub base_url: String,
+    /// 模型名（如 gpt-4o-mini / deepseek-chat / qwen2.5）
+    pub model: String,
+}

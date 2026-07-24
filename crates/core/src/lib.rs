@@ -8,9 +8,12 @@
 // 属经架构评审的刻意豁免，非疏漏。
 #![allow(async_fn_in_trait)]
 
+pub mod chat;
 pub mod import;
 pub mod loader;
+pub mod retriever;
 pub mod splitter;
+pub mod stream_parse;
 
 use echomind_models::{ChatMessage, Chunk, DocStatus, Document, RetrievalResult};
 use futures::stream::BoxStream;
@@ -85,8 +88,14 @@ pub trait Retriever: Send + Sync {
 }
 
 #[cfg(test)]
+mod chat_tests;
+#[cfg(test)]
 mod import_tests;
 #[cfg(test)]
 mod loader_tests;
 #[cfg(test)]
+mod retriever_tests;
+#[cfg(test)]
 mod splitter_tests;
+#[cfg(test)]
+mod stream_parse_tests;

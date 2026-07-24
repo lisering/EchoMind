@@ -5,7 +5,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0.3（含 SQLite 持久化、本地向量化引擎与 PDF 解析） |
+| 文档版本 | v1.0.4（含 RAG 检索引擎与 LLM 流式对话） |
 | 生效日期 | 2026-07-24 |
 | 维护者 | PM（状态流转由 TPM 统一登记） |
 
@@ -48,6 +48,7 @@ EchoMind 是一款本地优先的 AI 知识库桌面应用。核心链路：用�
 | ARCH | 架构与工程基建 |
 | DB | 数据持久化 |
 | PDF | PDF 文档解析 |
+| LLM | 大模型接入 |
 
 ### 2.2 验收标准编号
 `REQ-<域>-<序号>-AC-<n>`。每条 AC 必须能被至少一个测试用例（`TC-*` / `E2E-*`）自动验证。
@@ -193,13 +194,16 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 ### 4.3 RAG — 检索增强对话
 
 #### REQ-RAG-001 提问与流式回答
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-RAG-007、REQ-UI-002
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-RAG-007、REQ-UI-002
 - 描述：用户在底部控制台输入问题，系统检索知识库并调用 BYOK 大模型，回答以 token 级流式渲染。
 - 验收标准：
   - AC-1：网络正常时首 token 到达前端 ≤ 3s（以事件时间戳断言）。
   - AC-2：流式过程中 UI 不冻结，可随时滚动历史。
   - AC-3：回答完整结束后 Block 进入「完成」态，显示耗时与引用数。
-- 契约：TBD ｜ 关联测试：TBD
+- 契约（TPM 冻结，2026-07-24）：
+  - Command：`chat(app: AppHandle, query: String, history: Vec<ChatMessage>, conversation_id: String, state: State<'_, AppState>) -> Result<(), String>`（`app: AppHandle` 为事件发射所需；conversation_id 为会话持久化预留，Phase 5 启用）。
+  - Events：`chat_token(String)` 逐 token 推送；`chat_sources(Vec<RetrievalResult>)` 推送引用来源；`chat_error(String)` 推送中断或错误信息；`chat_done(())` 流结束信号。
+- 关联测试：TC-RAG-002、TC-LLM-001（L2 契约测试随 CI 阶段补齐）
 
 #### REQ-RAG-002 引用来源回溯
 - 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-RAG-001
@@ -210,12 +214,15 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 契约：TBD ｜ 关联测试：TBD
 
 #### REQ-RAG-003 检索策略与拒答
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-VEC-003
-- 描述：默认 top-k（k=5）向量相似度检索，命中片段注入提示词上下文；无有效命中时明确拒答。
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-VEC-003
+- 描述：VectorRetriever 接入 LocalEmbedder 与 SqliteStorage，默认 top-k（k=5）向量相似度检索；引入相关度分数阈值过滤（score < 0.5 直接丢弃），防止低质量上下文污染；过滤后上下文为空时，直接返回固定提示，**不调用 LLM**。
 - 验收标准：
-  - AC-1：相似度低于阈值时，回答明确告知「知识库中未找到相关内容」，不编造来源。
-  - AC-2：知识库为空时提问，给出引导导入文档的提示而非报错。
-- 契约：TBD ｜ 关联测试：TBD
+  - AC-1：低于阈值的检索结果全部被丢弃（TC-RAG-001）；相似度不足时回答明确告知「知识库中未找到相关内容」，不编造来源。
+  - AC-2：空上下文时不发起任何 LLM 网络请求，直接返回固定警告流（TC-RAG-002）。
+- 契约：Retriever 端口契约不变；编排器 `core::chat::ChatEngine`、检索适配器 `core::retriever::VectorRetriever`。
+- 关联测试：TC-RAG-001、TC-RAG-002
+
+> TPM 注（v1.0.4）：上游指令曾以「REQ-RAG-001」指代检索引擎；检索策略归口本条（REQ-RAG-003），REQ-RAG-001（流式回答）承载对话命令契约，避免编号冲突。
 
 #### REQ-RAG-004 多轮上下文管理
 - 优先级：P1 ｜ 状态：Approved ｜ 依赖：REQ-RAG-001
@@ -401,6 +408,26 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 契约：复用 Loader 端口，无 IPC 变更。
 - 关联测试：TC-PDF-001
 
+### 4.10 LLM — 大模型接入
+
+#### REQ-LLM-001 OpenAI 兼容流式对话
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-RAG-001
+- 描述：基于 reqwest 调用 OpenAI 兼容端点（`POST {base_url}/v1/chat/completions`，stream=true）；SSE 流式解析（按 `\n\n` 切分事件，不完整片段字节级缓冲，`[DONE]` 结束）；精准捕获 HTTP 状态码并透传真实错误体（401/400 等）；支持多轮上下文（history 注入 messages）；base_url 规范化去尾斜杠（防双斜杠）；空 API Key 时不携带 Authorization 头（兼容本地 Ollama）。
+- 验收标准：
+  - AC-1：SSE 字节流被任意切断（含多字节字符边界）时解析器不崩溃、不丢字（TC-LLM-001）。
+  - AC-2：非 2xx 响应返回携带状态码与响应体摘要的 Err，不 Panic。
+  - AC-3：网络代码全部位于 infra，core 无 reqwest 依赖（依赖树审计）。
+- 契约：LLMProvider 端口契约不变；适配器 `echomind_infra::openai_provider::OpenAIProvider`。
+- 关联测试：TC-LLM-001
+
+#### REQ-LLM-002 LLM 连接测试
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-LLM-001
+- 描述：提供 test_llm_connection 命令，发送极简请求（max_tokens=1）验证 API Key 与 URL 有效性，返回可读结果。
+- 验收标准：
+  - AC-1：有效配置返回成功文案；无效 Key / URL / 模型返回真实 HTTP 错误信息。
+- 契约（TPM 冻结，2026-07-24）：Command `test_llm_connection(api_key: String, base_url: String, model: String) -> Result<String, String>`。
+- 关联测试：手测 + 设置界面 E2E（wiremock L2 用例随 CI 阶段补齐）
+
 ---
 
 ## 5. 非功能需求（NFR）
@@ -440,3 +467,4 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 | v1.0.1 | 2026-07-24 | 新增 ARCH 域与 REQ-ARCH-000（Phase 1 工程底座），需求总数 36 → 37 | TPM |
 | v1.0.2 | 2026-07-24 | REQ-ING-001 导入管线细化、契约冻结；REQ-ING-004 指纹算法修订为 MD5；登记 TC-ING-001~007 | PM / TPM |
 | v1.0.3 | 2026-07-24 | 新增 DB / PDF 域；REQ-DB-001（SQLite 持久化）、REQ-PDF-001（lopdf 解析）、REQ-VEC-002（fastembed 本地引擎）契约冻结；新增 crates/infra 适配器层；登记 TC-DB-001/002、TC-PDF-001、TC-VEC-001 | PM / TPM |
+| v1.0.4 | 2026-07-24 | 新增 LLM 域；REQ-RAG-001 对话命令契约冻结（chat + 四事件）；REQ-RAG-003 检索引擎细化（阈值过滤 / 空上下文拒答）；新增 REQ-LLM-001（OpenAI 兼容流式）、REQ-LLM-002（连接测试）；登记 TC-RAG-001/002、TC-LLM-001 | PM / TPM |

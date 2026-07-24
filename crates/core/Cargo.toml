@@ -15,6 +15,9 @@ tiktoken-rs = "0.12"
 md-5 = "0.10"
 # 纯计算解析库（REQ-PDF-001），与 pulldown-cmark 同类经架构评审准入 core
 lopdf = "0.34"
+# SSE/JSON 载荷解析（REQ-LLM-001），纯计算库
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [dev-dependencies]
 tempfile = "3"

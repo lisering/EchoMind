@@ -18,7 +18,11 @@ fn main() {
             app.manage(state);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::import_files]);
+        .invoke_handler(tauri::generate_handler![
+            commands::import_files,
+            commands::chat,
+            commands::test_llm_connection,
+        ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {
         eprintln!("EchoMind 启动失败: {err}");
