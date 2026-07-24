@@ -1,0 +1,14 @@
+[package]
+name = "echomind-core"
+version = "0.1.0"
+edition = "2024"
+description = "EchoMind 六边形架构核心层：端口 Trait 与领域逻辑，禁止依赖任何具体实现"
+
+[dependencies]
+echomind-models = { path = "../models" }
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+futures = "0.3"
+
+[lints]
+workspace = true

@@ -1,0 +1,12 @@
+# 构建产物
+/target
+/node_modules
+/dist
+
+# 密钥与环境（体系三红线：严禁入库）
+.env
+.env.*
+
+# 日志与系统杂物
+*.log
+.DS_Store

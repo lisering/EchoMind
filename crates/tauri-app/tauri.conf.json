@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "EchoMind",
+  "version": "0.1.0",
+  "identifier": "com.echomind.app",
+  "build": {
+    "frontendDist": "../../ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "EchoMind",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 640
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}
