@@ -572,4 +572,60 @@ impl Storage for SqliteStorage {
         })
         .await
     }
+
+    async fn list_documents(&self) -> anyhow::Result<Vec<Document>> {
+        let pool = self.pool.clone();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {DOC_COLS} FROM documents ORDER BY created_at DESC, rowid DESC"
+            ))?;
+            let rows = stmt.query_map([], row_to_document)?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    async fn delete_document(&self, doc_id: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let doc_id = doc_id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            // 外键级联链：documents → chunks → embeddings（PRAGMA foreign_keys = ON）
+            conn.execute("DELETE FROM documents WHERE id = ?1", params![doc_id])
+                .context("删除文档失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn list_chunks(&self, doc_id: &str) -> anyhow::Result<Vec<Chunk>> {
+        let pool = self.pool.clone();
+        let doc_id = doc_id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let mut stmt = conn.prepare(
+                "SELECT id, doc_id, content, token_count, sequence FROM chunks WHERE doc_id = ?1 ORDER BY sequence ASC",
+            )?;
+            let rows = stmt.query_map(params![doc_id], |row| {
+                Ok(Chunk {
+                    id: row.get(0)?,
+                    doc_id: row.get(1)?,
+                    content: row.get(2)?,
+                    token_count: row.get(3)?,
+                    sequence: row.get(4)?,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+        .await
+    }
 }

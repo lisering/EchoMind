@@ -4,13 +4,15 @@
 
 use std::path::Path;
 
+use echomind_core::Embedder as _;
 use echomind_core::Storage;
 use echomind_core::chat::{ChatEngine, ChatOutcome};
 use echomind_core::import::{ImportOutcome, ImportService};
 use echomind_core::retriever::VectorRetriever;
 use echomind_infra::openai_provider::OpenAIProvider;
 use echomind_models::{
-    ChatMessage, Conversation, DocStatusPayload, LlmConfig, RetrievalResult, SettingsPayload,
+    ChatMessage, Conversation, DocStatus, DocStatusPayload, Document, LlmConfig, RetrievalResult,
+    SettingsPayload,
 };
 use futures::StreamExt;
 use futures::stream::BoxStream;
@@ -92,7 +94,21 @@ pub async fn import_files(
             Ok(ImportOutcome::Imported(doc)) => {
                 emit_status(&app, "indexing", format!("正在索引：{name}"));
                 match service.index_document(&doc).await {
-                    Ok(()) => emit_status(&app, "done", format!("索引完成：{name}")),
+                    Ok(()) => match embed_document_chunks(state.inner(), &doc.id).await {
+                        Ok(count) => {
+                            emit_status(&app, "done", format!("索引完成：{name}（{count} 向量）"))
+                        }
+                        Err(err) => {
+                            let _ = state
+                                .storage
+                                .update_doc_status(
+                                    &doc.id,
+                                    DocStatus::Failed(format!("向量化失败: {err}")),
+                                )
+                                .await;
+                            emit_status(&app, "error", format!("向量化失败：{name}（{err}）"));
+                        }
+                    },
                     Err(err) => emit_status(&app, "error", format!("索引失败：{name}（{err}）")),
                 }
                 imported.push(name);
@@ -105,6 +121,77 @@ pub async fn import_files(
     }
 
     Ok(imported)
+}
+
+/// 嵌入写入链路（REQ-VEC-002/003）：分块读取 → embed_batch → add_embedding。
+/// 失败时由调用方将文档置为 Failed（索引内容保留，可重试）。
+async fn embed_document_chunks(state: &AppState, doc_id: &str) -> Result<usize, String> {
+    let chunks = state
+        .storage
+        .list_chunks(doc_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if chunks.is_empty() {
+        return Ok(0);
+    }
+    let embedder = state
+        .embedder()
+        .await
+        .map_err(|e| format!("向量化引擎不可用: {e:#}"))?;
+    let texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
+    let vectors = embedder
+        .embed_batch(&texts)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    for (chunk, vector) in chunks.iter().zip(vectors.iter()) {
+        state
+            .storage
+            .add_embedding(&chunk.id, vector)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+    }
+    Ok(chunks.len())
+}
+
+// ---- 文档管理（REQ-UI-006 / REQ-ING-005）----
+
+/// 列出全部文档（知识库面板）。
+#[tauri::command]
+pub async fn get_documents(state: State<'_, AppState>) -> Result<Vec<Document>, String> {
+    state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 删除文档：级联清理 chunks / embeddings，并删除数据目录中的文件副本（REQ-ING-005）。
+#[tauri::command]
+pub async fn delete_document(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    // 先取副本路径再删记录（删除后无法回查）
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let file_path = docs
+        .iter()
+        .find(|d| d.id == id)
+        .map(|d| d.file_path.clone());
+
+    state
+        .storage
+        .delete_document(&id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 副本可能已不存在，记录日志但不视为失败
+    if let Some(path) = file_path
+        && let Err(err) = tokio::fs::remove_file(&path).await
+    {
+        eprintln!("文档副本清理失败（可忽略）: {path}: {err}");
+    }
+    Ok(())
 }
 
 // ---- chat（REQ-RAG-001/005/006）----

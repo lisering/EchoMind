@@ -26,7 +26,8 @@
 | --- | --- | --- | --- | --- | --- |
 | L1 单元测试 | `crates/core` 领域逻辑（分块、配额、License 校验、检索排序等）；`crates/infra` 适配器内部逻辑 | `cargo test`（推荐 nextest）、`mockall`（dev-dependency） | Backend Dev 编写，QA Lead 审查断言 | core 行覆盖率 ≥ 90%；每个 P0 领域规则 100% 有用例 | 每次提交前本地 + CI 必跑 |
 | L2 契约 / 集成测试 | `src-tauri` 全部 `#[tauri::command]` 签名与 `Event` Payload；SQLite / 向量库真实读写；HTTP 适配器 | `tauri::test`（mock app）、`wiremock`（LLM 端点打桩）、临时目录 | QA Lead 主导编写（红灯），Backend Dev 配合变绿 | 契约测试覆盖 100% Command 与 Event；每条 AC ≥ 1 用例 | 每次提交前本地 + CI 必跑 |
-| L3 E2E 测试 | 完整用户旅程与 UI 状态流转（导入→索引→提问→流式渲染→引用回溯；付费墙；License 激活） | Playwright + tauri-driver | QA Lead | 覆盖 100% P0 用户旅程（SRS 第 3 节） | CI 每日全量（macOS / Windows），发布前必跑 |
+| L3 E2E 测试（真实 GUI） | 完整用户旅程与 UI 状态流转（向导→导入→索引→提问→流式渲染→停止→删除） | **WebdriverIO + tauri-driver**（Playwright 仅讲 CDP，无法连接 WebDriver 协议的 tauri-driver） | QA Lead | 覆盖 100% P0 用户旅程（SRS 第 3 节） | CI 强制门禁（ubuntu-latest + windows-latest 矩阵）；**macOS 不可用**（WKWebView 无 WebDriver 实现，上游硬限制） |
+| L3-lite 桥接测试 | 与 L3 同内容的 UI 行为断言（本机含 macOS 可跑） | Playwright + 契约级 Mock `__TAURI__` 注入 | QA Lead | 与 L3 断言逐条对应 | 每个 PR 必跑（全平台 headless） |
 
 ### 2.1 各层纪律
 - **L1**：`crates/core` 的测试不引入 Tauri、reqwest、rusqlite；端口 Trait 用手写 fake 或 mockall 打桩。测试代码允许 `unwrap()`，生产代码严禁。
@@ -79,7 +80,8 @@ cargo clippy --all-targets -- -D warnings   # 静态检查（含 unwrap_used / e
 cargo check                        # 提交前必过
 cargo test                         # L1 + L2（或 cargo nextest run）
 cargo tarpaulin --out Html         # 覆盖率报告（core ≥ 90%）
-npx playwright test                # L3 E2E（需 tauri-driver 环境）
+cd e2e-tests && npm run test:e2e   # L3 真实 GUI（Linux/Windows；macOS 不可用）
+cd e2e-tests && npm run test:bridge # L3-lite 桥接层（Playwright，全平台）
 ```
 
 Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phase 1 落地）：`unwrap_used = "deny"`、`expect_used = "deny"`、`pedantic` 级别逐 crate 评审开启。
@@ -91,8 +93,12 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | 流水线 | 触发 | 内容 | 合并门禁 |
 | --- | --- | --- | --- |
 | pr-check | 每个 PR | fmt + clippy + check + L1/L2 全量 | 必须全绿 |
-| nightly-e2e | 每日定时 | L3 全量（macOS / Windows 矩阵）+ 性能基准 | 红灯时当日冻结新功能合并 |
+| e2e-gui | 每个 PR + 每日 | L3 真实 GUI（ubuntu + windows 矩阵，tauri-driver + WebdriverIO，Mock LLM SSE） | 必须全绿 |
+| e2e-bridge | 每个 PR | L3-lite 桥接层（Playwright headless，全平台） | 必须全绿 |
+| nightly-e2e | 每日定时 | L3 全量 + 性能基准 | 红灯时当日冻结新功能合并 |
 | release | tag | 全平台打包 + E2E 冒烟 + 安装包校验 | 必须全绿 |
+
+> 纪律条款（v1.0.6 起生效）：任何 UI 变更必须附带自动化断言通过证据；**严禁任何形式的人工冒烟代替自动化测试**。人工探索性测试仅作补充，不构成验收依据。
 
 任何门禁失败时不允许 `git commit` 合入主干；禁止跳过 hooks 与 CI 检查。
 
@@ -134,6 +140,8 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | REQ-RAG-006 | AC-1 | TC-RAG-003（会话 CRUD 与级联删除） | L2 | 红灯→绿灯 |
 | REQ-RAG-006 | AC-2 | TC-RAG-004（消息持久化双记录 + 标题提取） | L2 | 红灯→绿灯 |
 | REQ-RAG-005 | AC-1 | TC-RAG-005（CancellationToken 流中断无 Panic） | L2 | 红灯→绿灯 |
+| REQ-UI-006 / REQ-ING-005 | AC-1/AC-2 / AC-1 | E2E-UI-001（六断言全链路冒烟：向导→配置→导入→列表→流式→删除） | L3 | CI 门禁 |
+| REQ-RAG-001 / REQ-RAG-005 | AC-3 / AC-1 | E2E-UI-001（流式增长 + 代码块复制 + 停止中断断言） | L3 | CI 门禁 |
 | （其余条目待 QA 阶段登记） | | | | |
 
 | 版本 | 日期 | 修订摘要 | 批准 |

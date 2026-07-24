@@ -4,6 +4,8 @@
 pub mod commands;
 pub mod state;
 
+use std::path::PathBuf;
+
 use state::AppState;
 use tauri::Manager;
 
@@ -13,7 +15,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
+            // E2E 测试钩子：ECHOMIND_DATA_DIR 环境变量可重定向数据目录（隔离测试数据）
+            let data_dir = match std::env::var("ECHOMIND_DATA_DIR") {
+                Ok(custom) => PathBuf::from(custom),
+                Err(_) => app.path().app_data_dir()?,
+            };
             std::fs::create_dir_all(&data_dir)?;
             let state = tauri::async_runtime::block_on(AppState::new(data_dir))
                 .map_err(|e| -> Box<dyn std::error::Error> { format!("{e:#}").into() })?;
@@ -31,6 +37,8 @@ pub fn run() {
             commands::test_llm_connection,
             commands::update_llm_config,
             commands::get_settings,
+            commands::get_documents,
+            commands::delete_document,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

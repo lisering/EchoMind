@@ -109,6 +109,18 @@ impl Storage for MockStorage {
     async fn list_messages(&self, _conversation_id: &str) -> Result<Vec<ChatMessage>> {
         Ok(vec![])
     }
+
+    async fn list_documents(&self) -> Result<Vec<Document>> {
+        Ok(vec![])
+    }
+
+    async fn delete_document(&self, _doc_id: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn list_chunks(&self, _doc_id: &str) -> Result<Vec<Chunk>> {
+        Ok(vec![])
+    }
 }
 
 /// TC-RAG-001：score < 0.5 的检索结果必须被过滤丢弃（REQ-RAG-003-AC-1）。

@@ -97,6 +97,11 @@
         </div>
         <div class="side-label px-4 pt-5 pb-2 text-[11px] uppercase tracking-wider text-slate-500">会话历史</div>
         <div id="convList" class="flex-1 overflow-y-auto scrollbar-thin px-2 space-y-1"></div>
+        <div class="side-label px-4 pt-4 pb-2 text-[11px] uppercase tracking-wider text-slate-500 flex items-center justify-between border-t border-line">
+          <span>知识库</span>
+          <span id="docCount" class="text-accent">0/50</span>
+        </div>
+        <div id="docList" class="max-h-56 overflow-y-auto scrollbar-thin px-2 space-y-1"></div>
         <div class="side-label px-4 py-3 border-t border-line flex items-center justify-between text-xs text-slate-500">
           <span>免费版 · 数据仅本地处理</span>
           <button id="settingsBtn" title="设置" class="text-slate-400 hover:text-accent text-base">⚙</button>
@@ -236,8 +241,80 @@
           const list = await invoke('get_conversations', { workspaceId: WORKSPACE });
           if (list.length === 0) await newChat();
           else await loadConversation(list[0].id);
+          await loadDocuments();
         } catch (err) {
           toast('会话加载失败：' + String(err), 'error');
+        }
+      }
+
+      // ================== 知识库面板（REQ-UI-006 / REQ-ING-005） ==================
+      const DOC_STATUS_STYLE = {
+        Pending: ['待索引', 'text-slate-400 border-slate-500/40'],
+        Processing: ['索引中', 'text-amber-300 border-amber-400/40'],
+        Indexed: ['已索引', 'text-accent border-accent/40'],
+        Failed: ['失败', 'text-red-400 border-red-400/40'],
+      };
+
+      function docStatusOf(d) {
+        return typeof d.status === 'string' ? d.status : 'Failed';
+      }
+
+      // 入库副本命名规则 {md5}-{原始文件名}（REQ-ING-001），展示时剥离哈希前缀
+      function displayDocName(filePath) {
+        const base = filePath.split('/').pop() || filePath;
+        return base.length > 33 && base[32] === '-' ? base.slice(33) : base;
+      }
+
+      async function loadDocuments() {
+        try {
+          const docs = await invoke('get_documents');
+          $('docCount').textContent = `${docs.length}/50`;
+          const box = $('docList');
+          box.innerHTML = '';
+          for (const d of docs) {
+            const name = displayDocName(d.file_path);
+            const [label, style] = DOC_STATUS_STYLE[docStatusOf(d)] || DOC_STATUS_STYLE.Pending;
+            const item = document.createElement('div');
+            item.className = 'group flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs hover:bg-white/5';
+            item.dataset.docId = d.id;
+            item.dataset.docName = name;
+
+            const left = document.createElement('span');
+            left.className = 'truncate text-slate-300';
+            left.textContent = name;
+            left.title = d.file_path;
+
+            const right = document.createElement('span');
+            right.className = 'flex items-center gap-2 shrink-0';
+            const badge = document.createElement('span');
+            badge.className = `px-1.5 py-0.5 rounded border ${style}`;
+            badge.textContent = label;
+            const del = document.createElement('button');
+            del.className = 'invisible group-hover:visible text-slate-500 hover:text-red-400 px-1';
+            del.textContent = '×';
+            del.title = '删除文档';
+            del.onclick = async (ev) => {
+              ev.stopPropagation();
+              await removeDocument(d.id, name);
+            };
+            right.appendChild(badge);
+            right.appendChild(del);
+            item.appendChild(left);
+            item.appendChild(right);
+            box.appendChild(item);
+          }
+        } catch (err) {
+          toast('知识库列表加载失败：' + String(err), 'error');
+        }
+      }
+
+      async function removeDocument(id, name) {
+        try {
+          await invoke('delete_document', { id });
+          toast(`已删除：${name}`, 'info');
+          await loadDocuments();
+        } catch (err) {
+          toast(String(err), 'error');
         }
       }
 
@@ -484,6 +561,7 @@
       listen('doc-status-changed', (e) => {
         const p = e.payload;
         toast(p.message, p.status === 'error' ? 'error' : 'info');
+        loadDocuments(); // 状态徽标实时刷新（REQ-VEC-004）
       });
 
       // ---- 拖拽导入（REQ-UI-004：Tauri 原生拖拽事件）----
@@ -499,7 +577,10 @@
         try {
           // is_pro 暂为 false：License 系统交付后切换（REQ-LIC-002）
           const names = await invoke('import_files', { paths, isPro: false });
-          if (names.length > 0) toast(`导入完成：${names.join('、')}`, 'success');
+          if (names.length > 0) {
+            toast(`导入完成：${names.join('、')}`, 'success');
+            await loadDocuments();
+          }
         } catch (err) {
           toast(String(err), 'error');
         }

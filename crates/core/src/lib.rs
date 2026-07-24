@@ -93,6 +93,15 @@ pub trait Storage: Send + Sync {
 
     /// 列出会话消息（按写入顺序正序）。
     async fn list_messages(&self, conversation_id: &str) -> anyhow::Result<Vec<ChatMessage>>;
+
+    /// 列出全部文档（按创建时间倒序，REQ-UI-006）。
+    async fn list_documents(&self) -> anyhow::Result<Vec<Document>>;
+
+    /// 删除文档（外键级联清理 chunks 与 embeddings，REQ-ING-005）。
+    async fn delete_document(&self, doc_id: &str) -> anyhow::Result<()>;
+
+    /// 列出文档全部分块（按 sequence 正序，嵌入写入链路用，REQ-VEC-003）。
+    async fn list_chunks(&self, doc_id: &str) -> anyhow::Result<Vec<Chunk>>;
 }
 
 /// 大模型端口（对应 REQ-RAG-001/007）：token 级流式输出。

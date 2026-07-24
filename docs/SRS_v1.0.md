@@ -5,7 +5,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0.6（含会话持久化与流中断控制） |
+| 文档版本 | v1.0.7（含知识库面板、文档删除与 L3 E2E 基建） |
 | 生效日期 | 2026-07-24 |
 | 维护者 | PM（状态流转由 TPM 统一登记） |
 
@@ -129,12 +129,13 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 契约：TBD ｜ 关联测试：TBD
 
 #### REQ-ING-005 删除文档与级联清理
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-ING-001、REQ-VEC-003
-- 描述：用户可从知识库删除文档，其分块与向量数据同步清理。
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-ING-001、REQ-VEC-003
+- 描述：用户可从知识库删除文档，其分块与向量数据经外键级联同步清理，数据目录中的文档副本一并删除。
 - 验收标准：
-  - AC-1：删除前弹出二次确认；确认后文档条目、全部 chunk 与向量从本地存储移除。
+  - AC-1：删除后文档条目、全部 chunk 与向量从本地存储移除（前端经列表 × 按钮触发，E2E 断言 DOM 消失）。
   - AC-2：删除后对该文档的检索不再返回任何结果；免费版文件计数同步释放。
-- 契约：TBD ｜ 关联测试：TBD
+- 契约（TPM 冻结，2026-07-24）：Command `delete_document(id: String, state) -> Result<(), String>`；Command `get_documents(state) -> Result<Vec<Document>, String>`（列表读取，REQ-UI-006 共用）。
+- 关联测试：E2E-UI-001（L3）
 
 #### REQ-ING-006 导入进度与取消
 - 优先级：P1 ｜ 状态：Draft ｜ 依赖：REQ-ING-001
@@ -168,12 +169,13 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 > TPM 注（v1.0.3）：上游指令曾以「REQ-VEC-001」指代本地向量化引擎；因该编号已被「文档解析与分块」占用，本地引擎需求归口本条（REQ-VEC-002），避免编号冲突。
 
 #### REQ-VEC-003 向量持久化与索引
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-VEC-002
-- 描述：向量与 chunk 元数据持久化于本地嵌入式向量库（sqlite-vec 或同等方案），随应用重启可复用。
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-VEC-002
+- 描述：向量与 chunk 元数据持久化于本地 SQLite（embeddings 表，BLOB 存储）；导入管线已接通嵌入写入链路（分块入库 → embed_batch → add_embedding，失败置 Failed 并推送事件），随应用重启可复用。
 - 验收标准：
   - AC-1：索引完成后重启应用，无需重建即可检索。
   - AC-2：向量库文件位于应用数据目录内，不污染用户文档原始位置。
-- 契约：TBD ｜ 关联测试：TBD
+- 契约：Storage 端口新增 `list_documents / delete_document / list_chunks`（REQ-ING-005 与嵌入接线共用）。
+- 关联测试：TC-DB-001（旁证）、E2E-UI-001
 
 #### REQ-VEC-004 索引状态机与事件推送
 - 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-VEC-002、REQ-UI-006
@@ -308,12 +310,13 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 契约：TBD ｜ 关联测试：TBD
 
 #### REQ-UI-006 知识库列表面板
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-ING-001、REQ-VEC-004
-- 描述：侧栏列出全部已导入文档：文件名、格式、大小、索引状态徽标、删除入口；免费版显示配额用量（n/50）。
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-ING-001、REQ-VEC-004
+- 描述：侧栏「知识库」区块列出全部已导入文档：文件名、索引状态徽标（Pending/Processing/Indexed/Failed）、删除 × 按钮；免费版显示配额用量（n/50），导入与删除后实时刷新。
 - 验收标准：
   - AC-1：索引状态徽标与 REQ-VEC-004 状态机实时一致。
-  - AC-2：免费版配额用量实时刷新，触顶时导入入口显示锁定态。
-- 契约：TBD ｜ 关联测试：TBD
+  - AC-2：免费版配额用量实时刷新；删除后 DOM 元素即时消失（E2E 断言）。
+- 契约：`get_documents` / `delete_document` 命令；`doc-status-changed` 事件驱动刷新。
+- 关联测试：E2E-UI-001（L3）
 
 #### REQ-UI-007 首次启动配置向导
 - 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-UI-008、REQ-LLM-002
@@ -497,3 +500,4 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 | v1.0.4 | 2026-07-24 | 新增 LLM 域；REQ-RAG-001 对话命令契约冻结（chat + 四事件）；REQ-RAG-003 检索引擎细化（阈值过滤 / 空上下文拒答）；新增 REQ-LLM-001（OpenAI 兼容流式）、REQ-LLM-002（连接测试）；登记 TC-RAG-001/002、TC-LLM-001 | PM / TPM |
 | v1.0.5 | 2026-07-24 | REQ-UI-001/002/003/004 契约冻结；新增 REQ-UI-007（配置向导）、REQ-UI-008（settings 加密持久化）；裁决前端库本地化（禁 CDN）；REQ-RAG-007 部分交付；登记 TC-UI-001/002 | PM / TPM |
 | v1.0.6 | 2026-07-24 | REQ-RAG-005（停止生成，abort_chat + CancellationToken）、REQ-RAG-006（会话持久化，conversations/messages 表）契约冻结；中断事件语义复用 chat_error/chat_done；登记 TC-RAG-003/004/005 | PM / TPM |
+| v1.0.7 | 2026-07-24 | 纪律纠偏：L3 E2E 基建（WebdriverIO+tauri-driver 进 CI，Playwright 桥接层补本机）；REQ-ING-005 / REQ-UI-006 契约冻结；嵌入写入链路接通（embed_batch → add_embedding）；登记 E2E-UI-001 | PM / TPM |

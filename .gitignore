@@ -1,7 +1,11 @@
 # 构建产物
 /target
-/node_modules
+node_modules/
 /dist
+
+# E2E 测试产物
+e2e-tests/test-results/
+e2e-tests/playwright-report/
 
 # Tauri 构建生成物（tauri-build 每次构建重建）
 crates/tauri-app/gen/schemas/

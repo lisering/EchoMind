@@ -112,6 +112,18 @@ impl Storage for MockStorage {
     async fn list_messages(&self, _conversation_id: &str) -> Result<Vec<ChatMessage>> {
         Ok(vec![])
     }
+
+    async fn list_documents(&self) -> Result<Vec<Document>> {
+        Ok(vec![])
+    }
+
+    async fn delete_document(&self, _doc_id: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn list_chunks(&self, _doc_id: &str) -> Result<Vec<Chunk>> {
+        Ok(vec![])
+    }
 }
 
 fn write_file(dir: &TempDir, name: &str, content: &[u8]) -> String {

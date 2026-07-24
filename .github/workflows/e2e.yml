@@ -1,0 +1,89 @@
+# L3 E2E 强制门禁（TEST_STRATEGY §7）：
+# - e2e-gui：真实 GUI（WebdriverIO + tauri-driver，ubuntu / windows 矩阵，tauri-driver 不支持 macOS）
+# - e2e-bridge：桥接层（Playwright headless，全平台）
+name: e2e
+
+on:
+  pull_request:
+  schedule:
+    - cron: '0 18 * * *'
+
+jobs:
+  e2e-gui:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug
+          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-e2e-
+
+      - name: 缓存嵌入模型（all-MiniLM-L6-v2）
+        uses: actions/cache@v4
+        with:
+          path: target/fastembed-cache
+          key: fastembed-model-v1
+
+      - name: 安装 WebKitGTK WebDriver（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y webkit2gtk-driver xvfb libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装 tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: 构建应用
+        run: cargo build --workspace
+
+      - name: 安装 E2E 依赖
+        working-directory: e2e-tests
+        run: npm ci
+
+      - name: 运行 L3 真实 GUI E2E（Linux，xvfb）
+        if: runner.os == 'Linux'
+        working-directory: e2e-tests
+        run: xvfb-run -a npm run test:e2e
+
+      - name: 运行 L3 真实 GUI E2E（Windows）
+        if: runner.os == 'Windows'
+        working-directory: e2e-tests
+        run: npm run test:e2e
+
+  e2e-bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装 E2E 依赖
+        working-directory: e2e-tests
+        run: npm ci
+
+      - name: 安装 Playwright Chromium
+        working-directory: e2e-tests
+        run: npx playwright install --with-deps chromium
+
+      - name: 运行 L3-lite 桥接层测试
+        working-directory: e2e-tests
+        run: npm run test:bridge
