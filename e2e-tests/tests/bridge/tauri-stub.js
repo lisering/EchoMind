@@ -1,11 +1,12 @@
 // 契约级 Mock：window.__TAURI__（与 SRS 冻结命令/事件一一对应，仅供 L3-lite 桥接测试）。
 // 覆盖命令：get_settings / update_llm_config / test_llm_connection / import_files /
 // get_documents / delete_document / create_conversation / get_conversations /
-// get_messages / delete_conversation / chat / abort_chat。
+// get_messages / delete_conversation / chat / abort_chat / activate_pro / get_pro_status。
 // 覆盖事件：chat_token / chat_sources / chat_error / chat_done / doc-status-changed。
 (() => {
   const state = {
     configured: false,
+    isPro: false,
     docs: [],
     conversations: [],
     messages: {},
@@ -35,9 +36,12 @@
         return '连接成功：mock-llm 响应正常 (HTTP 200)';
       case 'import_files': {
         const names = [];
+        // 模拟 REQ-LIC-002 门控：免费版导入 PDF 返回 PRO_REQUIRED
         for (const p of args.paths) {
           const name = p.split('/').pop();
-          names.push(name);
+          if (name.endsWith('.pdf') && !state.isPro) {
+            throw 'PRO_REQUIRED: PDF 导入为 Pro 版功能，请升级后重试';
+          }
           const doc = {
             id: 'doc-' + name,
             // 与真实后端命名规则一致：{32 位 md5}-{原始文件名}
@@ -50,6 +54,7 @@
           emit('doc-status-changed', { status: 'indexing', message: `正在索引：${name}` });
           doc.status = 'Indexed';
           emit('doc-status-changed', { status: 'done', message: `索引完成：${name}（3 向量）` });
+          names.push(name);
         }
         return names;
       }
@@ -58,6 +63,15 @@
       case 'delete_document':
         state.docs = state.docs.filter((d) => d.id !== args.id);
         return null;
+      case 'get_pro_status':
+        return state.isPro;
+      case 'activate_pro':
+        // Mock：任何非空 Key 均视为有效（真实后端使用 Ed25519 校验）
+        if (args.licenseKey && args.licenseKey.trim()) {
+          state.isPro = true;
+          return true;
+        }
+        throw 'License 激活失败：License 格式错误：应为 payload-signature';
       case 'create_conversation': {
         const id = 'conv-' + state.conversations.length;
         state.conversations.unshift({

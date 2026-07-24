@@ -39,6 +39,8 @@ pub fn run() {
             commands::get_settings,
             commands::get_documents,
             commands::delete_document,
+            commands::activate_pro,
+            commands::get_pro_status,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

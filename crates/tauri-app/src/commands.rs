@@ -8,6 +8,7 @@ use echomind_core::Embedder as _;
 use echomind_core::Storage;
 use echomind_core::chat::{ChatEngine, ChatOutcome};
 use echomind_core::import::{ImportOutcome, ImportService};
+use echomind_core::license::verify_license;
 use echomind_core::retriever::VectorRetriever;
 use echomind_infra::openai_provider::OpenAIProvider;
 use echomind_models::{
@@ -77,26 +78,35 @@ fn emit_chat_done<R: Runtime>(app: &AppHandle<R>) {
 // ---- import_files（REQ-ING-001）----
 
 /// 导入文件。返回成功入库的原始文件名列表；格式非法 / 配额触顶 / 未授权 PDF / 路径遍历
-/// 等错误经 `Err(可读消息)` 返回。
+/// 等错误经 `Err(可读消息)` 返回。is_pro 从 AppState 读取（REQ-LIC-002 双重拦截）。
 #[tauri::command]
 pub async fn import_files(
     app: AppHandle,
     paths: Vec<String>,
-    is_pro: bool,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
+    import_files_inner(&app, &paths, state.inner()).await
+}
+
+/// 导入逻辑（命令与集成测试复用）。
+pub async fn import_files_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    paths: &[String],
+    state: &AppState,
+) -> Result<Vec<String>, String> {
+    let is_pro = *state.is_pro.read().await;
     let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
     let mut imported = Vec::new();
 
-    for raw_path in &paths {
+    for raw_path in paths {
         let name = display_name(raw_path);
         match service.import_one(raw_path, is_pro).await {
             Ok(ImportOutcome::Imported(doc)) => {
-                emit_status(&app, "indexing", format!("正在索引：{name}"));
+                emit_status(app, "indexing", format!("正在索引：{name}"));
                 match service.index_document(&doc).await {
-                    Ok(()) => match embed_document_chunks(state.inner(), &doc.id).await {
+                    Ok(()) => match embed_document_chunks(state, &doc.id).await {
                         Ok(count) => {
-                            emit_status(&app, "done", format!("索引完成：{name}（{count} 向量）"))
+                            emit_status(app, "done", format!("索引完成：{name}（{count} 向量）"))
                         }
                         Err(err) => {
                             let _ = state
@@ -106,15 +116,15 @@ pub async fn import_files(
                                     DocStatus::Failed(format!("向量化失败: {err}")),
                                 )
                                 .await;
-                            emit_status(&app, "error", format!("向量化失败：{name}（{err}）"));
+                            emit_status(app, "error", format!("向量化失败：{name}（{err}）"));
                         }
                     },
-                    Err(err) => emit_status(&app, "error", format!("索引失败：{name}（{err}）")),
+                    Err(err) => emit_status(app, "error", format!("索引失败：{name}（{err}）")),
                 }
                 imported.push(name);
             }
             Ok(ImportOutcome::SkippedDuplicate(_)) => {
-                emit_status(&app, "done", format!("内容已存在，跳过导入：{name}"));
+                emit_status(app, "done", format!("内容已存在，跳过导入：{name}"));
             }
             Err(err) => return Err(err.to_string()),
         }
@@ -482,6 +492,41 @@ pub async fn delete_conversation_inner(id: &str, state: &AppState) -> Result<(),
 pub async fn abort_chat(conversation_id: String, state: State<'_, AppState>) -> Result<(), String> {
     state.abort_chat(&conversation_id).await;
     Ok(())
+}
+
+// ---- activate_pro / get_pro_status（REQ-LIC-001/002）----
+
+/// 激活 Pro：验证 License Key 签名，有效则持久化并刷新运行态（REQ-LIC-001）。
+#[tauri::command]
+pub async fn activate_pro(license_key: String, state: State<'_, AppState>) -> Result<bool, String> {
+    activate_pro_inner(&license_key, state.inner()).await
+}
+
+/// 激活逻辑（命令与集成测试复用）。
+pub async fn activate_pro_inner(license_key: &str, state: &AppState) -> Result<bool, String> {
+    match verify_license(license_key) {
+        Ok(()) => {
+            state
+                .storage
+                .set_setting("license.is_pro", "true")
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+            *state.is_pro.write().await = true;
+            Ok(true)
+        }
+        Err(e) => Err(format!("License 激活失败: {e:#}")),
+    }
+}
+
+/// 查询当前授权状态（REQ-LIC-002）。
+#[tauri::command]
+pub async fn get_pro_status(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(get_pro_status_inner(state.inner()).await)
+}
+
+/// 授权状态查询逻辑（命令与集成测试复用）。
+pub async fn get_pro_status_inner(state: &AppState) -> bool {
+    *state.is_pro.read().await
 }
 
 // ---- test_llm_connection（REQ-LLM-002）----

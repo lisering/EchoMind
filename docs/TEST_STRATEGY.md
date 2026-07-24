@@ -140,6 +140,12 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | REQ-RAG-006 | AC-1 | TC-RAG-003（会话 CRUD 与级联删除） | L2 | 红灯→绿灯 |
 | REQ-RAG-006 | AC-2 | TC-RAG-004（消息持久化双记录 + 标题提取） | L2 | 红灯→绿灯 |
 | REQ-RAG-005 | AC-1 | TC-RAG-005（CancellationToken 流中断无 Panic） | L2 | 红灯→绿灯 |
+| REQ-LIC-001 | AC-1 | TC-LIC-001（合法签名 License 验证通过） | L1 | 红灯→绿灯 |
+| REQ-LIC-001 | AC-2 | TC-LIC-002（篡改签名 License 验证拒绝） | L1 | 红灯→绿灯 |
+| REQ-LIC-002 | AC-1 | TC-LIC-003（免费版 50 文件配额拦截） | L2 | 红灯→绿灯 |
+| REQ-LIC-002 | AC-2 | TC-LIC-004（免费版 PDF 付费门拦截） | L2 | 红灯→绿灯 |
+| REQ-LIC-001 | AC-3 | TC-LIC-005（激活后重启 is_pro 持久化恢复） | L2 | 红灯→绿灯 |
+| REQ-LIC-003 | AC-1/AC-2/AC-3 | E2E-LIC-001（付费墙弹出→激活→状态更新） | L3-lite | CI 门禁 |
 | REQ-UI-006 / REQ-ING-005 | AC-1/AC-2 / AC-1 | E2E-UI-001（六断言全链路冒烟：向导→配置→导入→列表→流式→删除） | L3 | CI 门禁 |
 | REQ-RAG-001 / REQ-RAG-005 | AC-3 / AC-1 | E2E-UI-001（流式增长 + 代码块复制 + 停止中断断言） | L3 | CI 门禁 |
 | （其余条目待 QA 阶段登记） | | | | |
@@ -147,3 +153,4 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | 版本 | 日期 | 修订摘要 | 批准 |
 | --- | --- | --- | --- |
 | v1.0.0 | 2026-07-24 | 创世版：金字塔分工、左移流程、门禁与 DoD 确立 | QA Lead / TPM |
+| v1.0.1 | 2026-07-25 | Phase 8：登记 TC-LIC-001~005（License 校验与配额门控）、E2E-LIC-001（付费墙 UI） | QA Lead / TPM |

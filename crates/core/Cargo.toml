@@ -18,6 +18,9 @@ lopdf = "0.34"
 # SSE/JSON 载荷解析（REQ-LLM-001），纯计算库
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# License 离线校验（REQ-LIC-001）：Ed25519 签名验证，纯计算库，经架构评审准入 core
+ed25519-dalek = "2.1"
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"

@@ -25,7 +25,7 @@ test.describe('E2E-UI-001-lite 桥接层冒烟', () => {
 
     // 03 导入文件后文档列表渲染文件名（doc-status-changed 事件驱动刷新）
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('import_files', { paths: ['/mock/echomind-e2e.md'], isPro: true }),
+      window.__TAURI__.core.invoke('import_files', { paths: ['/mock/echomind-e2e.md'] }),
     );
     const docItem = page.locator('#docList [data-doc-name="echomind-e2e.md"]');
     await expect(docItem).toBeVisible({ timeout: 15000 });
@@ -57,5 +57,36 @@ test.describe('E2E-UI-001-lite 桥接层冒烟', () => {
     await docItem.hover();
     await docItem.locator('button').click();
     await expect(page.locator('#docList [data-doc-name="echomind-e2e.md"]')).toHaveCount(0);
+  });
+
+  test('E2E-LIC-001 付费墙弹出→激活→状态更新（REQ-LIC-003）', async ({ page }) => {
+    // 01 经向导进入主界面
+    await page.locator('#wizKey').fill('sk-e2e-mock');
+    await page.locator('#wizStart').click();
+    await expect(page.locator('#app')).toBeVisible();
+
+    // 02 免费版导入 PDF → PRO_REQUIRED 错误 → 付费墙 Modal 弹出
+    // 通过前端 drag-drop 监听器触发 importPaths（错误处理在 importPaths 内）
+    await page.evaluate(() => {
+      const listeners = window.__state.listeners['tauri://drag-drop'] || [];
+      listeners.forEach((cb) => cb({ payload: { paths: ['/mock/paper.pdf'] } }));
+    });
+    await expect(page.locator('#paywall')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('#paywallReason')).toContainText('PDF');
+
+    // 03 输入 License Key 并激活 → Modal 关闭
+    await page.locator('#licenseInput').fill('test-license-key');
+    await page.locator('#paywallActivate').click();
+    await expect(page.locator('#paywall')).toBeHidden({ timeout: 5000 });
+
+    // 04 侧栏授权状态更新为 Pro
+    await expect(page.locator('#proStatus')).toContainText('Pro 版');
+
+    // 05 Pro 版可正常导入 PDF（不再拦截）
+    await page.evaluate(() => {
+      const listeners = window.__state.listeners['tauri://drag-drop'] || [];
+      listeners.forEach((cb) => cb({ payload: { paths: ['/mock/paper.pdf'] } }));
+    });
+    await expect(page.locator('#docList [data-doc-name="paper.pdf"]')).toBeVisible({ timeout: 5000 });
   });
 });

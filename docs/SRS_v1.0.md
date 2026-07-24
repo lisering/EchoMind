@@ -5,7 +5,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0.7（含知识库面板、文档删除与 L3 E2E 基建） |
+| 文档版本 | v1.0.8（含 License 离线校验与付费墙，Phase 8） |
 | 生效日期 | 2026-07-24 |
 | 维护者 | PM（状态流转由 TPM 统一登记） |
 
@@ -340,33 +340,41 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 
 ### 4.5 LIC — 授权与 Freemium 付费墙
 
-#### REQ-LIC-001 免费版配额规则
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-ING-001
-- 描述：免费版上限 50 个文件且禁用 PDF；配额计数本地持久化，删除文件后释放。
+#### REQ-LIC-001 License 离线校验（Ed25519）
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：无
+- 描述：采用 Ed25519 公私钥签名体系。用户输入 License Key（格式：`base64(payload)-base64(signature)`），后端使用内置公钥验证签名。有效则解锁 Pro，无效返回明确错误。验证状态持久化到 SQLite settings 表（key=`license.is_pro`），支持离线启动恢复。License 验证逻辑位于 `crates/core/src/license.rs`（纯计算，无 I/O 依赖，经架构评审准入 core）。
 - 验收标准：
-  - AC-1：库内达 50 文件后，任何新导入被拦截并触发付费墙（REQ-LIC-003）。
-  - AC-2：批量导入时若部分文件导致超限，仅允许导入至满额，其余拦截并逐文件说明。
-- 契约：TBD ｜ 关联测试：TBD
+  - AC-1：使用合法私钥签名的 License，`verify_license` 返回 `Ok(())`（TC-LIC-001）。
+  - AC-2：篡改签名后的 License，`verify_license` 返回 `Err`（TC-LIC-002）。
+  - AC-3：激活后重启应用，`is_pro` 状态从 SQLite 恢复为 `true`（TC-LIC-005）。
+  - AC-4：伪造 / 篡改的 License 被拒绝，错误消息不泄露校验细节（安全官要求）。
+- 契约（TPM 冻结，2026-07-25）：Command `activate_pro(license_key: String, state: State<'_, AppState>) -> Result<bool, String>`；Command `get_pro_status(state: State<'_, AppState>) -> bool`。License 格式：`base64(payload)-base64(signature)`，payload 为签名的原始字节（如 `EchoMind-Pro-v1`），signature 为 64 字节 Ed25519 签名。
+- 关联测试：TC-LIC-001、TC-LIC-002、TC-LIC-005
 
-#### REQ-LIC-002 License 激活与离线校验
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：无
-- 描述：用户输入 License Key 激活 Pro；采用非对称签名（Ed25519，公钥内置）本地校验，全程离线可用。
+#### REQ-LIC-002 is_pro 状态管理与门控
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-LIC-001、REQ-ING-001
+- 描述：所有 Tauri Command（如 `import_files`）在执行前必须检查 `is_pro`。免费版硬性限制：最多 50 个文件，禁止导入 PDF。`is_pro` 状态存储于 `AppState::is_pro: tokio::sync::RwLock<bool>`，启动时从 SQLite settings 表读取；`import_files` 从 AppState 读取 `is_pro`（不再信任前端参数），实现前后端双重拦截。导入拦截错误消息以结构化前缀返回：`LIMIT_REACHED:`（配额触顶）与 `PRO_REQUIRED:`（PDF 付费门）。
 - 验收标准：
-  - AC-1：有效 License 断网环境下可激活，激活状态持久化，重启后仍为 Pro。
-  - AC-2：伪造 / 篡改的 License 被拒绝，且不泄露校验细节。
-  - AC-3：激活记录具备防回滚保护（无法通过简单删除文件降级绕过，安全评审确认）。
-- 契约：TBD ｜ 关联测试：TBD
+  - AC-1：免费版已有 50 个文件时，调用 `import_files` 返回 `LIMIT_REACHED` 错误（TC-LIC-003）。
+  - AC-2：免费版导入 PDF 时，返回 `PRO_REQUIRED` 错误（TC-LIC-004）。
+  - AC-3：Pro 版不受 50 文件限制且可导入 PDF。
+  - AC-4：`get_pro_status` 返回当前授权状态（bool）。
+- 契约：`import_files` 签名移除 `is_pro` 参数，改为从 `state.is_pro` 读取（契约变更经 Phase 8 TPM 授权）。
+- 关联测试：TC-LIC-003、TC-LIC-004
 
-#### REQ-LIC-003 触顶拦截与升级引导
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-LIC-001
-- 描述：配额触顶或免费版导入 PDF 时，展示付费墙：说明限制、Pro 权益、License 输入入口与购买链接。
+#### REQ-LIC-003 付费墙 UI
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-LIC-001、REQ-LIC-002
+- 描述：当免费用户触发限制时（`import_files` 返回 `LIMIT_REACHED` 或 `PRO_REQUIRED` 错误），自动弹出全屏 Modal 引导激活。Modal 包含 License 输入框和「激活」按钮；激活成功后关闭 Modal 并隐藏所有限制提示；侧栏底部显示当前授权状态（免费版 / Pro）。
 - 验收标准：
-  - AC-1：付费墙内可直接输入 License；激活成功后自动继续被中断的导入。
-  - AC-2：关闭付费墙不产生任何副作用，原有数据不受影响。
-- 契约：TBD ｜ 关联测试：TBD
+  - AC-1：收到 `LIMIT_REACHED` 或 `PRO_REQUIRED` 错误时，付费墙 Modal 自动弹出（E2E 断言）。
+  - AC-2：在 Modal 中输入有效 License 并点击激活后，Modal 关闭，`get_pro_status` 返回 `true`。
+  - AC-3：激活成功后侧栏授权状态更新为「Pro 版」。
+  - AC-4：关闭付费墙不产生任何副作用，原有数据不受影响。
+- 契约：前端监听 `import_files` 错误前缀触发 Modal；调用 `activate_pro` 激活；调用 `get_pro_status` 刷新 UI。
+- 关联测试：E2E-LIC-001（L3-lite）
 
 #### REQ-LIC-004 License 停用与状态展示
-- 优先级：P2 ｜ 状态：Draft ｜ 依赖：REQ-LIC-002
+- 优先级：P2 ｜ 状态：Draft ｜ 依赖：REQ-LIC-001
 - 描述：设置页展示当前授权状态（免费 / Pro），支持在本机停用 License 以便转移。
 - 验收标准：
   - AC-1：停用后回落为免费版规则；已入库的 50+ 文件保留可读，但新导入按免费版拦截。
@@ -501,3 +509,4 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 | v1.0.5 | 2026-07-24 | REQ-UI-001/002/003/004 契约冻结；新增 REQ-UI-007（配置向导）、REQ-UI-008（settings 加密持久化）；裁决前端库本地化（禁 CDN）；REQ-RAG-007 部分交付；登记 TC-UI-001/002 | PM / TPM |
 | v1.0.6 | 2026-07-24 | REQ-RAG-005（停止生成，abort_chat + CancellationToken）、REQ-RAG-006（会话持久化，conversations/messages 表）契约冻结；中断事件语义复用 chat_error/chat_done；登记 TC-RAG-003/004/005 | PM / TPM |
 | v1.0.7 | 2026-07-24 | 纪律纠偏：L3 E2E 基建（WebdriverIO+tauri-driver 进 CI，Playwright 桥接层补本机）；REQ-ING-005 / REQ-UI-006 契约冻结；嵌入写入链路接通（embed_batch → add_embedding）；登记 E2E-UI-001 | PM / TPM |
+| v1.0.8 | 2026-07-25 | Phase 8 商业化冲刺：REQ-LIC-001（Ed25519 License 离线校验）、REQ-LIC-002（is_pro 状态管理与门控）、REQ-LIC-003（付费墙 UI）契约冻结；import_files 签名变更（移除 is_pro 参数，改读 AppState）；登记 TC-LIC-001~005、E2E-LIC-001 | PM / TPM |

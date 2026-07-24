@@ -15,6 +15,11 @@ pub const FREE_TIER_MAX_FILES: usize = 50;
 /// 格式白名单（REQ-ING-002）
 pub const ALLOWED_EXTENSIONS: [&str; 3] = ["md", "txt", "pdf"];
 
+/// 配额触顶错误前缀（REQ-LIC-002；前端据此弹出付费墙）
+pub const ERR_LIMIT_REACHED: &str = "LIMIT_REACHED";
+/// PDF 付费门错误前缀（REQ-LIC-002；前端据此弹出付费墙）
+pub const ERR_PRO_REQUIRED: &str = "PRO_REQUIRED";
+
 /// 单文件导入结果。
 #[derive(Debug)]
 pub enum ImportOutcome {
@@ -87,12 +92,12 @@ impl<S: Storage> ImportService<S> {
             return Ok(());
         }
         if ext == "pdf" {
-            bail!("PDF 导入为 Pro 版功能，请升级后重试");
+            bail!("{ERR_PRO_REQUIRED}: PDF 导入为 Pro 版功能，请升级后重试");
         }
         let count = self.storage.count_documents().await?;
         if count >= self.max_free_files {
             bail!(
-                "免费版最多导入 {} 个文件（当前已达上限）",
+                "{ERR_LIMIT_REACHED}: 免费版最多导入 {} 个文件（当前已达上限）",
                 self.max_free_files
             );
         }

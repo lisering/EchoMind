@@ -19,6 +19,8 @@ pub struct AppState {
     pub data_dir: PathBuf,
     /// BYOK LLM 运行态配置（启动时自 settings 表恢复；update_llm_config 后即时生效）
     pub llm_config: tokio::sync::RwLock<Option<LlmConfig>>,
+    /// Pro 授权状态（REQ-LIC-001/002；启动时自 settings 表恢复，activate_pro 后即时生效）
+    pub is_pro: tokio::sync::RwLock<bool>,
     /// 向量化引擎（首次使用时初始化：模型下载可能耗时，严禁阻塞启动）
     embedder: tokio::sync::OnceCell<LocalEmbedder>,
     /// 每个会话的流中断令牌（REQ-RAG-005；会话结束清理）
@@ -43,11 +45,13 @@ impl AppState {
         }
 
         let llm_config = Self::load_llm_config(&storage).await;
+        let is_pro = Self::load_is_pro(&storage).await;
 
         Ok(Self {
             storage,
             data_dir,
             llm_config: tokio::sync::RwLock::new(llm_config),
+            is_pro: tokio::sync::RwLock::new(is_pro),
             embedder: tokio::sync::OnceCell::new(),
             abort_tokens: tokio::sync::Mutex::new(HashMap::new()),
         })
@@ -63,6 +67,16 @@ impl AppState {
             base_url,
             model,
         })
+    }
+
+    /// 从 settings 表恢复 Pro 授权状态（REQ-LIC-001；值为 "true" 时视为已激活）。
+    async fn load_is_pro(storage: &SqliteStorage) -> bool {
+        storage
+            .get_setting("license.is_pro")
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|v| v == "true")
     }
 
     /// 懒加载向量化引擎（首次调用时初始化，模型下载在阻塞线程池执行）。

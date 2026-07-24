@@ -103,7 +103,7 @@
         </div>
         <div id="docList" class="max-h-56 overflow-y-auto scrollbar-thin px-2 space-y-1"></div>
         <div class="side-label px-4 py-3 border-t border-line flex items-center justify-between text-xs text-slate-500">
-          <span>免费版 · 数据仅本地处理</span>
+          <span id="proStatus">免费版 · 数据仅本地处理</span>
           <button id="settingsBtn" title="设置" class="text-slate-400 hover:text-accent text-base">⚙</button>
         </div>
       </aside>
@@ -138,6 +138,29 @@
     <!-- Toast 通道（REQ-UI-005 前置） -->
     <div id="toasts" class="fixed bottom-6 right-6 z-[60] space-y-2 w-80"></div>
 
+    <!-- ============ 付费墙 Modal（REQ-LIC-003） ============ -->
+    <div id="paywall" class="hidden fixed inset-0 z-50 bg-base/95 backdrop-blur-sm flex items-center justify-center">
+      <div class="w-full max-w-md px-8 fade-in">
+        <div class="mb-6 text-center">
+          <div class="text-4xl mb-3 text-accent">◈</div>
+          <h2 class="text-xl font-semibold">升级到 Pro 版</h2>
+          <p id="paywallReason" class="mt-2 text-sm text-slate-400">解锁更多功能</p>
+        </div>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5">License Key</label>
+            <input id="licenseInput" type="text" placeholder="粘贴你的 License Key" autocomplete="off"
+              class="w-full bg-panel border border-line rounded-xl px-4 py-3 text-sm outline-none focus:border-accent transition-colors" />
+          </div>
+          <div id="paywallError" class="hidden text-sm text-red-400 bg-red-400/10 border border-red-400/30 rounded-xl px-4 py-3"></div>
+          <div class="flex gap-3">
+            <button id="paywallClose" class="flex-1 border border-line rounded-xl px-4 py-3 text-sm text-slate-300 hover:bg-white/5 transition-colors">稍后再说</button>
+            <button id="paywallActivate" class="flex-1 bg-accent font-medium text-sm rounded-xl px-4 py-3 hover:opacity-90 transition-opacity" style="color:#0C1116">激活 Pro</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script>
       // ================== Tauri API 入口 ==================
       const invoke = window.__TAURI__.core.invoke;
@@ -156,6 +179,7 @@
       let renderScheduled = false;
       let currentConversationId = null;       // 当前会话（REQ-RAG-006）
       let activePreset = 'deepseek';
+      let isPro = false;                       // Pro 授权状态（REQ-LIC-002）
 
       const PRESETS = {
         deepseek: { label: 'DeepSeek', base_url: 'https://api.deepseek.com', model: 'deepseek-chat', keyUrl: 'https://platform.deepseek.com/api_keys', needKey: true, desc: '高性价比中文强模型' },
@@ -268,7 +292,7 @@
       async function loadDocuments() {
         try {
           const docs = await invoke('get_documents');
-          $('docCount').textContent = `${docs.length}/50`;
+          $('docCount').textContent = isPro ? `${docs.length}` : `${docs.length}/50`;
           const box = $('docList');
           box.innerHTML = '';
           for (const d of docs) {
@@ -575,14 +599,19 @@
       async function importPaths(paths) {
         if (!paths || paths.length === 0) return;
         try {
-          // is_pro 暂为 false：License 系统交付后切换（REQ-LIC-002）
-          const names = await invoke('import_files', { paths, isPro: false });
+          const names = await invoke('import_files', { paths });
           if (names.length > 0) {
             toast(`导入完成：${names.join('、')}`, 'success');
             await loadDocuments();
           }
         } catch (err) {
-          toast(String(err), 'error');
+          const msg = String(err);
+          if (msg.startsWith('LIMIT_REACHED') || msg.startsWith('PRO_REQUIRED')) {
+            const reason = msg.split(':').slice(1).join(':').trim() || '解锁更多功能';
+            showPaywall(reason);
+          } else {
+            toast(msg, 'error');
+          }
         }
       }
 
@@ -608,6 +637,55 @@
         e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px';
       });
 
+      // ================== 付费墙（REQ-LIC-003） ==================
+      function showPaywall(reason) {
+        $('paywallReason').textContent = reason || '解锁更多功能';
+        $('paywallError').classList.add('hidden');
+        $('licenseInput').value = '';
+        $('paywall').classList.remove('hidden');
+      }
+
+      function hidePaywall() {
+        $('paywall').classList.add('hidden');
+      }
+
+      function updateProStatus() {
+        const el = $('proStatus');
+        if (isPro) {
+          el.textContent = 'Pro 版 · 数据仅本地处理';
+          el.classList.add('text-accent');
+        } else {
+          el.textContent = '免费版 · 数据仅本地处理';
+          el.classList.remove('text-accent');
+        }
+      }
+
+      async function activatePro() {
+        const key = $('licenseInput').value.trim();
+        if (!key) {
+          $('paywallError').textContent = '请输入 License Key';
+          $('paywallError').classList.remove('hidden');
+          return;
+        }
+        $('paywallActivate').disabled = true;
+        $('paywallActivate').textContent = '激活中…';
+        try {
+          const result = await invoke('activate_pro', { licenseKey: key });
+          if (result) {
+            isPro = true;
+            updateProStatus();
+            hidePaywall();
+            toast('Pro 版已激活！', 'success');
+            await loadDocuments();
+          }
+        } catch (err) {
+          $('paywallError').textContent = String(err);
+          $('paywallError').classList.remove('hidden');
+        }
+        $('paywallActivate').disabled = false;
+        $('paywallActivate').textContent = '激活 Pro';
+      }
+
       // ---- 侧栏 ----
       $('collapseBtn').onclick = () => {
         const sb = $('sidebar');
@@ -618,6 +696,13 @@
       };
       $('newChatBtn').onclick = newChat;
       $('settingsBtn').onclick = () => { showWizard(); };
+
+      // ---- 付费墙按钮 ----
+      $('paywallClose').onclick = hidePaywall;
+      $('paywallActivate').onclick = activatePro;
+      $('licenseInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') activatePro();
+      });
 
       // ---- 向导按钮 ----
       $('wizStart').onclick = startWizard;
@@ -636,6 +721,8 @@
         try {
           const settings = await invoke('get_settings');
           if (settings.has_llm_config) {
+            isPro = await invoke('get_pro_status');
+            updateProStatus();
             showApp();
             await initConversations();
           } else {

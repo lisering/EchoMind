@@ -2,13 +2,16 @@
 //! QA 红灯集成测试（L2：Tauri Mock + 真实 SQLite，体系二阶段 2 先于实现编写）。
 //! 覆盖：TC-UI-001 配置持久化（REQ-UI-008）/ TC-UI-002 空知识库拦截（REQ-RAG-003-AC-2）。
 
-use echomind_models::LlmConfig;
+use base64::{Engine, engine::general_purpose::STANDARD as B64};
+use echomind_core::Storage;
+use echomind_models::{Document, LlmConfig};
 use echomind_tauri_app::commands::{
-    chat_inner, create_conversation_inner, delete_conversation_inner, forward_stream,
-    get_conversations_inner, get_messages_inner, get_settings_inner, persist_exchange,
-    update_llm_config_inner,
+    activate_pro_inner, chat_inner, create_conversation_inner, delete_conversation_inner,
+    forward_stream, get_conversations_inner, get_messages_inner, get_pro_status_inner,
+    get_settings_inner, import_files_inner, persist_exchange, update_llm_config_inner,
 };
 use echomind_tauri_app::state::AppState;
+use ed25519_dalek::Signer;
 use futures::StreamExt;
 use tempfile::TempDir;
 
@@ -180,4 +183,117 @@ async fn tc_rag_005_abort_interrupts_stream() {
 
     assert!(!result.completed, "流必须被标记为中断（未完成）");
     assert!(!result.content.is_empty(), "中断前已生成的部分内容必须保留");
+}
+
+// ================== Phase 8：License 校验与配额门控（REQ-LIC-001/002） ==================
+
+/// 开发测试种子（与 BUILTIN_PUBKEY 对应；仅存在于测试代码）。
+const DEV_SEED: [u8; 32] = [
+    0xE5, 0xC0, 0x4D, 0x49, 0x4E, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+
+/// 生成合法 License Key（使用开发种子签名）。
+fn make_valid_license() -> String {
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&DEV_SEED);
+    let payload = b"EchoMind-Pro-v1";
+    let signature = signing_key.sign(payload);
+    format!(
+        "{}-{}",
+        B64.encode(payload),
+        B64.encode(signature.to_bytes())
+    )
+}
+
+/// TC-LIC-003 免费版配额拦截：已有 50 个文件，导入第 51 个返回 LIMIT_REACHED（REQ-LIC-002-AC-1）。
+#[tokio::test]
+async fn tc_lic_003_free_tier_quota_blocked() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    // 预填充 50 个文档（直接写入 storage，跳过导入管线）
+    for i in 0..50 {
+        let doc = Document::new(format!("doc-{i}.md"), format!("hash-{i}"));
+        state.storage.add_document(&doc).await.unwrap();
+    }
+
+    // 创建测试文件
+    let extra = dir.path().join("extra.md");
+    std::fs::write(&extra, "extra content").unwrap();
+
+    let app = tauri::test::mock_app();
+    let handle = app.handle().clone();
+
+    let result = import_files_inner(&handle, &[extra.to_string_lossy().into_owned()], &state).await;
+
+    let err = result.err().unwrap_or_default();
+    assert!(
+        err.contains("LIMIT_REACHED"),
+        "配额触顶应返回 LIMIT_REACHED 错误，实际: {err}"
+    );
+}
+
+/// TC-LIC-004 免费版 PDF 付费门：is_pro=false 时导入 PDF 返回 PRO_REQUIRED（REQ-LIC-002-AC-2）。
+#[tokio::test]
+async fn tc_lic_004_free_tier_pdf_blocked() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    // 创建伪造 PDF 文件
+    let pdf = dir.path().join("paper.pdf");
+    std::fs::write(&pdf, b"%PDF-1.7 fake-bytes").unwrap();
+
+    let app = tauri::test::mock_app();
+    let handle = app.handle().clone();
+
+    let result = import_files_inner(&handle, &[pdf.to_string_lossy().into_owned()], &state).await;
+
+    let err = result.err().unwrap_or_default();
+    assert!(
+        err.contains("PRO_REQUIRED"),
+        "免费版 PDF 导入应返回 PRO_REQUIRED 错误，实际: {err}"
+    );
+}
+
+/// TC-LIC-005 激活 Pro 并跨重启持久化（REQ-LIC-001-AC-3）。
+#[tokio::test]
+async fn tc_lic_005_activate_pro_persists_across_restart() {
+    let dir = TempDir::new().unwrap();
+    let license = make_valid_license();
+
+    // 第一次会话：激活 Pro
+    {
+        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+        assert!(!get_pro_status_inner(&state).await, "初始状态应为免费版");
+
+        let result = activate_pro_inner(&license, &state).await;
+        assert!(
+            result.is_ok(),
+            "有效 License 激活应成功: {:?}",
+            result.err()
+        );
+        assert!(get_pro_status_inner(&state).await, "激活后运行态应为 Pro");
+    } // AppState 销毁，模拟应用退出
+
+    // 第二次会话：从 SQLite 恢复
+    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
+    assert!(
+        get_pro_status_inner(&restarted).await,
+        "重启后 Pro 状态必须从 SQLite 恢复"
+    );
+}
+
+/// TC-LIC-005b 无效 License 被拒绝（REQ-LIC-001-AC-2/AC-4）。
+#[tokio::test]
+async fn tc_lic_005b_invalid_license_rejected() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    let result = activate_pro_inner("invalid-license-string", &state).await;
+    assert!(result.is_err(), "无效 License 必须被拒绝");
+
+    assert!(
+        !get_pro_status_inner(&state).await,
+        "拒绝后状态不得变为 Pro"
+    );
 }

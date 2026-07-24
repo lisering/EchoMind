@@ -10,6 +10,7 @@
 
 pub mod chat;
 pub mod import;
+pub mod license;
 pub mod loader;
 pub mod retriever;
 pub mod splitter;
@@ -125,6 +126,8 @@ pub trait Retriever: Send + Sync {
 mod chat_tests;
 #[cfg(test)]
 mod import_tests;
+#[cfg(test)]
+mod license_tests;
 #[cfg(test)]
 mod loader_tests;
 #[cfg(test)]
