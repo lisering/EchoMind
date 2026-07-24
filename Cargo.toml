@@ -5,6 +5,7 @@ resolver = "3"
 members = [
     "crates/models",
     "crates/core",
+    "crates/infra",
     "crates/tauri-app",
 ]
 

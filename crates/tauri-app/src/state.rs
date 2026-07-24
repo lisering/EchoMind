@@ -1,91 +1,37 @@
-//! 应用状态与开发期内存存储适配器（Phase 2 临时方案）。
-//! TODO(phase-3): 以 crates/infra 的 sqlite-vec 适配器替换（REQ-VEC-003），
-//! 届时本文件仅保留 AppState 组装，存储实现迁出。
+//! 应用状态组装（Phase 3：注入 SqliteStorage，REQ-DB-001）。
+//! InMemoryStorage 已按 TPM 冻结契约移除，持久化由 crates/infra 的 SQLite 适配器承担。
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
+use anyhow::Context;
 use echomind_core::Storage;
-use echomind_models::{Chunk, DocStatus, Document, RetrievalResult};
+use echomind_infra::sqlite_storage::SqliteStorage;
 
 /// Tauri 全局状态。
 pub struct AppState {
-    /// 存储端口实现（开发期为内存适配器）
-    pub storage: InMemoryStorage,
-    /// 应用数据目录（文档副本根目录）
+    /// 存储端口实现（SQLite 持久化，WAL 模式）
+    pub storage: SqliteStorage,
+    /// 应用数据目录（文档副本与数据库根目录）
     pub data_dir: PathBuf,
 }
 
 impl AppState {
-    pub fn new(data_dir: PathBuf) -> Self {
-        Self {
-            storage: InMemoryStorage::default(),
-            data_dir,
+    /// 初始化：打开数据库并执行崩溃恢复（Processing 僵尸 → Failed，REQ-DB-001-AC-2）。
+    pub async fn new(data_dir: PathBuf) -> anyhow::Result<Self> {
+        let db_path = data_dir.join("echomind.db");
+        let storage = tokio::task::spawn_blocking(move || SqliteStorage::new(&db_path))
+            .await
+            .context("存储初始化任务失败")?
+            .context("初始化 SQLite 存储失败")?;
+
+        let cleaned = storage
+            .cleanup_zombies()
+            .await
+            .context("崩溃恢复清理失败")?;
+        if cleaned > 0 {
+            eprintln!("崩溃恢复：已将 {cleaned} 条中断的索引任务标记为失败");
         }
-    }
-}
 
-/// 开发期内存存储：进程退出即丢失，仅用于打通 Phase 2 导入流水线。
-/// 内部以 Arc 共享，克隆廉价；全部锁为 tokio 异步锁且临界区不含 await（体系三）。
-#[derive(Clone, Default)]
-pub struct InMemoryStorage {
-    docs: Arc<tokio::sync::Mutex<HashMap<String, Document>>>,
-    chunks: Arc<tokio::sync::Mutex<HashMap<String, Chunk>>>,
-    embeddings: Arc<tokio::sync::Mutex<HashMap<String, Vec<f32>>>>,
-}
-
-impl Storage for InMemoryStorage {
-    async fn add_document(&self, doc: &Document) -> anyhow::Result<()> {
-        self.docs.lock().await.insert(doc.id.clone(), doc.clone());
-        Ok(())
-    }
-
-    async fn update_doc_status(&self, doc_id: &str, status: DocStatus) -> anyhow::Result<()> {
-        let mut docs = self.docs.lock().await;
-        if let Some(doc) = docs.get_mut(doc_id) {
-            doc.status = status;
-        }
-        Ok(())
-    }
-
-    async fn add_chunk(&self, chunk: &Chunk) -> anyhow::Result<()> {
-        self.chunks
-            .lock()
-            .await
-            .insert(chunk.id.clone(), chunk.clone());
-        Ok(())
-    }
-
-    async fn add_embedding(&self, chunk_id: &str, embedding: &[f32]) -> anyhow::Result<()> {
-        self.embeddings
-            .lock()
-            .await
-            .insert(chunk_id.to_string(), embedding.to_vec());
-        Ok(())
-    }
-
-    async fn vector_search(
-        &self,
-        _query_embedding: &[f32],
-        _top_k: usize,
-    ) -> anyhow::Result<Vec<RetrievalResult>> {
-        Err(anyhow::anyhow!(
-            "向量检索适配器将于 Phase 3（sqlite-vec）交付"
-        ))
-    }
-
-    async fn find_document_by_hash(&self, hash: &str) -> anyhow::Result<Option<Document>> {
-        Ok(self
-            .docs
-            .lock()
-            .await
-            .values()
-            .find(|d| d.file_hash == hash)
-            .cloned())
-    }
-
-    async fn count_documents(&self) -> anyhow::Result<usize> {
-        Ok(self.docs.lock().await.len())
+        Ok(Self { storage, data_dir })
     }
 }

@@ -62,6 +62,9 @@ pub trait Storage: Send + Sync {
 
     /// 统计已入库文档总数（REQ-LIC-001 配额判定）。
     async fn count_documents(&self) -> anyhow::Result<usize>;
+
+    /// 崩溃恢复（REQ-DB-001）：将上次会话遗留的 Processing 僵尸文档置为 Failed，返回清理条数。
+    async fn cleanup_zombies(&self) -> anyhow::Result<usize>;
 }
 
 /// 大模型端口（对应 REQ-RAG-001/007）：token 级流式输出。

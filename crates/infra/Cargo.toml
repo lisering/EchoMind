@@ -1,0 +1,25 @@
+[package]
+name = "echomind-infra"
+version = "0.1.0"
+edition = "2024"
+description = "EchoMind 适配器层：SQLite 持久化与本地向量化引擎（实现 core 端口，六边形架构）"
+
+[dependencies]
+echomind-core = { path = "../core" }
+echomind-models = { path = "../models" }
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+# rusqlite 属体系三禁止进入 core 的具体实现，仅允许存在于本适配器层
+rusqlite = { version = "0.32", features = ["bundled"] }
+r2d2 = "0.8"
+# 版本对齐：0.25 对应 rusqlite 0.32（0.24 对应 rusqlite 0.31，会造成 libsqlite3-sys links 冲突）
+r2d2_sqlite = "0.25"
+fastembed = "4.0"
+# HTTP 客户端仅允许存在于 infra（体系三网络出口约束）；blocking 供 spawn_blocking 内使用
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

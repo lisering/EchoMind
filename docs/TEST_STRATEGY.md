@@ -122,6 +122,10 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | REQ-LIC-001 | AC-1 | TC-ING-003（免费版第 51 文件拦截） | L1 | 红灯→绿灯 |
 | REQ-ING-001（加载链路） | AC-1 旁证 | TC-ING-005 / TC-ING-006（Markdown / Text 加载器） | L1 | 红灯→绿灯 |
 | REQ-VEC-001 | AC-2 / AC-3（前置） | TC-ING-007（token 窗口分块器） | L1 | 红灯→绿灯 |
+| REQ-DB-001 | AC-1 | TC-DB-001（SQLite 跨实例持久化） | L1 | 红灯→绿灯 |
+| REQ-DB-001 | AC-2 | TC-DB-002（Processing 僵尸崩溃恢复） | L1 | 红灯→绿灯 |
+| REQ-PDF-001 | AC-1 | TC-PDF-001（伪造 PDF 字节流不 Panic） | L1 | 红灯→绿灯 |
+| REQ-VEC-002 | AC-2 | TC-VEC-001（fastembed 批量推理维度/数量） | L1 | 红灯→绿灯 |
 | （其余条目待 QA 阶段登记） | | | | |
 
 | 版本 | 日期 | 修订摘要 | 批准 |

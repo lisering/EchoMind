@@ -5,7 +5,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0.2（含 REQ-ING-001 管线细化、契约冻结与 MD5 指纹修订） |
+| 文档版本 | v1.0.3（含 SQLite 持久化、本地向量化引擎与 PDF 解析） |
 | 生效日期 | 2026-07-24 |
 | 维护者 | PM（状态流转由 TPM 统一登记） |
 
@@ -46,6 +46,8 @@ EchoMind 是一款本地优先的 AI 知识库桌面应用。核心链路：用�
 | SEC | 安全与隐私 |
 | NFR | 非功能需求 |
 | ARCH | 架构与工程基建 |
+| DB | 数据持久化 |
+| PDF | PDF 文档解析 |
 
 ### 2.2 验收标准编号
 `REQ-<域>-<序号>-AC-<n>`。每条 AC 必须能被至少一个测试用例（`TC-*` / `E2E-*`）自动验证。
@@ -153,13 +155,16 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 契约：TBD ｜ 关联测试：TBD
 
 #### REQ-VEC-002 Embedding 执行通道（可插拔）
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-VEC-001
-- 描述：Embedding 能力以端口 Trait 抽象，v1.0 提供本地内置模型（默认，数据不出机）与 BYOK 远程端点（可选，用户显式配置）两种适配器。
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-VEC-001
+- 描述：Embedding 能力以端口 Trait 抽象，v1.0 提供本地内置模型（默认，数据不出机）与 BYOK 远程端点（可选，用户显式配置）两种适配器。本地引擎（Phase 3 冻结）：fastembed 加载 all-MiniLM-L6-v2 量化模型（384 维）；批量推理经 `spawn_blocking` 执行、推理线程数设为系统核心数；模型下载多源容错（先 `https://huggingface.co`，失败回退 `https://hf-mirror.com`），强制全量下载、禁用断点续传（避免镜像源 Content-Range 报错）。
 - 验收标准：
-  - AC-1：`crates/core` 中仅存在 Embedding 端口 Trait，无任何具体实现依赖。
-  - AC-2：用户未配置远程端点时，全流程使用本地模型完成索引。
-  - AC-3：远程端点失败时给出可操作的错误提示，索引任务标记为「失败」而非静默丢弃。
-- 契约：TBD ｜ 关联测试：TBD
+  - AC-1：`crates/core` 中仅存在 Embedding 端口 Trait，无任何具体实现依赖（适配器位于 crates/infra）。
+  - AC-2：批量推理返回向量数量与输入匹配、维度 384、非全零（TC-VEC-001）。
+  - AC-3：官方源不可达时自动回退镜像源；双侧均失败时返回携带双侧原因的可读 Err。
+- 契约：Embedder 端口契约不变；适配器 `echomind_infra::local_embedder::LocalEmbedder`。
+- 关联测试：TC-VEC-001
+
+> TPM 注（v1.0.3）：上游指令曾以「REQ-VEC-001」指代本地向量化引擎；因该编号已被「文档解析与分块」占用，本地引擎需求归口本条（REQ-VEC-002），避免编号冲突。
 
 #### REQ-VEC-003 向量持久化与索引
 - 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-VEC-002
@@ -373,6 +378,29 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
   - AC-3：全部端口 Trait 满足 `Send + Sync` 约束，未使用 `async-trait` 宏。
 - 契约：不涉及 IPC（纯 crate 层）｜ 关联测试：CI 构建门禁（cargo check / clippy / 依赖树审计）
 
+### 4.8 DB — 数据持久化
+
+#### REQ-DB-001 SQLite 持久化存储
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-ARCH-000
+- 描述：以 rusqlite（bundled）+ r2d2 连接池实现 Storage 端口，数据库文件位于 Tauri `app_data_dir`；启用 WAL 模式与外键级联；启动时执行崩溃恢复，将上次会话遗留的 Processing 僵尸文档置为 Failed。批量事务写入将随 Phase 4 向量写入路径以端口扩展交付（本期单条写在 WAL 下达标）。
+- 验收标准：
+  - AC-1：写入文档 / 分块 / 向量后销毁实例并重新实例化，数据完整可读（TC-DB-001）。
+  - AC-2：手动置入 Processing 状态文档，调用 `cleanup_zombies` 后状态变为 Failed 且返回清理条数（TC-DB-002）。
+  - AC-3：连接启用 WAL（journal_mode）与 foreign_keys 级联（删除文档级联清理 chunks 与 embeddings，REQ-ING-005 前置）。
+- 契约（TPM 冻结，2026-07-24）：Storage Trait 契约不变，仅新增 `async fn cleanup_zombies(&self) -> anyhow::Result<usize>`；AppState 移除 InMemoryStorage，注入 SqliteStorage。
+- 关联测试：TC-DB-001、TC-DB-002
+
+### 4.9 PDF — PDF 文档解析
+
+#### REQ-PDF-001 PDF 文档解析
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-ING-002
+- 描述：基于 lopdf 实现 PdfLoader，逐页提取文本并以 `String::from_utf8_lossy` 容错解码；单页失败跳过并记录，整体失败优雅返回 Err，任何非法输入不得导致 Panic。
+- 验收标准：
+  - AC-1：伪造 PDF 字节流输入不 Panic，返回 Result（Err 时携带可读原因）（TC-PDF-001）。
+  - AC-2：Pro 用户导入 PDF 后索引链路可完整走通（load → split → chunks 入库，打通 REQ-ING-002-AC-2）。
+- 契约：复用 Loader 端口，无 IPC 变更。
+- 关联测试：TC-PDF-001
+
 ---
 
 ## 5. 非功能需求（NFR）
@@ -411,3 +439,4 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 | v1.0.0 | 2026-07-24 | 骨架与 v1.0 核心需求首批定义（ING 6 / VEC 5 / RAG 7 / UI 6 / LIC 4 / SEC 4 / NFR 4，共 36 条） | PM / TPM |
 | v1.0.1 | 2026-07-24 | 新增 ARCH 域与 REQ-ARCH-000（Phase 1 工程底座），需求总数 36 → 37 | TPM |
 | v1.0.2 | 2026-07-24 | REQ-ING-001 导入管线细化、契约冻结；REQ-ING-004 指纹算法修订为 MD5；登记 TC-ING-001~007 | PM / TPM |
+| v1.0.3 | 2026-07-24 | 新增 DB / PDF 域；REQ-DB-001（SQLite 持久化）、REQ-PDF-001（lopdf 解析）、REQ-VEC-002（fastembed 本地引擎）契约冻结；新增 crates/infra 适配器层；登记 TC-DB-001/002、TC-PDF-001、TC-VEC-001 | PM / TPM |

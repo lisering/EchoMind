@@ -1,0 +1,329 @@
+//! SQLite 持久化适配器（REQ-DB-001）：rusqlite(bundled) + r2d2 连接池 + WAL 模式。
+//! 体系三：rusqlite 为具体实现，仅允许存在于 infra 层；
+//! rusqlite 为同步 API，全部数据库操作经 `spawn_blocking` 执行，严禁阻塞 async executor。
+
+use std::path::Path;
+
+use anyhow::{Context, bail};
+use echomind_core::Storage;
+use echomind_models::{Chunk, DocStatus, Document, RetrievalResult};
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
+
+/// 连接级 PRAGMA：WAL 模式 + 外键级联 + 写繁忙重试（REQ-DB-001-AC-3）
+const PRAGMAS: &str = "
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
+";
+
+/// 表结构：documents / chunks / embeddings，外键 ON DELETE CASCADE（REQ-ING-005 前置）
+const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS documents (
+    id TEXT PRIMARY KEY,
+    file_path TEXT NOT NULL,
+    file_hash TEXT NOT NULL,
+    status TEXT NOT NULL,
+    status_reason TEXT,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(file_hash);
+
+CREATE TABLE IF NOT EXISTS chunks (
+    id TEXT PRIMARY KEY,
+    doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    token_count INTEGER NOT NULL,
+    sequence INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
+
+CREATE TABLE IF NOT EXISTS embeddings (
+    chunk_id TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+    vector BLOB NOT NULL
+);
+";
+
+const DOC_COLS: &str = "id, file_path, file_hash, status, status_reason, created_at";
+
+type Pool = r2d2::Pool<SqliteConnectionManager>;
+
+/// SQLite 存储适配器。克隆廉价（共享连接池）。
+#[derive(Clone)]
+pub struct SqliteStorage {
+    pool: Pool,
+}
+
+impl SqliteStorage {
+    /// 打开（必要时创建）数据库，启用 WAL 并初始化表结构。
+    /// 本函数含同步磁盘 I/O，调用方应置于 `spawn_blocking` 中。
+    pub fn new(db_path: &Path) -> anyhow::Result<Self> {
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("创建数据库目录失败: {}", parent.display()))?;
+        }
+        let manager =
+            SqliteConnectionManager::file(db_path).with_init(|conn| conn.execute_batch(PRAGMAS));
+        let pool = Pool::builder()
+            .max_size(8)
+            .build(manager)
+            .context("创建 SQLite 连接池失败")?;
+        let storage = Self { pool };
+        storage.init_schema()?;
+        Ok(storage)
+    }
+
+    fn init_schema(&self) -> anyhow::Result<()> {
+        let conn = self.pool.get().context("获取数据库连接失败")?;
+        conn.execute_batch(SCHEMA)
+            .context("初始化数据库表结构失败")?;
+        Ok(())
+    }
+}
+
+/// 在阻塞线程池执行数据库任务。
+async fn run_db<T>(f: impl FnOnce() -> anyhow::Result<T> + Send + 'static) -> anyhow::Result<T>
+where
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .context("数据库任务执行失败")?
+}
+
+fn status_to_row(status: &DocStatus) -> (&'static str, Option<String>) {
+    match status {
+        DocStatus::Pending => ("pending", None),
+        DocStatus::Processing => ("processing", None),
+        DocStatus::Indexed => ("indexed", None),
+        DocStatus::Failed(reason) => ("failed", Some(reason.clone())),
+    }
+}
+
+fn row_to_status(status: &str, reason: Option<String>) -> DocStatus {
+    match status {
+        "pending" => DocStatus::Pending,
+        "processing" => DocStatus::Processing,
+        "indexed" => DocStatus::Indexed,
+        "failed" => DocStatus::Failed(reason.unwrap_or_default()),
+        other => DocStatus::Failed(format!("未知状态标识: {other}")),
+    }
+}
+
+fn row_to_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
+    let status: String = row.get(3)?;
+    let reason: Option<String> = row.get(4)?;
+    Ok(Document {
+        id: row.get(0)?,
+        file_path: row.get(1)?,
+        file_hash: row.get(2)?,
+        status: row_to_status(&status, reason),
+        created_at: row.get(5)?,
+    })
+}
+
+/// f32 向量 → 小端字节（零依赖序列化）。
+fn vec_to_bytes(vector: &[f32]) -> Vec<u8> {
+    vector.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+/// 小端字节 → f32 向量（长度校验，绝不 Panic）。
+fn bytes_to_vec(bytes: &[u8]) -> anyhow::Result<Vec<f32>> {
+    if !bytes.len().is_multiple_of(4) {
+        bail!("向量字节长度非法（非 4 的倍数）: {}", bytes.len());
+    }
+    Ok(bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect())
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let mut dot = 0.0f32;
+    let mut norm_a = 0.0f32;
+    let mut norm_b = 0.0f32;
+    for (x, y) in a.iter().zip(b.iter()) {
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
+    }
+    let denom = norm_a.sqrt() * norm_b.sqrt();
+    if denom == 0.0 { 0.0 } else { dot / denom }
+}
+
+impl Storage for SqliteStorage {
+    async fn add_document(&self, doc: &Document) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let doc = doc.clone();
+        run_db(move || {
+            let (status, reason) = status_to_row(&doc.status);
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                &format!(
+                    "INSERT OR REPLACE INTO documents ({DOC_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+                ),
+                params![
+                    doc.id,
+                    doc.file_path,
+                    doc.file_hash,
+                    status,
+                    reason,
+                    doc.created_at
+                ],
+            )
+            .context("写入文档失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn update_doc_status(&self, doc_id: &str, status: DocStatus) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let doc_id = doc_id.to_string();
+        run_db(move || {
+            let (status, reason) = status_to_row(&status);
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "UPDATE documents SET status = ?1, status_reason = ?2 WHERE id = ?3",
+                params![status, reason, doc_id],
+            )
+            .context("更新文档状态失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn add_chunk(&self, chunk: &Chunk) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let chunk = chunk.clone();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "INSERT OR REPLACE INTO chunks (id, doc_id, content, token_count, sequence) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![chunk.id, chunk.doc_id, chunk.content, chunk.token_count, chunk.sequence],
+            )
+            .context("写入分块失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn add_embedding(&self, chunk_id: &str, embedding: &[f32]) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let chunk_id = chunk_id.to_string();
+        let bytes = vec_to_bytes(embedding);
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "INSERT OR REPLACE INTO embeddings (chunk_id, vector) VALUES (?1, ?2)",
+                params![chunk_id, bytes],
+            )
+            .context("写入向量失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn vector_search(
+        &self,
+        query_embedding: &[f32],
+        top_k: usize,
+    ) -> anyhow::Result<Vec<RetrievalResult>> {
+        let pool = self.pool.clone();
+        let query = query_embedding.to_vec();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let mut stmt = conn.prepare(
+                "SELECT c.id, c.doc_id, c.content, c.token_count, c.sequence, d.file_path, e.vector
+                 FROM embeddings e
+                 JOIN chunks c ON c.id = e.chunk_id
+                 JOIN documents d ON d.id = c.doc_id",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                let file_path: String = row.get(5)?;
+                let vector: Vec<u8> = row.get(6)?;
+                Ok((
+                    Chunk {
+                        id: row.get(0)?,
+                        doc_id: row.get(1)?,
+                        content: row.get(2)?,
+                        token_count: row.get(3)?,
+                        sequence: row.get(4)?,
+                    },
+                    file_path,
+                    vector,
+                ))
+            })?;
+
+            let mut hits = Vec::new();
+            for row in rows {
+                let (chunk, file_path, bytes) = row?;
+                let vector = bytes_to_vec(&bytes)?;
+                let score = cosine_similarity(&query, &vector);
+                let doc_name = Path::new(&file_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| file_path.clone());
+                hits.push(RetrievalResult {
+                    chunk,
+                    score,
+                    doc_name,
+                });
+            }
+            hits.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            hits.truncate(top_k);
+            Ok(hits)
+        })
+        .await
+    }
+
+    async fn find_document_by_hash(&self, hash: &str) -> anyhow::Result<Option<Document>> {
+        let pool = self.pool.clone();
+        let hash = hash.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {DOC_COLS} FROM documents WHERE file_hash = ?1 LIMIT 1"
+            ))?;
+            let mut rows = stmt.query_map(params![hash], row_to_document)?;
+            match rows.next() {
+                Some(row) => Ok(Some(row?)),
+                None => Ok(None),
+            }
+        })
+        .await
+    }
+
+    async fn count_documents(&self) -> anyhow::Result<usize> {
+        let pool = self.pool.clone();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))
+                .context("统计文档数失败")?;
+            Ok(count as usize)
+        })
+        .await
+    }
+
+    async fn cleanup_zombies(&self) -> anyhow::Result<usize> {
+        let pool = self.pool.clone();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let affected = conn.execute(
+                "UPDATE documents SET status = 'failed', status_reason = ?1 WHERE status = 'processing'",
+                params!["崩溃恢复：上次会话中断"],
+            )?;
+            Ok(affected)
+        })
+        .await
+    }
+}

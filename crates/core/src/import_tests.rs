@@ -62,6 +62,18 @@ impl Storage for MockStorage {
     async fn count_documents(&self) -> Result<usize> {
         Ok(self.docs.lock().await.len())
     }
+
+    async fn cleanup_zombies(&self) -> Result<usize> {
+        let mut docs = self.docs.lock().await;
+        let mut cleaned = 0;
+        for doc in docs.values_mut() {
+            if matches!(doc.status, DocStatus::Processing) {
+                doc.status = DocStatus::Failed("崩溃恢复：上次会话中断".to_string());
+                cleaned += 1;
+            }
+        }
+        Ok(cleaned)
+    }
 }
 
 fn write_file(dir: &TempDir, name: &str, content: &[u8]) -> String {

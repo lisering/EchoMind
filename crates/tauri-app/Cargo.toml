@@ -6,6 +6,7 @@ description = "EchoMind Tauri 组装层：依赖注入、Command/Event 声明与
 
 [dependencies]
 echomind-core = { path = "../core" }
+echomind-infra = { path = "../infra" }
 echomind-models = { path = "../models" }
 tauri = { version = "2.0", features = [] }
 tokio = { version = "1.0", features = ["full"] }

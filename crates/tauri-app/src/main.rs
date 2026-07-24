@@ -13,7 +13,9 @@ fn main() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            app.manage(AppState::new(data_dir));
+            let state = tauri::async_runtime::block_on(AppState::new(data_dir))
+                .map_err(|e| -> Box<dyn std::error::Error> { format!("{e:#}").into() })?;
+            app.manage(state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![commands::import_files]);

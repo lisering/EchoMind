@@ -134,8 +134,7 @@ impl<S: Storage> ImportService<S> {
     }
 
     /// 执行索引（load → split → chunks 入库），并推进状态机。
-    /// 注：本 Phase 覆盖 md/txt；PDF 解析适配器随 REQ-VEC-001 后续迭代交付，
-    /// PDF 文档将标记 Failed 并携带明确原因（不影响入库事实）。
+    /// 支持 md / txt / pdf（REQ-PDF-001）；失败时状态置 Failed 并携带可读原因。
     pub async fn index_document(&self, doc: &Document) -> anyhow::Result<()> {
         self.storage
             .update_doc_status(&doc.id, DocStatus::Processing)
@@ -161,7 +160,8 @@ impl<S: Storage> ImportService<S> {
         let text = match ext.as_str() {
             "md" => crate::loader::MarkdownLoader.load(&doc.file_path).await?,
             "txt" => crate::loader::TextLoader.load(&doc.file_path).await?,
-            other => bail!("暂不支持解析 .{other}（PDF 解析适配器将于后续迭代交付）"),
+            "pdf" => crate::loader::PdfLoader.load(&doc.file_path).await?,
+            other => bail!("不支持的解析格式: .{other}"),
         };
         let splitter = crate::splitter::TextSplitter::new()?;
         let pieces = splitter.split(&text).await?;
