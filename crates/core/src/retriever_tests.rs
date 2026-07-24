@@ -71,6 +71,14 @@ impl Storage for MockStorage {
     async fn cleanup_zombies(&self) -> Result<usize> {
         Ok(0)
     }
+
+    async fn set_setting(&self, _key: &str, _value: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn get_setting(&self, _key: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 /// TC-RAG-001：score < 0.5 的检索结果必须被过滤丢弃（REQ-RAG-003-AC-1）。

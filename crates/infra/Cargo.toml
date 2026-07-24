@@ -19,6 +19,10 @@ fastembed = "4.0"
 # HTTP 客户端仅允许存在于 infra（体系三网络出口约束）；blocking 供 spawn_blocking 内使用
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls", "json", "stream"] }
 serde_json = "1.0"
+# settings 加密（REQ-UI-008）：AES-256-GCM + 随机数 + base64
+aes-gcm = "0.10"
+rand = "0.8"
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"

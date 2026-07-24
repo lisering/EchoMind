@@ -4,7 +4,10 @@
 
 use std::path::Path;
 
-use anyhow::{Context, bail};
+use aes_gcm::aead::Aead;
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+use anyhow::{Context, anyhow, bail};
+use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use echomind_core::Storage;
 use echomind_models::{Chunk, DocStatus, Document, RetrievalResult};
 use r2d2_sqlite::SqliteConnectionManager;
@@ -43,33 +46,44 @@ CREATE TABLE IF NOT EXISTS embeddings (
     chunk_id TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
     vector BLOB NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 ";
 
 const DOC_COLS: &str = "id, file_path, file_hash, status, status_reason, created_at";
 
+/// AES-256-GCM 随机数 nonce 长度（96 bit）
+const NONCE_LEN: usize = 12;
+/// 加密密钥文件名（与数据库同目录，权限 0600）
+const SECRET_KEY_FILE: &str = "secret.key";
+
 type Pool = r2d2::Pool<SqliteConnectionManager>;
 
-/// SQLite 存储适配器。克隆廉价（共享连接池）。
+/// SQLite 存储适配器。克隆廉价（共享连接池与加密器）。
 #[derive(Clone)]
 pub struct SqliteStorage {
     pool: Pool,
+    cipher: Aes256Gcm,
 }
 
 impl SqliteStorage {
-    /// 打开（必要时创建）数据库，启用 WAL 并初始化表结构。
+    /// 打开（必要时创建）数据库，启用 WAL 并初始化表结构与设置加密器。
     /// 本函数含同步磁盘 I/O，调用方应置于 `spawn_blocking` 中。
     pub fn new(db_path: &Path) -> anyhow::Result<Self> {
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("创建数据库目录失败: {}", parent.display()))?;
-        }
+        let data_dir = db_path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(data_dir)
+            .with_context(|| format!("创建数据库目录失败: {}", data_dir.display()))?;
+        let cipher = Self::load_or_create_cipher(data_dir)?;
         let manager =
             SqliteConnectionManager::file(db_path).with_init(|conn| conn.execute_batch(PRAGMAS));
         let pool = Pool::builder()
             .max_size(8)
             .build(manager)
             .context("创建 SQLite 连接池失败")?;
-        let storage = Self { pool };
+        let storage = Self { pool, cipher };
         storage.init_schema()?;
         Ok(storage)
     }
@@ -79,6 +93,57 @@ impl SqliteStorage {
         conn.execute_batch(SCHEMA)
             .context("初始化数据库表结构失败")?;
         Ok(())
+    }
+
+    /// 加载或生成 AES-256-GCM 密钥（REQ-UI-008；文件权限 0600）。
+    fn load_or_create_cipher(data_dir: &Path) -> anyhow::Result<Aes256Gcm> {
+        let key_path = data_dir.join(SECRET_KEY_FILE);
+        let key_bytes: [u8; 32] = if key_path.exists() {
+            let raw = std::fs::read(&key_path)
+                .with_context(|| format!("读取密钥文件失败: {}", key_path.display()))?;
+            raw.try_into()
+                .map_err(|_| anyhow!("密钥文件损坏（长度非法）: {}", key_path.display()))?
+        } else {
+            let generated: [u8; 32] = rand::random();
+            std::fs::write(&key_path, generated)
+                .with_context(|| format!("写入密钥文件失败: {}", key_path.display()))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+                    .with_context(|| format!("设置密钥文件权限失败: {}", key_path.display()))?;
+            }
+            generated
+        };
+        Ok(Aes256Gcm::new(aes_gcm::Key::<Aes256Gcm>::from_slice(
+            &key_bytes,
+        )))
+    }
+
+    /// AES-256-GCM 加密 → base64(nonce‖ciphertext)。
+    fn encrypt(&self, plaintext: &str) -> anyhow::Result<String> {
+        let nonce_bytes: [u8; NONCE_LEN] = rand::random();
+        let ciphertext = self
+            .cipher
+            .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_bytes())
+            .map_err(|e| anyhow!("设置项加密失败: {e}"))?;
+        let mut blob = nonce_bytes.to_vec();
+        blob.extend_from_slice(&ciphertext);
+        Ok(B64.encode(blob))
+    }
+
+    /// base64(nonce‖ciphertext) → 解密明文。
+    fn decrypt(&self, encoded: &str) -> anyhow::Result<String> {
+        let blob = B64.decode(encoded).context("设置项 base64 解码失败")?;
+        if blob.len() < NONCE_LEN {
+            bail!("设置项密文长度非法");
+        }
+        let (nonce, ciphertext) = blob.split_at(NONCE_LEN);
+        let plaintext = self
+            .cipher
+            .decrypt(Nonce::from_slice(nonce), ciphertext)
+            .map_err(|e| anyhow!("设置项解密失败（密钥不匹配或数据损坏）: {e}"))?;
+        String::from_utf8(plaintext).context("设置项明文非合法 UTF-8")
     }
 }
 
@@ -325,5 +390,40 @@ impl Storage for SqliteStorage {
             Ok(affected)
         })
         .await
+    }
+
+    async fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()> {
+        let encrypted = self.encrypt(value)?;
+        let pool = self.pool.clone();
+        let key = key.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                params![key, encrypted],
+            )
+            .context("写入设置项失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn get_setting(&self, key: &str) -> anyhow::Result<Option<String>> {
+        let pool = self.pool.clone();
+        let key = key.to_string();
+        let encoded = run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
+            let mut rows = stmt.query_map(params![key], |row| row.get::<_, String>(0))?;
+            match rows.next() {
+                Some(row) => Ok(Some(row?)),
+                None => Ok(None),
+            }
+        })
+        .await?;
+        match encoded {
+            Some(v) => Ok(Some(self.decrypt(&v)?)),
+            None => Ok(None),
+        }
     }
 }

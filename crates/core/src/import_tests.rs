@@ -74,6 +74,14 @@ impl Storage for MockStorage {
         }
         Ok(cleaned)
     }
+
+    async fn set_setting(&self, _key: &str, _value: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn get_setting(&self, _key: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 fn write_file(dir: &TempDir, name: &str, content: &[u8]) -> String {

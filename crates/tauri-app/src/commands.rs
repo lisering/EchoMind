@@ -1,16 +1,18 @@
-//! Tauri Command 层（契约见 SRS：REQ-ING-001、REQ-RAG-001、REQ-LLM-002，TPM 冻结）。
+//! Tauri Command 层（契约见 SRS：REQ-ING-001、REQ-RAG-001、REQ-LLM-002、REQ-UI-008）。
 //! 体系三：全部 Result 显式处理，零 unwrap；错误以可读消息返回前端（不泄露敏感信息）。
+//! `*_inner` 函数泛型化 Runtime，供 Tauri 命令与 L2 集成测试（MockRuntime）复用。
 
 use std::path::Path;
 
+use echomind_core::Storage;
 use echomind_core::chat::{ChatEngine, ChatOutcome};
 use echomind_core::import::{ImportOutcome, ImportService};
 use echomind_core::retriever::VectorRetriever;
 use echomind_infra::openai_provider::OpenAIProvider;
-use echomind_models::{ChatMessage, DocStatusPayload, RetrievalResult};
+use echomind_models::{ChatMessage, DocStatusPayload, LlmConfig, RetrievalResult, SettingsPayload};
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::state::AppState;
 
@@ -25,9 +27,9 @@ fn display_name(raw_path: &str) -> String {
         .unwrap_or_else(|| raw_path.to_string())
 }
 
-/// 发射文档状态事件（契约：`doc-status-changed` / DocStatusPayload）。
-/// 发射失败仅记录日志，不中断主流程。
-fn emit_status(app: &AppHandle, status: &str, message: String) {
+// ---- 事件发射助手（发射失败仅记录日志，不中断主流程）----
+
+fn emit_status<R: Runtime>(app: &AppHandle<R>, status: &str, message: String) {
     let payload = DocStatusPayload {
         status: status.to_string(),
         message,
@@ -37,33 +39,33 @@ fn emit_status(app: &AppHandle, status: &str, message: String) {
     }
 }
 
-/// 发射对话事件（契约：`chat_token` / `chat_sources` / `chat_error` / `chat_done`）。
-fn emit_chat_token(app: &AppHandle, token: String) {
+fn emit_chat_token<R: Runtime>(app: &AppHandle<R>, token: String) {
     if let Err(err) = app.emit("chat_token", token) {
         eprintln!("chat_token 事件发射失败: {err}");
     }
 }
 
-fn emit_chat_sources(app: &AppHandle, sources: &[RetrievalResult]) {
+fn emit_chat_sources<R: Runtime>(app: &AppHandle<R>, sources: &[RetrievalResult]) {
     if let Err(err) = app.emit("chat_sources", sources.to_vec()) {
         eprintln!("chat_sources 事件发射失败: {err}");
     }
 }
 
-fn emit_chat_error(app: &AppHandle, message: String) {
+fn emit_chat_error<R: Runtime>(app: &AppHandle<R>, message: String) {
     if let Err(err) = app.emit("chat_error", message) {
         eprintln!("chat_error 事件发射失败: {err}");
     }
 }
 
-fn emit_chat_done(app: &AppHandle) {
+fn emit_chat_done<R: Runtime>(app: &AppHandle<R>) {
     if let Err(err) = app.emit("chat_done", ()) {
         eprintln!("chat_done 事件发射失败: {err}");
     }
 }
 
-/// 导入文件（REQ-ING-001）。
-/// 返回成功入库的原始文件名列表；格式非法 / 配额触顶 / 未授权 PDF / 路径遍历
+// ---- import_files（REQ-ING-001）----
+
+/// 导入文件。返回成功入库的原始文件名列表；格式非法 / 配额触顶 / 未授权 PDF / 路径遍历
 /// 等错误经 `Err(可读消息)` 返回。
 #[tauri::command]
 pub async fn import_files(
@@ -96,9 +98,10 @@ pub async fn import_files(
     Ok(imported)
 }
 
-/// 流式对话（REQ-RAG-001）。
-/// 事件序列：`chat_sources?` → `chat_token*` → `chat_done`；任何失败先推 `chat_error` 再返回 Err。
-/// `conversation_id` 为会话持久化预留（REQ-RAG-006，Phase 5 启用）。
+// ---- chat（REQ-RAG-001）----
+
+/// 流式对话。事件序列：`chat_sources?` → `chat_token*` → `chat_done`；
+/// 任何失败先推 `chat_error` 再返回 Err。`conversation_id` 为会话持久化预留（REQ-RAG-006）。
 #[tauri::command]
 pub async fn chat(
     app: AppHandle,
@@ -114,20 +117,35 @@ pub async fn chat(
     result
 }
 
-async fn chat_inner(
-    app: &AppHandle,
+/// 对话编排（命令与集成测试复用）：空库拦截 → 配置检查 → 引擎初始化 → 检索对话。
+pub async fn chat_inner<R: Runtime>(
+    app: &AppHandle<R>,
     query: &str,
     history: &[ChatMessage],
     _conversation_id: &str,
     state: &AppState,
 ) -> Result<(), String> {
+    // 空知识库前置拦截（REQ-RAG-003-AC-2）：明确引导，不触碰向量化引擎与网络
+    let doc_count = state
+        .storage
+        .count_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if doc_count == 0 {
+        return Err("知识库为空：请先通过左下角 + 号导入文档".to_string());
+    }
+
+    let llm_config = state
+        .llm_config
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| "未配置 LLM：请完成初始配置向导".to_string())?;
+
     let embedder = state
         .embedder()
         .await
         .map_err(|e| format!("向量化引擎不可用: {e:#}"))?;
-    let llm_config = state.llm_config.as_ref().ok_or_else(|| {
-        "未配置 LLM：请在应用数据目录创建 llm_config.json（api_key / base_url / model）".to_string()
-    })?;
 
     let retriever = VectorRetriever::new(embedder.clone(), state.storage.clone());
     let provider = OpenAIProvider::new(
@@ -152,8 +170,8 @@ async fn chat_inner(
 }
 
 /// 将 token 流逐条转发为 chat_token 事件，结束时发射 chat_done。
-async fn forward_stream(
-    app: &AppHandle,
+async fn forward_stream<R: Runtime>(
+    app: &AppHandle<R>,
     mut stream: BoxStream<'static, anyhow::Result<String>>,
 ) -> Result<(), String> {
     while let Some(item) = stream.next().await {
@@ -166,7 +184,9 @@ async fn forward_stream(
     Ok(())
 }
 
-/// 测试 LLM 连接（REQ-LLM-002）：极简请求验证 API Key 与 URL 有效性。
+// ---- test_llm_connection（REQ-LLM-002）----
+
+/// 测试 LLM 连接：极简请求验证 API Key 与 URL 有效性。
 #[tauri::command]
 pub async fn test_llm_connection(
     api_key: String,
@@ -178,4 +198,71 @@ pub async fn test_llm_connection(
         .test_connection()
         .await
         .map_err(|e| format!("{e:#}"))
+}
+
+// ---- update_llm_config / get_settings（REQ-UI-008）----
+
+/// 更新 LLM 配置：写入 settings 加密表并刷新运行态（无需重启）。
+#[tauri::command]
+pub async fn update_llm_config(
+    config: LlmConfig,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    update_llm_config_inner(config, state.inner()).await
+}
+
+/// 配置写入逻辑（命令与集成测试复用）。
+pub async fn update_llm_config_inner(config: LlmConfig, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .set_setting("llm.api_key", &config.api_key)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting("llm.base_url", &config.base_url)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting("llm.model", &config.model)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    *state.llm_config.write().await = Some(config);
+    Ok(())
+}
+
+/// 读取配置状态（Key 仅脱敏返回，严禁回传明文，安全官要求）。
+#[tauri::command]
+pub async fn get_settings(state: State<'_, AppState>) -> Result<SettingsPayload, String> {
+    get_settings_inner(state.inner()).await
+}
+
+/// 配置读取逻辑（命令与集成测试复用）。
+pub async fn get_settings_inner(state: &AppState) -> Result<SettingsPayload, String> {
+    let config = state.llm_config.read().await.clone();
+    Ok(match config {
+        Some(c) => SettingsPayload {
+            has_llm_config: true,
+            base_url: c.base_url,
+            model: c.model,
+            api_key_masked: mask_api_key(&c.api_key),
+        },
+        None => SettingsPayload {
+            has_llm_config: false,
+            base_url: String::new(),
+            model: String::new(),
+            api_key_masked: String::new(),
+        },
+    })
+}
+
+/// API Key 脱敏：仅保留末四位；不足四位整体遮蔽。
+fn mask_api_key(api_key: &str) -> String {
+    let char_count = api_key.chars().count();
+    if char_count <= 4 {
+        return "****".to_string();
+    }
+    let tail: String = api_key.chars().skip(char_count - 4).collect();
+    format!("****{tail}")
 }

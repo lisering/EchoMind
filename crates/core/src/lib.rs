@@ -68,6 +68,12 @@ pub trait Storage: Send + Sync {
 
     /// 崩溃恢复（REQ-DB-001）：将上次会话遗留的 Processing 僵尸文档置为 Failed，返回清理条数。
     async fn cleanup_zombies(&self) -> anyhow::Result<usize>;
+
+    /// 写入设置项（REQ-UI-008；敏感值由实现方负责加密存储）。
+    async fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()>;
+
+    /// 读取设置项（REQ-UI-008）。
+    async fn get_setting(&self, key: &str) -> anyhow::Result<Option<String>>;
 }
 
 /// 大模型端口（对应 REQ-RAG-001/007）：token 级流式输出。

@@ -3,10 +3,472 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EchoMind</title>
+    <title>EchoMind 灵犀</title>
+    <!-- 前端库全部本地化（PROJECT_RULES 体系三 / REQ-SEC-003：禁止运行时 CDN） -->
+    <script src="vendor/tailwindcss.js"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: { base: '#161616', accent: '#38BDF8', panel: '#1C1C1E', line: '#2A2A2E' },
+          },
+        },
+      };
+    </script>
+    <script src="vendor/marked.min.js"></script>
+    <script src="vendor/purify.min.js"></script>
+    <script src="vendor/highlight.min.js"></script>
+    <link rel="stylesheet" href="vendor/github-dark.min.css" />
+    <style>
+      /* 规范外零硬编码色值：仅布局与微交互 */
+      html, body { height: 100%; }
+      body { font-family: -apple-system, "SF Pro SC", "PingFang SC", "Segoe UI", sans-serif; }
+      .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+      .scrollbar-thin::-webkit-scrollbar-thumb { border-radius: 3px; background: rgba(255,255,255,0.12); }
+      .fade-in { animation: fadeIn 0.25s ease-out; }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+      .pulse-dot { animation: pulseDot 1.2s ease-in-out infinite; }
+      @keyframes pulseDot { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
+      pre { position: relative; }
+      .copy-btn { position: absolute; top: 6px; right: 8px; font-size: 12px; padding: 2px 8px; border-radius: 6px; opacity: 0; transition: opacity 0.15s; }
+      pre:hover .copy-btn { opacity: 1; }
+      .md pre { margin: 10px 0; border-radius: 10px; overflow-x: auto; }
+      .md pre code { display: block; padding: 14px; font-size: 13px; line-height: 1.6; }
+      .md p { margin: 8px 0; line-height: 1.75; }
+      .md ul, .md ol { margin: 8px 0 8px 20px; line-height: 1.75; }
+      .md h1, .md h2, .md h3, .md h4 { margin: 14px 0 8px; font-weight: 600; }
+      .md code:not(pre code) { padding: 2px 6px; border-radius: 6px; background: rgba(255,255,255,0.08); font-size: 0.9em; }
+      .md blockquote { margin: 8px 0; padding-left: 12px; border-left: 3px solid #38BDF8; opacity: 0.85; }
+      .md table { border-collapse: collapse; margin: 10px 0; }
+      .md th, .md td { border: 1px solid rgba(255,255,255,0.15); padding: 6px 12px; }
+      .md a { color: #38BDF8; }
+    </style>
   </head>
-  <body>
-    <!-- Phase 1 占位页：UI 实现将在对应 REQ 进入流水线后由 Frontend Dev 交付 -->
-    <main id="app">EchoMind — 本地 AI 知识库（Phase 1 骨架）</main>
+  <body class="bg-base text-slate-200 overflow-hidden">
+    <!-- ============ 首次启动配置向导（REQ-UI-007） ============ -->
+    <div id="wizard" class="hidden fixed inset-0 z-40 bg-base flex items-center justify-center">
+      <div class="w-full max-w-xl px-8 fade-in">
+        <div class="mb-8 text-center">
+          <div class="text-3xl font-semibold tracking-wide">灵犀 <span class="text-accent">EchoMind</span></div>
+          <p class="mt-3 text-sm text-slate-400">本地 AI 知识库 · 数据不出域 · BYOK 买断制<br />首次使用，请配置你的大模型接入</p>
+        </div>
+
+        <div id="presetCards" class="grid grid-cols-3 gap-3 mb-6"></div>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5">API Key <span id="keyOptional" class="hidden text-accent">（本地端点可留空）</span></label>
+            <input id="wizKey" type="password" placeholder="sk-..." autocomplete="off"
+              class="w-full bg-panel border border-line rounded-xl px-4 py-3 text-sm outline-none focus:border-accent transition-colors" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1.5">Base URL</label>
+              <input id="wizUrl" type="text"
+                class="w-full bg-panel border border-line rounded-xl px-4 py-3 text-sm outline-none focus:border-accent transition-colors" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1.5">Model</label>
+              <input id="wizModel" type="text"
+                class="w-full bg-panel border border-line rounded-xl px-4 py-3 text-sm outline-none focus:border-accent transition-colors" />
+            </div>
+          </div>
+        </div>
+
+        <div id="wizError" class="hidden mt-4 text-sm text-red-400 bg-red-400/10 border border-red-400/30 rounded-xl px-4 py-3"></div>
+
+        <div class="mt-6 flex items-center justify-between">
+          <button id="wizKeyLink" class="text-sm text-accent hover:underline">去获取 API Key →</button>
+          <button id="wizStart" class="bg-accent text-base font-medium text-sm rounded-xl px-6 py-3 hover:opacity-90 transition-opacity disabled:opacity-40" style="color:#0C1116">
+            验证并开始
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 主界面（REQ-UI-001/002/003） ============ -->
+    <div id="app" class="hidden h-full flex">
+      <!-- 左侧折叠栏 -->
+      <aside id="sidebar" class="w-60 shrink-0 bg-panel border-r border-line flex flex-col transition-all duration-200">
+        <div class="px-4 py-4 flex items-center justify-between">
+          <span class="side-label font-semibold tracking-wide">灵犀 <span class="text-accent">·</span></span>
+          <button id="collapseBtn" title="折叠" class="text-slate-400 hover:text-accent text-lg leading-none">‹</button>
+        </div>
+        <div class="px-3">
+          <button id="newChatBtn" class="side-label w-full text-sm bg-accent/10 text-accent border border-accent/30 rounded-xl px-3 py-2.5 hover:bg-accent/20 transition-colors">＋ 新对话</button>
+        </div>
+        <div class="side-label px-4 pt-5 pb-2 text-[11px] uppercase tracking-wider text-slate-500">会话历史</div>
+        <div id="convList" class="flex-1 overflow-y-auto scrollbar-thin px-2 space-y-1"></div>
+        <div class="side-label px-4 py-3 border-t border-line flex items-center justify-between text-xs text-slate-500">
+          <span>免费版 · 数据仅本地处理</span>
+          <button id="settingsBtn" title="设置" class="text-slate-400 hover:text-accent text-base">⚙</button>
+        </div>
+      </aside>
+
+      <!-- 右侧主区域 -->
+      <main class="flex-1 flex flex-col min-w-0">
+        <div id="chatArea" class="flex-1 overflow-y-auto scrollbar-thin px-6 py-6">
+          <div id="emptyState" class="h-full flex flex-col items-center justify-center text-center select-none">
+            <div class="text-5xl mb-5 text-accent">◈</div>
+            <div class="text-lg font-medium">向你的知识库提问</div>
+            <p class="mt-2 text-sm text-slate-500 max-w-sm">回答仅基于本地数据与你自己配置的模型。<br />点击左下角 ＋ 或直接把文件拖进来，开始构建知识库。</p>
+          </div>
+        </div>
+
+        <!-- 底部控制台式输入框（REQ-UI-003） -->
+        <div class="px-6 pb-5 pt-2">
+          <div id="inputBar" class="bg-panel border border-line rounded-2xl px-4 py-3 flex items-end gap-3 transition-colors focus-within:border-accent/60">
+            <button id="plusBtn" title="导入文件" class="shrink-0 w-9 h-9 rounded-xl bg-white/5 text-slate-300 hover:text-accent hover:bg-accent/10 transition-colors text-xl leading-none">＋</button>
+            <textarea id="queryInput" rows="1" placeholder="输入问题，Enter 发送 · Shift+Enter 换行"
+              class="flex-1 bg-transparent resize-none outline-none text-sm leading-6 max-h-40 scrollbar-thin"></textarea>
+            <button id="sendBtn" class="shrink-0 h-9 px-4 rounded-xl bg-accent text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-30" style="color:#0C1116">发送</button>
+          </div>
+          <div id="inputHint" class="mt-2 px-1 text-[11px] text-slate-500 h-4"></div>
+        </div>
+      </main>
+    </div>
+
+    <!-- ============ 拖拽全屏遮罩（REQ-UI-004） ============ -->
+    <div id="dragOverlay" class="hidden fixed inset-0 z-50 bg-base/90 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+      <div class="border-2 border-dashed border-accent rounded-3xl w-[86%] h-[80%] flex flex-col items-center justify-center fade-in">
+        <div class="text-5xl text-accent mb-4">⇩</div>
+        <div class="text-xl font-medium text-accent">数据仅本地处理</div>
+        <p class="mt-2 text-sm text-slate-400">松开即可导入 · 支持 .md / .txt / .pdf（PDF 为 Pro 功能）</p>
+      </div>
+    </div>
+
+    <!-- Toast 通道（REQ-UI-005 前置） -->
+    <div id="toasts" class="fixed bottom-6 right-6 z-[60] space-y-2 w-80"></div>
+
+    <script>
+      // ================== Tauri API 入口 ==================
+      const invoke = window.__TAURI__.core.invoke;
+      const listen = window.__TAURI__.event.listen;
+      const tauriDialog = window.__TAURI__.dialog;
+      const tauriOpener = window.__TAURI__.opener;
+
+      // ================== 全局状态 ==================
+      let history = [];                       // 多轮上下文（REQ-RAG-004）
+      let currentRawMarkdown = '';            // 流式累积原文（REQ-UI-003）
+      let lastSources = null;
+      let streaming = false;
+      let currentAssistantEl = null;
+      let renderScheduled = false;
+      let conversationId = crypto.randomUUID();
+      let activePreset = 'deepseek';
+
+      const PRESETS = {
+        deepseek: { label: 'DeepSeek', base_url: 'https://api.deepseek.com', model: 'deepseek-chat', keyUrl: 'https://platform.deepseek.com/api_keys', needKey: true, desc: '高性价比中文强模型' },
+        openai: { label: 'OpenAI', base_url: 'https://api.openai.com', model: 'gpt-4o-mini', keyUrl: 'https://platform.openai.com/api-keys', needKey: true, desc: 'GPT 系列官方端点' },
+        ollama: { label: 'Ollama 本地', base_url: 'http://localhost:11434', model: 'llama3.1', keyUrl: 'https://ollama.com/library', needKey: false, desc: '完全离线的本地模型' },
+      };
+
+      const $ = (id) => document.getElementById(id);
+
+      // ================== Toast ==================
+      function toast(message, kind = 'info') {
+        const el = document.createElement('div');
+        const color = kind === 'error' ? 'border-red-400/40 text-red-300' : kind === 'success' ? 'border-accent/50 text-accent' : 'border-line text-slate-300';
+        el.className = `bg-panel border ${color} rounded-xl px-4 py-3 text-sm shadow-lg fade-in`;
+        el.textContent = message;
+        $('toasts').appendChild(el);
+        setTimeout(() => el.remove(), 4200);
+      }
+
+      // ================== 配置向导（REQ-UI-007） ==================
+      function renderPresetCards() {
+        const box = $('presetCards');
+        box.innerHTML = '';
+        for (const [key, p] of Object.entries(PRESETS)) {
+          const btn = document.createElement('button');
+          const active = key === activePreset;
+          btn.className = `rounded-xl border px-4 py-4 text-left transition-colors ${active ? 'border-accent bg-accent/10' : 'border-line bg-panel hover:border-slate-500'}`;
+          btn.innerHTML = `<div class="text-sm font-medium ${active ? 'text-accent' : ''}">${p.label}</div><div class="mt-1 text-[11px] text-slate-500">${p.desc}</div>`;
+          btn.onclick = () => { activePreset = key; applyPreset(); renderPresetCards(); };
+          box.appendChild(btn);
+        }
+      }
+
+      function applyPreset() {
+        const p = PRESETS[activePreset];
+        $('wizUrl').value = p.base_url;
+        $('wizModel').value = p.model;
+        $('keyOptional').classList.toggle('hidden', p.needKey);
+        $('wizError').classList.add('hidden');
+      }
+
+      async function startWizard() {
+        const p = PRESETS[activePreset];
+        const api_key = $('wizKey').value.trim();
+        const base_url = $('wizUrl').value.trim();
+        const model = $('wizModel').value.trim();
+        const errBox = $('wizError');
+        errBox.classList.add('hidden');
+
+        if (p.needKey && !api_key) { errBox.textContent = '请填入 API Key（或选择 Ollama 本地预设）'; errBox.classList.remove('hidden'); return; }
+        if (!base_url || !model) { errBox.textContent = 'Base URL 与 Model 不能为空'; errBox.classList.remove('hidden'); return; }
+
+        $('wizStart').disabled = true;
+        $('wizStart').textContent = '验证中…';
+        try {
+          await invoke('test_llm_connection', { apiKey: api_key, baseUrl: base_url, model });
+        } catch (err) {
+          errBox.textContent = String(err);
+          errBox.classList.remove('hidden');
+          $('wizStart').disabled = false;
+          $('wizStart').textContent = '验证并开始';
+          return;
+        }
+        try {
+          await invoke('update_llm_config', { config: { api_key, base_url, model } });
+        } catch (err) {
+          errBox.textContent = '配置保存失败：' + String(err);
+          errBox.classList.remove('hidden');
+          $('wizStart').disabled = false;
+          $('wizStart').textContent = '验证并开始';
+          return;
+        }
+        showApp();
+        toast('配置完成，开始构建你的知识库吧', 'success');
+      }
+
+      // ================== 主界面 ==================
+      function showWizard() { $('wizard').classList.remove('hidden'); $('app').classList.add('hidden'); }
+      function showApp() { $('wizard').classList.add('hidden'); $('app').classList.remove('hidden'); $('queryInput').focus(); }
+
+      function hideEmptyState() { const e = $('emptyState'); if (e) e.remove(); }
+
+      function appendBlock(role) {
+        hideEmptyState();
+        const wrap = document.createElement('div');
+        wrap.className = 'mb-5 fade-in';
+        if (role === 'user') {
+          wrap.innerHTML = `<div class="flex justify-end"><div class="max-w-[78%] bg-accent/15 border border-accent/30 rounded-2xl rounded-br-md px-4 py-3 text-sm leading-6 whitespace-pre-wrap"></div></div>`;
+          wrap.querySelector('div div').textContent = '';
+        } else {
+          wrap.innerHTML = `<div class="max-w-[92%] bg-panel border border-line rounded-2xl rounded-tl-md px-5 py-4">
+              <div class="md text-sm"></div>
+              <div class="sources mt-3 flex flex-wrap gap-2"></div>
+            </div>`;
+        }
+        $('chatArea').appendChild(wrap);
+        return wrap;
+      }
+
+      function appendUserBlock(text) {
+        const el = appendBlock('user');
+        el.querySelector('div div').textContent = text;
+        scrollToBottom();
+      }
+
+      // ---- 流式渲染（REQ-UI-003）：marked → DOMPurify → highlight，rAF 节流 ----
+      function scheduleRender() {
+        if (renderScheduled) return;
+        renderScheduled = true;
+        requestAnimationFrame(() => {
+          renderScheduled = false;
+          renderMarkdown();
+          scrollToBottom();
+        });
+      }
+
+      function renderMarkdown() {
+        if (!currentAssistantEl) return;
+        const mdEl = currentAssistantEl.querySelector('.md');
+        // 安全铁律：模型输出必须经 DOMPurify 白名单消毒（REQ-SEC-002）
+        mdEl.innerHTML = DOMPurify.sanitize(marked.parse(currentRawMarkdown));
+        mdEl.querySelectorAll('pre code').forEach((code) => {
+          if (!code.dataset.highlighted) { try { hljs.highlightElement(code); } catch (_) { /* 半截语法容错 */ } }
+        });
+        mdEl.querySelectorAll('pre').forEach((pre) => {
+          if (pre.querySelector('.copy-btn')) return;
+          const btn = document.createElement('button');
+          btn.className = 'copy-btn bg-white/10 text-slate-300 hover:text-accent';
+          btn.textContent = '复制';
+          btn.onclick = () => {
+            navigator.clipboard.writeText(pre.querySelector('code')?.innerText ?? '');
+            btn.textContent = '已复制 ✓';
+            setTimeout(() => (btn.textContent = '复制'), 1500);
+          };
+          pre.appendChild(btn);
+        });
+      }
+
+      function renderSources(sources) {
+        lastSources = sources;
+        if (!currentAssistantEl) return;
+        const box = currentAssistantEl.querySelector('.sources');
+        box.innerHTML = '';
+        sources.forEach((s, i) => {
+          const chip = document.createElement('span');
+          chip.className = 'text-[11px] px-2.5 py-1 rounded-full bg-accent/10 text-accent border border-accent/25';
+          chip.textContent = `[${i + 1}] ${s.doc_name} · ${(s.score * 100).toFixed(0)}%`;
+          chip.title = s.chunk.content.slice(0, 200);
+          box.appendChild(chip);
+        });
+      }
+
+      function scrollToBottom() {
+        const area = $('chatArea');
+        area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' });
+      }
+
+      function setInputState(state, hint = '') {
+        const input = $('queryInput');
+        const send = $('sendBtn');
+        streaming = state === 'streaming';
+        input.disabled = streaming;
+        send.disabled = streaming;
+        send.textContent = streaming ? '生成中…' : '发送';
+        $('inputHint').textContent = hint;
+        if (!streaming) input.focus();
+      }
+
+      function finalizeStream(ok) {
+        if (ok && currentRawMarkdown) {
+          history.push({ role: 'assistant', content: currentRawMarkdown, sources: lastSources });
+        }
+        currentRawMarkdown = '';
+        lastSources = null;
+        currentAssistantEl = null;
+        if (ok) setInputState('idle');
+      }
+
+      async function send() {
+        const query = $('queryInput').value.trim();
+        if (!query || streaming) return;
+        $('queryInput').value = '';
+        $('queryInput').style.height = 'auto';
+        appendUserBlock(query);
+        history.push({ role: 'user', content: query, sources: null });
+
+        currentRawMarkdown = '';
+        lastSources = null;
+        currentAssistantEl = appendBlock('assistant');
+        setInputState('streaming', '正在检索知识库…');
+
+        try {
+          await invoke('chat', {
+            query,
+            history: history.slice(0, -1),
+            conversationId,
+          });
+        } catch (err) {
+          // chat_error 事件已由后端推送；此处兜底状态复位
+          finalizeStream(false);
+          setInputState('error', String(err));
+        }
+      }
+
+      // ---- 事件监听（契约：REQ-RAG-001 / REQ-ING-001）----
+      listen('chat_token', (e) => {
+        currentRawMarkdown += e.payload;
+        scheduleRender();
+      });
+      listen('chat_sources', (e) => renderSources(e.payload));
+      listen('chat_error', (e) => {
+        toast(String(e.payload), 'error');
+        finalizeStream(false);
+        setInputState('error', String(e.payload));
+      });
+      listen('chat_done', () => {
+        finalizeStream(true);
+        setInputState('idle');
+      });
+      listen('doc-status-changed', (e) => {
+        const p = e.payload;
+        toast(p.message, p.status === 'error' ? 'error' : 'info');
+      });
+
+      // ---- 拖拽导入（REQ-UI-004：Tauri 原生拖拽事件）----
+      listen('tauri://drag-enter', () => $('dragOverlay').classList.remove('hidden'));
+      listen('tauri://drag-leave', () => $('dragOverlay').classList.add('hidden'));
+      listen('tauri://drag-drop', (e) => {
+        $('dragOverlay').classList.add('hidden');
+        importPaths(e.payload.paths);
+      });
+
+      async function importPaths(paths) {
+        if (!paths || paths.length === 0) return;
+        try {
+          // is_pro 暂为 false：License 系统交付后切换（REQ-LIC-002）
+          const names = await invoke('import_files', { paths, isPro: false });
+          if (names.length > 0) toast(`导入完成：${names.join('、')}`, 'success');
+        } catch (err) {
+          toast(String(err), 'error');
+        }
+      }
+
+      $('plusBtn').onclick = async () => {
+        try {
+          const selected = await tauriDialog.open({
+            multiple: true,
+            filters: [{ name: '文档', extensions: ['md', 'txt', 'pdf'] }],
+          });
+          if (selected) importPaths(Array.isArray(selected) ? selected : [selected]);
+        } catch (err) {
+          toast('文件选择器不可用：' + String(err), 'error');
+        }
+      };
+
+      // ---- 输入框微交互 ----
+      $('sendBtn').onclick = send;
+      $('queryInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+      });
+      $('queryInput').addEventListener('input', (e) => {
+        e.target.style.height = 'auto';
+        e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px';
+      });
+
+      // ---- 侧栏 ----
+      $('collapseBtn').onclick = () => {
+        const sb = $('sidebar');
+        sb.classList.toggle('w-60');
+        sb.classList.toggle('w-14');
+        sb.querySelectorAll('.side-label').forEach((el) => el.classList.toggle('hidden'));
+        $('collapseBtn').textContent = sb.classList.contains('w-14') ? '›' : '‹';
+      };
+      $('newChatBtn').onclick = () => {
+        history = [];
+        conversationId = crypto.randomUUID();
+        $('chatArea').innerHTML = '';
+        $('chatArea').appendChild(document.createElement('div')).outerHTML =
+          '<div id="emptyState" class="h-full flex flex-col items-center justify-center text-center select-none"><div class="text-5xl mb-5 text-accent">◈</div><div class="text-lg font-medium">新会话已开始</div><p class="mt-2 text-sm text-slate-500 max-w-sm">上下文已清空，向你的知识库提问吧。</p></div>';
+        renderConvList();
+      };
+      $('settingsBtn').onclick = () => { showWizard(); };
+
+      function renderConvList() {
+        const list = $('convList');
+        list.innerHTML = '';
+        const item = document.createElement('div');
+        item.className = 'px-3 py-2.5 rounded-xl bg-white/5 text-sm text-slate-300 truncate';
+        item.textContent = '当前会话';
+        list.appendChild(item);
+      }
+
+      // ---- 向导按钮 ----
+      $('wizStart').onclick = startWizard;
+      $('wizKeyLink').onclick = async () => {
+        const url = PRESETS[activePreset].keyUrl;
+        try { await tauriOpener.openUrl(url); }
+        catch (_) { toast('请手动访问：' + url, 'info'); }
+      };
+
+      // ================== 启动引导 ==================
+      marked.setOptions({ breaks: true, gfm: true });
+      renderPresetCards();
+      applyPreset();
+      renderConvList();
+      (async () => {
+        try {
+          const settings = await invoke('get_settings');
+          if (settings.has_llm_config) showApp(); else showWizard();
+        } catch (_) {
+          showWizard();
+        }
+      })();
+    </script>
   </body>
 </html>

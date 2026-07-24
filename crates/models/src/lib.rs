@@ -106,8 +106,7 @@ pub struct DocStatusPayload {
     pub message: String,
 }
 
-/// BYOK LLM 配置（REQ-RAG-007 前置；当前经数据目录 `llm_config.json` 加载，
-/// 设置界面交付后改由安全存储承载，REQ-SEC-001）。
+/// BYOK LLM 配置（REQ-UI-008：经 SQLite settings 表 AES-256-GCM 加密持久化）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
     /// API Key（允许为空串：兼容本地 Ollama，REQ-LLM-001）
@@ -116,4 +115,17 @@ pub struct LlmConfig {
     pub base_url: String,
     /// 模型名（如 gpt-4o-mini / deepseek-chat / qwen2.5）
     pub model: String,
+}
+
+/// get_settings 返回载荷（REQ-UI-008；api_key 仅以脱敏形式返回，安全官要求）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingsPayload {
+    /// 是否已完成 LLM 配置
+    pub has_llm_config: bool,
+    /// OpenAI 兼容端点
+    pub base_url: String,
+    /// 模型名
+    pub model: String,
+    /// 脱敏 API Key（**** 前缀 + 末四位）
+    pub api_key_masked: String,
 }

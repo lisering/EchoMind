@@ -129,6 +129,8 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | REQ-RAG-003 | AC-1 | TC-RAG-001（低分检索结果阈值过滤） | L1 | 红灯→绿灯 |
 | REQ-RAG-003 | AC-1 / AC-2 | TC-RAG-002（空上下文不调用 LLM 直接固定提示） | L1 | 红灯→绿灯 |
 | REQ-LLM-001 | AC-1 | TC-LLM-001（SSE 粘包/拆包缓冲解析） | L1 | 红灯→绿灯 |
+| REQ-UI-008 | AC-1 / AC-3 | TC-UI-001（配置持久化跨重启 + Key 脱敏） | L2 | 红灯→绿灯 |
+| REQ-RAG-003 | AC-2 | TC-UI-002（空知识库 chat 明确拦截） | L2 | 红灯→绿灯 |
 | （其余条目待 QA 阶段登记） | | | | |
 
 | 版本 | 日期 | 修订摘要 | 批准 |

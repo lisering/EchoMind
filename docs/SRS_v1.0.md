@@ -5,7 +5,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0.4（含 RAG 检索引擎与 LLM 流式对话） |
+| 文档版本 | v1.0.5（含配置向导、主界面与配置持久化） |
 | 生效日期 | 2026-07-24 |
 | 维护者 | PM（状态流转由 TPM 统一登记） |
 
@@ -259,22 +259,25 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 
 ### 4.4 UI — 界面与交互状态
 
-#### REQ-UI-001 全局视觉规范
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：无
-- 描述：v1.0 仅暗黑主题；背景 `#161616`，强调色 `#38BDF8`；色值统一由 Tailwind 配置输出。
+#### REQ-UI-001 全局视觉规范与主界面布局
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：无
+- 描述：v1.0 仅暗黑主题；背景 `#161616`，强调色 `#38BDF8`；色值统一由 Tailwind 配置输出。布局：左侧极简折叠栏（会话历史），右侧主对话区，底部宽大圆角控制台式输入框（左下角 + 号导入文件）。前端第三方库（marked / DOMPurify / highlight.js / Tailwind）一律本地化 vendored 于 `ui/vendor/`，**禁止运行时 CDN**（体系三与 REQ-SEC-003 红线）。
 - 验收标准：
   - AC-1：全部页面背景 / 强调色与规范值一致（E2E 计算样式断言）。
   - AC-2：不存在规范外的硬编码色值（样式静态检查）。
-- 契约：TBD ｜ 关联测试：TBD
+  - AC-3：界面无任何外联 CDN 请求（静态扫描 `ui/` 无 http(s):// script/link 引用）。
+- 契约：前端仅经已冻结命令与事件通信（REQ-ING-001 / REQ-RAG-001 / REQ-LLM-002 / REQ-UI-008）。
+- 关联测试：E2E 待 CI 阶段
 
 #### REQ-UI-002 Block 式对话与安全流式渲染
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-RAG-001
-- 描述：消息以 Block 呈现；流式 Markdown 必须经 marked.js → DOMPurify → highlight.js 链路渲染。
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-RAG-001
+- 描述：消息以 Block 呈现；监听 `chat_token` 事件维护 `currentRawMarkdown`，流式 Markdown 必须经 marked.js → DOMPurify → highlight.js 链路渲染；代码块带复制按钮；流式输出时平滑滚动到底部（rAF 节流，零阻塞）。
 - 验收标准：
-  - AC-1：模型输出包含代码块时语法高亮正确。
+  - AC-1：模型输出包含代码块时语法高亮正确，且可复制。
   - AC-2：模型输出含 `<script>`、事件属性等注入载荷时被完全消毒，不执行、不弹窗（安全用例）。
   - AC-3：流式期间 Markdown 半截语法（如未闭合代码围栏）不产生布局错乱。
-- 契约：TBD ｜ 关联测试：TBD
+- 契约：消费 REQ-RAG-001 冻结的 `chat_token` / `chat_sources` / `chat_error` / `chat_done` 事件。
+- 关联测试：E2E 待 CI 阶段
 
 #### REQ-UI-003 控制台式输入框状态
 - 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-RAG-001
@@ -285,12 +288,13 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 契约：TBD ｜ 关联测试：TBD
 
 #### REQ-UI-004 拖拽全屏遮罩
-- 优先级：P0 ｜ 状态：Approved ｜ 依赖：REQ-ING-001
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-ING-001
 - 描述：文件拖拽进入窗口时，全屏遮罩高亮显示「数据仅本地处理」。
 - 验收标准：
   - AC-1：遮罩文案与强调色（`#38BDF8`）符合规范；拖拽离开即消失，无误判残留。
   - AC-2：遮罩出现时页面其余交互被遮罩层接管，避免误触。
-- 契约：TBD ｜ 关联测试：TBD
+- 契约：监听 Tauri 原生拖拽事件 `tauri://drag-enter` / `tauri://drag-leave` / `tauri://drag-drop`；drop 载荷 `paths` 传入 `import_files`。
+- 关联测试：E2E 待 CI 阶段
 
 #### REQ-UI-005 空状态与全局错误反馈
 - 优先级：P1 ｜ 状态：Draft ｜ 依赖：无
@@ -307,6 +311,26 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
   - AC-1：索引状态徽标与 REQ-VEC-004 状态机实时一致。
   - AC-2：免费版配额用量实时刷新，触顶时导入入口显示锁定态。
 - 契约：TBD ｜ 关联测试：TBD
+
+#### REQ-UI-007 首次启动配置向导
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-UI-008、REQ-LLM-002
+- 描述：未配置 LLM 时全屏遮罩向导；提供 DeepSeek / OpenAI / Ollama 预设卡片（自动填充 base_url 与 model，均可编辑以兼容自建端点）；「去获取 API Key」按钮经 opener 插件跳转系统浏览器；「验证并开始」调用 test_llm_connection，成功后 update_llm_config 并进入主界面。
+- 验收标准：
+  - AC-1：get_settings 返回未配置时启动即显示向导，已配置直接进入主界面。
+  - AC-2：验证失败在向导内联展示真实错误（HTTP 状态码 + 摘要），不得进入主界面。
+  - AC-3：Ollama 预设允许空 API Key（本地端点）。
+- 契约：`get_settings` / `test_llm_connection` / `update_llm_config` 命令；`opener` 插件跳转外链。
+- 关联测试：E2E 待 CI 阶段（持久化由 TC-UI-001 覆盖）
+
+#### REQ-UI-008 LLM 配置持久化
+- 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-DB-001
+- 描述：update_llm_config 命令将配置写入 SQLite settings 表（AES-256-GCM 加密，随机密钥存于数据目录 `secret.key`，权限 0600）；get_settings 返回配置存在性、base_url、model 与脱敏 Key（仅末四位），**严禁回传明文 Key**；启动时从 settings 表恢复运行态配置（替换 Phase 4 的 llm_config.json 手配方案）。
+- 验收标准：
+  - AC-1：update → 重建 AppState（模拟重启）→ get_settings 数据仍在且 Key 脱敏（TC-UI-001）。
+  - AC-2：settings 表存储值不出现明文 Key（密文为 base64(nonce‖ciphertext)）。
+  - AC-3：update 后运行态配置立即生效，无需重启。
+- 契约（TPM 冻结，2026-07-24）：Command `update_llm_config(config: LlmConfig, state) -> Result<(), String>`；Command `get_settings(state) -> Result<SettingsPayload, String>`。
+- 关联测试：TC-UI-001
 
 ### 4.5 LIC — 授权与 Freemium 付费墙
 
@@ -468,3 +492,4 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 | v1.0.2 | 2026-07-24 | REQ-ING-001 导入管线细化、契约冻结；REQ-ING-004 指纹算法修订为 MD5；登记 TC-ING-001~007 | PM / TPM |
 | v1.0.3 | 2026-07-24 | 新增 DB / PDF 域；REQ-DB-001（SQLite 持久化）、REQ-PDF-001（lopdf 解析）、REQ-VEC-002（fastembed 本地引擎）契约冻结；新增 crates/infra 适配器层；登记 TC-DB-001/002、TC-PDF-001、TC-VEC-001 | PM / TPM |
 | v1.0.4 | 2026-07-24 | 新增 LLM 域；REQ-RAG-001 对话命令契约冻结（chat + 四事件）；REQ-RAG-003 检索引擎细化（阈值过滤 / 空上下文拒答）；新增 REQ-LLM-001（OpenAI 兼容流式）、REQ-LLM-002（连接测试）；登记 TC-RAG-001/002、TC-LLM-001 | PM / TPM |
+| v1.0.5 | 2026-07-24 | REQ-UI-001/002/003/004 契约冻结；新增 REQ-UI-007（配置向导）、REQ-UI-008（settings 加密持久化）；裁决前端库本地化（禁 CDN）；REQ-RAG-007 部分交付；登记 TC-UI-001/002 | PM / TPM |
