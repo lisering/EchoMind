@@ -613,3 +613,53 @@ mod chaos_tests {
         println!("  [TC-CHAOS-007] 50 文件全部导入，{elapsed:?}");
     }
 }
+
+// ================== Tauri ACL 能力配置守卫（防回归） ==================
+// 教训：Tauri v2 的 ACL 权限系统仅在真实运行时强制检查，
+// mock_app() 和桥接 Mock 均绕过 ACL，导致 dialog 权限缺失无法被 L2/L3-lite 发现。
+// 本测试静态校验 capabilities/default.json 存在且包含必要权限，
+// 作为配置回归守卫，防止再次出现「dialog.open not allowed」类问题。
+
+/// TC-ACL-001 Tauri 能力配置守卫：验证 `capabilities/default.json` 存在，
+/// 且包含 `dialog:allow-open` 权限（防「文件选择器不可用」回归）。
+#[test]
+fn tc_acl_001_dialog_capability_exists() {
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    let cap_path = std::path::Path::new(manifest)
+        .join("capabilities")
+        .join("default.json");
+
+    assert!(
+        cap_path.exists(),
+        "capabilities/default.json 缺失！Tauri v2 要求显式声明插件权限，\
+         缺失会导致 dialog.open 等命令被 ACL 拒绝。路径: {}",
+        cap_path.display()
+    );
+
+    let content = std::fs::read_to_string(&cap_path)
+        .unwrap_or_else(|e| panic!("读取 capabilities 失败: {e}"));
+
+    // 解析 JSON 并校验关键权限
+    let json: serde_json::Value = serde_json::from_str(&content)
+        .unwrap_or_else(|e| panic!("capabilities/default.json JSON 解析失败: {e}"));
+
+    let permissions = json["permissions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("permissions 字段必须为数组"));
+
+    let perm_strs: Vec<&str> = permissions
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+
+    assert!(
+        perm_strs.contains(&"dialog:allow-open"),
+        "capabilities/default.json 必须包含 'dialog:allow-open' 权限，\
+         否则点击加号按钮会报 'dialog.open not allowed'。当前权限: {perm_strs:?}"
+    );
+
+    assert!(
+        perm_strs.contains(&"core:default"),
+        "capabilities/default.json 必须包含 'core:default' 权限（事件系统等基础能力）"
+    );
+}
