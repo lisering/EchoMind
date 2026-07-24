@@ -5,7 +5,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0.0 |
+| 文档版本 | v1.1.0 |
 | 生效日期 | 2026-07-24 |
 | 维护者 | QA Lead |
 
@@ -62,13 +62,45 @@
 
 ## 5. 测试数据与环境
 
+### 5.1 基础约定
+
 | 项 | 约定 |
 | --- | --- |
-| fixtures | `tests/fixtures/` 存放小型样例文档（md / txt / pdf），单文件 ≤ 100KB，禁止放入任何真实用户文档 |
+| fixtures | `tests/fixtures/` 存放测试语料；野蛮场景 fixtures 由 `generate_corpus.py` 自动生成 |
 | 数据目录 | 测试一律使用临时目录（`tempfile`），用例结束自动销毁 |
-| LLM / Embedding | 一律打桩：L1 用 fake Trait 实现；L2/L3 用 wiremock 流式假端点（固定 token 序列与延迟） |
+| LLM / Embedding | L1 用 fake Trait 实现；L2/L3 用 wiremock 流式假端点（固定 token 序列与延迟）；**真实 LLM 联调测试**见 §5.2 |
 | 密钥 | 测试中只允许使用形如 `sk-test-*` 的假 Key；发现真实 Key 入库视为安全事故 |
 | 并发 | 测试必须可并行执行（默认 `cargo test` 多线程），禁止用例间共享可变状态 |
+
+### 5.2 真实 LLM 联调测试环境变量
+
+> **铁律**（PROJECT_RULES.md 体系三 §3.0 铁律四）：需要真实 LLM 的集成测试通过环境变量注入凭据，严禁硬编码。
+
+| 环境变量 | 用途 | 示例 |
+| --- | --- |
+| `ANTHROPIC_AUTH_TOKEN` | LLM API Key | `sk-ant-xxxx` |
+| `BASE_URL` | LLM API Base URL | `https://api.anthropic.com` |
+| `CLAUDE_CODE_SUBAGENT_MODEL` | 模型名称 | `claude-sonnet-4-20250514` |
+
+**使用规范**：
+1. 测试代码通过 `std::env::var()` 读取，缺失时 `skip` 而非 `fail`。
+2. 严禁将环境变量值写入日志、断言消息或 Git 提交。
+3. CI 中通过 GitHub Secrets 注入；本地开发通过 shell `export` 临时设置。
+4. 测试结束后无需 `unset`（环境变量本身不构成安全风险，与代理不同）。
+
+### 5.3 混沌测试语料（Phase 8.5）
+
+| 文件 | 类型 | 场景 | 生成方式 |
+| --- | --- | --- | --- |
+| `large_real.md` | 大型真实 Markdown | 抗压测试（超长文档分块） | GitHub Raw 拉取 |
+| `complex_paper.pdf` | 复杂学术论文 PDF | PDF 解析容错（图表/公式/多栏） | arXiv 下载 |
+| `mixed_encoding.txt` | 混合编码文本 | 编码地狱容错（UTF-8/GBK/非法字节） | 脚本生成 |
+| `malicious.md` | 恶意 Markdown | XSS 安全测试（script/img onerror） | 脚本生成 |
+| `fake.pdf` | 格式欺骗文件 | PdfLoader 错误处理 | 脚本生成 |
+| `empty.md` | 空文件 | 空内容边界处理 | 脚本生成 |
+| `deep_nested/` | 深套目录（50 层） | 海量并发遍历 | 脚本生成 |
+
+**生成命令**：`python3 tests/fixtures/generate_corpus.py`
 
 ---
 
@@ -146,6 +178,13 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | REQ-LIC-002 | AC-2 | TC-LIC-004（免费版 PDF 付费门拦截） | L2 | 红灯→绿灯 |
 | REQ-LIC-001 | AC-3 | TC-LIC-005（激活后重启 is_pro 持久化恢复） | L2 | 红灯→绿灯 |
 | REQ-LIC-003 | AC-1/AC-2/AC-3 | E2E-LIC-001（付费墙弹出→激活→状态更新） | L3-lite | CI 门禁 |
+| REQ-CHAOS-001 | AC-1 | TC-CHAOS-001（大型真实 Markdown 抗压导入） | L2 | 红灯→绿灯 |
+| REQ-CHAOS-002 | AC-1 | TC-CHAOS-002（复杂学术论文 PDF 文本提取） | L2 | 红灯→绿灯 |
+| REQ-CHAOS-003 | AC-1 | TC-CHAOS-003（混合编码 TXT from_utf8_lossy 容错） | L2 | 红灯→绿灯 |
+| REQ-CHAOS-004 | AC-1 | TC-CHAOS-004（恶意 Markdown XSS 标签剥离） | L2 | 红灯→绿灯 |
+| REQ-CHAOS-005 | AC-1 | TC-CHAOS-005（空文件零垃圾 Chunk） | L2 | 红灯→绿灯 |
+| REQ-CHAOS-006 | AC-1 | TC-CHAOS-006（格式欺骗文件优雅失败） | L2 | 红灯→绿灯 |
+| REQ-CHAOS-007 | AC-1 | TC-CHAOS-007（50 层深套目录批量导入） | L2 | 红灯→绿灯 |
 | REQ-UI-006 / REQ-ING-005 | AC-1/AC-2 / AC-1 | E2E-UI-001（六断言全链路冒烟：向导→配置→导入→列表→流式→删除） | L3 | CI 门禁 |
 | REQ-RAG-001 / REQ-RAG-005 | AC-3 / AC-1 | E2E-UI-001（流式增长 + 代码块复制 + 停止中断断言） | L3 | CI 门禁 |
 | （其余条目待 QA 阶段登记） | | | | |
@@ -154,3 +193,4 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | --- | --- | --- | --- |
 | v1.0.0 | 2026-07-24 | 创世版：金字塔分工、左移流程、门禁与 DoD 确立 | QA Lead / TPM |
 | v1.0.1 | 2026-07-25 | Phase 8：登记 TC-LIC-001~005（License 校验与配额门控）、E2E-LIC-001（付费墙 UI） | QA Lead / TPM |
+| v1.1.0 | 2026-07-25 | Phase 8.5：新增 §5.2 真实 LLM 环境变量、§5.3 混沌测试语料、TC-CHAOS-001~007 追溯矩阵 | QA Lead / TPM |

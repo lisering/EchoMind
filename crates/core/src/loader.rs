@@ -41,13 +41,19 @@ impl Loader for MarkdownLoader {
 }
 
 /// 纯文本加载器：内容原样读取（TC-ING-006 断言依据）。
+///
+/// 使用 `read` + `from_utf8_lossy` 而非 `read_to_string`，容错处理混合编码文件
+/// （REQ-CHAOS-003：真实世界 txt 文件可能包含 GBK / 非法字节，不应因编码问题崩溃）。
+/// 对合法 UTF-8 文本，`from_utf8_lossy` 输出与 `read_to_string` 完全一致。
 pub struct TextLoader;
 
 impl Loader for TextLoader {
     async fn load(&self, file_path: &str) -> anyhow::Result<String> {
-        tokio::fs::read_to_string(file_path)
+        let bytes = tokio::fs::read(file_path)
             .await
-            .with_context(|| format!("读取文本失败: {file_path}"))
+            .with_context(|| format!("读取文本失败: {file_path}"))?;
+        // from_utf8_lossy：非法字节以 U+FFFD 替代，保证返回合法 UTF-8 字符串
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 }
 
