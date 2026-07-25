@@ -1,6 +1,6 @@
 # 开发会话交接文档
 
-> **最后更新**：2026-07-25（v6：Phase 4 Chunk Expansion 落地）
+> **最后更新**：2026-07-25（v7：Phase 3 ContextualEmbedding 落地）
 > **用途**：新 AI 会话开始时，读取此文件快速恢复全部上下文。
 
 ---
@@ -167,7 +167,7 @@ SRS 中多个 P1 需求仍为 Draft 状态，需逐个推进至 Approved → Con
 > **RAG 增强下一步候选**（基于调研 [[memory:17849201661656590178]]）：
 > - ✅ Phase 4：Chunk Expansion **已落地**（`VectorRetriever.expand_neighbors`，TC-RAG-009 绿灯，检索命中后扩展前后各 1 个相邻 chunk，去重 + 按 sequence 排序）
 > - ✅ 补齐：SemanticSplitter L1 集成测试 **已完成**（TC-VEC-002 绿灯，端到端分块入库契约）
-> - Phase 3：ContextualEmbedding（每 chunk 追加文档上下文，检索失败率 ↓49%，需 LLM 调用成本）— **下一步**
+> - ✅ Phase 3：ContextualEmbedding **已落地**（`build_contextual_text` 拼接文档名前缀，零 LLM 成本规则方案，TC-RAG-010 绿灯，`commands.rs embed_document_chunks` 已接入）
 
 ### P2: 远期
 

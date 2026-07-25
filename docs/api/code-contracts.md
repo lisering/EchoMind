@@ -473,3 +473,13 @@ pub struct VectorRetriever<E: Embedder, S: Storage> {
 3. `retain(|h| h.score >= 0.35)` → 阈值过滤
 4. `expand_neighbors(hits)` → 扩展相邻 chunk（Phase 4）
 5. 返回 `Vec<RetrievalResult>`（可能 > top_k 个，含扩展 chunk）
+
+**Phase 3 ContextualEmbedding**（`build_contextual_text` 函数）：
+
+嵌入时为 chunk 内容拼接文档名上下文前缀（`文档《{doc_name}》：\n{chunk_content}`），
+使向量包含文档上下文信息，提升检索质量（Anthropic Contextual Retrieval 调研：
+检索失败率 ↓49%）。EchoMind 采用零 LLM 成本规则方案（不调用 LLM 生成上下文摘要）。
+
+- 调用点：`commands.rs::embed_document_chunks`（嵌入写入链路）
+- 不改变 `chunk.content`（存储仍为原始内容），仅嵌入文本拼接前缀
+- 检索时 `build_rag_prompt` 仍用原始 `chunk.content`（不含前缀），保持引用块可读

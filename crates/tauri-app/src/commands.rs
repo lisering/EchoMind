@@ -1,19 +1,24 @@
 //! Tauri Command 层（契约见 SRS：REQ-ING-001、REQ-RAG-001/005/006、REQ-LLM-002、REQ-UI-008）。
 //! 体系三：全部 Result 显式处理，零 unwrap；错误以可读消息返回前端（不泄露敏感信息）。
 //! `*_inner` 函数泛型化 Runtime，供 Tauri 命令与 L2 集成测试（MockRuntime）复用。
+// 铁律五例外：#[tauri::command] 宏展开的代码内部使用 unreachable!()，
+// Clippy 无法区分宏生成代码与手写代码，此处仅豁免 unreachable lint。
+// 本文件手写代码严禁使用 unreachable!()，由 code review 把关。
+#![allow(clippy::unreachable)]
 
 use std::path::Path;
 
 use echomind_core::Embedder as _;
+use echomind_core::NoVlm;
 use echomind_core::Storage;
 use echomind_core::chat::{ChatEngine, ChatOutcome};
 use echomind_core::import::{ImportOutcome, ImportService};
 use echomind_core::license::verify_license;
-use echomind_core::retriever::VectorRetriever;
+use echomind_core::retriever::{build_contextual_text, VectorRetriever};
 use echomind_infra::openai_provider::OpenAIProvider;
 use echomind_models::{
-    ChatMessage, Conversation, DocStatus, DocStatusPayload, Document, LlmConfig, RetrievalResult,
-    SettingsPayload,
+    ChatMessage, ChatPhasePayload, Conversation, DocStatus, DocStatusPayload, Document, LlmConfig,
+    RetrievalResult, SettingsPayload,
 };
 use futures::StreamExt;
 use futures::stream::BoxStream;
@@ -23,7 +28,9 @@ use tokio_util::sync::CancellationToken;
 use crate::state::AppState;
 
 /// RAG 检索默认 top-k（REQ-RAG-003）
-const DEFAULT_TOP_K: usize = 5;
+/// 8：all-MiniLM-L6-v2 对中文短查询的语义匹配精度有限，top-5 可能遗漏相关片段；
+/// top-8 让 LLM 获得更充分的上下文以综合回答（TC-RAG-001c 回归教训）。
+const DEFAULT_TOP_K: usize = 8;
 /// 会话标题自动提取的最大字符数（REQ-RAG-006）
 const TITLE_MAX_CHARS: usize = 24;
 /// 新建会话占位标题（REQ-RAG-006）
@@ -42,9 +49,20 @@ fn display_name(raw_path: &str) -> String {
 // ---- 事件发射助手（发射失败仅记录日志，不中断主流程）----
 
 fn emit_status<R: Runtime>(app: &AppHandle<R>, status: &str, message: String) {
+    emit_status_with_phase(app, status, message, None);
+}
+
+/// 发射带子阶段的状态事件（REQ-MM-004 多模态管线进度反馈）。
+fn emit_status_with_phase<R: Runtime>(
+    app: &AppHandle<R>,
+    status: &str,
+    message: String,
+    sub_phase: Option<&str>,
+) {
     let payload = DocStatusPayload {
         status: status.to_string(),
         message,
+        sub_phase: sub_phase.map(|s| s.to_string()),
     };
     if let Err(err) = app.emit("doc-status-changed", payload) {
         eprintln!("doc-status-changed 事件发射失败: {err}");
@@ -75,6 +93,17 @@ fn emit_chat_done<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// 发射对话阶段事件（REQ-RAG-001 扩展）：在首个 token 到达前推送进度，消除空白等待。
+fn emit_chat_phase<R: Runtime>(app: &AppHandle<R>, phase: &str, message: &str) {
+    let payload = ChatPhasePayload {
+        phase: phase.to_string(),
+        message: message.to_string(),
+    };
+    if let Err(err) = app.emit("chat_phase", payload) {
+        eprintln!("chat_phase 事件发射失败: {err}");
+    }
+}
+
 // ---- import_files（REQ-ING-001）----
 
 /// 导入文件。返回成功入库的原始文件名列表；格式非法 / 配额触顶 / 未授权 PDF / 路径遍历
@@ -102,9 +131,27 @@ pub async fn import_files_inner<R: Runtime>(
         let name = display_name(raw_path);
         match service.import_one(raw_path, is_pro).await {
             Ok(ImportOutcome::Imported(doc)) => {
-                emit_status(app, "indexing", format!("正在索引：{name}"));
-                match service.index_document(&doc).await {
-                    Ok(()) => match embed_document_chunks(state, &doc.id).await {
+                // 判断是否为 PDF（Pro 版可触发多模态管线，REQ-MM-004）
+                let is_pdf = Path::new(&doc.file_path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.eq_ignore_ascii_case("pdf"))
+                    .unwrap_or(false);
+
+                let index_result = if is_pdf && is_pro {
+                    // Pro 版 PDF：尝试多模态索引（文本 + 渲染 + OCR）
+                    index_pdf_multimodal(app, &service, &doc, state, &name).await
+                } else {
+                    // 非 PDF 或免费版：纯文本索引（现有逻辑）
+                    emit_status(app, "indexing", format!("正在索引：{name}"));
+                    service
+                        .index_document(&doc)
+                        .await
+                        .map_err(|e| format!("{e:#}"))
+                };
+
+                match index_result {
+                    Ok(()) => match embed_document_chunks(state, &doc.id, &name).await {
                         Ok(count) => {
                             emit_status(app, "done", format!("索引完成：{name}（{count} 向量）"))
                         }
@@ -133,9 +180,80 @@ pub async fn import_files_inner<R: Runtime>(
     Ok(imported)
 }
 
+/// Pro 版 PDF 多模态索引（REQ-MM-004）：文本提取 → 图片渲染 → OCR → VLM 增强 → 分块入库。
+///
+/// VLM 编排（REQ-MM-003 前端接线）：
+/// - `mm.vlm_enabled` = true 且 LLM 配置存在 → `index_document_multimodal_with_vlm` + VLM
+/// - VLM 禁用或配置缺失 → `index_document_multimodal_with_vlm` + `NoVlm`（管线天然跳过 VLM 阶段）
+///
+/// 降级策略：OCR 引擎或渲染引擎初始化失败时，回退到纯文本索引（`index_document`），
+/// 确保 PDF 导入不因多模态引擎不可用而完全失败。
+async fn index_pdf_multimodal<R: Runtime>(
+    app: &AppHandle<R>,
+    service: &ImportService<echomind_infra::sqlite_storage::SqliteStorage>,
+    doc: &echomind_models::Document,
+    state: &AppState,
+    name: &str,
+) -> Result<(), String> {
+    // 阶段 1：初始化 OCR 引擎（首次使用需下载模型 ~17MB，可能耗时）
+    emit_status_with_phase(app, "indexing", "初始化 OCR 引擎…".to_string(), Some("ocr"));
+    let ocr_engine = state.ocr_engine().await;
+    let page_renderer = state.page_renderer().await;
+    let renderer_ok = page_renderer.is_ok();
+    let ocr_ok = ocr_engine.is_ok();
+
+    match (page_renderer, ocr_engine) {
+        (Ok(renderer), Ok(ocr)) => {
+            // 获取 VLM provider（None 表示禁用或配置缺失，将使用 NoVlm 降级）
+            let vlm = state.vision_provider().await.map_err(|e| format!("{e:#}"))?;
+            let vlm_on = vlm.is_some();
+
+            // 阶段 2：文本提取 + 图片检测 + 渲染 + OCR + VLM 增强
+            let phase_label = if vlm_on { "vlm_enhancing" } else { "text_extracting" };
+            emit_status_with_phase(
+                app,
+                "indexing",
+                format!("正在多模态索引：{name}"),
+                Some(phase_label),
+            );
+
+            match vlm {
+                Some(ref vlm_provider) => {
+                    // VLM 启用：表格→Markdown、甘特图→Mermaid
+                    service
+                        .index_document_multimodal_with_vlm(doc, renderer, ocr, vlm_provider)
+                        .await
+                        .map_err(|e| format!("{e:#}"))
+                }
+                None => {
+                    // VLM 禁用或配置缺失：NoVlm 占位，管线天然跳过 VLM 阶段
+                    let no_vlm = NoVlm;
+                    service
+                        .index_document_multimodal_with_vlm(doc, renderer, ocr, &no_vlm)
+                        .await
+                        .map_err(|e| format!("{e:#}"))
+                }
+            }
+        }
+        _ => {
+            // 降级：多模态引擎不可用，回退到纯文本索引
+            eprintln!(
+                "多模态引擎初始化失败（renderer={renderer_ok}, ocr={ocr_ok}），降级为纯文本索引"
+            );
+            emit_status(app, "indexing", format!("正在索引（纯文本）：{name}"));
+            service
+                .index_document(doc)
+                .await
+                .map_err(|e| format!("{e:#}"))
+        }
+    }
+}
+
 /// 嵌入写入链路（REQ-VEC-002/003）：分块读取 → embed_batch → add_embedding。
+/// Phase 3 ContextualEmbedding：嵌入文本拼接文档名上下文前缀（`build_contextual_text`），
+/// 使向量包含文档上下文信息，提升检索质量（Anthropic Contextual Retrieval）。
 /// 失败时由调用方将文档置为 Failed（索引内容保留，可重试）。
-async fn embed_document_chunks(state: &AppState, doc_id: &str) -> Result<usize, String> {
+async fn embed_document_chunks(state: &AppState, doc_id: &str, doc_name: &str) -> Result<usize, String> {
     let chunks = state
         .storage
         .list_chunks(doc_id)
@@ -148,7 +266,10 @@ async fn embed_document_chunks(state: &AppState, doc_id: &str) -> Result<usize, 
         .embedder()
         .await
         .map_err(|e| format!("向量化引擎不可用: {e:#}"))?;
-    let texts: Vec<String> = chunks.iter().map(|c| c.content.clone()).collect();
+    let texts: Vec<String> = chunks
+        .iter()
+        .map(|c| build_contextual_text(doc_name, &c.content))
+        .collect();
     let vectors = embedder
         .embed_batch(&texts)
         .await
@@ -248,6 +369,8 @@ pub async fn chat_inner<R: Runtime>(
         .clone()
         .ok_or_else(|| "未配置 LLM：请完成初始配置向导".to_string())?;
 
+    // 阶段 1：初始化向量化引擎（首次使用需下载模型，可能耗时较长）
+    emit_chat_phase(app, "preparing", "初始化向量化引擎…");
     let embedder = state
         .embedder()
         .await
@@ -270,9 +393,12 @@ pub async fn chat_inner<R: Runtime>(
         llm_config.api_key.clone(),
         llm_config.base_url.clone(),
         llm_config.model.clone(),
-    );
+    )
+    .map_err(|e| format!("{e:#}"))?;
     let engine = ChatEngine::new(retriever, provider);
 
+    // 阶段 2：检索知识库（向量化查询 + top-k 相似度检索）
+    emit_chat_phase(app, "retrieving", "检索知识库…");
     let outcome = engine
         .chat(history, query, DEFAULT_TOP_K)
         .await
@@ -281,6 +407,8 @@ pub async fn chat_inner<R: Runtime>(
     let (sources, stream) = match outcome {
         ChatOutcome::Answered { sources, stream } => {
             emit_chat_sources(app, &sources);
+            // 阶段 3：LLM 生成回答（首个 token 到达前的连接与推理延迟）
+            emit_chat_phase(app, "generating", "正在生成回答…");
             (Some(sources), stream)
         }
         ChatOutcome::NoContext { stream } => (None, stream),
@@ -538,7 +666,7 @@ pub async fn test_llm_connection(
     base_url: String,
     model: String,
 ) -> Result<String, String> {
-    let provider = OpenAIProvider::new(api_key, base_url, model);
+    let provider = OpenAIProvider::new(api_key, base_url, model).map_err(|e| format!("{e:#}"))?;
     provider
         .test_connection()
         .await
@@ -584,22 +712,53 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<SettingsPayload,
 }
 
 /// 配置读取逻辑（命令与集成测试复用）。
+/// VLM 开关状态从 settings 表读取（REQ-MM-003 前端接线）。
 pub async fn get_settings_inner(state: &AppState) -> Result<SettingsPayload, String> {
     let config = state.llm_config.read().await.clone();
+    let vlm_enabled = state
+        .storage
+        .get_setting("mm.vlm_enabled")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .is_some_and(|v| v == "true");
     Ok(match config {
         Some(c) => SettingsPayload {
             has_llm_config: true,
             base_url: c.base_url,
             model: c.model,
             api_key_masked: mask_api_key(&c.api_key),
+            vlm_enabled,
         },
         None => SettingsPayload {
             has_llm_config: false,
             base_url: String::new(),
             model: String::new(),
             api_key_masked: String::new(),
+            vlm_enabled,
         },
     })
+}
+
+// ---- set_vlm_enabled（REQ-MM-003 前端接线）----
+
+/// 切换 VLM 图片理解增强开关（REQ-MM-003）。
+/// 写入 settings 表 `mm.vlm_enabled`，vision_provider() 下次调用时即时生效。
+#[tauri::command]
+pub async fn set_vlm_enabled(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    set_vlm_enabled_inner(enabled, state.inner()).await
+}
+
+/// VLM 开关写入逻辑（命令与集成测试复用）。
+pub async fn set_vlm_enabled_inner(enabled: bool, state: &AppState) -> Result<(), String> {
+    let value = if enabled { "true" } else { "false" };
+    state
+        .storage
+        .set_setting("mm.vlm_enabled", value)
+        .await
+        .map_err(|e| format!("{e:#}"))
 }
 
 /// API Key 脱敏：仅保留末四位；不足四位整体遮蔽。

@@ -14,6 +14,18 @@ use crate::{Embedder, Retriever, Storage};
 /// 0.5 阈值会误杀大量有效结果导致空检索（用户反馈：上传文档后提问"没有任何反应"）。
 pub const DEFAULT_SCORE_THRESHOLD: f32 = 0.35;
 
+/// Phase 3 ContextualEmbedding：为 chunk 内容拼接文档名上下文前缀（低成本规则方案）。
+///
+/// 嵌入时使用此文本而非纯 chunk.content，使向量包含文档上下文信息，
+/// 提升检索质量（Anthropic Contextual Retrieval 调研：检索失败率 ↓49%）。
+///
+/// EchoMind 采用低成本规则方案（零 LLM 调用）：仅拼接文档名前缀，
+/// 不使用 LLM 生成上下文摘要（Anthropic 高成本方案，需每 chunk 调用 LLM）。
+/// 后续可扩展为拼接 Markdown 标题层级（需 SemanticSplitter 记录标题元数据）。
+pub fn build_contextual_text(doc_name: &str, chunk_content: &str) -> String {
+    format!("文档《{doc_name}》：\n{chunk_content}")
+}
+
 /// 向量检索适配器：query → embedding → vector_search → 阈值过滤。
 pub struct VectorRetriever<E: Embedder, S: Storage> {
     embedder: E,

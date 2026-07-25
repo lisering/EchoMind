@@ -11,7 +11,7 @@
 use anyhow::Result;
 use echomind_models::{ChatMessage, Chunk, DocStatus, Document, RetrievalResult};
 
-use crate::retriever::{DEFAULT_SCORE_THRESHOLD, VectorRetriever};
+use crate::retriever::{build_contextual_text, DEFAULT_SCORE_THRESHOLD, VectorRetriever};
 use crate::{Embedder, Retriever, Storage};
 
 /// 固定向量 Embedder（检索内容不影响本测试断言）。
@@ -220,5 +220,23 @@ async fn tc_rag_009_chunk_expansion_includes_neighbors() {
             .iter()
             .any(|r| r.chunk.content.contains("命中的片段")),
         "应包含命中 chunk 本身"
+    );
+}
+
+/// TC-RAG-010：ContextualEmbedding 文档名上下文前缀拼接（Phase 3 低成本方案）。
+///
+/// 验证 `build_contextual_text` 返回的文本包含文档名 + 原始 chunk 内容，
+/// 使嵌入向量包含文档上下文信息（Anthropic Contextual Retrieval 最佳实践）。
+/// EchoMind 采用零 LLM 成本规则方案：仅拼接文档名前缀。
+#[test]
+fn tc_rag_010_contextual_text_includes_doc_name() {
+    let text = build_contextual_text("lisp-intro.md", "Lisp 是第二古老的编程语言");
+    assert!(
+        text.contains("lisp-intro.md"),
+        "应包含文档名作为上下文前缀"
+    );
+    assert!(
+        text.contains("Lisp 是第二古老的编程语言"),
+        "应包含原始 chunk 内容"
     );
 }
