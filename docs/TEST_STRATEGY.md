@@ -187,6 +187,30 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | REQ-CHAOS-007 | AC-1 | TC-CHAOS-007（50 层深套目录批量导入） | L2 | 红灯→绿灯 |
 | REQ-UI-006 / REQ-ING-005 | AC-1/AC-2 / AC-1 | E2E-UI-001（六断言全链路冒烟：向导→配置→导入→列表→流式→删除） | L3 | CI 门禁 |
 | REQ-RAG-001 / REQ-RAG-005 | AC-3 / AC-1 | E2E-UI-001（流式增长 + 代码块复制 + 停止中断断言） | L3 | CI 门禁 |
+| REQ-VIZ-001 | AC-1 | TC-VIZ-001（Mermaid flowchart 渲染为 SVG） | L3-lite | 绿灯 |
+| REQ-VIZ-001 | AC-2 | TC-VIZ-002（流式期间 mermaid 代码块占位提示） | L3-lite | 绿灯 |
+| REQ-VIZ-001 | AC-3 | TC-VIZ-003（Mermaid 语法错误优雅提示） | L3-lite | 绿灯 |
+| REQ-VIZ-001 | AC-5 | TC-VIZ-004（暗色主题图表可读性） | L3-lite | 绿灯 |
+| REQ-VIZ-002 | AC-1/AC-3 | TC-VIZ-005（行内 LaTeX 公式渲染 + mhchem 化学方程式） | L3-lite | 绿灯 |
+| REQ-VIZ-002 | AC-2 | TC-VIZ-005b（块级 LaTeX 公式居中渲染） | L3-lite | 绿灯 |
+| REQ-VIZ-002 | — | TC-VIZ-005c（KaTeX 语法错误优雅提示） | L3-lite | 绿灯 |
+| REQ-VIZ-002/REQ-SEC-002 | — | TC-VIZ-005d（KaTeX 渲染不含 XSS 载荷） | L3-lite | 绿灯 |
+| REQ-VIZ-001/REQ-SEC-002 | AC-4 | TC-VIZ-006（渲染 SVG 不含 <script> 标签） | L3-lite | 绿灯 |
+| REQ-VIZ-003 | AC-1/AC-3 | TC-VIZ-007（Markdown 表格→图表切换 + 数据一致） | L3-lite | 绿灯 |
+| REQ-VIZ-003 | AC-2 | TC-VIZ-007b（柱/折/饼三种图表类型可切换） | L3-lite | 绿灯 |
+| REQ-VIZ-004 | AC-1 | TC-VIZ-008（提问流程图→LLM 输出 mermaid 语法） | L2 | 红灯→绿灯 |
+| REQ-VIZ-004 | AC-2 | TC-VIZ-008b（提问公式→LLM 输出 LaTeX 语法） | L2 | 红灯→绿灯 |
+| REQ-VIZ-004 | AC-3 | TC-VIZ-008c（普通问题不强制图表语法） | L2 | 红灯→绿灯 |
+| REQ-MM-001 | AC-1/AC-2/AC-3 | TC-MM-001（PDF 图片页面渲染为位图） | L2 | 红灯→绿灯 |
+| REQ-MM-002 | AC-1/AC-2/AC-3 | TC-MM-002（本地 OCR 提取图片文字） | L2 | 红灯→绿灯 |
+| REQ-MM-003 | AC-1 | TC-MM-003（VLM 表格→Markdown 表格） | L2 | 绿灯 |
+| REQ-MM-003 | AC-2 | TC-MM-003b（VLM 甘特图→Mermaid gantt） | L2 | 绿灯 |
+| REQ-MM-003 | AC-3/AC-4 | TC-MM-003c（VLM 不可用时降级为 OCR） | L2 | 绿灯 |
+| REQ-MM-004 | AC-1/AC-2/AC-3 | TC-MM-004（多模态导入管线图文混排可检索） | L2 | 红灯→绿灯 |
+| REQ-MM-003 | 前端接线 AC-1/AC-2/AC-3/AC-4 | TC-MM-005（VLM 开关持久化与重启恢复） | L2 | 绿灯 |
+| REQ-MM-003 | 前端接线 AC-1/AC-2/AC-3/AC-4 | TC-MM-006（vision_provider 运行时开关响应） | L2 | 绿灯 |
+| REQ-MM-003 | 前端接线 | E2E-MM-001~009（设置面板 + VLM 开关 + 隐私弹窗 9 场景） | L3-lite | 绿灯 |
+| REQ-VEC-001 | AC-3 / 段落感知 / 代码块完整性 | TC-VEC-002（SemanticSplitter 端到端分块入库：sequence 连续 + 标题正文同 chunk + 代码块内容完整 + token_count 合理） | L1 | 绿灯 |
 | （其余条目待 QA 阶段登记） | | | | |
 
 | 版本 | 日期 | 修订摘要 | 批准 |
@@ -194,3 +218,11 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | v1.0.0 | 2026-07-24 | 创世版：金字塔分工、左移流程、门禁与 DoD 确立 | QA Lead / TPM |
 | v1.0.1 | 2026-07-25 | Phase 8：登记 TC-LIC-001~005（License 校验与配额门控）、E2E-LIC-001（付费墙 UI） | QA Lead / TPM |
 | v1.1.0 | 2026-07-25 | Phase 8.5：新增 §5.2 真实 LLM 环境变量、§5.3 混沌测试语料、TC-CHAOS-001~007 追溯矩阵 | QA Lead / TPM |
+| v1.2.0 | 2026-07-25 | Phase 9：新增 VIZ 域 TC-VIZ-001~008c 追溯矩阵（Mermaid/KaTeX/Chart.js 富内容渲染） | QA Lead / TPM |
+| v1.2.1 | 2026-07-25 | VIZ Phase 1 实施：TC-VIZ-008/008b/008c 绿灯（build_rag_prompt 图表引导）；TC-VIZ-001~006 E2E 用例已编写待浏览器验证 | QA Lead / TPM |
+| v1.2.2 | 2026-07-25 | VIZ Phase 1 E2E 验证：TC-VIZ-001~006 全部绿灯（5/5 passed）。VIZ Phase 2 实施：TC-VIZ-005/005b/005c/005d 全部绿灯（KaTeX 0.18.1 + mhchem，4/4 passed） | QA Lead / TPM |
+| v1.2.3 | 2026-07-25 | MM Phase 3 L2 契约测试验收：TC-MM-001/002/004 全部绿灯（lopdf 编程生成测试 PDF + Mock 端口验证） | QA Lead / TPM |
+| v1.2.4 | 2026-07-25 | MM Phase 2 L2 契约测试验收：TC-MM-003/003b/003c 全部绿灯（VisionLanguageModel 端口 + OpenAIVisionProvider 适配器 + NoVlm 占位 + Mock VLM 验证表格→MD/甘特→Mermaid/降级） | TPM |
+| v1.2.5 | 2026-07-25 | MM Phase 2 前端接线 L2 测试：TC-MM-005/006 绿灯（set_vlm_enabled 持久化 + vision_provider 运行时开关 + OnceCell 缓存移除验证） | TPM |
+| v1.2.6 | 2026-07-25 | MM Phase 2 前端接线 E2E：E2E-MM-001~009 全部绿灯（设置面板打开/关闭 + VLM 开关初始状态 + 隐私确认弹窗弹出/取消/确认 + VLM 关闭直接生效 + 状态持久化恢复 + LLM 配置修改入口） | QA Lead / TPM |
+| v1.2.7 | 2026-07-25 | SemanticSplitter L1 集成测试：TC-VEC-002 绿灯（端到端分块入库契约：真实 Markdown 语料 → import → index → 验证 sequence 连续 + 标题正文同 chunk + 代码块内容完整 + token_count 合理）；MockStorage 扩展 chunks 捕获能力 | TPM |

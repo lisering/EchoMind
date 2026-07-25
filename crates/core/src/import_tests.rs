@@ -1,4 +1,11 @@
-#![allow(clippy::unwrap_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::unimplemented
+)]
 //! QA 红灯测试（体系二阶段 2：先于实现编写，初始必然失败）。
 //! 覆盖：TC-ING-001 格式白名单 / TC-ING-002 MD5 去重 / TC-ING-003 免费版配额 / TC-ING-004 PDF 付费门。
 
@@ -12,14 +19,27 @@ use echomind_models::{ChatMessage, Chunk, DocStatus, Document, RetrievalResult};
 use tempfile::TempDir;
 
 /// QA Mock Storage：内存实现，用于隔离验证导入管线逻辑。
+/// 扩展支持 chunks 捕获（TC-VEC-002 端到端分块入库契约验证）。
 #[derive(Clone, Default)]
 struct MockStorage {
     docs: Arc<tokio::sync::Mutex<HashMap<String, Document>>>,
+    /// doc_id -> chunks（按 add_chunk 调用顺序累积，用于验证分块结果）
+    chunks: Arc<tokio::sync::Mutex<HashMap<String, Vec<Chunk>>>>,
 }
 
 impl MockStorage {
     async fn len(&self) -> usize {
         self.docs.lock().await.len()
+    }
+
+    /// 获取指定文档的全部 chunks（按写入顺序，TC-VEC-002 断言用）。
+    async fn chunks_for(&self, doc_id: &str) -> Vec<Chunk> {
+        self.chunks
+            .lock()
+            .await
+            .get(doc_id)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -33,7 +53,13 @@ impl Storage for MockStorage {
         Ok(())
     }
 
-    async fn add_chunk(&self, _chunk: &Chunk) -> Result<()> {
+    async fn add_chunk(&self, chunk: &Chunk) -> Result<()> {
+        self.chunks
+            .lock()
+            .await
+            .entry(chunk.doc_id.clone())
+            .or_default()
+            .push(chunk.clone());
         Ok(())
     }
 
@@ -121,8 +147,8 @@ impl Storage for MockStorage {
         Ok(())
     }
 
-    async fn list_chunks(&self, _doc_id: &str) -> Result<Vec<Chunk>> {
-        Ok(vec![])
+    async fn list_chunks(&self, doc_id: &str) -> Result<Vec<Chunk>> {
+        Ok(self.chunks_for(doc_id).await)
     }
 }
 
@@ -213,4 +239,102 @@ async fn tc_ing_001b_path_traversal_rejected() {
     let result = service.import_one(&traversal, true).await;
 
     assert!(result.is_err(), "含 .. 的路径遍历必须被拒绝");
+}
+
+/// TC-VEC-002 SemanticSplitter 端到端分块入库契约（REQ-VEC-001 + 段落感知 + 代码块完整性）。
+///
+/// 验证 `ImportService.index_with_text` 使用 `SemanticSplitter` 后的完整分块链路：
+/// - chunks 非空且 sequence 从 0 连续递增（REQ-VEC-001-AC-3）
+/// - 段落感知：标题与其正文保持在同一 chunk（不跨段落硬切分）
+/// - 代码块完整性：代码块作为整体段落不被内部分割
+/// - token_count 合理（不超过 max_tokens = target * 3 = 768）
+///
+/// 注：MarkdownLoader 剥离 `#` 和 ` ``` ` 标记，保留正文与代码内容，
+/// 段落边界以 `\n\n` 保留（loader.rs 注释明确说明）。
+#[tokio::test]
+async fn tc_vec_002_semantic_splitter_end_to_end_chunking() {
+    let dir = TempDir::new().unwrap();
+    // 真实 Markdown 语料：标题 + 正文 + 代码块 + 多段落（~400 tokens，触发多 chunk 切分）
+    let md_content = "\
+# Lisp 语言简介\n\n\
+Lisp 是第二古老的编程语言，诞生于 1958 年。代码和数据都是列表结构，这是 Lisp 的核心特性。\
+John McCarthy 在 MIT 发明了这门语言，灵感来自 Lambda 演算。\n\n\
+## 基本语法规则\n\n\
+Lisp 的核心是 S-表达式。括号表示函数调用。嵌套的括号表示组合操作。\
+这是 Lisp 最独特的语法特征，代码即数据的数据即代码。\n\n\
+### 代码示例\n\n\
+下面是一个简单的程序示例，展示基本语法：\n\n\
+```rust\n\
+fn main() {\n    println!(\"Hello, Lisp!\");\n    let list = vec![1, 2, 3];\n    println!(\"{:?}\", list);\n}\n\
+```\n\n\
+## 高阶函数与函数式编程\n\n\
+map 和 reduce 是 Lisp 的精髓。函数式编程的基石在于函数是一等公民。\
+Lisp 天然支持闭包和连续传递风格。reduce 可以将列表归约为单值。map 对每个元素应用函数变换。\n\n\
+## 宏系统与同象性\n\n\
+Lisp 的宏比 C 宏强大得多。代码即数据，数据即代码。这是同象性的优势。\
+宏允许在编译期生成代码，实现领域特定语言。\n";
+
+    let md_path = write_file(&dir, "lisp-intro.md", md_content.as_bytes());
+    let storage = MockStorage::default();
+    let service = ImportService::new(storage.clone(), dir.path().join("data"));
+
+    // 导入文件（is_pro=true 跳过配额限制）
+    let outcome = service.import_one(&md_path, true).await.unwrap();
+    let doc = match outcome {
+        ImportOutcome::Imported(d) => d,
+        other => panic!("导入应成功，实际: {other:?}"),
+    };
+
+    // 执行索引（load → SemanticSplitter.split → add_chunk 入库）
+    service.index_document(&doc).await.unwrap();
+
+    // 获取分块结果
+    let chunks = storage.chunks_for(&doc.id).await;
+    assert!(
+        !chunks.is_empty(),
+        "SemanticSplitter 必须产生至少 1 个 chunk"
+    );
+
+    // 断言 1：sequence 从 0 连续递增（REQ-VEC-001-AC-3）
+    for (i, chunk) in chunks.iter().enumerate() {
+        assert_eq!(
+            chunk.sequence, i,
+            "chunk sequence 必须从 0 连续递增，第 {i} 个 chunk 的 sequence = {}",
+            chunk.sequence
+        );
+    }
+
+    // 断言 2：段落感知——标题文本"Lisp 语言简介"与其正文"第二古老的编程语言"在同一 chunk
+    // （MarkdownLoader 剥离 # 标记，标题作为独立段落，与正文段落合并到同一 chunk）
+    let title_chunk = chunks.iter().find(|c| c.content.contains("Lisp 语言简介"));
+    assert!(title_chunk.is_some(), "必须存在包含标题文本的 chunk");
+    let title_chunk = title_chunk.unwrap();
+    assert!(
+        title_chunk.content.contains("第二古老的编程语言"),
+        "段落感知：标题与其正文必须在同一 chunk（实际 chunk 不包含正文）"
+    );
+
+    // 断言 3：代码块完整性——`fn main` 与 `println!` 在同一 chunk
+    // （MarkdownLoader 将代码块作为 Event::Code 整体输出，SemanticSplitter 保持其完整）
+    let code_chunk = chunks.iter().find(|c| c.content.contains("fn main"));
+    assert!(code_chunk.is_some(), "必须存在包含代码块的 chunk");
+    let code_chunk = code_chunk.unwrap();
+    assert!(
+        code_chunk.content.contains("println!(\"Hello, Lisp!\")"),
+        "代码块完整性：fn main 与 println! 必须在同一 chunk（不被内部分割）"
+    );
+    assert!(
+        code_chunk.content.contains("vec![1, 2, 3]"),
+        "代码块完整性：代码块全部内容（含 vec!）必须在同一 chunk"
+    );
+
+    // 断言 4：每个 chunk 的 token_count 合理（不超过 max_tokens = 256 * 3 = 768）
+    for chunk in &chunks {
+        assert!(
+            chunk.token_count <= 768,
+            "chunk token_count {} 超过 max_tokens (768)",
+            chunk.token_count
+        );
+        assert!(!chunk.content.trim().is_empty(), "chunk 内容不得为空");
+    }
 }
