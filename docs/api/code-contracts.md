@@ -445,3 +445,31 @@ impl<R: PageRenderer, O: OcrEngine, V: VisionLanguageModel> Loader for Multimoda
 5. 合并文本层 + OCR 文本 + VLM 描述
 
 **设计原因**：`async fn` in trait 不支持 `dyn Trait`（Edition 2024），故使用泛型注入。`V` 默认 `NoVlm`，无 VLM 时天然跳过 VLM 阶段。
+
+### 5.6 VectorRetriever（`crates/core/src/retriever.rs`）
+
+实现 `Retriever` 端口，query → embedding → `vector_search` → 阈值过滤 → **Chunk Expansion**。
+
+```rust
+pub struct VectorRetriever<E: Embedder, S: Storage> {
+    embedder: E,
+    storage: S,
+    score_threshold: f32,  // DEFAULT_SCORE_THRESHOLD = 0.35
+}
+```
+
+**Phase 4 Chunk Expansion**（`expand_neighbors` 方法）：
+
+检索命中后，对每命中 chunk 调 `Storage.list_chunks(doc_id)` 获取同文档全部 chunk，找到命中 chunk 的位置，扩展前后各 1 个相邻 chunk，补全跨 chunk 上下文（如被分块器切断的段落、代码块后续行）。
+
+- 扩展的 chunk 使用命中 chunk 的 score 作为近似（同文档同主题假设）
+- 去重（按 chunk_id，防止相邻命中 chunk 扩展出重复 chunk）
+- 结果按 (doc_id, sequence) 排序，使 prompt 上下文按文档顺序排列
+- `list_chunks` 返回空或找不到命中 chunk 时不扩展（优雅降级）
+
+**检索流程**：
+1. `embedder.embed(query)` → 查询向量
+2. `storage.vector_search(embedding, top_k)` → top-k 候选
+3. `retain(|h| h.score >= 0.35)` → 阈值过滤
+4. `expand_neighbors(hits)` → 扩展相邻 chunk（Phase 4）
+5. 返回 `Vec<RetrievalResult>`（可能 > top_k 个，含扩展 chunk）

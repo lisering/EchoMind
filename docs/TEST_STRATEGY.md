@@ -211,6 +211,7 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | REQ-MM-003 | 前端接线 AC-1/AC-2/AC-3/AC-4 | TC-MM-006（vision_provider 运行时开关响应） | L2 | 绿灯 |
 | REQ-MM-003 | 前端接线 | E2E-MM-001~009（设置面板 + VLM 开关 + 隐私弹窗 9 场景） | L3-lite | 绿灯 |
 | REQ-VEC-001 | AC-3 / 段落感知 / 代码块完整性 | TC-VEC-002（SemanticSplitter 端到端分块入库：sequence 连续 + 标题正文同 chunk + 代码块内容完整 + token_count 合理） | L1 | 绿灯 |
+| REQ-RAG-003 | AC-1 / Phase 4 Chunk Expansion | TC-RAG-009（检索命中后扩展前后各 1 个相邻 chunk，补全跨 chunk 上下文，去重 + 按 sequence 排序） | L1 | 绿灯 |
 | （其余条目待 QA 阶段登记） | | | | |
 
 | 版本 | 日期 | 修订摘要 | 批准 |
@@ -226,3 +227,4 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | v1.2.5 | 2026-07-25 | MM Phase 2 前端接线 L2 测试：TC-MM-005/006 绿灯（set_vlm_enabled 持久化 + vision_provider 运行时开关 + OnceCell 缓存移除验证） | TPM |
 | v1.2.6 | 2026-07-25 | MM Phase 2 前端接线 E2E：E2E-MM-001~009 全部绿灯（设置面板打开/关闭 + VLM 开关初始状态 + 隐私确认弹窗弹出/取消/确认 + VLM 关闭直接生效 + 状态持久化恢复 + LLM 配置修改入口） | QA Lead / TPM |
 | v1.2.7 | 2026-07-25 | SemanticSplitter L1 集成测试：TC-VEC-002 绿灯（端到端分块入库契约：真实 Markdown 语料 → import → index → 验证 sequence 连续 + 标题正文同 chunk + 代码块内容完整 + token_count 合理）；MockStorage 扩展 chunks 捕获能力 | TPM |
+| v1.2.8 | 2026-07-25 | Phase 4 Chunk Expansion：TC-RAG-009 绿灯（VectorRetriever.retrieve 命中后扩展前后各 1 个相邻 chunk，补全跨 chunk 上下文，去重 + 按 sequence 排序）；MockStorage 扩展 all_chunks 字段 | TPM |

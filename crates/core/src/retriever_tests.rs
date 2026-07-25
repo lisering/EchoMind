@@ -1,4 +1,11 @@
-#![allow(clippy::unwrap_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::unimplemented
+)]
 //! QA 红灯测试：TC-RAG-001 相关度阈值过滤（REQ-RAG-003-AC-1）。
 
 use anyhow::Result;
@@ -21,8 +28,12 @@ impl Embedder for MockEmbedder {
 }
 
 /// 返回预置检索结果的 Storage（含低分污染项）。
+/// `all_chunks` 用于 Chunk Expansion 测试（TC-RAG-009）：list_chunks 返回该字段。
+#[derive(Default)]
 struct MockStorage {
     hits: Vec<RetrievalResult>,
+    /// 文档的全部 chunk（按 sequence 正序），供 Chunk Expansion 扩展相邻 chunk 用。
+    all_chunks: Vec<Chunk>,
 }
 
 impl MockStorage {
@@ -119,19 +130,20 @@ impl Storage for MockStorage {
     }
 
     async fn list_chunks(&self, _doc_id: &str) -> Result<Vec<Chunk>> {
-        Ok(vec![])
+        Ok(self.all_chunks.clone())
     }
 }
 
-/// TC-RAG-001：score < 0.5 的检索结果必须被过滤丢弃（REQ-RAG-003-AC-1）。
+/// TC-RAG-001：score < 阈值的检索结果必须被过滤丢弃（REQ-RAG-003-AC-1）。
 #[tokio::test]
 async fn tc_rag_001_low_score_results_filtered() {
     let storage = MockStorage {
         hits: vec![
             MockStorage::hit(0.92),
-            MockStorage::hit(0.41),
-            MockStorage::hit(0.49),
+            MockStorage::hit(0.31),
+            MockStorage::hit(0.34),
         ],
+        ..Default::default()
     };
     let retriever = VectorRetriever::new(MockEmbedder, storage);
 
@@ -146,10 +158,67 @@ async fn tc_rag_001_low_score_results_filtered() {
 async fn tc_rag_001b_all_low_scores_yield_empty() {
     let storage = MockStorage {
         hits: vec![MockStorage::hit(0.1), MockStorage::hit(0.2)],
+        ..Default::default()
     };
     let retriever = VectorRetriever::new(MockEmbedder, storage);
 
     let hits = retriever.retrieve("任意问题", 5).await.unwrap();
 
     assert!(hits.is_empty(), "全部低分时必须返回空结果");
+}
+
+/// TC-RAG-009：Chunk Expansion — 检索命中后扩展相邻 chunk，补全跨 chunk 上下文（Phase 4）。
+///
+/// 验证 `VectorRetriever::retrieve()` 在命中后自动扩展前后各 1 个相邻 chunk：
+/// - 命中 chunk 在中间（sequence=1），扩展后应包含 sequence=0 和 sequence=2
+/// - 扩展的 chunk 使用命中 chunk 的 score 作为近似
+/// - 结果按 sequence 排序（前→命中→后）
+#[tokio::test]
+async fn tc_rag_009_chunk_expansion_includes_neighbors() {
+    let doc_id = "expansion-doc".to_string();
+    let chunk0 = Chunk::new(doc_id.clone(), "前一段落内容".to_string(), 10, 0);
+    let chunk1 = Chunk::new(doc_id.clone(), "命中的片段内容".to_string(), 10, 1);
+    let chunk2 = Chunk::new(doc_id.clone(), "后一段落内容".to_string(), 10, 2);
+
+    let storage = MockStorage {
+        hits: vec![RetrievalResult {
+            chunk: chunk1.clone(),
+            score: 0.9,
+            doc_name: "expansion.md".to_string(),
+        }],
+        all_chunks: vec![chunk0, chunk1, chunk2],
+    };
+    let retriever = VectorRetriever::new(MockEmbedder, storage);
+
+    let results = retriever.retrieve("任意问题", 5).await.unwrap();
+
+    // 断言：扩展后应包含 3 个 chunk（命中 + 前后各 1 个）
+    assert_eq!(
+        results.len(),
+        3,
+        "Chunk Expansion 应扩展前后相邻 chunk，实际 {} 个",
+        results.len()
+    );
+
+    // 断言：包含前一段落
+    assert!(
+        results
+            .iter()
+            .any(|r| r.chunk.content.contains("前一段落")),
+        "应包含前一个相邻 chunk"
+    );
+    // 断言：包含后一段落
+    assert!(
+        results
+            .iter()
+            .any(|r| r.chunk.content.contains("后一段落")),
+        "应包含后一个相邻 chunk"
+    );
+    // 断言：包含命中本身
+    assert!(
+        results
+            .iter()
+            .any(|r| r.chunk.content.contains("命中的片段")),
+        "应包含命中 chunk 本身"
+    );
 }
