@@ -13,6 +13,10 @@ pub mod import;
 pub mod license;
 pub mod loader;
 pub mod retriever;
+/// 语义分块器：段落→句子→子句递归分割，保留代码块完整性。
+pub mod semantic_splitter;
+/// 章节感知分块器：Markdown 标题层级 → section 切分 → 章节路径前缀（REQ-VEC-006）。
+pub mod section_aware_splitter;
 pub mod splitter;
 pub mod stream_parse;
 
@@ -120,6 +124,86 @@ pub trait LLMProvider: Send + Sync {
 pub trait Retriever: Send + Sync {
     /// 对查询做向量化并检索最相关的 top_k 个分块。
     async fn retrieve(&self, query: &str, top_k: usize) -> anyhow::Result<Vec<RetrievalResult>>;
+}
+
+/// PDF 页面渲染端口（REQ-MM-001）：将 PDF 页面渲染为位图，供 OCR 或 VLM 处理。
+///
+/// 渲染引擎优先选择 Rust 可用的 PDF 渲染库（pdfium 绑定），经架构评审确定（ADR-010）。
+/// 渲染为 CPU 密集任务，实现方必须经 `spawn_blocking` 执行。
+pub trait PageRenderer: Send + Sync {
+    /// 将指定页面渲染为位图（PNG 字节），供 OCR 或 VLM 处理。
+    ///
+    /// # 参数
+    /// - `pdf_path`: PDF 文件路径
+    /// - `page_num`: 页码（从 0 开始）
+    /// - `dpi`: 渲染分辨率（建议 150-200，平衡清晰度与内存）
+    ///
+    /// # 错误
+    /// - 文件不存在 / 非 PDF 格式 / 页码越界 / 渲染引擎初始化失败
+    async fn render_page(
+        &self,
+        pdf_path: &str,
+        page_num: usize,
+        dpi: u32,
+    ) -> anyhow::Result<Vec<u8>>;
+}
+
+/// OCR 文字识别端口（REQ-MM-002）：对位图执行 OCR，提取文字内容。
+///
+/// OCR 引擎使用 ocrs（纯 Rust PaddleOCR PP-OCRv4 + rten 推理引擎，ADR-010 架构评审确定），
+/// 完全本地运行，零网络请求（符合「隐私不出域」承诺）。
+/// OCR 为 CPU 密集任务，实现方必须经 `spawn_blocking` 执行。
+pub trait OcrEngine: Send + Sync {
+    /// 对位图执行 OCR，返回识别出的文本。
+    ///
+    /// # 参数
+    /// - `image_bytes`: 位图数据（PNG/JPEG 字节）
+    ///
+    /// # 返回
+    /// 识别出的文本内容。如果 OCR 不可用或图片中无文字，返回空字符串。
+    async fn recognize(&self, image_bytes: &[u8]) -> anyhow::Result<String>;
+}
+
+/// VLM 图片理解端口（REQ-MM-003）：将位图发送到视觉语言模型，获取结构化文本描述。
+///
+/// 与 OCR（提取印刷文字）互补：VLM 能理解表格→Markdown 表格、甘特图→Mermaid gantt、
+/// 流程图→Mermaid flowchart 等结构化内容。OCR 对这类结构化内容识别效果有限。
+///
+/// # 隐私边界
+///
+/// 图片仅发送到用户自行配置的 LLM 端点（BYOK），符合「隐私不出域」——数据出口由用户控制。
+/// 网络请求必须且仅发往用户配置的 `base_url`（ADR-010 安全官要求 AC-4）。
+/// 用户可在设置中关闭 VLM 增强（默认关闭），此时管线仅使用 OCR。
+///
+/// # 适配器
+///
+/// - `OpenAIVisionProvider`（`crates/infra/src/openai_vision.rs`）— 复用 reqwest，
+///   调用 OpenAI 兼容 Vision API（Chat Completions + image_url base64）
+pub trait VisionLanguageModel: Send + Sync {
+    /// 将图片发送到 VLM，获取结构化文本描述。
+    ///
+    /// # 参数
+    /// - `image_bytes`: 位图数据（PNG/JPEG 字节，base64 编码后嵌入请求体）
+    /// - `prompt`: 系统提示，引导 VLM 将图片中的结构化内容转换为目标格式
+    ///   （表格→Markdown 表格、甘特图→Mermaid gantt、流程图→Mermaid flowchart）
+    ///
+    /// # 返回
+    /// VLM 生成的结构化文本描述。如果 VLM 不可用或调用失败，返回空字符串（优雅降级）。
+    async fn describe_image(&self, image_bytes: &[u8], prompt: &str) -> anyhow::Result<String>;
+}
+
+/// VLM 禁用占位实现（REQ-MM-003 AC-3）：用户未开启 VLM 增强时使用。
+///
+/// `describe_image` 始终返回空字符串，使管线天然跳过 VLM 阶段，仅使用 OCR。
+/// 设计为零大小类型 + `Send + Sync`，可安全跨线程共享。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoVlm;
+
+impl VisionLanguageModel for NoVlm {
+    /// 始终返回空字符串，表示 VLM 未启用。
+    async fn describe_image(&self, _image_bytes: &[u8], _prompt: &str) -> anyhow::Result<String> {
+        Ok(String::new())
+    }
 }
 
 #[cfg(test)]

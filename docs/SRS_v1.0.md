@@ -5,8 +5,8 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0.8（含 License 离线校验与付费墙，Phase 8） |
-| 生效日期 | 2026-07-24 |
+| 文档版本 | v1.3.0（文档一致性审计与矛盾检测：Decompose-Then-Verify 全量扫描式勘误） |
+| 生效日期 | 2026-07-25 |
 | 维护者 | PM（状态流转由 TPM 统一登记） |
 
 ---
@@ -49,6 +49,9 @@ EchoMind 是一款本地优先的 AI 知识库桌面应用。核心链路：用�
 | DB | 数据持久化 |
 | PDF | PDF 文档解析 |
 | LLM | 大模型接入 |
+| VIZ | 富内容可视化渲染（图表/公式/数据可视化） |
+| MM | 多模态内容理解（PDF 图片/表格/图表识别） |
+| AUDIT | 文档一致性审计与矛盾检测（全量扫描式勘误） |
 
 ### 2.2 验收标准编号
 `REQ-<域>-<序号>-AC-<n>`。每条 AC 必须能被至少一个测试用例（`TC-*` / `E2E-*`）自动验证。
@@ -193,6 +196,17 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
   - AC-2：自动重试达到上限后状态置为 `failed` 并给出原因。
 - 契约：TBD ｜ 关联测试：TBD
 
+#### REQ-VEC-006 章节感知分块（Section-Aware Chunking）
+- 优先级：P1 ｜ 状态：Approved ｜ 依赖：REQ-VEC-001
+- 描述：当前 `SemanticSplitter` 按 `\n\n` 段落边界切分，不识别文档结构层级。对于学术论文、技术手册等结构化文档，跨段落的论证链（假设→推理→结论）可能被拆散到不同 chunk，导致检索时只命中局部、LLM 看不到完整论证上下文。本需求在现有语义分块前置一个**结构感知层**：识别 Markdown 标题层级（`#`/`##`/`###`），将「标题 + 其下所有正文」作为同一 section；section 内部再由 `SemanticSplitter` 切分；每个 chunk 内容前缀追加章节路径标记（如 `[第3章 > 3.2 实验设计]`），使 embedding 与 LLM 均能感知片段在文档中的结构位置。
+- 验收标准：
+  - AC-1：含 `# 引言`、`## 1.1 背景`、`# 方法` 三级标题的 Markdown 文档，分块后每个 chunk 内容以 `[章节路径]` 前缀开头，路径正确反映标题层级（TC-VEC-010）。
+  - AC-2：标题与其下首段正文出现在同一 chunk，不因 token 窗口恰好满而分离（TC-VEC-010 旁证）。
+  - AC-3：无标题的纯文本文档退化为现有 `SemanticSplitter` 行为，不产生空章节路径前缀（TC-VEC-010 旁证）。
+  - AC-4：分块后的 chunk 内容仍为合法 UTF-8，章节路径前缀不破坏 `SemanticSplitter` 的中文句子/子句分割逻辑（TC-VEC-010 旁证）。
+- 契约：TBD ｜ 关联测试：TBD
+- 调研依据：LangChain `MarkdownHeaderTextSplitter`（按标题层级分块 + metadata）；LlamaIndex `SentenceSplitter`（段落优先策略）；Anthropic Contextual Retrieval 博文（chunk 上下文增强使检索失败率 ↓ 49%）。本需求为纯 `crates/core` 层算法改进，不引入新依赖。
+
 ### 4.3 RAG — 检索增强对话
 
 #### REQ-RAG-001 提问与流式回答
@@ -217,7 +231,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 
 #### REQ-RAG-003 检索策略与拒答
 - 优先级：P0 ｜ 状态：Contract-Frozen ｜ 依赖：REQ-VEC-003
-- 描述：VectorRetriever 接入 LocalEmbedder 与 SqliteStorage，默认 top-k（k=5）向量相似度检索；引入相关度分数阈值过滤（score < 0.5 直接丢弃），防止低质量上下文污染；过滤后上下文为空时，直接返回固定提示，**不调用 LLM**。
+- 描述：VectorRetriever 接入 LocalEmbedder 与 SqliteStorage，默认 top-k（k=5）向量相似度检索；引入相关度分数阈值过滤（score < 0.35 直接丢弃），防止低质量上下文污染；过滤后上下文为空时，直接返回固定提示，**不调用 LLM**。
 - 验收标准：
   - AC-1：低于阈值的检索结果全部被丢弃（TC-RAG-001）；相似度不足时回答明确告知「知识库中未找到相关内容」，不编造来源。
   - AC-2：空上下文时不发起任何 LLM 网络请求，直接返回固定警告流（TC-RAG-002）。
@@ -261,6 +275,30 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
   - AC-2：切换 Provider 后新会话立即生效，无需重启。
   - AC-3：未配置任何 Provider 时，提问入口给出引导而非报错。
 - 契约：TBD ｜ 关联测试：TBD
+
+#### REQ-RAG-008 回答语言自适应
+- 优先级：P1 ｜ 状态：Approved ｜ 依赖：REQ-RAG-001、REQ-VIZ-004
+- 描述：RAG 系统提示词追加语言跟随引导指令，使 LLM 以用户提问的语言回答。默认策略为 `auto`（跟随提问语言），用户无需任何配置即可获得语言匹配的回答。引用知识库中的代码、API 名称、专有术语时保留原文，不翻译。本需求仅修改系统提示词组装逻辑（`build_rag_prompt`），不改变检索、嵌入或流式解析链路。
+- 验收标准：
+  - AC-1：`build_rag_prompt` 输出的系统提示词包含语言跟随引导指令（TC-RAG-006）。
+  - AC-2：引导指令明确要求代码/术语/API 名称保留原文不翻译（TC-RAG-006）。
+  - AC-3：引导指令与现有图表引导（REQ-VIZ-004）共存，互不冲突（TC-RAG-006）。
+  - AC-4：引导指令使用条件式语言（"请使用…"），不强制所有回答必须使用某一语言。
+- 契约：`build_rag_prompt(sources: &[RetrievalResult]) -> String` 签名不变，仅在返回值末尾追加语言引导段。无新增 IPC 命令、无新增设置键、无架构变更。
+- 关联测试：TC-RAG-006
+- 调研依据：AnythingLLM Issue #97 官方维护者建议「best place to force this instruction is in the system prompt」；Dify 平台将语言策略交由开发者通过 Prompt Engineering 定义；业界无产品使用本地语言检测库（whatlang/lingua），均依赖 LLM 自身语言识别能力。
+
+#### REQ-RAG-009 检索后段落扩展（Chunk Expansion）
+- 优先级：P1 ｜ 状态：Draft ｜ 依赖：REQ-RAG-003、REQ-VEC-001
+- 描述：当前 `VectorRetriever` 检索 top-k chunk 后直接注入 LLM prompt，每个 chunk 是孤立片段。对于学术论文等深度文档，用户提问「检查 3.2 节实验设计的逻辑是否自洽」时，命中的 chunk 可能只是实验设计的一个段落，缺少前后文（如假设前提、实验参数定义），导致 LLM 无法做出完整判断。本需求在检索结果返回后、注入 prompt 前，增加一个**段落扩展层**：对每个命中 chunk，根据其 `sequence` 字段向前后各扩展 1 个相邻 chunk（同一文档内），合并为完整段落后注入 prompt。扩展仅影响注入 LLM 的上下文，不改变 `chat_sources` 事件推送的引用列表（引用列表仍只展示命中的核心 chunk，避免引用膨胀）。
+- 验收标准：
+  - AC-1：检索命中 chunk A（sequence=5）时，注入 LLM prompt 的上下文包含同一文档的 sequence=4 和 sequence=6 的 chunk 内容（TC-RAG-007）。
+  - AC-2：命中 chunk 为文档首个 chunk（sequence=0）时，仅向后扩展，不产生越界（TC-RAG-007 旁证）。
+  - AC-3：命中 chunk 为文档末尾 chunk 时，仅向前扩展，不产生越界（TC-RAG-007 旁证）。
+  - AC-4：`chat_sources` 事件推送的引用列表只包含原始命中的 chunk，不包含扩展 chunk（TC-RAG-007 旁证）。
+  - AC-5：扩展 chunk 与命中 chunk 来自不同文档时不合并（跨文档不扩展，TC-RAG-007 旁证）。
+- 契约：TBD ｜ 关联测试：TBD
+- 调研依据：LlamaIndex `SentenceWindowRetriever`（检索后扩展窗口）；LangChain `ParentDocumentRetriever`（子 chunk 检索→父文档返回）；Anthropic Contextual Retrieval 博文建议「检索后提供更完整的上下文窗口」。本需求为纯 `crates/core` 层逻辑改进，不引入新依赖，不改变 `Retriever` 端口签名。
 
 ### 4.4 UI — 界面与交互状态
 
@@ -468,6 +506,199 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 
 ---
 
+### 4.11 VIZ — 富内容可视化渲染
+
+> **域背景**：当前答案区仅支持 Markdown 基础语法 + 代码高亮。LLM 天然擅长生成结构化文本语法（Mermaid / LaTeX / CSV），一次集成即可覆盖 12+ 职业场景的 10+ 种图表类型，是本产品核心价值差异化所在。
+>
+> **技术调研来源**（铁律八互联网搜索，2026-07-25）：
+> - Mermaid.js v11.16.0（⭐89,399）— 文本→10+种图表
+> - Chart.js v4.5.1 — 数据可视化图表
+> - KaTeX — LaTeX 数学公式渲染
+> - 全职业场景调研覆盖 12 个领域，Mermaid+Chart.js+KaTeX 组合覆盖 ~65% 场景
+
+#### REQ-VIZ-001 Mermaid 图表渲染引擎
+- 优先级：P0 ｜ 状态：Done ｜ 依赖：REQ-UI-002
+- 描述：在答案区支持 Mermaid 语法代码块（```mermaid），流式结束后渲染为可视化图表。支持图表类型：流程图（flowchart）、甘特图（gantt）、序列图（sequenceDiagram）、类图（classDiagram）、状态图（stateDiagram-v2）、ER 图（erDiagram）、饼图（pie）、思维导图（mindmap）、时间线（timeline）、用户旅程（journey）、C4 架构图（C4Context）、Git 分支图（gitGraph）。Mermaid.js 库本地 vendored 于 `ui/vendor/`，暗色主题（theme: 'dark'），背景对齐 #161616。流式渲染时序：流式过程中 ```mermaid 代码块显示为源码 + 「图表渲染中…」占位提示；chat_done 事件后调用 mermaid.run() 一次性渲染所有图表为 SVG。图表支持点击放大查看。
+- 验收标准：
+  - AC-1：LLM 输出 ```mermaid flowchart 语法时，流结束后渲染为可读流程图 SVG，非纯文本代码块（TC-VIZ-001）。
+  - AC-2：流式过程中 mermaid 代码块不产生布局错乱，占位提示可见（TC-VIZ-002）。
+  - AC-3：Mermaid 语法错误时显示错误提示而非崩溃，不阻塞后续渲染（TC-VIZ-003）。
+  - AC-4：渲染出的 SVG 不含可执行的 <script> 标签（安全审查，TC-VIZ-006）。
+  - AC-5：暗色主题下图表背景透明，文字与连线在 #161616 背景上清晰可读（TC-VIZ-004）。
+- 契约：TBD（待 TPM 冻结） ｜ 关联测试：TC-VIZ-001~004、TC-VIZ-006
+
+#### REQ-VIZ-002 KaTeX 数学公式渲染
+- 优先级：P1 ｜ 状态：Done ｜ 依赖：REQ-UI-002
+- 描述：在答案区支持 LaTeX 数学公式渲染。行内公式以 `$...$` 包裹，块级公式以 `$$...$$` 包裹。使用 KaTeX 库（本地 vendored），支持 mhchem 插件（化学方程式）。公式在流式过程中实时渲染（KaTeX 渲染速度 ≤5ms/公式）。暗色主题适配：公式文字色 `#E2E8F0`（slate-200），背景透明。
+- 验收标准：
+  - AC-1：LLM 输出 `$E=mc^2$` 时渲染为上标公式，非原始 LaTeX 源码（TC-VIZ-005）。
+  - AC-2：块级公式 `$$\sum_{i=1}^{n} x_i$$` 居中渲染，带独立边距（TC-VIZ-005b）。
+  - AC-3：化学方程式 `$\ce{H2O}$` 经 mhchem 插件正确渲染（TC-VIZ-005）。
+  - AC-4：半截公式语法（流式中）不产生布局错乱（TC-VIZ-002 旁证）。
+  - AC-5：KaTeX 语法错误时显示优雅错误提示，不崩溃（TC-VIZ-005c）。
+  - AC-6：KaTeX 渲染输出不含 XSS 载荷（TC-VIZ-005d，REQ-SEC-002）。
+- 契约：已冻结（ADR-009 §3.1 前端渲染链路） ｜ 关联测试：TC-VIZ-005、TC-VIZ-005b、TC-VIZ-005c、TC-VIZ-005d
+
+#### REQ-VIZ-003 数据图表渲染（Chart.js）
+- 优先级：P1 ｜ 状态：Done ｜ 依赖：REQ-UI-002
+- 描述：在答案区支持数据可视化图表。采用「表格数据自动转图表」策略：检测 Markdown 表格数据，在表格上方显示「📊 切换图表视图」按钮，用户可选择柱状图/折线图/饼图。Chart.js 库本地 vendored。暗色主题适配：坐标轴文字色 `#94a3b8`，网格线 `rgba(255,255,255,0.08)`，强调色 `#38BDF8`。
+- 验收标准：
+  - AC-1：Markdown 表格旁出现「切换图表」按钮，点击后表格转换为对应图表（TC-VIZ-007）。
+  - AC-2：柱状图/折线图/饼图三种类型可切换（TC-VIZ-007b）。
+  - AC-3：图表数据与原表格数据一致（TC-VIZ-007）。
+- 契约：已冻结（ADR-009 §3.3 前端表格→图表转换链路） ｜ 关联测试：TC-VIZ-007、TC-VIZ-007b
+
+#### REQ-VIZ-004 RAG Prompt 图表引导增强
+- 优先级：P0 ｜ 状态：Done ｜ 依赖：REQ-VIZ-001、REQ-RAG-003
+- 描述：在 ChatEngine 的 build_rag_prompt() 中增加图表引导指令，引导 LLM 根据问题类型自动选择合适的可视化方式。指令内容：「当回答涉及流程、架构、关系、时间线时，使用 ```mermaid 代码块输出图表语法；当涉及数学公式时，使用 $...$ 或 $$...$$ 语法；当涉及数据对比时，优先使用 Markdown 表格。图表语法必须完整闭合。」此增强不改变 RAG 检索逻辑，仅修改系统提示词。
+- 验收标准：
+  - AC-1：提问「画一个用户登录流程图」时，LLM 回答包含 ```mermaid 代码块（TC-VIZ-008）。
+  - AC-2：提问「推导 E=mc²」时，LLM 回答包含 LaTeX 公式语法（TC-VIZ-008b）。
+  - AC-3：不涉及图表的问题回答不受 Prompt 引导影响，不强制输出图表语法（TC-VIZ-008c）。
+- 契约：TBD ｜ 关联测试：TC-VIZ-008、TC-VIZ-008b、TC-VIZ-008c
+
+---
+
+### 4.12 MM — 多模态内容理解
+
+> **域背景**：当前 PDF 导入仅提取纯文本（lopdf 文本层），图片中的文字、表格、甘特图等信息完全丢失。对于扫描版 PDF、含图表的技术文档、医学影像报告等场景，检索能力严重不足。
+>
+> **技术调研来源**（铁律八互联网搜索，2026-07-25）：
+> - Tesseract OCR：开源 OCR 引擎（C 库 + Rust binding）
+> - ColPali：2024-2025 前沿视觉文档检索（无 OCR，直接页面级视觉嵌入）
+> - Jina CLIP v2：多模态嵌入模型（文本+图像统一向量空间）
+> - BYOK VLM：用户配置的 Vision LLM（GPT-4o / Claude 3.5 Sonnet）经 OpenAI 兼容 Vision API
+> - fastembed-rs v5.17.3：当前不支持 CLIP 视觉嵌入（Rust 生态无成熟方案）
+> - PaddleOCR PP-Structure：表格识别主流方案（但需 Python 运行时，与纯 Rust 架构不兼容）
+
+#### REQ-MM-001 PDF 图片提取与页面渲染
+- 优先级：P1 ｜ 状态：Done ｜ 依赖：REQ-ING-002
+- 描述：当前 PdfLoader 基于 lopdf 仅提取文本层。本需求扩展为：检测 PDF 页面是否含图片/XObject，将含图片的页面渲染为位图（PNG/JPEG），供后续 OCR 或 VLM 处理。渲染引擎优先选择 Rust 可用的 PDF 渲染库（pdfium 绑定或 mupdf 绑定），经架构评审确定。渲染分辨率建议 150-200 DPI（平衡清晰度与内存）。渲染为 CPU 密集任务，经 spawn_blocking 执行。Pro 版功能（免费版 PDF 导入本就被禁止，REQ-LIC-002）。
+- 验收标准：
+  - AC-1：含图片的 PDF 页面被渲染为位图，位图尺寸与页面比例一致（TC-MM-001）。
+  - AC-2：纯文本 PDF 页面不触发渲染（跳过优化，TC-MM-001 旁证）。
+  - AC-3：渲染过程不阻塞 async executor（spawn_blocking，TC-MM-001 旁证）。
+- 契约：`PageRenderer` 端口（§1.7）+ `PdfiumRenderer` 适配器（§4.4） ｜ 关联测试：TC-MM-001
+
+#### REQ-MM-002 本地 OCR 文字识别（ocrs）
+- 优先级：P1 ｜ 状态：Done ｜ 依赖：REQ-MM-001
+- 描述：对渲染出的页面位图执行本地 OCR 识别，提取图片中的文字内容。OCR 引擎使用 ocrs（纯 Rust PaddleOCR PP-OCRv4 + rten 推理引擎，ADR-010 架构评审确定），完全本地运行，零网络请求（符合「隐私不出域」承诺）。OCR 结果作为附加文本追加到该页的文本内容中，统一进入分块→嵌入→存储链路。支持中英文识别（PP-OCRv4 原生支持）。OCR 为 CPU 密集任务，经 spawn_blocking 执行。Pro 版功能。
+- 验收标准：
+  - AC-1：含印刷文字的图片经 OCR 提取后，文字内容出现在对应 chunk 中（TC-MM-002）。
+  - AC-2：OCR 过程无网络请求（网络监控断言，TC-MM-002 旁证）。
+  - AC-3：OCR 失败（如无语言包）时优雅降级，保留页面文本层内容，不崩溃（TC-MM-002 旁证）。
+- 契约：`OcrEngine` 端口（§1.8）+ `OcrsEngine` 适配器（§4.5） ｜ 关联测试：TC-MM-002
+
+#### REQ-MM-003 BYOK VLM 图片理解（表格/图表/甘特图）
+- 优先级：P1 ｜ 状态：Done ｜ 依赖：REQ-MM-001、REQ-LLM-001
+- 描述：OCR 对表格、甘特图等结构化内容的识别效果有限。本需求提供 VLM（Vision Language Model）增强路径：将渲染出的页面位图发送到用户配置的 Vision LLM（经 OpenAI 兼容 Vision API），获取结构化文本描述（表格转 Markdown 表格、甘特图转 Mermaid 语法、流程图转 Mermaid flowchart）。VLM 返回的描述文本追加到该页文本内容中，进入分块→嵌入→存储链路。**隐私边界**：图片仅发送到用户自行配置的 LLM 端点（BYOK），符合「隐私不出域」——数据出口由用户控制。前端需明确提示「图片将发送到配置的 LLM 端点」。用户可在设置中关闭 VLM 增强（仅用 OCR）。Pro 版功能。
+- 验收标准：
+  - AC-1：含表格的图片经 VLM 处理后，表格内容以 Markdown 表格形式出现在 chunk 中（TC-MM-003）。
+  - AC-2：含甘特图的图片经 VLM 处理后，甘特图内容以 Mermaid gantt 语法出现在 chunk 中（TC-MM-003b）。
+  - AC-3：VLM 不可用（未配置 Vision LLM）时优雅降级为纯 OCR，不崩溃（TC-MM-003c）。
+  - AC-4：网络请求仅发往用户配置的 base_url（网络监控断言，安全官要求）。
+- 契约：`VisionLanguageModel` 端口（§1.9）+ `OpenAIVisionProvider` 适配器（§4.6）+ `NoVlm` 占位实现（§1.9） ｜ 关联测试：TC-MM-003、TC-MM-003b、TC-MM-003c
+
+#### REQ-MM-004 多模态内容导入管线编排
+- 优先级：P1 ｜ 状态：Done ｜ 依赖：REQ-MM-001、REQ-MM-002、REQ-MM-003
+- 描述：将上述三个能力编排为统一的 PDF 多模态导入管线。PdfLoader 扩展为：文本层提取 → 图片页面检测 → 页面渲染 → OCR（本地）→ VLM 增强（可选，BYOK）→ 合并全部文本 → SemanticSplitter 分块 → 嵌入 → 存储。管线状态机扩展：Processing 状态增加子阶段「text_extracting / image_rendering / ocr / vlm_enhancing」以提供更精细的进度反馈。前端 doc-status-changed 事件增加子阶段进度文案。Pro 版功能。
+- 验收标准：
+  - AC-1：含图文混排的 PDF 导入后，文本和图片中的文字均可被检索（TC-MM-004）。
+  - AC-2：导入进度展示子阶段（文本提取→图片渲染→OCR→VLM 增强），非黑盒等待（TC-MM-004 旁证）。
+  - AC-3：用户在设置中关闭 VLM 增强后，管线自动跳过 VLM 阶段，仅用 OCR（TC-MM-004 旁证）。
+- 契约：`MultimodalPdfLoader`（§5.5）+ `ImportService.index_document_multimodal`（§5.4）+ `DocStatusPayload.sub_phase` ｜ 关联测试：TC-MM-004
+
+#### REQ-MM-005 分级图表理解（Tiered Chart Understanding）
+- 优先级：P1 ｜ 状态：Draft ｜ 依赖：REQ-MM-003、REQ-MM-004
+- 描述：当前 VLM 图片理解使用单一提示词（`VLM_IMAGE_PROMPT`），对所有图片内容一视同仁：表格→Markdown、甘特图→Mermaid、流程图→Mermaid、**其他图表→简洁文字描述**。对于学术论文中的科学数据图表（散点图、柱状图、折线图、热力图等），「简洁文字描述」仅输出趋势概括（如"显示正相关关系"），丢失原始数据点，用户无法通过 RAG 对话核对图表中的具体数值。本需求将 VLM 提示词升级为**分级理解策略**：按内容类型分四个精度等级处理——Level 1 表格（完整 Markdown 表格）、Level 2 流程图/甘特图（Mermaid 语法）、Level 3 数据图表（先判断图表类型，再提取坐标轴标签/数据系列名称/关键数值点以 CSV 格式输出，附带趋势描述）、Level 4 示意图/照片（简洁文字描述）。Level 3 是核心改进：从"描述图表"升级为"提取图表数据"，提取的 CSV 数据进入分块→嵌入→存储链路后，用户可通过 RAG 对话查询图表中的具体数值。因 VLM 对密集数据图表的提取精度有限（存在幻觉风险），提取结果须标注「以下数据由 AI 视觉提取，可能存在误差，请核对原文」。
+- 验收标准：
+  - AC-1：含数据图表（如柱状图）的 PDF 页面经 VLM 处理后，chunk 中包含 CSV 格式的数据点（坐标轴标签 + 至少 3 个数值点），而非仅文字趋势描述（TC-MM-005）。
+  - AC-2：含数学公式的 PDF 页面经 VLM 处理后，chunk 中包含 LaTeX 格式的公式文本（`$...$` 或 `$$...$$`），而非公式截图的 OCR 乱码（TC-MM-005b）。
+  - AC-3：VLM 提取的数据图表结果末尾标注「AI 视觉提取，可能存在误差，请核对原文」提示（TC-MM-005 旁证）。
+  - AC-4：VLM 不可用（未配置或关闭）时退化为现有 OCR 行为，不崩溃（TC-MM-005 旁证）。
+  - AC-5：VLM 提取的 CSV 数据经分块和向量化后，可通过 RAG 对话检索到（如提问"图5的X轴标签是什么"能命中对应 chunk，TC-MM-005 旁证）。
+- 契约：TBD ｜ 关联测试：TBD
+- 调研依据：Salesforce AI Research CogAlign（VLM 图表理解增强，2025）；ChartHal（ICLR 2026 投稿，评估 VLM 在科学图表理解中的幻觉问题）；Marker（⭐37,816，PDF→Markdown 高精度转换，支持公式 LaTeX 还原）；Nougat（Meta，⭐10,050，学术 PDF 公式提取）。本需求不引入新依赖，仅升级 `VLM_IMAGE_PROMPT` 提示词与 `VisionLanguageModel::describe_image` 调用逻辑，纯 `crates/core` 层改动。Pro 版功能。
+
+---
+
+### 4.13 AUDIT — 文档一致性审计与矛盾检测
+
+> **域背景**：标准 RAG 是「问题驱动」的单向检索（query → top-k），无法胜任「全文矛盾检测」这类需要两两比对的任务。学术文献中第 3 页的"25°C"与第 18 页的"20°C"可能因分块后被分到不同 chunk，向量检索只能找到与问题语义相似的片段，不会遍历全文做跨章节一致性检查。矛盾检测需要「双重上下文」——AI 必须同时持有两段可能矛盾的文本才能判定，而 RAG 每次只召回几个相关 chunk，无法保证矛盾的两段话被同时召回。
+>
+> **技术调研来源**（铁律八互联网搜索，2026-07-25）：
+> - **FIND 基准**（arXiv: 2512.18601, 2025.12）——首个文档内部不一致性检测基准；GPT-5 仅恢复 64% 人工插入的不一致性，但在 50 篇 arXiv 论文上发现了 136 条作者自己遗漏的真实不一致性；证明 LLM 具备矛盾发现能力但远非完美，应定位为「辅助审计」而非「自动纠错」。
+> - **Decompose-Then-Verify 范式**（arXiv: 2505.12348 / 2503.15354 / 2602.21857）——事实核查领域的共识方法论：复杂声明 → 分解为原子子声明 → 逐个验证 → 聚合判定；8B 模型经 RL 优化后可达 71.75% macro-F1。
+> - **Google PAT**（arXiv: 2606.28277, 2026.06）——Agentic AI 学术审稿框架，已在 STOC/ICML 顶会试点；核心为 Inference Scaling（多轮迭代推理），比 zero-shot recall 提升 34%；提出 AI-人类协作四级分类法。
+> - **SIFiD**（arXiv: 2403.07557）——用 NLI/语义相似度过滤文档关键句子，缩小检测范围，降低 LLM 调用次数。
+> - **SummaC**（arXiv: 2111.09525）——句子级 NLI 分割 + 分数聚合 = 文档级一致性检测；过去失败原因是输入粒度不匹配（NLI 句子级 vs 检测文档级）。
+> - **LangChain MapReduce/Refine Chain**——全量扫描式文档处理框架：Map 阶段逐块提取声明，Reduce 阶段合并比对；Refine 阶段逐块传入逐步积累发现。
+> - **Rust 生态**：`rust-bert`（本地 BERT/NLI 推理）、`sqlite-knowledge-graph`（SQLite 轻量知识图谱）、`semantic-diff`（语义差异比较）等 crate 提供构建块，但无成熟「文档矛盾检测器」——EchoMind 的差异化机会。
+>
+> **设计原则**：
+> 1. **全量扫描而非问题驱动**——审计模式遍历文档全部 chunk，不依赖向量检索的 top-k 召回。
+> 2. **Decompose-Then-Verify 流水线**——先提取原子声明，再交叉验证，最后聚合报告。
+> 3. **零新依赖**——复用现有 `Storage.list_chunks()` + `LLMProvider.chat_stream()` + `Embedder.embed()` 端口，纯 `crates/core` 层新增逻辑。
+> 4. **辅助审计定位**——不期望 100% 召回率（FIND 证明 GPT-5 也只达 64%），定位为「AI 辅助发现，人类最终裁决」。
+
+#### REQ-AUDIT-001 文档全量审计命令（Full-Scan Audit Mode）
+- 优先级：P1 ｜ 状态：Draft ｜ 依赖：REQ-RAG-003、REQ-DB-001
+- 描述：当前 `chat` 命令走 query → embedding → top-k 检索路径，无法胜任全文矛盾检测。本需求新增独立的审计命令 `audit_document(doc_id)`，走完全不同的数据路径：通过 `Storage.list_chunks(doc_id)` 获取文档全部 chunk（全量扫描），不走向量检索。审计流程分为三个阶段（对应 Decompose-Then-Verify 范式）：(1) **Decompose**——逐 chunk 提取原子声明；(2) **Verify**——对跨 chunk 的声明对做矛盾判定；(3) **Report**——聚合发现为结构化报告。审计结果以流式事件推送前端，渲染为 Block 形式的勘误报告。审计过程支持取消（CancellationToken，复用 REQ-RAG-005 的 abort 模式）。Pro 版功能。
+- 验收标准：
+  - AC-1：调用 `audit_document(doc_id)` 后，系统通过 `list_chunks` 获取该文档全部 chunk，而非走 `vector_search` top-k 路径（TC-AUDIT-001）。
+  - AC-2：审计过程分三个阶段推送 `audit_phase` 事件（`extracting` / `comparing` / `reporting`），前端显示当前阶段（TC-AUDIT-001 旁证）。
+  - AC-3：审计过程中可通过 `abort_audit` 取消，取消后已提取的声明和已发现的矛盾保留并输出部分报告（TC-AUDIT-001 旁证）。
+  - AC-4：空文档（0 chunk）或不存在文档返回明确错误，不 Panic（TC-AUDIT-001 旁证）。
+- 契约：TBD ｜ 关联测试：TBD
+- 调研依据：LangChain `MapReduceDocumentsChain`（全量扫描范式）；Google PAT（Inference Scaling 多轮推理）；FIND 基准（文档内部不一致性检测可行性验证）。本需求不引入新依赖，复用 `Storage` + `LLMProvider` + `Embedder` 端口。
+
+#### REQ-AUDIT-002 原子声明提取（Decompose Phase）
+- 优先级：P1 ｜ 状态：Draft ｜ 依赖：REQ-AUDIT-001
+- 描述：对文档的每个 chunk，调用 LLM 提取**可验证的原子声明**（Atomic Claims）。声明是文档中做出的可被事实检验的断言，包括但不限于：数值参数（"实验温度为 25°C"）、定义声明（"X 定义为 Y 的函数"）、因果声明（"A 导致 B"）、结论声明（"结果表明误差小于 5%"）。每个声明结构化为 `{claim_id, chunk_id, sequence, text, claim_type, entities}` 格式。提取使用专门设计的 Decompose Prompt，引导 LLM 逐句扫描并输出 JSON 数组。声明提取逐 chunk 独立执行（Map 阶段），可并行化。提取的声明暂存于内存（不持久化，审计结束后丢弃）。
+- 验收标准：
+  - AC-1：给定含数值参数的 chunk（如"实验在 25°C 下进行，误差小于 5%"），提取出的声明列表包含"温度为 25°C"和"误差小于 5%"两条原子声明（TC-AUDIT-002）。
+  - AC-2：提取的声明携带来源信息（chunk_id 和 sequence），可追溯回原文位置（TC-AUDIT-002 旁证）。
+  - AC-3：纯描述性文字（如"本章介绍实验设计"）不被提取为声明，只有可验证的断言才进入声明列表（TC-AUDIT-002 旁证）。
+  - AC-4：LLM 返回非法 JSON 时优雅降级，跳过该 chunk 的声明提取并记录警告，不中断整个审计流程（TC-AUDIT-002 旁证）。
+- 契约：TBD ｜ 关联测试：TBD
+- 调研依据：Decompose-Then-Verify 范式（arXiv: 2505.12348 Reasoning-CV；arXiv: 2503.15354 Optimizing Decomposition——提出「原子性 atomicity」指标量化信息密度）；arXiv: 2510.22055（数值事实核查——数值型声明是矛盾高发区）；Google PAT（声明级验证目标记录）。本需求仅设计 Decompose Prompt + JSON 解析，纯 `crates/core` 层逻辑。
+
+#### REQ-AUDIT-003 跨声明矛盾检测（Verify Phase）
+- 优先级：P1 ｜ 状态：Draft ｜ 依赖：REQ-AUDIT-002、REQ-VEC-002
+- 描述：对提取的全部原子声明做跨 chunk 矛盾检测。直接两两比对复杂度为 \(O(n^2)\)（n = 声明数），对长文档不可行。本需求采用 **SIFiD 式预筛 + LLM 精判** 两阶段策略：(1) **预筛阶段**——用现有 `Embedder.embed()` 计算所有声明的向量，按 cosine 相似度找出"高相似但来自不同 chunk"的声明对（相似度高意味着讨论同一主题，更可能存在矛盾），过滤掉明显不相关的声明对，将 \(O(n^2)\) 降至 \(O(k)\)（k = 高风险声明对数）；(2) **精判阶段**——将预筛出的高风险声明对及其原文上下文（包含 chunk 的章节路径前缀，REQ-VEC-006）交给 LLM 判定是否矛盾，LLM 输出 `{pair_id, verdict: "contradiction" | "consistent" | "unverifiable", explanation, severity}`。判定为 `contradiction` 的声明对进入审计报告。
+- 验收标准：
+  - AC-1：给定两个来自不同 chunk 但讨论同一参数的矛盾声明（如"温度为 25°C" vs "温度为 20°C"），预筛阶段将其标记为高风险对，精判阶段判定为 `contradiction`（TC-AUDIT-003）。
+  - AC-2：两个语义无关的声明（如"温度为 25°C" vs "使用 Rust 语言"）在预筛阶段被过滤，不进入精判（TC-AUDIT-003 旁证）。
+  - AC-3：LLM 精判输出包含 verdict 字段（`contradiction` / `consistent` / `unverifiable`）和 explanation 字段（TC-AUDIT-003 旁证）。
+  - AC-4：预筛阶段的 cosine 相似度计算复用现有 `Embedder.embed()` 端口，不引入新依赖（TC-AUDIT-003 旁证）。
+- 契约：TBD ｜ 关联测试：TBD
+- 调研依据：SIFiD（arXiv: 2403.07557——NLI/语义相似度过滤关键句子，缩小检测范围）；SummaC（arXiv: 2111.09525——句子级 NLI 分割 + 分数聚合）；MultiHop-RAG（arXiv: 2401.15391——标准 RAG 在多跳推理上表现不佳，需要跨 chunk 两两比对）。本需求复用 `Embedder` 端口做预筛，零新依赖。
+
+#### REQ-AUDIT-004 结构化审计报告生成（Report Phase）
+- 优先级：P1 ｜ 状态：Draft ｜ 依赖：REQ-AUDIT-003、REQ-UI-002
+- 描述：将 Verify 阶段判定为 `contradiction` 的声明对聚合成结构化审计报告，以流式 Block 渲染到对话区。报告格式为 Markdown，包含：(1) **摘要段**——审计文档名、chunk 总数、提取声明数、发现矛盾数、审计耗时；(2) **矛盾清单**——逐条列出矛盾，每条含序号、严重等级（`🔴 高` / `🟡 中` / `🟢 低`，由 LLM 在 Verify 阶段判定 severity）、矛盾位置（chunk 序号 + 章节路径前缀）、声明 A 文本、声明 B 文本、LLM 解释说明；(3) **免责声明**——"本报告由 AI 辅助生成，矛盾判定可能存在遗漏或误报，请人工核实"。报告以 `chat_token` 事件流式推送，复用现有 Markdown 渲染链路（marked.js → DOMPurify → highlight.js）。无矛盾时输出"未发现明显矛盾"。
+- 验收标准：
+  - AC-1：审计完成后对话区渲染为 Markdown 格式的勘误报告，包含摘要段、矛盾清单（如有）、免责声明三部分（TC-AUDIT-004）。
+  - AC-2：每条矛盾包含严重等级标记（🔴/🟡/🟢）、两个矛盾声明的原文、来源 chunk 序号与章节路径（TC-AUDIT-004 旁证）。
+  - AC-3：无矛盾时输出"未发现明显矛盾"文案，而非空报告（TC-AUDIT-004 旁证）。
+  - AC-4：报告末尾包含免责声明"本报告由 AI 辅助生成，矛盾判定可能存在遗漏或误报，请人工核实"（TC-AUDIT-004 旁证）。
+  - AC-5：报告内容经 DOMPurify 消毒，不含可执行脚本（REQ-SEC-002 安全审查，TC-AUDIT-004 旁证）。
+- 契约：TBD ｜ 关联测试：TBD
+- 调研依据：FIND 基准（arXiv: 2512.18601——GPT-5 仅恢复 64% 不一致性，需标注"辅助审计"定位）；Google PAT（四级 AI-人类协作分类法——Level 2: AI 辅助内容审查，人类决策）。本需求复用现有 `chat_token` 事件 + 前端 Markdown 渲染链路，零新依赖。
+
+#### REQ-AUDIT-005 审计进度流式推送与取消
+- 优先级：P1 ｜ 状态：Draft ｜ 依赖：REQ-AUDIT-001、REQ-RAG-005
+- 描述：审计过程可能耗时较长（N 个 chunk × 2 次 LLM 调用——声明提取 + 矛盾精判），需要为用户提供实时进度反馈和取消能力。进度推送采用与 `chat_phase` 相同的模式：新增 `audit_phase` 事件（`extracting` / `comparing` / `reporting`），每个阶段内推送 `audit_progress` 事件（`{current, total, message}`）。取消机制复用 REQ-RAG-005 的 `CancellationToken` 模式：`abort_audit` 命令触发 token 取消，审计循环检测到取消后 break，已提取的声明和已发现的矛盾保留并输出部分报告。取消事件语义复用 `chat_error("⏹ 审计已中断")` + `chat_done`。
+- 验收标准：
+  - AC-1：审计过程中前端实时显示当前阶段（提取声明中 / 比对中 / 生成报告中）和进度（如"正在提取声明: 3/12 chunks"）（TC-AUDIT-005）。
+  - AC-2：用户点击取消后审计立即停止，已发现的部分矛盾输出为部分报告，不 Panic（TC-AUDIT-005 旁证）。
+  - AC-3：取消后输入框恢复空闲态，可立即发起其他操作（TC-AUDIT-005 旁证）。
+  - AC-4：审计完成后 `chat_done` 事件推送，前端 Block 进入完成态（TC-AUDIT-005 旁证）。
+- 契约：TBD ｜ 关联测试：TBD
+- 调研依据：REQ-RAG-005（abort_chat + CancellationToken 模式）；REQ-RAG-001（chat_phase 事件流式进度模式）；Google PAT（Inference Scaling——多轮迭代推理需要进度反馈）。本需求复用现有 CancellationToken + 事件推送架构，零新依赖。
+
+---
+
 ## 5. 非功能需求（NFR）
 
 #### REQ-NFR-001 冷启动性能
@@ -510,3 +741,13 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 | v1.0.6 | 2026-07-24 | REQ-RAG-005（停止生成，abort_chat + CancellationToken）、REQ-RAG-006（会话持久化，conversations/messages 表）契约冻结；中断事件语义复用 chat_error/chat_done；登记 TC-RAG-003/004/005 | PM / TPM |
 | v1.0.7 | 2026-07-24 | 纪律纠偏：L3 E2E 基建（WebdriverIO+tauri-driver 进 CI，Playwright 桥接层补本机）；REQ-ING-005 / REQ-UI-006 契约冻结；嵌入写入链路接通（embed_batch → add_embedding）；登记 E2E-UI-001 | PM / TPM |
 | v1.0.8 | 2026-07-25 | Phase 8 商业化冲刺：REQ-LIC-001（Ed25519 License 离线校验）、REQ-LIC-002（is_pro 状态管理与门控）、REQ-LIC-003（付费墙 UI）契约冻结；import_files 签名变更（移除 is_pro 参数，改读 AppState）；登记 TC-LIC-001~005、E2E-LIC-001 | PM / TPM |
+| v1.0.9 | 2026-07-25 | 新增 VIZ 域：REQ-VIZ-001（Mermaid 图表引擎）、REQ-VIZ-002（KaTeX 数学公式）、REQ-VIZ-003（Chart.js 数据图表）、REQ-VIZ-004（RAG Prompt 图表引导）；全职业场景调研覆盖 12 个领域 | PM / TPM |
+| v1.1.0 | 2026-07-25 | 新增 MM 域：REQ-MM-001（PDF 图片提取）、REQ-MM-002（本地 OCR）、REQ-MM-003（BYOK VLM 图片理解）、REQ-MM-004（多模态导入管线）；调研 ColPali/Jina CLIP/Tesseract/PaddleOCR | PM / TPM |
+| v1.1.1 | 2026-07-25 | VIZ Phase 1 实施：REQ-VIZ-001（Mermaid 图表引擎）状态→In-Dev；REQ-VIZ-004（RAG Prompt 图表引导）状态→In-Dev；ADR-009 状态→Approved (Phase 1)；TC-VIZ-008/008b/008c 绿灯 | PM / TPM |
+| v1.1.2 | 2026-07-25 | VIZ Phase 1+2 验收完成：REQ-VIZ-001/004→Done、REQ-VIZ-002→Done（ADR-009 Phase 1+2 已实施验证）；MM 域登记：ADR-010 Approved（Phase 1 架构评审）；文档同步：code-contracts 补充 SemanticSplitter、frontend-modules/settings-reference 创建、session-handoff 修订 | TPM |
+| v1.1.3 | 2026-07-25 | MM Phase 3 L2 契约测试验收：REQ-MM-001/002/004→Done（TC-MM-001/002/004 全部绿灯）；L2 测试使用 lopdf 编程生成含图片 XObject 的测试 PDF + Mock PageRenderer/OcrEngine 验证端口契约 | TPM |
+| v1.1.4 | 2026-07-25 | MM Phase 2 L2 契约测试验收：REQ-MM-003→Done（TC-MM-003/003b/003c 全部绿灯）；VisionLanguageModel 端口 + NoVlm 占位 + OpenAIVisionProvider 适配器 + ImportService.index_document_multimodal_with_vlm + MultimodalPdfLoader 三泛型扩展 | TPM |
+| v1.1.5 | 2026-07-25 | 新增 REQ-RAG-008（回答语言自适应）：`build_rag_prompt` 追加语言跟随引导指令（auto 策略，代码/术语保留原文）；调研依据 AnythingLLM Issue #97 + Dify 官方文档；登记 TC-RAG-006 | PM / TPM |
+| v1.2.0 | 2026-07-25 | 深度文档理解 Phase 1 需求起草（教授文章勘误场景）：新增 REQ-VEC-006（章节感知分块，标题层级→章节路径前缀）、REQ-RAG-009（检索后段落扩展，sequence ±1 相邻 chunk 合并注入）、REQ-MM-005（分级图表理解，VLM 提示词四级策略：表格→MD/流程图→Mermaid/数据图表→CSV+趋势/公式→LaTeX）；调研依据 LangChain MarkdownHeaderTextSplitter + LlamaIndex SentenceWindowRetriever + Anthropic Contextual Retrieval + Marker/Nougat/ChartHal；三条需求均为纯 crates/core 层改动，零新依赖 | PM / TPM |
+| v1.2.1 | 2026-07-25 | REQ-VEC-006 章节感知分块状态 Draft→Approved + 落地（SectionAwareSplitter pulldown-cmark 标题层级解析 → section 切分 → 委托 SemanticSplitter → 章节路径前缀；ImportService.index_inner .md 接入；TC-VEC-010 绿灯） | TPM |
+| v1.3.0 | 2026-07-25 | 新增 AUDIT 域（文档一致性审计与矛盾检测）：REQ-AUDIT-001（全量审计命令，list_chunks 全扫描非 top-k 检索）、REQ-AUDIT-002（原子声明提取，Decompose Phase）、REQ-AUDIT-003（跨声明矛盾检测，SIFiD 式 embedding 预筛 + LLM 精判两阶段）、REQ-AUDIT-004（结构化审计报告，Markdown 勘误报告 + 免责声明）、REQ-AUDIT-005（审计进度流式推送与取消，复用 CancellationToken）；调研依据 FIND 基准(arXiv:2512.18601) + Decompose-Then-Verify 范式 + Google PAT(arXiv:2606.28277) + SIFiD(arXiv:2403.07557) + SummaC(arXiv:2111.09525) + LangChain MapReduce/Refine + Rust 生态(rust-bert/sqlite-knowledge-graph/semantic-diff)；五条需求均为纯 crates/core 层改动，零新依赖，复用 Storage + LLMProvider + Embedder 端口 | PM / TPM |

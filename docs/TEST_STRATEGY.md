@@ -213,6 +213,7 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | REQ-VEC-001 | AC-3 / 段落感知 / 代码块完整性 | TC-VEC-002（SemanticSplitter 端到端分块入库：sequence 连续 + 标题正文同 chunk + 代码块内容完整 + token_count 合理） | L1 | 绿灯 |
 | REQ-RAG-003 | AC-1 / Phase 4 Chunk Expansion | TC-RAG-009（检索命中后扩展前后各 1 个相邻 chunk，补全跨 chunk 上下文，去重 + 按 sequence 排序） | L1 | 绿灯 |
 | REQ-VEC-002 | AC-2 / Phase 3 ContextualEmbedding | TC-RAG-010（build_contextual_text 拼接文档名前缀，使嵌入向量包含文档上下文信息） | L1 | 绿灯 |
+| REQ-VEC-006 | AC-1/2/3/4 | TC-VEC-010（SectionAwareSplitter 章节感知分块：标题层级 → section 切分 → 章节路径前缀，无标题退化） | L1 | 绿灯 |
 | （其余条目待 QA 阶段登记） | | | | |
 
 | 版本 | 日期 | 修订摘要 | 批准 |
@@ -230,3 +231,4 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | v1.2.7 | 2026-07-25 | SemanticSplitter L1 集成测试：TC-VEC-002 绿灯（端到端分块入库契约：真实 Markdown 语料 → import → index → 验证 sequence 连续 + 标题正文同 chunk + 代码块内容完整 + token_count 合理）；MockStorage 扩展 chunks 捕获能力 | TPM |
 | v1.2.8 | 2026-07-25 | Phase 4 Chunk Expansion：TC-RAG-009 绿灯（VectorRetriever.retrieve 命中后扩展前后各 1 个相邻 chunk，补全跨 chunk 上下文，去重 + 按 sequence 排序）；MockStorage 扩展 all_chunks 字段 | TPM |
 | v1.2.9 | 2026-07-25 | Phase 3 ContextualEmbedding：TC-RAG-010 绿灯（build_contextual_text 拼接文档名前缀，零 LLM 成本规则方案）；commands.rs embed_document_chunks 接入 | TPM |
+| v1.3.0 | 2026-07-25 | REQ-VEC-006 章节感知分块：TC-VEC-010 绿灯（SectionAwareSplitter pulldown-cmark 标题层级解析 → section 切分 → 委托 SemanticSplitter → 章节路径前缀）；ImportService.index_inner .md 接入 SectionAwareSplitter | TPM |

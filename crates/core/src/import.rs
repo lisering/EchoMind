@@ -8,7 +8,21 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, anyhow, bail};
 use echomind_models::{Chunk, DocStatus, Document};
 
-use crate::{Loader, Splitter, Storage};
+use crate::{Loader, NoVlm, OcrEngine, PageRenderer, Splitter, Storage, VisionLanguageModel};
+
+/// VLM 图片理解系统提示（REQ-MM-003）：引导 VLM 将图片中的结构化内容
+/// 转换为 Markdown 表格、Mermaid gantt/flowchart 等可检索格式。
+///
+/// 与 `loader::VLM_IMAGE_PROMPT` 保持一致（管线编排层与加载器层共用同一提示）。
+const VLM_IMAGE_PROMPT: &str = "\
+你是一个文档图片理解助手。请分析图片中的内容，并将其转换为可检索的结构化文本格式：\n\
+- 表格 → Markdown 表格语法\n\
+- 甘特图 → Mermaid gantt 语法\n\
+- 流程图 → Mermaid flowchart 语法\n\
+- 其他图表 → 简洁文字描述\n\
+- 纯文字图片 → 提取文字内容\n\
+\n\
+请仅输出转换后的文本，不要添加额外解释。";
 
 /// 免费版文件数上限（REQ-LIC-001）
 pub const FREE_TIER_MAX_FILES: usize = 50;
@@ -162,13 +176,45 @@ impl<S: Storage> ImportService<S> {
 
     async fn index_inner(&self, doc: &Document) -> anyhow::Result<()> {
         let ext = Self::validate_extension(Path::new(&doc.file_path))?;
-        let text = match ext.as_str() {
-            "md" => crate::loader::MarkdownLoader.load(&doc.file_path).await?,
-            "txt" => crate::loader::TextLoader.load(&doc.file_path).await?,
-            "pdf" => crate::loader::PdfLoader.load(&doc.file_path).await?,
+        match ext.as_str() {
+            "md" => {
+                // .md 用 SectionAwareSplitter（需要原始 markdown，不经过 MarkdownLoader 剥离 #）
+                let raw = tokio::fs::read_to_string(&doc.file_path)
+                    .await
+                    .with_context(|| format!("读取 Markdown 失败: {}", doc.file_path))?;
+                self.index_with_section(doc, raw).await
+            }
+            "txt" => {
+                let text = crate::loader::TextLoader.load(&doc.file_path).await?;
+                self.index_with_text(doc, text).await
+            }
+            "pdf" => {
+                let text = crate::loader::PdfLoader.load(&doc.file_path).await?;
+                self.index_with_text(doc, text).await
+            }
             other => bail!("不支持的解析格式: .{other}"),
-        };
-        let splitter = crate::splitter::TextSplitter::new()?;
+        }
+    }
+
+    /// .md 专用：SectionAwareSplitter 章节感知分块 + 入库（REQ-VEC-006）。
+    /// 需要**原始 markdown 文本**（含 # 标题标记），不经过 MarkdownLoader。
+    async fn index_with_section(&self, doc: &Document, text: String) -> anyhow::Result<()> {
+        let splitter = crate::section_aware_splitter::SectionAwareSplitter::default_config()?;
+        let pieces = splitter.split(&text).await?;
+        for (sequence, content) in pieces.into_iter().enumerate() {
+            let token_count = splitter.count_tokens(&content)?;
+            let chunk = Chunk::new(doc.id.clone(), content, token_count, sequence);
+            self.storage.add_chunk(&chunk).await?;
+        }
+        Ok(())
+    }
+
+    /// 分块 + 入库（复用逻辑，供 `index_inner` 和 `index_multimodal_inner` 共享）。
+    async fn index_with_text(&self, doc: &Document, text: String) -> anyhow::Result<()> {
+        // 使用 SemanticSplitter 替代 TextSplitter：
+        // 段落→句子→子句递归分割，保留代码块完整性，支持中文标点。
+        // 来源：rs-pro 语义分块器，借鉴 LangChain/LlamaIndex 最佳实践。
+        let splitter = crate::semantic_splitter::SemanticSplitter::default_config()?;
         let pieces = splitter.split(&text).await?;
         for (sequence, content) in pieces.into_iter().enumerate() {
             let token_count = splitter.count_tokens(&content)?;
@@ -182,5 +228,157 @@ impl<S: Storage> ImportService<S> {
         path.file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unnamed".to_string())
+    }
+}
+
+/// 多模态索引扩展（REQ-MM-004）：为 `ImportService` 增加泛型方法，
+/// 支持注入 `PageRenderer` + `OcrEngine` 对 PDF 执行多模态提取。
+///
+/// 设计原因：`async fn` in trait 不支持 `dyn Trait`（Edition 2024），
+/// 故采用泛型方法注入而非 trait object。
+impl<S: Storage> ImportService<S> {
+    /// 多模态索引文档（REQ-MM-004）：文本提取 → 图片检测 → 渲染 → OCR → 分块入库。
+    ///
+    /// 对 PDF 格式：使用 `MultimodalPdfLoader` 逻辑（文本层 + 图片渲染 + OCR）。
+    /// 对 md/txt 格式：与 `index_document` 行为一致（仅文本提取）。
+    ///
+    /// # 参数
+    /// - `doc`: 已导入的文档记录
+    /// - `page_renderer`: PDF 页面渲染引擎
+    /// - `ocr_engine`: OCR 文字识别引擎
+    pub async fn index_document_multimodal<R, O>(
+        &self,
+        doc: &Document,
+        page_renderer: &R,
+        ocr_engine: &O,
+    ) -> anyhow::Result<()>
+    where
+        R: PageRenderer,
+        O: OcrEngine,
+    {
+        // VLM 禁用：使用 NoVlm 占位实现，管线天然跳过 VLM 阶段
+        self.index_document_multimodal_with_vlm(doc, page_renderer, ocr_engine, &NoVlm)
+            .await
+    }
+
+    /// 多模态索引文档（含 VLM 增强，REQ-MM-003/004）：
+    /// 文本提取 → 图片检测 → 渲染 → OCR → VLM 增强 → 分块入库。
+    ///
+    /// 在 `index_document_multimodal` 基础上，对含图片的页面额外调用 VLM，
+    /// 将表格→Markdown、甘特图→Mermaid 等结构化内容追加到文本中。
+    ///
+    /// # 隐私
+    /// 图片仅发送到用户配置的 LLM 端点（BYOK），符合「隐私不出域」。
+    ///
+    /// # 参数
+    /// - `doc`: 已导入的文档记录
+    /// - `page_renderer`: PDF 页面渲染引擎
+    /// - `ocr_engine`: OCR 文字识别引擎
+    /// - `vlm`: VLM 图片理解引擎（`NoVlm` 表示禁用）
+    pub async fn index_document_multimodal_with_vlm<R, O, V>(
+        &self,
+        doc: &Document,
+        page_renderer: &R,
+        ocr_engine: &O,
+        vlm: &V,
+    ) -> anyhow::Result<()>
+    where
+        R: PageRenderer,
+        O: OcrEngine,
+        V: VisionLanguageModel,
+    {
+        self.storage
+            .update_doc_status(&doc.id, DocStatus::Processing)
+            .await?;
+        let result = self
+            .index_multimodal_inner(doc, page_renderer, ocr_engine, vlm)
+            .await;
+        match &result {
+            Ok(()) => {
+                self.storage
+                    .update_doc_status(&doc.id, DocStatus::Indexed)
+                    .await?;
+            }
+            Err(err) => {
+                self.storage
+                    .update_doc_status(&doc.id, DocStatus::Failed(err.to_string()))
+                    .await?;
+            }
+        }
+        result
+    }
+
+    /// 多模态索引内部逻辑（不处理状态机，供 `index_document_multimodal_with_vlm` 调用）。
+    async fn index_multimodal_inner<R, O, V>(
+        &self,
+        doc: &Document,
+        page_renderer: &R,
+        ocr_engine: &O,
+        vlm: &V,
+    ) -> anyhow::Result<()>
+    where
+        R: PageRenderer,
+        O: OcrEngine,
+        V: VisionLanguageModel,
+    {
+        let ext = Self::validate_extension(Path::new(&doc.file_path))?;
+        let text = match ext.as_str() {
+            "md" => crate::loader::MarkdownLoader.load(&doc.file_path).await?,
+            "txt" => crate::loader::TextLoader.load(&doc.file_path).await?,
+            "pdf" => {
+                // 多模态 PDF 加载：lopdf 文本提取 + 图片检测 → 渲染 → OCR → 合并
+                let owned = doc.file_path.clone();
+                // Step 1: lopdf 文本提取 + 图片检测（CPU 密集，spawn_blocking）
+                let (text_layer, image_pages) = tokio::task::spawn_blocking(move || {
+                    crate::loader::MultimodalPdfLoader::<R, O, V>::extract_text_and_detect_images(
+                        &owned,
+                    )
+                })
+                .await
+                .context("PDF 文本提取 + 图片检测任务执行失败")??;
+
+                // Step 2: 对含图片的页面执行渲染 + OCR
+                let mut full_text = text_layer;
+                for page_num in image_pages {
+                    let image_bytes = page_renderer
+                        .render_page(&doc.file_path, page_num, 150)
+                        .await
+                        .with_context(|| format!("渲染 PDF 第 {page_num} 页失败"))?;
+
+                    let ocr_text = ocr_engine
+                        .recognize(&image_bytes)
+                        .await
+                        .with_context(|| format!("OCR 识别 PDF 第 {page_num} 页失败"))?;
+
+                    if !ocr_text.is_empty() {
+                        if !full_text.is_empty() {
+                            full_text.push_str("\n\n");
+                        }
+                        full_text.push_str(&ocr_text);
+                    }
+
+                    // REQ-MM-003: VLM 图片理解（表格→Markdown，甘特图→Mermaid）
+                    // 图片仅发送到用户配置的 LLM 端点（BYOK），符合隐私不出域
+                    let vlm_text = vlm
+                        .describe_image(&image_bytes, VLM_IMAGE_PROMPT)
+                        .await
+                        .with_context(|| format!("VLM 理解 PDF 第 {page_num} 页失败"))?;
+
+                    if !vlm_text.is_empty() {
+                        if !full_text.is_empty() {
+                            full_text.push_str("\n\n");
+                        }
+                        full_text.push_str(&vlm_text);
+                    }
+                }
+
+                if full_text.trim().is_empty() {
+                    bail!("PDF 未提取到任何文本: {}", doc.file_path);
+                }
+                full_text
+            }
+            other => bail!("不支持的解析格式: .{other}"),
+        };
+        self.index_with_text(doc, text).await
     }
 }

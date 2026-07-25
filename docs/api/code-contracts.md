@@ -483,3 +483,32 @@ pub struct VectorRetriever<E: Embedder, S: Storage> {
 - 调用点：`commands.rs::embed_document_chunks`（嵌入写入链路）
 - 不改变 `chunk.content`（存储仍为原始内容），仅嵌入文本拼接前缀
 - 检索时 `build_rag_prompt` 仍用原始 `chunk.content`（不含前缀），保持引用块可读
+
+### 5.7 SectionAwareSplitter（`crates/core/src/section_aware_splitter.rs`）
+
+实现 `Splitter` 端口，在 SemanticSplitter 前置结构感知层（REQ-VEC-006）。
+
+```rust
+pub struct SectionAwareSplitter {
+    inner: SemanticSplitter,  // 组合：section 内部委托 SemanticSplitter 切分
+}
+
+impl SectionAwareSplitter {
+    pub fn default_config() -> Result<Self>;  // 256 tokens / 32 overlap
+    pub fn count_tokens(&self, text: &str) -> Result<usize>;
+    fn extract_sections(text: &str) -> Vec<Section>;  // pulldown-cmark 标题层级解析
+}
+
+impl Splitter for SectionAwareSplitter {
+    async fn split(&self, text: &str) -> Result<Vec<String>>;
+}
+```
+
+**分块策略**（章节感知）：
+1. `pulldown-cmark` 解析 Markdown 标题层级（`#`/`##`/`###`）
+2. 按 section 切分（标题 + 其下正文），构建层级路径（如 `引言 > 1.1 背景`）
+3. 每 section 委托 `SemanticSplitter.split()` 切分
+4. 每 chunk 前缀追加 `[章节路径] ` 标记，使 embedding 与 LLM 感知结构位置
+5. 无标题的纯文本退化为 `SemanticSplitter` 行为（不加前缀）
+
+**接入点**：`ImportService.index_inner` 对 `.md` 文件直接读取原始 markdown（不经过 MarkdownLoader 剥离 `#`），调 `index_with_section`。
