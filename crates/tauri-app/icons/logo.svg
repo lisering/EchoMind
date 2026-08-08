@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EchoMind — Logo / App Icon Master Source v5.0
+  ──────────────────────────────────────────────────────
+  Design: "Echo Signal" (adopted from rs-pro, enhanced for production)
+
+  Visual elements:
+    • Background — rounded square, deep indigo gradient
+    • Outer Arc  — signal echo wave (thinner, deeper blue)
+    • Inner Arc  — signal echo wave (thicker, lighter blue)
+    • Core       — glowing amber dot (the "Mind" — intelligence center)
+    • Inner Core — bright highlight (light source effect)
+
+  Symbolism:
+    • Concentric arcs = echo / signal propagation (the "Echo")
+    • Glowing amber center = mind / knowledge core (the "Mind")
+    • Blue-to-amber contrast = cold data → warm intelligence
+
+  Design principles:
+    1. Simplicity — 4 elements (bg + 2 arcs + core), recognizable at 16×16
+    2. Meaningful — directly relates to EchoMind brand name
+    3. Scalable — geometric shapes scale cleanly to any size
+    4. Distinctive — no other RAG app uses echo-wave + amber-core combo
+    5. High contrast — amber pops against deep blue, visible in taskbar
+
+  Palette:
+    • Background: #1E2A78 → #2E40A8 (deep indigo → bright indigo)
+    • Outer Arc:  #6B8AFF (periwinkle blue)
+    • Inner Arc:  #8BA8FF (light periwinkle)
+    • Core:       #FFB454 (amber/gold)
+    • Highlight:  #FFD98A (warm light)
+
+  Format: 1024×1024 squircle, scales cleanly to 16×16
+  License: MIT (project-wide)
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Background: deep indigo diagonal gradient -->
+    <linearGradient id="emBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E2A78"/>
+      <stop offset="100%" stop-color="#2E40A8"/>
+    </linearGradient>
+
+    <!-- Subtle radial glow behind the core -->
+    <radialGradient id="emCoreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFB454" stop-opacity="0.25"/>
+      <stop offset="50%" stop-color="#FFB454" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#FFB454" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Gaussian blur filter for the glow effect -->
+    <filter id="emGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+
+    <!-- Core gradient: amber with depth -->
+    <radialGradient id="emCoreFill" cx="40%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#FFD98A"/>
+      <stop offset="60%" stop-color="#FFB454"/>
+      <stop offset="100%" stop-color="#E89530"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Squircle background (iOS-style rounded square) -->
+  <rect width="1024" height="1024" rx="228" ry="228" fill="url(#emBg)"/>
+
+  <!-- Ambient glow behind the core (adds depth at large sizes) -->
+  <circle cx="512" cy="512" r="280" fill="url(#emCoreGlow)"/>
+
+  <!-- Outer arc: signal echo wave (thinner, deeper blue) — opens rightward -->
+  <!-- Arc from top to bottom, centered at (512, 512), radius ~280 -->
+  <path d="M 710 314 A 280 280 0 1 0 710 710"
+        fill="none"
+        stroke="#6B8AFF"
+        stroke-width="14"
+        stroke-linecap="round"
+        opacity="0.85"/>
+
+  <!-- Inner arc: signal echo wave (thicker, lighter blue) — opens rightward -->
+  <!-- Arc from top to bottom, centered at (512, 512), radius ~190 -->
+  <path d="M 646 376 A 190 190 0 1 0 646 648"
+        fill="none"
+        stroke="#8BA8FF"
+        stroke-width="20"
+        stroke-linecap="round"/>
+
+  <!-- Glowing core: the "Mind" — amber beacon -->
+  <!-- Blurred glow halo -->
+  <circle cx="512" cy="512" r="80" fill="#FFB454" filter="url(#emGlow)" opacity="0.6"/>
+
+  <!-- Main core circle -->
+  <circle cx="512" cy="512" r="56" fill="url(#emCoreFill)"/>
+
+  <!-- Inner highlight (light catching the sphere) -->
+  <circle cx="498" cy="498" r="22" fill="#FFE8B0" opacity="0.7"/>
+</svg>

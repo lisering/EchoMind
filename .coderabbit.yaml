@@ -1,0 +1,31 @@
+# CodeRabbit AI Code Review Configuration
+# https://docs.coderabbit.ai/getting-started/configure-coderabbit/
+#
+# CodeRabbit is free for open-source/public repositories.
+# Install the GitHub App: https://github.com/apps/coderabbitai
+
+reviews:
+  auto_review:
+    enabled: true
+    drafts: false
+
+  language: en-US
+
+  path_filters:
+    - "!**/*.md"
+    - "!**/*.svg"
+    - "!**/*.png"
+    - "!**/Cargo.lock"
+
+  profile:
+    request_changes_workflow: true
+    high_level_summary: true
+    poem: false
+    review_status: true
+
+  tools:
+    rustfmt:
+      enabled: true
+    clippy:
+      enabled: true
+      threshold: "warning"

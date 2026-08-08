@@ -1,0 +1,61 @@
+Business Source License 1.1
+
+Parameters
+
+Licensor:             EchoMind
+Licensed Work:        EchoMind — AI-powered knowledge management with local LLM engine
+                     (including all source code in crates/, ui/, and scripts/)
+Additional Use Grant: 
+  1. Personal, non-commercial use: Individuals may use the Licensed Work for 
+     personal knowledge management, learning, and research without purchasing 
+     a license, provided no commercial benefit is derived.
+  2. Evaluation: Organizations may evaluate the Licensed Work for up to 30 days 
+     for compatibility and capability assessment.
+  3. The following are NOT permitted without purchasing a commercial license:
+     a. Using the Licensed Work to provide a paid service or hosted product
+     b. Distributing modified versions of the Licensed Work commercially
+     c. Using the Licensed Work within a commercial product or service
+     d. Removing or bypassing the Ed25519 license verification mechanism
+
+Change Date:          2030-01-01
+
+Change License:       Apache License, Version 2.0
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, distribute, and/or 
+use the Licensed Work for any purpose, subject to the following conditions:
+
+1. You must not use the Licensed Work in a manner that is inconsistent with 
+   the Additional Use Grant.
+
+2. If you copy, modify, or distribute the Licensed Work, you must include a 
+   verbatim copy of this License.
+
+3. You must retain all copyright, patent, trademark, and attribution notices 
+   present in the Licensed Work.
+
+4. You must not remove or alter the Ed25519 license verification mechanism 
+   or any other digital rights management feature.
+
+5. On the Change Date, this License will automatically change to the Change 
+   License, at which point you may use the Licensed Work under the terms of 
+   the Change License.
+
+DISCLAIMER: THIS LICENSE DOES NOT GRANT YOU ANY RIGHT TO USE THE TRADE NAMES, 
+TRADEMARKS, SERVICE MARKS, OR PRODUCT NAMES OF THE LICENSOR, EXCEPT AS REQUIRED 
+FOR REASONABLE AND CUSTOMARY USE IN DESCRIBING THE ORIGIN OF THE LICENSED WORK.
+
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS 
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT WILL THE LICENSOR 
+BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF 
+CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE 
+LICENSED WORK OR THE USE OR OTHER DEALINGS IN THE LICENSED WORK.
+
+---
+
+For commercial licensing inquiries, contact: EchoMind
+
+Full text of the Business Source License 1.1 specification:
+https://mariadb.com/bsl11/

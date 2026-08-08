@@ -1,0 +1,22 @@
+[package]
+name = "echomind-compact"
+version = "1.4.0"
+edition = "2024"
+license = "BUSL-1.1"
+description = "EchoMind 上下文压缩引擎：超限时将旧消息压缩为摘要（替代纯截断）"
+
+[dependencies]
+echomind-models = { path = "../models" }
+echomind-core = { path = "../core" }
+tiktoken-rs = "0.12"
+anyhow = "1.0"
+futures = "0.3"
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+tracing = "0.1"
+
+[dev-dependencies]
+serde_json = "1.0"
+
+[lints]
+workspace = true

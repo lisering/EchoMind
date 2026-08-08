@@ -1,0 +1,422 @@
+/* ============================================================
+ * EchoMind Design Token v2.0 — CSS 变量系统
+ * FIGMA_DESIGN_SPEC §2 — 暗色主题
+ *
+ * 本文件仅保留基础设施：CSS 变量定义 + 基础重置 + 浏览器 Hack。
+ * 所有组件样式使用 Tailwind 工具类（见 index.html <script> tailwind.config）。
+ * 动画已注册到 Tailwind config keyframes/animation，使用 animate-* 类。
+ * ============================================================ */
+
+:root {
+  /* ============================================================
+   * Color Tokens（颜色令牌）
+   * ============================================================ */
+
+  /* Surface 色阶（背景层次，受 Arc/Linear 启发） */
+  --surface-0: #0A0A0B;
+  --surface-1: #131316;
+  --surface-2: #1C1C20;
+  --surface-3: #26262C;
+  --surface-4: #303036;
+
+  /* Border 色阶 */
+  --border-subtle: #1F1F23;
+  --border-default: #2A2A2E;
+  --border-strong: #3A3A40;
+
+  /* Text 色阶 */
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-tertiary: #94A3B8;
+  --text-quaternary: #8995A8;
+
+  /* Accent */
+  --accent: #38BDF8;
+  --accent-hover: #0EA5E9;
+  --accent-subtle: rgba(56, 189, 248, 0.08);
+  --accent-rgb: 56, 189, 248;  /* rgba() 使用的 RGB 分量 */
+  --accent-text: var(--accent);  /* 文本用 accent 色（暗色主题与 accent 一致） */
+
+  /* Semantic */
+  --success: #4ADE80;
+  --warning: #FBBF24;
+  --danger: #F87171;
+  --info: #60A5FA;
+  --ink: #0C1116;
+
+  /* Semantic RGB 分量（rgba() 使用） */
+  --success-rgb: 74, 222, 128;
+  --warning-rgb: 251, 191, 36;
+  --danger-rgb: 248, 113, 113;
+  --info-rgb: 96, 165, 250;
+
+  /* 语义扩展色（审计日志/PII 等特定场景） */
+  --primary: #3B82F6;
+  --primary-hover: #2563EB;
+  --purple: #A855F7;
+  --pink: #EC4899;
+
+  /* ============================================================
+   * Spacing Tokens（间距令牌）
+   * 基于 4px 网格系统，便于整体调整
+   * ============================================================ */
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ============================================================
+   * Message Tokens（消息组件令牌）
+   * ============================================================ */
+  /* 消息块 */
+  --msg-padding: var(--space-4);           /* 16px */
+  --msg-padding-sm: var(--space-3);        /* 12px */
+  --msg-radius: 12px;
+  --msg-gap-qa: var(--space-8);            /* 问答间距 32px */
+  --msg-gap-inner: var(--space-1);         /* 消息内部间距 4px */
+  --msg-list-max-width: 100%;              /* 消息列表最大宽度 — 全宽（仅留 20px padding） */
+
+  /* 用户消息 */
+  --msg-user-bg: rgba(56, 189, 248, 0.08);
+  --msg-user-border: rgba(56, 189, 248, 0.12);
+  --msg-user-max-width: 85%;
+  --msg-user-radius: 22px;                 /* 用户气泡大圆角（DeepSeek 风格） */
+
+  /* 助手消息 — 透明背景，无气泡（DeepSeek 风格） */
+  --msg-assistant-bg: transparent;
+  --msg-assistant-border: transparent;
+
+  /* 操作栏 */
+  --action-gap: var(--space-1);            /* 4px */
+  --action-btn-size: 28px;                 /* 按钮尺寸 */
+  --action-opacity: 0;                     /* 默认隐藏 */
+  --action-opacity-hover: 1;               /* 悬停显示 */
+  --action-transition: opacity 0.15s ease;
+
+  /* ============================================================
+   * 语义别名（Bg 别名 — 统一引用 Surface 色阶）
+   * ============================================================ */
+  --bg-primary: var(--surface-1);    /* 模态框/卡片背景 */
+  --bg-secondary: var(--surface-2); /* 次级背景 */
+  --bg-hover: var(--surface-3);     /* 悬停态背景 */
+  --bg-input: var(--surface-0);     /* 输入框背景 */
+
+  /* ============================================================
+   * Typography Tokens（排版令牌）
+   * ============================================================ */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --leading-tight: 1.4;
+  --leading-normal: 1.75;
+
+  /* ============================================================
+   * Transition Tokens（动效令牌）
+   * ============================================================ */
+  --duration-micro: 100ms;
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --ease-out: ease-out;
+
+  /* ============================================================
+   * Layer 2: Semantic Aliases（语义别名层 — DeepSeek 风格三层架构）
+   *
+   * 引用 Layer 1 原始变量，为组件层提供语义化间接引用。
+   * 主题切换时只需修改此层，无需逐组件修改。
+   * ============================================================ */
+  --dsw-alias-brand-primary: var(--accent);
+  --dsw-alias-brand-hover: var(--accent-hover);
+  --dsw-alias-brand-subtle: var(--accent-subtle);
+  --dsw-alias-brand-rgb: var(--accent-rgb);
+
+  --dsw-alias-label-primary: var(--text-primary);
+  --dsw-alias-label-secondary: var(--text-secondary);
+  --dsw-alias-label-tertiary: var(--text-tertiary);
+  --dsw-alias-label-caption: var(--text-quaternary);
+
+  --dsw-alias-surface-0: var(--surface-0);
+  --dsw-alias-surface-1: var(--surface-1);
+  --dsw-alias-surface-2: var(--surface-2);
+  --dsw-alias-surface-3: var(--surface-3);
+
+  --dsw-alias-interactive-bg-hover: var(--surface-3);
+  --dsw-alias-interactive-bg-selected: rgba(var(--accent-rgb), 0.15);
+
+  --dsw-alias-border-l1: var(--border-subtle);
+  --dsw-alias-border-l2: var(--border-default);
+  --dsw-alias-border-l3: var(--border-strong);
+
+  --dsw-alias-success: var(--success);
+  --dsw-alias-warning: var(--warning);
+  --dsw-alias-danger: var(--danger);
+  --dsw-alias-info: var(--info);
+
+  /* ============================================================
+   * Layer 3: Component Variables（组件变量层 — DeepSeek 风格三层架构）
+   *
+   * 引用 Layer 2 语义别名，为特定组件提供命名变量。
+   * 组件样式引用此层变量，实现组件级主题定制。
+   * ============================================================ */
+
+  /* Button 组件 */
+  --dsl-button-radius: 4096px;       /* 胶囊形按钮 */
+  --dsl-button-radius-sm: 8px;       /* 小按钮 */
+  --dsl-button-text: var(--dsw-alias-label-primary);
+  --dsl-button-bg: transparent;
+  --dsl-button-bg-hover: var(--dsw-alias-interactive-bg-hover);
+  --dsl-button-ring: var(--dsw-alias-brand-primary);
+
+  /* Input 组件 */
+  --dsl-input-radius: 16px;
+  --dsl-input-bg: var(--dsw-alias-surface-2);
+  --dsl-input-border: var(--dsw-alias-border-l2);
+  --dsl-input-border-focus: rgba(var(--dsw-alias-brand-rgb), 0.6);
+
+  /* Message 组件 */
+  --dsl-msg-user-radius: var(--msg-user-radius);
+  --dsl-msg-user-bg: var(--msg-user-bg);
+  --dsl-msg-user-border: var(--msg-user-border);
+  --dsl-msg-assistant-bg: var(--msg-assistant-bg);
+  --dsl-msg-list-max-width: var(--msg-list-max-width);
+
+  /* Card 组件 */
+  --dsl-card-radius: 12px;
+  --dsl-card-bg: var(--dsw-alias-surface-2);
+  --dsl-card-border: var(--dsw-alias-border-l2);
+
+  /* Toggle 组件 */
+  --dsl-toggle-radius: 8px;
+  --dsl-toggle-active-text: var(--dsw-alias-brand-primary);
+  --dsl-toggle-active-bg: rgba(var(--dsw-alias-brand-rgb), 0.1);
+  --dsl-toggle-inactive-text: var(--dsw-alias-label-tertiary);
+
+  /* Thinking Panel 组件 */
+  --dsl-thinking-text: var(--dsw-alias-label-tertiary);
+  --dsl-thinking-content-border: var(--dsw-alias-border-l1);
+}
+
+/* ============================================================
+ * Light Theme — [data-theme="light"] 变量覆盖（REQ-UI-011）
+ *
+ * 通过 CSS 变量覆盖实现浅色主题，零组件代码改动。
+ * 所有颜色变量在此重新定义，Spacing/Typography/Transition 等非颜色变量
+ * 继承 :root 默认值，无需重复声明。
+ * ============================================================ */
+
+[data-theme="light"] {
+  /* Surface 色阶（浅色主题背景层次） */
+  --surface-0: #FFFFFF;    /* 主背景白 */
+  --surface-1: #F8FAFC;    /* 次背景，slate-50 */
+  --surface-2: #F1F5F9;    /* 卡片背景，slate-100 */
+  --surface-3: #E2E8F0;    /* 悬停态，slate-200 */
+  --surface-4: #CBD5E1;    /* 选中态，slate-300 */
+
+  /* Border 色阶 */
+  --border-subtle: #E2E8F0;   /* slate-200 */
+  --border-default: #CBD5E1;  /* slate-300 */
+  --border-strong: #94A3B8;   /* slate-400 */
+
+  /* Text 色阶（确保 WCAG AA 4.5:1，包括在 surface-3 背景上） */
+  --text-primary: #0F172A;     /* slate-900，在 #FFFFFF 上 18.7:1 */
+  --text-secondary: #334155;   /* slate-700，在 #FFFFFF 上 12.6:1 */
+  --text-tertiary: #475569;    /* slate-600，在 #FFFFFF 上 7.6:1 */
+  --text-quaternary: #475569;  /* slate-600，在 surface-3 (#E2E8F0) 上 6.2:1（REQ-UI-011 AC-5） */
+
+  /* Accent（保持品牌色一致，微调对比度） */
+  --accent: #0EA5E9;            /* sky-500 */
+  --accent-hover: #0284C7;      /* sky-600 */
+  --accent-subtle: rgba(14, 165, 233, 0.08);
+  --accent-rgb: 14, 165, 233;
+  --accent-text: #0369A1;       /* sky-700，用于文本（在白色上 6.4:1，REQ-UI-011 AC-5） */
+
+  /* Semantic */
+  --success: #15803D;   /* green-700，在浅色背景上 5.2:1（REQ-UI-011 AC-5） */
+  --warning: #D97706;   /* amber-600 */
+  --danger: #DC2626;    /* red-600 */
+  --info: #2563EB;      /* blue-600 */
+  --ink: #F8FAFC;       /* 浅色主题下 ink 反转为浅色，用于深色背景上的文字 */
+
+  /* Semantic RGB 分量 */
+  --success-rgb: 22, 163, 74;
+  --warning-rgb: 217, 119, 6;
+  --danger-rgb: 220, 38, 38;
+  --info-rgb: 37, 99, 235;
+
+  /* 语义扩展色 */
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --purple: #9333EA;
+  --pink: #DB2777;
+
+  /* Bg 别名（引用新的 Surface 色阶） */
+  --bg-primary: var(--surface-1);
+  --bg-secondary: var(--surface-2);
+  --bg-hover: var(--surface-3);
+  --bg-input: var(--surface-0);
+
+  /* 消息组件令牌 */
+  --msg-user-bg: rgba(14, 165, 233, 0.08);
+  --msg-user-border: rgba(14, 165, 233, 0.15);
+}
+
+[data-theme="light"] body {
+  color-scheme: light;  /* 浅色主题：浏览器原生控件使用浅色 */
+}
+
+/* ============================================================
+ * System Theme — [data-theme="system"] 跟随系统偏好（REQ-UI-011 AC-4）
+ *
+ * 当 data-theme="system" 时，根据 prefers-color-scheme 自动选择暗色或浅色。
+ * 暗色为 :root 默认值（无需额外规则），浅色通过 @media 覆盖。
+ * ============================================================ */
+
+@media (prefers-color-scheme: light) {
+  [data-theme="system"] {
+    /* Surface 色阶 */
+    --surface-0: #FFFFFF;
+    --surface-1: #F8FAFC;
+    --surface-2: #F1F5F9;
+    --surface-3: #E2E8F0;
+    --surface-4: #CBD5E1;
+
+    /* Border 色阶 */
+    --border-subtle: #E2E8F0;
+    --border-default: #CBD5E1;
+    --border-strong: #94A3B8;
+
+    /* Text 色阶 */
+    --text-primary: #0F172A;
+    --text-secondary: #334155;
+    --text-tertiary: #475569;
+    --text-quaternary: #475569;  /* REQ-UI-011 AC-5：确保在 surface-3 上 ≥ 4.5:1 */
+
+    /* Accent */
+    --accent: #0EA5E9;
+    --accent-hover: #0284C7;
+    --accent-subtle: rgba(14, 165, 233, 0.08);
+    --accent-rgb: 14, 165, 233;
+    --accent-text: #0369A1;  /* REQ-UI-011 AC-5 */
+
+    /* Semantic */
+    --success: #15803D;  /* REQ-UI-011 AC-5 */
+    --warning: #D97706;
+    --danger: #DC2626;
+    --info: #2563EB;
+    --ink: #F8FAFC;
+
+    /* Semantic RGB 分量 */
+    --success-rgb: 22, 163, 74;
+    --warning-rgb: 217, 119, 6;
+    --danger-rgb: 220, 38, 38;
+    --info-rgb: 37, 99, 235;
+
+    /* 语义扩展色 */
+    --primary: #2563EB;
+    --primary-hover: #1D4ED8;
+    --purple: #9333EA;
+    --pink: #DB2777;
+
+    /* Bg 别名 */
+    --bg-primary: var(--surface-1);
+    --bg-secondary: var(--surface-2);
+    --bg-hover: var(--surface-3);
+    --bg-input: var(--surface-0);
+
+    /* 消息组件令牌 */
+    --msg-user-bg: rgba(14, 165, 233, 0.08);
+    --msg-user-border: rgba(14, 165, 233, 0.15);
+  }
+
+  [data-theme="system"] body {
+    color-scheme: light;
+  }
+}
+
+/* ============================================================
+ * 基础重置（Tailwind Preflight 已覆盖大部分，此处仅补充）
+ * ============================================================ */
+
+html, body { height: 100%; }
+
+/* CJK 引号修复：使用 PingFangSC 渲染弯引号，避免系统字体引号宽度异常（DeepSeek 风格） */
+@font-face {
+  font-family: 'quote-cjk-patch';
+  src: local('PingFangSC-Regular'), local('PingFang SC');
+  unicode-range: U+201C-201D, U+2018-2019;
+}
+
+body {
+  font-family: 'quote-cjk-patch', -apple-system, "SF Pro SC", "PingFang SC", "Segoe UI", sans-serif;
+  color-scheme: dark;  /* 暗色主题：浏览器原生控件（滚动条/表单）使用深色 */
+}
+
+/* Webkit 滚动条样式（Tailwind 无等价工具类） */
+.scrollbar-thin::-webkit-scrollbar { width: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* 浅色主题滚动条（REQ-UI-011） */
+[data-theme="light"] .scrollbar-thin::-webkit-scrollbar-thumb,
+[data-theme="light"] .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+/* ============================================================
+ * 动画基础设施（Tailwind CDN 不支持 config 自定义 keyframes/animation）
+ * 定义 @keyframes + animate-* 工具类，供 Tailwind 类名体系调用
+ * ============================================================ */
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes scaleIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } }
+@keyframes messageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes caretBlink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
+@keyframes panelIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+.animate-fade-in { animation: fadeIn 0.25s ease-out; }
+.animate-scale-in { animation: scaleIn 0.15s ease-out; }
+.animate-slide-up { animation: slideUp 0.2s cubic-bezier(0.34,1.56,0.64,1); }
+.animate-message-in { animation: messageIn 0.25s ease-out; }
+.animate-spin { animation: spin 0.8s linear infinite; }
+.animate-caret-blink { animation: caretBlink 600ms infinite step-start; }
+.animate-panel-in { animation: panelIn 0.15s ease-out; }
+
+/* 全局 Focus 环 — box-shadow 跟随圆角（DeepSeek 风格，A11Y 兼容） */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 4px var(--accent);
+}
+
+/* prefers-reduced-motion 降级（A11Y — 无法用 Tailwind 工具类表达） */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+ * 主题切换过渡禁用（DeepSeek 风格）
+ *
+ * 切换主题时临时添加 body.change-theme 类，禁用所有过渡动画，
+ * 避免主题切换时的「闪烁瀑布」效果。
+ * JS 逻辑：switchTheme() 在切换前后添加/移除 .change-theme 类。
+ * ============================================================ */
+body.change-theme *,
+body.change-theme *::before,
+body.change-theme *::after {
+  transition: none !important;
+  animation: none !important;
+}
