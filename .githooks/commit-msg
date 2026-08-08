@@ -1,0 +1,29 @@
+#!/bin/sh
+# EchoMind Commit Message Hook
+# Enforces Conventional Commits format: type(scope): description
+#
+# Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert
+# Examples:
+#   feat(req-ing-001): support drag-import for md/txt
+#   fix(req-rag-005): reset input box after stop
+#   docs(srs): freeze REQ-ING-001 import contract
+
+commit_regex='^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([a-z0-9_-]+\))?: .{1,100}'
+
+error_msg="❌ Commit message format invalid!
+Expected: type(scope): description
+Valid types: feat, fix, docs, style, refactor, test, chore, perf, ci, build, revert
+Example: feat(req-ing-001): support drag-import for md/txt
+
+To bypass: git commit --no-verify (use sparingly)"
+
+if ! grep -qE "$commit_regex" "$1"; then
+    echo "$error_msg" >&2
+    exit 1
+fi
+
+# Warn if message is too long
+first_line=$(head -1 "$1")
+if [ ${#first_line} -gt 120 ]; then
+    echo "⚠️  Warning: commit message subject line exceeds 120 characters" >&2
+fi

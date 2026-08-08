@@ -60,7 +60,7 @@ describe('E2E-UI-001 EchoMind 全链路冒烟', function () {
 
   before(async () => {
     mockLlm = await startMockLlm();
-    // 测试文档：内容与提问高度重合，确保越过 0.5 检索阈值（REQ-RAG-003）
+    // 测试文档：内容与提问高度重合，确保越过检索阈值（REQ-RAG-003）
     fixtureName = `echomind-e2e-${Date.now()}.md`;
     fixturePath = path.join(os.tmpdir(), fixtureName);
     fs.writeFileSync(

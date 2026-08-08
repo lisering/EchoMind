@@ -45,6 +45,17 @@ impl SectionAwareSplitter {
         })
     }
 
+    /// 以自定义 token 窗口创建（GB 级文档加速：大文件用 1024 tokens 减少 chunk 总量 4x）。
+    ///
+    /// # 参数
+    /// - `target_tokens`: 目标块大小（tokens）。256=精确检索，1024=大文档加速
+    /// - `overlap_tokens`: 块间重叠（建议 target_tokens 的 1/8~1/4）
+    pub fn new_with_config(target_tokens: usize, overlap_tokens: usize) -> Result<Self> {
+        Ok(Self {
+            inner: SemanticSplitter::new(target_tokens, overlap_tokens)?,
+        })
+    }
+
     /// 统计文本 token 数（委托给内部分块器）。
     pub fn count_tokens(&self, text: &str) -> Result<usize> {
         self.inner.count_tokens(text)
@@ -229,10 +240,7 @@ mod tests {
         let plain_text = "这是纯文本内容，没有标题标记。只有一段话用于验证退化行为。";
         let plain_chunks = splitter.split(plain_text).await.unwrap();
         for chunk in &plain_chunks {
-            assert!(
-                !chunk.starts_with('['),
-                "无标题文本不应有章节路径前缀"
-            );
+            assert!(!chunk.starts_with('['), "无标题文本不应有章节路径前缀");
         }
 
         // AC-4：章节路径前缀不破坏中文分割（含中文的 chunk 应为合法 UTF-8）

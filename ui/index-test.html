@@ -1,0 +1,1998 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+<script src="../e2e-tests/tests/bridge/tauri-stub.js"></script>
+
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EchoMind 灵犀</title>
+    <!-- 前端库全部本地化（PROJECT_RULES 体系三 / REQ-SEC-003：禁止运行时 CDN） -->
+    <script src="vendor/tailwindcss.js"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: { base: '#161616', accent: '#38BDF8', panel: '#1C1C1E', line: '#2A2A2E', ink: '#0C1116', muted: '#94a3b8' },
+          },
+        },
+      };
+    </script>
+    <script src="vendor/marked.min.js"></script>
+    <script src="vendor/purify.min.js"></script>
+    <script src="vendor/highlight.min.js"></script>
+    <script src="vendor/mermaid.min.js"></script>
+    <script src="vendor/katex/katex.min.js"></script>
+    <link rel="stylesheet" href="vendor/katex/katex.min.css" />
+    <script src="vendor/katex/katex-mhchem.min.js"></script>
+    <script src="vendor/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="vendor/github-dark.min.css" />
+    <style>
+      /* 规范外零硬编码色值：仅布局与微交互 */
+      html, body { height: 100%; }
+      body { font-family: -apple-system, "SF Pro SC", "PingFang SC", "Segoe UI", sans-serif; }
+      .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+      .scrollbar-thin::-webkit-scrollbar-thumb { border-radius: 3px; background: rgba(255,255,255,0.12); }
+      .fade-in { animation: fadeIn 0.25s ease-out; }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+      /* ============ 答案区排版体系（集 ChatGPT/Claude/Notion/GitHub 众家之长）============ */
+      /* --- 基础排版 --- */
+      .md { font-size: 14px; line-height: 1.8; color: #cbd5e1; word-wrap: break-word; }
+      .md > *:first-child { margin-top: 0; }
+      .md > *:last-child { margin-bottom: 0; }
+      /* --- 段落 --- */
+      .md p { margin: 10px 0; }
+      /* --- 标题层级：h1 带底线 / h2 带左侧色条 / h3-h4 加粗分色 --- */
+      .md h1 { font-size: 1.45em; font-weight: 700; margin: 22px 0 10px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.1); color: #f1f5f9; }
+      .md h2 { font-size: 1.25em; font-weight: 700; margin: 20px 0 8px; padding-left: 10px; border-left: 3px solid #38BDF8; color: #f1f5f9; }
+      .md h3 { font-size: 1.12em; font-weight: 600; margin: 18px 0 6px; color: #e2e8f0; }
+      .md h4 { font-size: 1em; font-weight: 600; margin: 14px 0 6px; color: #e2e8f0; }
+      .md h5, .md h6 { font-size: 0.9em; font-weight: 600; margin: 12px 0 4px; color: #94a3b8; }
+      /* --- 强调 --- */
+      .md strong { font-weight: 700; color: #f8fafc; }
+      .md em { font-style: italic; color: #e2e8f0; }
+      /* --- 高亮标记 ==text== --- */
+      .md mark { background: rgba(251,191,36,0.22); color: #fde68a; padding: 1px 4px; border-radius: 4px; }
+      /* --- 行内代码：天蓝色芯片风格 --- */
+      .md code:not(pre code) { padding: 2px 6px; border-radius: 5px; background: rgba(56,189,248,0.1); color: #7dd3fc; font-size: 0.88em; font-family: "SF Mono","Fira Code",monospace; border: 1px solid rgba(56,189,248,0.12); }
+      /* --- 代码块容器：头部栏 + 代码区 --- */
+      .md .code-block { margin: 12px 0; border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); background: #0d1117; }
+      .md .code-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 14px; background: rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.06); }
+      .md .code-lang { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+      .md .code-block pre { margin: 0; border-radius: 0; border: none; overflow-x: auto; }
+      .md .code-block pre code { display: block; padding: 14px; font-size: 13px; line-height: 1.65; }
+      .md pre:not(.code-block pre) { margin: 10px 0; border-radius: 10px; overflow-x: auto; }
+      .md pre:not(.code-block pre) code { display: block; padding: 14px; font-size: 13px; line-height: 1.6; }
+      .copy-btn { font-size: 11px; padding: 2px 10px; border-radius: 6px; color: #94a3b8; cursor: pointer; transition: all 0.15s; background: transparent; border: 1px solid rgba(255,255,255,0.08); }
+      .copy-btn:hover { color: #38BDF8; border-color: rgba(56,189,248,0.3); background: rgba(56,189,248,0.08); }
+      /* --- 列表：自定义圆点 + 有序数字 + 嵌套层级色 --- */
+      .md ul, .md ol { margin: 10px 0; padding-left: 24px; }
+      .md ul li { list-style: none; position: relative; margin: 4px 0; }
+      .md ul li::before { content: ''; position: absolute; left: -14px; top: 11px; width: 5px; height: 5px; border-radius: 50%; background: #38BDF8; opacity: 0.7; }
+      .md ul ul li::before { background: #64748b; opacity: 1; }
+      .md ul ul ul li::before { width: 4px; height: 4px; background: #475569; }
+      .md ol { counter-reset: ol-counter; }
+      .md ol li { list-style: none; position: relative; counter-increment: ol-counter; margin: 4px 0; }
+      .md ol li::before { content: counter(ol-counter) '.'; position: absolute; left: -26px; top: 0; width: 22px; text-align: right; color: #38BDF8; font-weight: 600; font-size: 0.9em; }
+      .md li > input[type="checkbox"] { margin-right: 6px; accent-color: #38BDF8; cursor: default; width: 15px; height: 15px; vertical-align: text-bottom; }
+      .md li.task-item { list-style: none; }
+      .md li.task-item::before { display: none; }
+      .md li.task-done { opacity: 0.5; }
+      .md li.task-done > span { text-decoration: line-through; }
+      /* 侧栏折叠时空状态提示适配 */
+      .w-14 .empty-state-hint { padding: 8px 4px; }
+      .w-14 .empty-state-hint .expanded-hint { display: none; }
+      .w-14 .empty-state-hint .collapsed-hint { display: block; }
+      /* --- 引用块 --- */
+      .md blockquote { margin: 12px 0; padding: 8px 14px; border-left: 3px solid #38BDF8; background: rgba(56,189,248,0.06); border-radius: 0 8px 8px 0; color: #94a3b8; }
+      .md blockquote p { margin: 4px 0; }
+      /* --- GitHub Alerts 标注块 --- */
+      .md .callout { margin: 12px 0; padding: 12px 16px; border-radius: 10px; border-left: 4px solid; }
+      .md .callout-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.92em; margin-bottom: 6px; }
+      .md .callout-body p { margin: 4px 0; }
+      .md .callout-note { background: rgba(59,130,246,0.08); border-color: #3b82f6; } .md .callout-note .callout-title { color: #60a5fa; }
+      .md .callout-tip { background: rgba(34,197,94,0.08); border-color: #22c55e; } .md .callout-tip .callout-title { color: #4ade80; }
+      .md .callout-important { background: rgba(168,85,247,0.08); border-color: #a855f7; } .md .callout-important .callout-title { color: #c084fc; }
+      .md .callout-warning { background: rgba(251,191,36,0.08); border-color: #fbbf24; } .md .callout-warning .callout-title { color: #fcd34d; }
+      .md .callout-caution { background: rgba(239,68,68,0.08); border-color: #ef4444; } .md .callout-caution .callout-title { color: #f87171; }
+      /* --- 表格：头部背景 + 斑马纹 + 悬停高亮 + 滚动包裹 --- */
+      .md .table-wrap { overflow-x: auto; margin: 12px 0; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); }
+      .md table { border-collapse: collapse; width: 100%; font-size: 0.92em; }
+      .md th { background: rgba(56,189,248,0.08); color: #e2e8f0; font-weight: 600; text-align: left; padding: 8px 14px; border-bottom: 2px solid rgba(56,189,248,0.2); white-space: nowrap; }
+      .md td { padding: 8px 14px; border-bottom: 1px solid rgba(255,255,255,0.06); color: #cbd5e1; }
+      .md tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+      .md tbody tr:hover { background: rgba(56,189,248,0.05); }
+      /* --- 分割线：渐变淡出 --- */
+      .md hr { border: none; height: 1px; margin: 20px 0; background: linear-gradient(to right, transparent, rgba(255,255,255,0.15), transparent); }
+      /* --- 链接：悬停下划线动画 --- */
+      .md a { color: #38BDF8; text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.15s; }
+      .md a:hover { border-bottom-color: #38BDF8; }
+      /* --- 可折叠区域 <details>/<summary> --- */
+      .md details { margin: 10px 0; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; overflow: hidden; }
+      .md summary { padding: 8px 14px; cursor: pointer; font-weight: 600; color: #e2e8f0; background: rgba(255,255,255,0.03); user-select: none; list-style: none; display: flex; align-items: center; gap: 6px; }
+      .md summary::before { content: '▸'; font-size: 0.8em; transition: transform 0.15s; }
+      .md details[open] summary::before { transform: rotate(90deg); }
+      .md summary:hover { background: rgba(255,255,255,0.05); }
+      .md details[open] summary { border-bottom: 1px solid rgba(255,255,255,0.06); }
+      .md details > *:not(summary) { margin-left: 14px; margin-right: 14px; }
+      .md details > *:not(summary):first-of-type { margin-top: 10px; }
+      .md details > *:not(summary):last-of-type { margin-bottom: 10px; }
+      /* --- 行内引用标记 [1] --- */
+      .md .cite-ref { font-size: 0.72em; vertical-align: super; color: #38BDF8; cursor: pointer; text-decoration: none; margin: 0 1px; padding: 0 3px; border-radius: 3px; transition: background 0.15s; }
+      .md .cite-ref:hover { background: rgba(56,189,248,0.15); }
+      /* --- 消息操作栏 --- */
+      .msg-actions { display: flex; gap: 6px; margin-top: 10px; opacity: 0; transition: opacity 0.2s; }
+      .md-block:hover .msg-actions { opacity: 1; }
+      .msg-action-btn { font-size: 11px; padding: 3px 10px; border-radius: 6px; background: rgba(255,255,255,0.04); color: #94a3b8; border: 1px solid rgba(255,255,255,0.06); cursor: pointer; transition: all 0.15s; }
+      .msg-action-btn:hover { background: rgba(56,189,248,0.1); color: #38BDF8; border-color: rgba(56,189,248,0.2); }
+      /* 思考过程指示器（REQ-RAG-001 扩展）：首个 token 到达前的进度反馈 */
+      .thinking-indicator { display: flex; align-items: center; gap: 8px; color: theme('colors.muted'); font-size: 13px; padding: 2px 0; }
+      .thinking-dots { display: inline-flex; gap: 4px; }
+      .thinking-dots span { width: 6px; height: 6px; border-radius: 50%; background: #38BDF8; animation: thinkingPulse 1.4s infinite ease-in-out; }
+      .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+      .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+      @keyframes thinkingPulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+      /* Mermaid 图表占位与渲染（REQ-VIZ-001） */
+      .mermaid-source { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px; margin: 10px 0; overflow-x: auto; }
+      .mermaid-source pre { margin: 0; }
+      .mermaid-placeholder { color: theme('colors.muted'); }
+      .mermaid-rendered { background: transparent; border: none; padding: 0; }
+      .mermaid-rendered svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+      .mermaid-error { border-color: rgba(239,68,68,0.3); }
+      /* KaTeX 数学公式（REQ-VIZ-002） */
+      .katex-block { display: block; text-align: center; margin: 12px 0; overflow-x: auto; }
+      .katex-inline { display: inline; }
+      .katex-pending { color: theme('colors.muted'); font-style: italic; }
+      .katex-error { color: #f87171; font-style: italic; }
+      /* REQ-VIZ-003: Chart.js 表格→图表 */
+      .chart-toggle { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; margin: 8px 0; font-size: 12px; color: theme('colors.accent'); background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.2); border-radius: 6px; cursor: pointer; transition: background 0.15s; }
+      .chart-toggle:hover { background: rgba(56,189,248,0.15); }
+      .chart-container { margin: 12px 0; position: relative; height: 280px; }
+      .chart-type-bar { display: inline-flex; gap: 6px; margin: 4px 0 8px; }
+      .chart-type-bar button { padding: 2px 8px; font-size: 11px; color: theme('colors.muted'); background: rgba(255,255,255,0.04); border: 1px solid theme('colors.line'); border-radius: 4px; cursor: pointer; }
+      .chart-type-bar button.active { color: theme('colors.accent'); border-color: rgba(56,189,248,0.3); background: rgba(56,189,248,0.08); }
+    </style>
+  </head>
+  <body class="bg-base text-slate-200 overflow-hidden">
+    <!-- ============ 首次启动配置向导（REQ-UI-007） ============ -->
+    <div id="wizard" class="hidden fixed inset-0 z-40 bg-base flex items-center justify-center">
+      <div class="w-full max-w-xl px-8 fade-in">
+        <div class="mb-8 text-center">
+          <div class="text-3xl font-semibold tracking-wide">灵犀 <span class="text-accent">EchoMind</span></div>
+          <p class="mt-3 text-sm text-slate-400">本地 AI 知识库 · 数据不出域 · BYOK 买断制<br />首次使用，请配置你的大模型接入</p>
+        </div>
+
+        <div id="presetCards" class="grid grid-cols-3 gap-3 mb-6"></div>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5">API Key <span id="keyOptional" class="hidden text-accent">（本地端点可留空）</span></label>
+            <input id="wizKey" type="password" placeholder="sk-..." autocomplete="off"
+              class="w-full bg-panel border border-line rounded-xl px-4 py-3 text-sm outline-none focus:border-accent transition-colors" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1.5">Base URL</label>
+              <input id="wizUrl" type="text"
+                class="w-full bg-panel border border-line rounded-xl px-4 py-3 text-sm outline-none focus:border-accent transition-colors" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1.5">Model</label>
+              <input id="wizModel" type="text"
+                class="w-full bg-panel border border-line rounded-xl px-4 py-3 text-sm outline-none focus:border-accent transition-colors" />
+            </div>
+          </div>
+        </div>
+
+        <div id="wizError" class="hidden mt-4 text-sm text-red-400 bg-red-400/10 border border-red-400/30 rounded-xl px-4 py-3"></div>
+
+        <div class="mt-6 flex items-center justify-between">
+          <button id="wizKeyLink" class="text-sm text-accent hover:underline">去获取 API Key →</button>
+          <button id="wizStart" class="bg-accent font-medium text-sm rounded-xl px-6 py-3 hover:opacity-90 transition-opacity disabled:opacity-40 text-ink">
+            验证并开始
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 主界面（REQ-UI-001/002/003） ============ -->
+    <div id="app" class="hidden h-full flex">
+      <!-- 左侧折叠栏（REQ-RAG-006：历史会话） -->
+      <aside id="sidebar" class="w-60 shrink-0 bg-panel border-r border-line flex flex-col transition-all duration-200">
+        <div class="px-4 py-4 flex items-center justify-between">
+          <span class="side-label font-semibold tracking-wide">灵犀 <span class="text-accent">·</span></span>
+          <button id="collapseBtn" title="折叠" class="text-slate-400 hover:text-accent text-lg leading-none">‹</button>
+        </div>
+        <div class="px-3">
+          <button id="newChatBtn" class="side-label w-full text-sm bg-accent/10 text-accent border border-accent/30 rounded-xl px-3 py-2.5 hover:bg-accent/20 transition-colors">＋ 新对话</button>
+        </div>
+        <div class="side-label px-4 pt-5 pb-2 text-[11px] uppercase tracking-wider text-slate-500">会话历史</div>
+        <div id="convList" class="flex-1 overflow-y-auto scrollbar-thin px-2 space-y-1"></div>
+        <div class="side-label px-4 pt-4 pb-2 text-[11px] uppercase tracking-wider text-slate-500 flex items-center justify-between border-t border-line">
+          <span>知识库</span>
+          <span id="docCount" class="text-accent">0/50</span>
+        </div>
+        <div id="docList" class="max-h-56 overflow-y-auto scrollbar-thin px-2 space-y-1"></div>
+        <div class="side-label px-4 py-3 border-t border-line flex items-center justify-between text-xs text-slate-500">
+          <span id="proStatus">免费版 · 数据仅本地处理</span>
+          <button id="settingsBtn" title="设置" class="text-slate-400 hover:text-accent text-base">⚙</button>
+        </div>
+      </aside>
+
+      <!-- 右侧主区域 -->
+      <main class="flex-1 flex flex-col min-w-0">
+        <div id="chatArea" class="flex-1 overflow-y-auto scrollbar-thin px-6 py-6"></div>
+
+        <!-- 导入进度条（REQ-ING-006） -->
+        <div id="importProgress" class="hidden px-6 pb-1">
+          <div class="bg-panel border border-line rounded-xl px-4 py-2.5">
+            <div class="flex items-center justify-between mb-1.5">
+              <span id="importProgressText" class="text-xs text-slate-300"></span>
+              <button id="importCancelBtn" class="text-[11px] text-red-400 hover:text-red-300 border border-red-400/40 rounded px-2 py-0.5 transition-colors">取消导入</button>
+            </div>
+            <div class="w-full bg-base rounded-full h-1 overflow-hidden">
+              <div id="importProgressBar" class="bg-accent h-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部控制台式输入框（REQ-UI-003） -->
+        <div class="px-6 pb-5 pt-2">
+          <div id="inputBar" class="bg-panel border border-line rounded-2xl px-4 py-3 flex items-end gap-3 transition-colors focus-within:border-accent/60">
+            <button id="plusBtn" title="导入文件" class="shrink-0 w-9 h-9 rounded-xl bg-white/5 text-slate-300 hover:text-accent hover:bg-accent/10 transition-colors text-xl leading-none">＋</button>
+<textarea id="queryInput" rows="1" placeholder="输入问题，Enter 发送 · Shift+Enter 换行"
+class="flex-1 bg-transparent resize-none outline-none text-sm leading-6 max-h-40 scrollbar-thin py-1.5"></textarea>
+            <button id="sendBtn" class="shrink-0 h-9 px-4 rounded-xl bg-accent text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-30 text-ink">发送</button>
+            <button id="stopBtn" title="停止生成" class="hidden shrink-0 h-9 px-4 rounded-xl bg-red-500/15 text-red-300 border border-red-400/40 text-sm hover:bg-red-500/25 transition-colors">■ 停止</button>
+          </div>
+          <div id="inputHint" class="mt-2 px-1 text-[11px] text-slate-500 h-4"></div>
+        </div>
+      </main>
+    </div>
+
+    <!-- ============ 拖拽全屏遮罩（REQ-UI-004） ============ -->
+    <div id="dragOverlay" class="hidden fixed inset-0 z-50 bg-base/90 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+      <div class="border-2 border-dashed border-accent rounded-3xl w-[86%] h-[80%] flex flex-col items-center justify-center fade-in">
+        <div class="text-5xl text-accent mb-4">⇩</div>
+        <div class="text-xl font-medium text-accent">数据仅本地处理</div>
+        <p class="mt-2 text-sm text-slate-400">松开即可导入 · 支持 .md / .txt / .pdf（PDF 为 Pro 功能）</p>
+      </div>
+    </div>
+
+    <!-- Toast 通道（REQ-UI-005 前置） -->
+    <div id="toasts" class="fixed bottom-6 right-6 z-[60] space-y-2 w-80"></div>
+
+    <!-- ============ 付费墙 Modal（REQ-LIC-003） ============ -->
+    <div id="paywall" class="hidden fixed inset-0 z-50 bg-base/95 backdrop-blur-sm flex items-center justify-center">
+      <div class="w-full max-w-md px-8 fade-in">
+        <div class="mb-6 text-center">
+          <div class="text-4xl mb-3 text-accent">◈</div>
+          <h2 class="text-xl font-semibold">升级到 Pro 版</h2>
+          <p id="paywallReason" class="mt-2 text-sm text-slate-400">解锁更多功能</p>
+        </div>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1.5">License Key</label>
+            <input id="licenseInput" type="text" placeholder="粘贴你的 License Key" autocomplete="off"
+              class="w-full bg-panel border border-line rounded-xl px-4 py-3 text-sm outline-none focus:border-accent transition-colors" />
+          </div>
+          <div id="paywallError" class="hidden text-sm text-red-400 bg-red-400/10 border border-red-400/30 rounded-xl px-4 py-3"></div>
+          <div class="flex gap-3">
+            <button id="paywallClose" class="flex-1 border border-line rounded-xl px-4 py-3 text-sm text-slate-300 hover:bg-white/5 transition-colors">稍后再说</button>
+            <button id="paywallActivate" class="flex-1 bg-accent font-medium text-sm rounded-xl px-4 py-3 hover:opacity-90 transition-opacity text-ink">激活 Pro</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 设置 Modal（REQ-MM-003 前端接线） ============ -->
+    <div id="settingsModal" class="hidden fixed inset-0 z-50 bg-base/95 backdrop-blur-sm flex items-center justify-center">
+      <div class="w-full max-w-md px-8 fade-in">
+        <div class="mb-6">
+          <h2 class="text-xl font-semibold">设置</h2>
+        </div>
+
+        <!-- LLM 配置区 -->
+        <div class="space-y-3 mb-6">
+          <div class="text-xs uppercase tracking-wider text-slate-500">LLM 配置</div>
+          <div id="settingsLlmInfo" class="bg-panel border border-line rounded-xl px-4 py-3 text-sm space-y-1">
+            <!-- 动态填充 -->
+          </div>
+          <button id="settingsEditLlm" class="w-full border border-line rounded-xl px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 transition-colors">修改 LLM 配置</button>
+        </div>
+
+        <!-- VLM 多模态设置区（REQ-MM-003） -->
+        <div class="space-y-3 mb-6">
+          <div class="text-xs uppercase tracking-wider text-slate-500">PDF 图片理解（VLM）</div>
+          <div class="bg-panel border border-line rounded-xl px-4 py-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="text-sm">VLM 增强开关</div>
+                <div class="mt-1 text-[11px] text-slate-500">表格→Markdown · 甘特图→Mermaid</div>
+              </div>
+              <!-- Toggle Switch -->
+              <button id="vlmToggle" role="switch" aria-checked="false" class="relative w-11 h-6 rounded-full bg-slate-600 transition-colors shrink-0">
+                <span class="absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-white transition-transform"></span>
+              </button>
+            </div>
+            <div id="vlmPrivacy" class="hidden mt-3 pt-3 border-t border-line text-[11px] text-slate-400">
+              ⚠️ 开启后，PDF 中的图片将发送到你配置的 LLM 端点（BYOK）进行理解。数据出口由你控制。
+            </div>
+          </div>
+        </div>
+
+        <!-- 授权状态区（REQ-LIC-004） -->
+        <div class="space-y-3 mb-6">
+          <div class="text-xs uppercase tracking-wider text-slate-500">授权状态</div>
+          <div id="settingsLicenseInfo" class="bg-panel border border-line rounded-xl px-4 py-3 text-sm">
+            <!-- 动态填充 -->
+          </div>
+        </div>
+
+        <!-- 模型缓存管理区（REQ-VEC-008） -->
+        <div class="space-y-3 mb-6">
+          <div class="text-xs uppercase tracking-wider text-slate-500">模型缓存</div>
+          <div id="settingsCacheInfo" class="bg-panel border border-line rounded-xl px-4 py-3 text-sm space-y-1">
+            <!-- 动态填充 -->
+          </div>
+          <div class="flex gap-2">
+            <button id="settingsInitEmbedder" class="flex-1 border border-line rounded-xl px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 transition-colors">下载模型</button>
+            <button id="settingsClearCache" class="flex-1 border border-line rounded-xl px-4 py-2.5 text-sm text-slate-300 hover:bg-white/5 transition-colors">清理缓存</button>
+          </div>
+        </div>
+
+        <button id="settingsClose" class="w-full bg-accent font-medium text-sm rounded-xl px-4 py-3 hover:opacity-90 transition-opacity text-ink">完成</button>
+      </div>
+    </div>
+
+    <!-- ============ VLM 隐私确认弹窗（REQ-MM-003 隐私边界） ============ -->
+    <div id="vlmConfirm" class="hidden fixed inset-0 z-[55] bg-base/95 backdrop-blur-sm flex items-center justify-center">
+      <div class="w-full max-w-sm px-8 fade-in">
+        <div class="mb-4 text-center">
+          <div class="text-3xl mb-2 text-amber-400">⚠️</div>
+          <h3 class="text-lg font-semibold">VLM 图片理解增强</h3>
+        </div>
+        <p class="text-sm text-slate-300 leading-relaxed mb-4">
+          开启后，导入 PDF 时页面中的图片将发送到你配置的 LLM 端点进行视觉理解，以提取表格、图表等结构化内容。
+        </p>
+        <div class="bg-amber-400/10 border border-amber-400/30 rounded-xl px-4 py-3 mb-6 text-[11px] text-amber-300/80">
+          图片数据将离开本地，发送到你自行配置的 LLM 端点（BYOK）。EchoMind 本身不收集任何数据。
+        </div>
+        <div class="flex gap-3">
+          <button id="vlmConfirmCancel" class="flex-1 border border-line rounded-xl px-4 py-3 text-sm text-slate-300 hover:bg-white/5 transition-colors">取消</button>
+          <button id="vlmConfirmOk" class="flex-1 bg-accent font-medium text-sm rounded-xl px-4 py-3 hover:opacity-90 transition-opacity text-ink">确认开启</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ================== Tauri API 入口 ==================
+      const invoke = window.__TAURI__.core.invoke;
+      const listen = window.__TAURI__.event.listen;
+      const tauriDialog = window.__TAURI__.dialog;
+      const tauriOpener = window.__TAURI__.opener;
+
+      const WORKSPACE = 'default';
+
+      // ================== 全局状态 ==================
+      let history = [];                       // 多轮上下文（REQ-RAG-004/006）
+      let currentRawMarkdown = '';            // 流式累积原文（REQ-UI-003）
+      let lastSources = null;
+      let streaming = false;
+      let currentAssistantEl = null;
+      let renderScheduled = false;
+      let currentConversationId = null;       // 当前会话（REQ-RAG-006）
+      let activePreset = 'deepseek';
+      let isPro = false;                       // Pro 授权状态（REQ-LIC-002）
+      let vlmEnabled = false;                   // VLM 图片理解增强开关（REQ-MM-003）
+      let auditingDocId = null;                  // 审计中文档 ID（REQ-AUDIT-001；null=非审计模式）
+      let importing = false;                     // 导入进行中标志（REQ-ING-006）
+
+      const PRESETS = {
+        deepseek: { label: 'DeepSeek', base_url: 'https://api.deepseek.com', model: 'deepseek-chat', keyUrl: 'https://platform.deepseek.com/api_keys', needKey: true, desc: '高性价比中文强模型' },
+        openai: { label: 'OpenAI', base_url: 'https://api.openai.com', model: 'gpt-4o-mini', keyUrl: 'https://platform.openai.com/api-keys', needKey: true, desc: 'GPT 系列官方端点' },
+        ollama: { label: 'Ollama 本地', base_url: 'http://localhost:11434', model: 'llama3.1', keyUrl: 'https://ollama.com/library', needKey: false, desc: '完全离线的本地模型' },
+      };
+
+      /**
+       * 按 id 获取 DOM 元素简写助手。
+       * @param {string} id - 元素 ID（不含 # 前缀）
+       * @returns {HTMLElement} 对应的 DOM 元素
+       */
+      const $ = (id) => document.getElementById(id);
+
+      // ================== Toast（REQ-UI-005）==================
+      /**
+       * 脱敏错误消息：过滤 API Key、文件路径中的用户名等敏感信息（REQ-UI-005-AC-2）。
+       * @param {string|Error} err - 原始错误对象或字符串
+       * @returns {string} 脱敏后的安全错误消息
+       */
+      function sanitizeError(err) {
+        let msg = String(err);
+        // 过滤 API Key（sk-xxx 格式，保留前缀 + 末四位）
+        msg = msg.replace(/sk-[a-zA-Z0-9]{8,}/g, 'sk-****');
+        // 过滤 Windows 用户路径
+        msg = msg.replace(/\\Users\\[^\\]+?\\/g, '\\Users\\****\\');
+        // 过滤 Unix 用户路径
+        msg = msg.replace(/\/Users\/[^/]+?\//g, '/Users/****/');
+        return msg;
+      }
+
+      /**
+       * 显示一条 Toast 提示消息，4.2 秒后自动消失。
+       * @param {string} message - 提示文本
+       * @param {'info'|'error'|'success'} [kind='info'] - 提示类型（决定颜色样式）
+       */
+      function toast(message, kind = 'info') {
+        const el = document.createElement('div');
+        const color = kind === 'error' ? 'border-red-400/40 text-red-300' : kind === 'success' ? 'border-accent/50 text-accent' : 'border-line text-slate-300';
+        el.className = `bg-panel border ${color} rounded-xl px-4 py-3 text-sm shadow-lg fade-in`;
+        el.textContent = message;
+        $('toasts').appendChild(el);
+        setTimeout(() => el.remove(), 4200);
+      }
+
+      /**
+       * 成功 Toast 快捷函数：以 success 样式展示（REQ-VEC-008 / REQ-LIC-004）。
+       * @param {string} message - 提示文本
+       */
+      function toastSuccess(message) {
+        toast(message, 'success');
+      }
+
+      /**
+       * 错误 Toast 快捷函数：自动脱敏后展示（REQ-UI-005-AC-2）。
+       * @param {string|Error} err - 原始错误
+       */
+      function toastError(err) {
+        toast(sanitizeError(err), 'error');
+      }
+
+      // ================== 配置向导（REQ-UI-007） ==================
+      /**
+       * 渲染 Provider 预设卡片（DeepSeek / OpenAI / Ollama），高亮当前选中项。
+       */
+      function renderPresetCards() {
+        const box = $('presetCards');
+        box.innerHTML = '';
+        for (const [key, p] of Object.entries(PRESETS)) {
+          const btn = document.createElement('button');
+          const active = key === activePreset;
+          btn.className = `rounded-xl border px-4 py-4 text-left transition-colors ${active ? 'border-accent bg-accent/10' : 'border-line bg-panel hover:border-slate-500'}`;
+          btn.innerHTML = `<div class="text-sm font-medium ${active ? 'text-accent' : ''}">${p.label}</div><div class="mt-1 text-[11px] text-slate-500">${p.desc}</div>`;
+          btn.onclick = () => { activePreset = key; applyPreset(); renderPresetCards(); };
+          box.appendChild(btn);
+        }
+      }
+
+      /**
+       * 将当前选中的预设值填入向导输入框，并切换 API Key 可选性提示。
+       */
+      function applyPreset() {
+        const p = PRESETS[activePreset];
+        $('wizUrl').value = p.base_url;
+        $('wizModel').value = p.model;
+        $('keyOptional').classList.toggle('hidden', p.needKey);
+        $('wizError').classList.add('hidden');
+      }
+
+      /**
+       * 向导「验证并开始」流程：先 test_llm_connection 验证配置，成功后 update_llm_config 持久化并进入主界面。
+       * @throws {Error} 连接测试或配置保存失败时在向导内联展示错误，不进入主界面
+       */
+      async function startWizard() {
+        const p = PRESETS[activePreset];
+        const api_key = $('wizKey').value.trim();
+        const base_url = $('wizUrl').value.trim();
+        const model = $('wizModel').value.trim();
+        const errBox = $('wizError');
+        errBox.classList.add('hidden');
+
+        if (p.needKey && !api_key) { errBox.textContent = '请填入 API Key（或选择 Ollama 本地预设）'; errBox.classList.remove('hidden'); return; }
+        if (!base_url || !model) { errBox.textContent = 'Base URL 与 Model 不能为空'; errBox.classList.remove('hidden'); return; }
+
+        $('wizStart').disabled = true;
+        $('wizStart').textContent = '验证中…';
+        try {
+          await invoke('test_llm_connection', { apiKey: api_key, baseUrl: base_url, model });
+        } catch (err) {
+          errBox.textContent = String(err);
+          errBox.classList.remove('hidden');
+          $('wizStart').disabled = false;
+          $('wizStart').textContent = '验证并开始';
+          return;
+        }
+        try {
+          await invoke('update_llm_config', { config: { api_key, base_url, model } });
+        } catch (err) {
+          errBox.textContent = '配置保存失败：' + String(err);
+          errBox.classList.remove('hidden');
+          $('wizStart').disabled = false;
+          $('wizStart').textContent = '验证并开始';
+          return;
+        }
+        $('wizStart').disabled = false;
+        $('wizStart').textContent = '验证并开始';
+        showApp();
+        toast('配置完成，开始构建你的知识库吧', 'success');
+        await initConversations();
+      }
+
+      // ================== 会话生命周期（REQ-RAG-006） ==================
+      /**
+       * 初始化会话列表：加载历史会话，无则新建；同步刷新知识库面板。
+       * @throws {Error} 会话加载失败时以 toast 提示
+       */
+      async function initConversations() {
+        try {
+          const list = await invoke('get_conversations', { workspaceId: WORKSPACE });
+          if (list.length === 0) await newChat();
+          else await loadConversation(list[0].id);
+          await loadDocuments();
+        } catch (err) {
+          toastError(err);
+        }
+      }
+
+      // ================== 知识库面板（REQ-UI-006 / REQ-ING-005） ==================
+      const DOC_STATUS_STYLE = {
+        Pending: ['待索引', 'text-slate-400 border-slate-500/40'],
+        Processing: ['索引中', 'text-amber-300 border-amber-400/40'],
+        Indexed: ['已索引', 'text-accent border-accent/40'],
+        Failed: ['失败', 'text-red-400 border-red-400/40'],
+      };
+
+      /**
+       * 从文档对象安全提取状态字符串（后端枚举或字符串形式均兼容）。
+       * @param {Object} d - 文档对象
+       * @returns {string} 状态标识（Pending/Processing/Indexed/Failed）
+       */
+      function docStatusOf(d) {
+        return typeof d.status === 'string' ? d.status : 'Failed';
+      }
+
+      /**
+       * 从入库副本路径中剥离 MD5 哈希前缀，返回展示用文件名。
+       * 入库副本命名规则 {md5}-{原始文件名}（REQ-ING-001）。
+       * @param {string} filePath - 入库后的本地路径
+       * @returns {string} 去除哈希前缀后的文件名
+       */
+      function displayDocName(filePath) {
+        const base = filePath.split('/').pop() || filePath;
+        return base.length > 33 && base[32] === '-' ? base.slice(33) : base;
+      }
+
+      /**
+       * 加载知识库文档列表，渲染到侧栏面板，同步更新配额计数（免费版 n/50）。
+       * @throws {Error} 列表加载失败时以 toast 提示
+       */
+      async function loadDocuments() {
+        try {
+          const docs = await invoke('get_documents');
+          $('docCount').textContent = isPro ? `${docs.length}` : `${docs.length}/50`;
+          const box = $('docList');
+          box.innerHTML = '';
+          // REQ-UI-005-AC-1：空知识库时显示导入引导（含格式与配额说明）
+          if (docs.length === 0) {
+            const empty = document.createElement('div');
+            // 适配侧栏折叠状态：折叠时显示图标+垂直提示，展开时显示完整文案
+            empty.className = 'px-3 py-4 text-center text-[11px] text-slate-500 empty-state-hint';
+            empty.innerHTML = `
+              <div class="expanded-hint">
+                知识库为空<br>点击 ＋ 或拖拽导入<br><span class="text-slate-600">支持 .md / .txt / .pdf</span>
+              </div>
+              <div class="collapsed-hint hidden" title="知识库为空，点击 + 导入">
+                <div class="text-2xl mb-1">📚</div>
+                <div class="text-[10px] opacity-70">空</div>
+              </div>
+            `;
+            box.appendChild(empty);
+            return;
+          }
+          for (const d of docs) {
+            const name = displayDocName(d.file_path);
+            const [label, style] = DOC_STATUS_STYLE[docStatusOf(d)] || DOC_STATUS_STYLE.Pending;
+            const item = document.createElement('div');
+            item.className = 'group flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs hover:bg-white/5';
+            item.dataset.docId = d.id;
+            item.dataset.docName = name;
+
+            const left = document.createElement('span');
+            left.className = 'truncate text-slate-300';
+            left.textContent = name;
+            left.title = d.file_path;
+
+            const right = document.createElement('span');
+            right.className = 'flex items-center gap-2 shrink-0';
+            const badge = document.createElement('span');
+            badge.className = `px-1.5 py-0.5 rounded border ${style}`;
+            badge.textContent = label;
+            // REQ-VEC-005-AC-1：Failed 文档显示重试按钮
+            const retry = document.createElement('button');
+            retry.className = 'invisible group-hover:visible text-slate-500 hover:text-accent px-1';
+            retry.textContent = '↻';
+            retry.title = '重试索引';
+            retry.style.display = docStatusOf(d) === 'Failed' ? '' : 'none';
+            retry.onclick = async (ev) => {
+              ev.stopPropagation();
+              await retryDocument(d.id, name);
+            };
+            const del = document.createElement('button');
+            del.className = 'invisible group-hover:visible text-slate-500 hover:text-red-400 px-1';
+            del.textContent = '×';
+            del.title = '删除文档';
+            del.onclick = async (ev) => {
+              ev.stopPropagation();
+              await removeDocument(d.id, name);
+            };
+            // 审计按钮（REQ-AUDIT-001）：仅 Pro 版 + 已索引文档显示
+            const audit = document.createElement('button');
+            audit.className = 'invisible group-hover:visible text-slate-500 hover:text-accent px-1';
+            audit.textContent = '🔍';
+            audit.title = '审计文档一致性';
+            audit.style.display = (isPro && docStatusOf(d) === 'Indexed') ? '' : 'none';
+            audit.onclick = async (ev) => {
+              ev.stopPropagation();
+              await auditDocument(d.id, name);
+            };
+            right.appendChild(badge);
+            right.appendChild(retry);
+            right.appendChild(audit);
+            right.appendChild(del);
+            item.appendChild(left);
+            item.appendChild(right);
+            box.appendChild(item);
+          }
+        } catch (err) {
+          toastError(err);
+        }
+      }
+
+      /**
+       * 删除指定文档（级联清理 chunks/embeddings），并刷新列表。
+       * @param {string} id - 文档 ID
+       * @param {string} name - 展示用文件名（用于 toast 提示）
+       */
+      async function removeDocument(id, name) {
+        try {
+          await invoke('delete_document', { id });
+          toast(`已删除：${name}`, 'info');
+          await loadDocuments();
+        } catch (err) {
+          toastError(err);
+        }
+      }
+
+      /**
+       * 重试索引失败文档（REQ-VEC-005-AC-1）：重置状态为 Pending → 重新索引 + 嵌入。
+       * 前端入口，调用 retry_index IPC 命令，进度由 doc-status-changed 事件驱动。
+       * @param {string} docId - 文档 ID
+       * @param {string} docName - 展示用文件名（用于 toast 提示）
+       */
+      async function retryDocument(docId, docName) {
+        try {
+          toast(`正在重试索引：${docName}`, 'info');
+          await invoke('retry_index', { id: docId });
+        } catch (err) {
+          toastError(err);
+        }
+      }
+
+      /**
+       * 文档一致性审计（REQ-AUDIT-001~005）：全量扫描 → 声明提取 → 矛盾检测 → 报告生成。
+       * 复用 chat_token / chat_done / chat_error 事件链路渲染 Markdown 报告。
+       * @param {string} docId - 文档 ID
+       * @param {string} docName - 文档显示名（用于报告标题）
+       */
+      async function auditDocument(docId, docName) {
+        if (streaming) { toast('正在生成，请先停止或等待完成', 'info'); return; }
+        if (!isPro) { showPaywall('审计是 Pro 版功能'); return; }
+
+        // 设置审计模式（stopBtn 据此调用 abort_audit）
+        auditingDocId = docId;
+        currentRawMarkdown = '';
+        lastSources = null;
+        currentAssistantEl = appendBlock('assistant');
+        // 修改思考指示器文案为审计专属
+        const thinkingText = currentAssistantEl.querySelector('.thinking-text');
+        if (thinkingText) thinkingText.textContent = '正在初始化审计引擎…';
+        setInputState('streaming', '正在审计文档…');
+
+        try {
+          await invoke('audit_document', { docId, docName });
+        } catch (err) {
+          // chat_error 事件已由后端推送；此处兜底状态复位
+          finalizeStream(false);
+          setInputState('error', String(err));
+          auditingDocId = null;
+        }
+      }
+
+      /**
+       * 新建会话：调用 create_conversation 获取 ID，清空上下文与聊天区。
+       * 生成中（streaming=true）时阻止操作并提示。
+       */
+      async function newChat() {
+        if (streaming) { toast('正在生成，请先停止或等待完成', 'info'); return; }
+        currentConversationId = await invoke('create_conversation', { workspaceId: WORKSPACE });
+        history = [];
+        resetChatArea('新会话已开始', '上下文已清空，向你的知识库提问吧。');
+        await loadConversations();
+        $('queryInput').focus();
+      }
+
+      /**
+       * 加载历史会话：拉取消息列表，逐条渲染 user/assistant Block，恢复多轮上下文。
+       * @param {string} id - 会话 ID
+       */
+      async function loadConversation(id) {
+        if (streaming) { toast('正在生成，请先停止或等待完成', 'info'); return; }
+        const messages = await invoke('get_messages', { conversationId: id });
+        currentConversationId = id;
+        history = messages;
+        $('chatArea').innerHTML = '';
+        if (messages.length === 0) {
+          resetChatArea('暂无消息', '开始提问吧。');
+        }
+        for (const m of messages) {
+          if (m.role === 'user') {
+            appendUserBlock(m.content);
+          } else {
+            currentAssistantEl = appendBlock('assistant');
+            // 历史消息：移除思考指示器，直接显示内容
+            const thinking = currentAssistantEl.querySelector('.thinking-indicator');
+            if (thinking) thinking.remove();
+            currentAssistantEl.querySelector('.md').classList.remove('hidden');
+            currentRawMarkdown = m.content;
+            // 先设置来源，以便 renderMarkdown 中的引用标记链接能正确工作
+            if (m.sources && m.sources.length > 0) renderSources(m.sources);
+            else lastSources = null;
+            renderMarkdown();
+            // REQ-VIZ-001: 历史消息中的 mermaid 图表也需渲染
+            await renderRichContent(currentAssistantEl.querySelector('.md'));
+            // 消息操作栏：复制全文按钮
+            showMsgActions(currentAssistantEl, m.content);
+          }
+        }
+        currentAssistantEl = null;
+        currentRawMarkdown = '';
+        scrollToBottom();
+        await loadConversations();
+      }
+
+      /**
+       * 删除会话并级联清理消息；若删的是当前会话则自动新建。
+       * @param {string} id - 会话 ID
+       */
+      async function removeConversation(id) {
+        await invoke('delete_conversation', { id });
+        if (id === currentConversationId) await newChat();
+        else await loadConversations();
+      }
+
+      /**
+       * 拉取会话列表并渲染到侧栏，高亮当前会话。
+       */
+      async function loadConversations() {
+        const list = await invoke('get_conversations', { workspaceId: WORKSPACE });
+        const box = $('convList');
+        box.innerHTML = '';
+        for (const c of list) {
+          const item = document.createElement('div');
+          const active = c.id === currentConversationId;
+          item.className = `group flex items-center justify-between px-3 py-2.5 rounded-xl text-sm cursor-pointer ${active ? 'bg-accent/15 text-accent' : 'text-slate-300 hover:bg-white/5'}`;
+          const title = document.createElement('span');
+          title.className = 'truncate';
+          title.textContent = c.title;
+          title.onclick = () => loadConversation(c.id);
+          const del = document.createElement('button');
+          del.className = 'invisible group-hover:visible text-slate-500 hover:text-red-400 ml-2 shrink-0 px-1';
+          del.textContent = '×';
+          del.title = '删除会话';
+          del.onclick = async (ev) => { ev.stopPropagation(); await removeConversation(c.id); };
+          item.appendChild(title);
+          item.appendChild(del);
+          item.onclick = () => loadConversation(c.id);
+          box.appendChild(item);
+        }
+      }
+
+      // ================== 主界面渲染 ==================
+      /** 显示配置向导，隐藏主界面。 */
+      function showWizard() { $('wizard').classList.remove('hidden'); $('app').classList.add('hidden'); }
+      /** 隐藏配置向导，显示主界面。 */
+      function showApp() { $('wizard').classList.add('hidden'); $('app').classList.remove('hidden'); }
+
+      /**
+       * 重置聊天区为空状态引导页面。
+       * @param {string} title - 引导标题
+       * @param {string} desc - 引导描述文案
+       */
+      function resetChatArea(title, desc) {
+        $('chatArea').innerHTML = '';
+        const e = document.createElement('div');
+        e.className = 'h-full flex flex-col items-center justify-center text-center select-none fade-in';
+        e.innerHTML = `<div class="text-5xl mb-5 text-accent">◈</div><div class="text-lg font-medium"></div><p class="mt-2 text-sm text-slate-500 max-w-sm"></p>`;
+        e.querySelector('.text-lg').textContent = title;
+        e.querySelector('p').textContent = desc;
+        $('chatArea').appendChild(e);
+      }
+
+      /**
+       * 隐藏空状态引导页（当聊天区只有占位元素时移除它）。
+       */
+      function hideEmptyState() {
+        const area = $('chatArea');
+        if (area.children.length === 1 && area.firstElementChild?.classList.contains('h-full')) {
+          area.innerHTML = '';
+        }
+      }
+
+      /**
+       * 追加一条消息 Block 到聊天区（user 右对齐 / assistant 左对齐含思考指示器）。
+       * @param {'user'|'assistant'} role - 消息角色
+       * @returns {HTMLElement} 追加的 Block 根元素
+       */
+      function appendBlock(role) {
+        hideEmptyState();
+        const wrap = document.createElement('div');
+        wrap.className = 'mb-5 fade-in';
+        if (role === 'user') {
+          wrap.innerHTML = `<div class="flex justify-end"><div class="max-w-[78%] bg-accent/15 border border-accent/30 rounded-2xl rounded-br-md px-4 py-3 text-sm leading-6 whitespace-pre-wrap"></div></div>`;
+        } else {
+          wrap.innerHTML = `<div class="md-block max-w-[92%] bg-panel border border-line rounded-2xl rounded-tl-md px-5 py-4">
+              <div class="thinking-indicator"><div class="thinking-dots"><span></span><span></span><span></span></div><span class="thinking-text">正在检索知识库…</span></div>
+              <div class="md text-sm hidden"></div>
+              <div class="sources mt-3 flex flex-wrap gap-2"></div>
+              <div class="msg-actions"></div>
+            </div>`;
+        }
+        $('chatArea').appendChild(wrap);
+        return wrap;
+      }
+
+      /**
+       * 追加用户消息 Block 并滚动到底部。
+       * @param {string} text - 用户消息文本
+       */
+      function appendUserBlock(text) {
+        const el = appendBlock('user');
+        el.querySelector('div div').textContent = text;
+        scrollToBottom();
+      }
+
+      // ---- 流式渲染（REQ-UI-003）：marked → DOMPurify → highlight，rAF 节流 ----
+      /**
+       * 调度一次 rAF 渲染周期（防抖：已有待执行帧时跳过）。
+       * 触发 renderMarkdown + scrollToBottom。
+       */
+      function scheduleRender() {
+        if (renderScheduled) return;
+        renderScheduled = true;
+        requestAnimationFrame(() => {
+          renderScheduled = false;
+          renderMarkdown();
+          scrollToBottom();
+        });
+      }
+
+      /**
+       * 将 currentRawMarkdown 经 marked → DOMPurify → highlight.js 链路渲染到当前 assistant Block。
+       * 安全铁律：模型输出必须经 DOMPurify 白名单消毒（REQ-SEC-002）。
+       * REQ-VIZ-001：```mermaid 代码块不走向 highlight.js，输出占位 div 等待 chat_done 后渲染。
+       * 代码块追加复制按钮；半截语法容错不抛出异常。
+       */
+      function renderMarkdown() {
+        if (!currentAssistantEl) return;
+        const mdEl = currentAssistantEl.querySelector('.md');
+        // 安全铁律：模型输出必须经 DOMPurify 白名单消毒（REQ-SEC-002）
+        mdEl.innerHTML = DOMPurify.sanitize(marked.parse(currentRawMarkdown));
+        // REQ-VIZ-001：mermaid 代码块 → 占位 div（流式过程中不渲染，chat_done 后渲染）
+        mdEl.querySelectorAll('pre code[class*="mermaid"]').forEach((code) => {
+          const pre = code.parentElement;
+          if (!pre || pre.tagName !== 'PRE') return;
+          const raw = code.textContent;
+          const div = document.createElement('div');
+          div.className = 'mermaid-source';
+          div.setAttribute('data-raw', raw);
+          const srcPre = document.createElement('pre');
+          srcPre.className = 'text-xs text-slate-400';
+          srcPre.textContent = raw;
+          div.appendChild(srcPre);
+          const hint = document.createElement('div');
+          hint.className = 'mermaid-placeholder text-xs mt-1';
+          hint.textContent = '图表渲染中…';
+          div.appendChild(hint);
+          pre.replaceWith(div);
+        });
+        // 代码块增强：包裹 .code-block + 头部栏（语言标签 + 复制按钮）
+        mdEl.querySelectorAll('pre').forEach((pre) => {
+          if (pre.closest('.mermaid-source, .code-block')) return;
+          const code = pre.querySelector('code');
+          if (!code) return;
+          if (!code.dataset.highlighted) { try { hljs.highlightElement(code); } catch (_) { /* 半截语法容错 */ } }
+          const langMatch = /language-(\w+)/.exec(code.className);
+          const lang = langMatch ? langMatch[1] : 'code';
+          const wrapper = document.createElement('div');
+          wrapper.className = 'code-block';
+          const header = document.createElement('div');
+          header.className = 'code-header';
+          const langLabel = document.createElement('span');
+          langLabel.className = 'code-lang';
+          langLabel.textContent = lang;
+          header.appendChild(langLabel);
+          const btn = document.createElement('button');
+          btn.className = 'copy-btn';
+          btn.textContent = '复制';
+          btn.onclick = () => {
+            navigator.clipboard.writeText(code.innerText ?? '');
+            btn.textContent = '已复制 ✓';
+            setTimeout(() => (btn.textContent = '复制'), 1500);
+          };
+          header.appendChild(btn);
+          pre.parentNode.insertBefore(wrapper, pre);
+          wrapper.appendChild(header);
+          wrapper.appendChild(pre);
+        });
+        // GitHub Alerts 标注块：blockquote [!NOTE]/[!TIP]/[!IMPORTANT]/[!WARNING]/[!CAUTION]
+        enhanceCallouts(mdEl);
+        // 任务列表：标记 task-item / task-done 类（GFM 已生成 checkbox）
+        mdEl.querySelectorAll('li').forEach((li) => {
+          const cb = li.querySelector('input[type="checkbox"]');
+          if (!cb) return;
+          li.classList.add('task-item');
+          if (cb.checked) li.classList.add('task-done');
+          // 将 checkbox 后的文本包裹在 span 中以支持 line-through
+          let next = cb.nextSibling;
+          if (next && next.nodeType === Node.TEXT_NODE) {
+            const span = document.createElement('span');
+            span.textContent = next.textContent;
+            next.replaceWith(span);
+          }
+        });
+        // 表格滚动包裹
+        mdEl.querySelectorAll('table').forEach((table) => {
+          if (table.closest('.table-wrap')) return;
+          const wrap = document.createElement('div');
+          wrap.className = 'table-wrap';
+          table.parentNode.insertBefore(wrap, table);
+          wrap.appendChild(table);
+        });
+        // 行内引用标记 [1] [2] → 可点击 cite-ref（仅在有来源时处理）
+        if (lastSources && lastSources.length > 0) enhanceCitations(mdEl);
+        // REQ-VIZ-002: KaTeX 数学公式渲染（$...$ 行内 / $$...$$ 块级）
+        renderKatexInElement(mdEl);
+      }
+
+      /**
+       * GitHub Alerts 标注块增强：检测 blockquote 中的 [!NOTE]/[!TIP]/[!IMPORTANT]/[!WARNING]/[!CAUTION]
+       * 语法，转换为带颜色图标和标题的 callout div（集 GitHub Alerts/Notion Callout 之长）。
+       * @param {HTMLElement} mdEl - Markdown 内容容器
+       */
+      function enhanceCallouts(mdEl) {
+        const ALERT_CONFIG = {
+          note: { icon: 'ℹ️', label: 'Note' },
+          tip: { icon: '💡', label: 'Tip' },
+          important: { icon: '❗', label: 'Important' },
+          warning: { icon: '⚠️', label: 'Warning' },
+          caution: { icon: '🔴', label: 'Caution' },
+        };
+        mdEl.querySelectorAll('blockquote').forEach((bq) => {
+          const firstP = bq.querySelector('p');
+          if (!firstP) return;
+          const text = firstP.textContent.trim();
+          const match = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i.exec(text);
+          if (!match) return;
+          const type = match[1].toLowerCase();
+          const cfg = ALERT_CONFIG[type];
+          if (!cfg) return;
+          const callout = document.createElement('div');
+          callout.className = 'callout callout-' + type;
+          const title = document.createElement('div');
+          title.className = 'callout-title';
+          title.innerHTML = '<span>' + cfg.icon + '</span><span>' + cfg.label + '</span>';
+          callout.appendChild(title);
+          // 内容：移除 [!TYPE] 标记行，保留其余
+          const rest = text.slice(match[0].length).trim();
+          if (rest) { firstP.textContent = rest; }
+          else { firstP.remove(); }
+          const body = document.createElement('div');
+          body.className = 'callout-body';
+          while (bq.firstChild) body.appendChild(bq.firstChild);
+          callout.appendChild(body);
+          bq.replaceWith(callout);
+        });
+      }
+
+      /**
+       * 行内引用标记增强：将文本中的 [1] [2] 等引用标记转换为可点击的 .cite-ref 元素，
+       * 点击后高亮对应的来源芯片（集 Perplexity/Claude 引用交互之长）。
+       * @param {HTMLElement} mdEl - Markdown 内容容器
+       */
+      function enhanceCitations(mdEl) {
+        const walker = document.createTreeWalker(mdEl, NodeFilter.SHOW_TEXT, {
+          acceptNode: (node) => {
+            const parent = node.parentElement;
+            if (!parent) return NodeFilter.FILTER_REJECT;
+            if (parent.closest('a, code, pre, .cite-ref, .callout-title')) return NodeFilter.FILTER_REJECT;
+            return /\[(\d+)\]/.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+          },
+        });
+        const textNodes = [];
+        let node;
+        while ((node = walker.nextNode())) textNodes.push(node);
+        for (const textNode of textNodes) {
+          const text = textNode.nodeValue;
+          const regex = /\[(\d+)\]/g;
+          let lastIndex = 0;
+          let match;
+          const fragments = [];
+          while ((match = regex.exec(text)) !== null) {
+            if (match.index > lastIndex) {
+              fragments.push(document.createTextNode(text.slice(lastIndex, match.index)));
+            }
+            const num = parseInt(match[1], 10);
+            if (num >= 1 && num <= (lastSources ? lastSources.length : 0)) {
+              const ref = document.createElement('span');
+              ref.className = 'cite-ref';
+              ref.textContent = '[' + num + ']';
+              ref.setAttribute('data-cite', String(num));
+              ref.onclick = () => {
+                const block = mdEl.parentElement;
+                if (!block) return;
+                const chips = block.querySelectorAll('.sources span');
+                const chip = chips[num - 1];
+                if (chip) {
+                  chip.style.transition = 'background 0.3s';
+                  chip.style.background = 'rgba(56,189,248,0.4)';
+                  setTimeout(() => { chip.style.background = ''; }, 1000);
+                }
+              };
+              fragments.push(ref);
+            } else {
+              fragments.push(document.createTextNode(match[0]));
+            }
+            lastIndex = regex.lastIndex;
+          }
+          if (fragments.length > 0) {
+            if (lastIndex < text.length) {
+              fragments.push(document.createTextNode(text.slice(lastIndex)));
+            }
+            const parent = textNode.parentElement;
+            if (parent) {
+              fragments.forEach((f) => parent.insertBefore(f, textNode));
+              parent.removeChild(textNode);
+            }
+          }
+        }
+      }
+
+      /**
+       * 填充并显示消息操作栏（复制全文按钮）。
+       * 在流结束（finalizeStream）和历史消息加载（loadConversation）时调用。
+       * @param {HTMLElement} blockEl - assistant Block 根元素（wrap）
+       * @param {string} rawMarkdown - 该消息的原始 Markdown 文本
+       */
+      function showMsgActions(blockEl, rawMarkdown) {
+        const bar = blockEl.querySelector('.msg-actions');
+        if (!bar) return;
+        bar.innerHTML = '';
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'msg-action-btn';
+        copyBtn.textContent = '复制全文';
+        copyBtn.onclick = () => {
+          navigator.clipboard.writeText(rawMarkdown);
+          copyBtn.textContent = '已复制 ✓';
+          setTimeout(() => (copyBtn.textContent = '复制全文'), 1500);
+        };
+        bar.appendChild(copyBtn);
+      }
+
+      /**
+       * 在 DOM 元素内渲染 KaTeX 数学公式（REQ-VIZ-002）。
+       * 遍历文本节点，匹配 $...$（行内）和 $$...$$（块级）LaTeX 语法，
+       * 调用 katex.renderToString() 渲染。流式过程中半截语法保留原始文本（.katex-pending），
+       * 待 chat_done 后 renderRichContent() 重试。
+       * 安全铁律：KaTeX 渲染在 DOMPurify 消毒之后执行，输入已是消毒文本（ADR-009 §6.1）。
+       * @param {HTMLElement} el - Markdown 内容容器元素（.md）
+       */
+      function renderKatexInElement(el) {
+        if (typeof katex === 'undefined') return;
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+          acceptNode: (node) => {
+            const parent = node.parentElement;
+            if (!parent) return NodeFilter.FILTER_REJECT;
+            // 跳过代码块、pre、已渲染的 KaTeX、Mermaid 占位
+            if (parent.closest('pre, code, .katex, .mermaid-source')) return NodeFilter.FILTER_REJECT;
+            return /\$/.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+          },
+        });
+        const textNodes = [];
+        let node;
+        while ((node = walker.nextNode())) textNodes.push(node);
+        for (const textNode of textNodes) {
+          const text = textNode.nodeValue;
+          // 先匹配 $$...$$（块级），再匹配 $...$（行内）
+          const regex = /\$\$([\s\S]+?)\$\$|\$([^\$\n]+?)\$/g;
+          let lastIndex = 0;
+          let match;
+          const fragments = [];
+          while ((match = regex.exec(text)) !== null) {
+            if (match.index > lastIndex) {
+              fragments.push(document.createTextNode(text.slice(lastIndex, match.index)));
+            }
+            const isBlock = !!match[1];
+            const latex = (match[1] || match[2] || '').trim();
+            try {
+              const html = katex.renderToString(latex, {
+                throwOnError: true,
+                displayMode: isBlock,
+                output: 'html',
+              });
+              const container = document.createElement(isBlock ? 'div' : 'span');
+              container.className = isBlock ? 'katex-block' : 'katex-inline';
+              container.innerHTML = html;
+              fragments.push(container);
+            } catch (_) {
+              // 流式中半截语法：保留原始 $...$ 文本，标记 .katex-pending 供 chat_done 后重试
+              const pending = document.createElement(isBlock ? 'div' : 'span');
+              pending.className = 'katex-pending';
+              pending.setAttribute('data-latex', latex);
+              pending.setAttribute('data-display', String(isBlock));
+              pending.textContent = match[0];
+              fragments.push(pending);
+            }
+            lastIndex = regex.lastIndex;
+          }
+          if (fragments.length > 0) {
+            if (lastIndex < text.length) {
+              fragments.push(document.createTextNode(text.slice(lastIndex)));
+            }
+            const parent = textNode.parentElement;
+            if (parent) {
+              fragments.forEach((f) => parent.insertBefore(f, textNode));
+              parent.removeChild(textNode);
+            }
+          }
+        }
+      }
+
+      /**
+       * 渲染富内容（REQ-VIZ-001/002）：将 .mermaid-source 占位元素渲染为 SVG 图表，
+       * 重试渲染流式期间未能渲染的 KaTeX 公式（.katex-pending）。
+       * 在 chat_done 事件后和历史消息加载时调用。mermaid securityLevel: 'strict' 禁止脚本注入。
+       * @param {HTMLElement} mdEl - Markdown 内容容器元素（.md）
+       */
+      async function renderRichContent(mdEl) {
+        if (!mdEl) return;
+        const sources = mdEl.querySelectorAll('.mermaid-source:not(.mermaid-rendered):not(.mermaid-error)');
+        for (const el of sources) {
+          const raw = el.getAttribute('data-raw') || '';
+          try {
+            const id = 'mmd-' + Math.random().toString(36).slice(2, 10);
+            const { svg } = await mermaid.render(id, raw);
+            el.innerHTML = svg;
+            el.classList.add('mermaid-rendered');
+          } catch (_) {
+            // 语法错误：显示错误提示 + 保留源码（TC-VIZ-003）
+            el.classList.add('mermaid-error');
+            el.innerHTML = '';
+            const errMsg = document.createElement('div');
+            errMsg.className = 'text-red-400 text-xs mb-1';
+            errMsg.textContent = '⚠ 图表语法错误';
+            el.appendChild(errMsg);
+            const srcPre = document.createElement('pre');
+            srcPre.className = 'text-xs text-slate-400 overflow-x-auto';
+            srcPre.textContent = raw;
+            el.appendChild(srcPre);
+          }
+        }
+        // REQ-VIZ-002: 重试渲染流式期间未能渲染的 KaTeX 公式（chat_done 后语法应已完整）
+        const pendingKatex = mdEl.querySelectorAll('.katex-pending');
+        for (const kp of pendingKatex) {
+          const latex = kp.getAttribute('data-latex') || '';
+          const isBlock = kp.getAttribute('data-display') === 'true';
+          try {
+            const html = katex.renderToString(latex, {
+              throwOnError: true,
+              displayMode: isBlock,
+              output: 'html',
+            });
+            kp.innerHTML = html;
+            kp.classList.remove('katex-pending');
+            kp.classList.add(isBlock ? 'katex-block' : 'katex-inline');
+          } catch (_) {
+            // 语法错误：显示错误提示 + 保留源码
+            kp.classList.remove('katex-pending');
+            kp.classList.add('katex-error');
+            kp.textContent = '⚠ 公式语法错误: ' + latex;
+          }
+        }
+        // REQ-VIZ-003: 表格数据→图表转换（chat_done 后检测 Markdown 表格）
+        enhanceTablesForChart(mdEl);
+      }
+
+      /**
+       * REQ-VIZ-003: 检测 Markdown 表格并注入「切换图表视图」按钮。
+       * 表格数据解析为 labels + datasets，用户可切换柱状图/折线图/饼图。
+       * 暗色主题适配：坐标轴文字 #94a3b8，网格线 rgba(255,255,255,0.08)，强调色 #38BDF8。
+       * @param {HTMLElement} mdEl - Markdown 内容容器
+       */
+      function enhanceTablesForChart(mdEl) {
+        if (typeof Chart === 'undefined') return;
+        // 设置 Chart.js 全局暗色主题默认值（仅一次）
+        if (!Chart._echomindDefaults) {
+          Chart.defaults.color = '#94a3b8';
+          Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
+          Chart._echomindDefaults = true;
+        }
+        const tables = mdEl.querySelectorAll('table:not(.chart-enhanced)');
+        for (const table of tables) {
+          table.classList.add('chart-enhanced');
+          const data = parseTableForChart(table);
+          if (!data || data.labels.length === 0 || data.datasets.length === 0) continue;
+          const btn = document.createElement('button');
+          btn.className = 'chart-toggle';
+          btn.textContent = '📊 切换图表视图';
+          let chartInstance = null;
+          let chartContainer = null;
+          btn.addEventListener('click', () => {
+            if (chartContainer) {
+              chartContainer.remove();
+              chartContainer = null;
+              if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+              btn.textContent = '📊 切换图表视图';
+              table.style.display = '';
+              return;
+            }
+            table.style.display = 'none';
+            chartContainer = document.createElement('div');
+            chartContainer.className = 'chart-container';
+            const typeBar = document.createElement('div');
+            typeBar.className = 'chart-type-bar';
+            const types = [
+              { type: 'bar', label: '柱状图' },
+              { type: 'line', label: '折线图' },
+              { type: 'pie', label: '饼图' },
+            ];
+            for (const t of types) {
+              const tb = document.createElement('button');
+              tb.textContent = t.label;
+              tb.dataset.type = t.type;
+              tb.addEventListener('click', () => {
+                typeBar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                tb.classList.add('active');
+                if (chartInstance) chartInstance.destroy();
+                chartInstance = renderChart(canvas, t.type, data);
+              });
+              typeBar.appendChild(tb);
+            }
+            const canvas = document.createElement('canvas');
+            chartContainer.appendChild(typeBar);
+            chartContainer.appendChild(canvas);
+            table.parentNode.insertBefore(chartContainer, table.nextSibling);
+            typeBar.querySelector('button').click();
+            btn.textContent = '📊 切换表格视图';
+          });
+          table.parentNode.insertBefore(btn, table);
+        }
+      }
+
+      /**
+       * 解析 Markdown 表格为 Chart.js 数据格式。
+       * @param {HTMLTableElement} table - 表格元素
+       * @returns {{labels: string[], datasets: Array<{label: string, data: number[]}>}|null}
+       */
+      function parseTableForChart(table) {
+        const headerCells = table.querySelectorAll('thead th, thead td');
+        if (headerCells.length === 0) return null;
+        const labels = Array.from(headerCells).slice(1).map(c => c.textContent.trim());
+        if (labels.length === 0) return null;
+        const bodyRows = table.querySelectorAll('tbody tr');
+        if (bodyRows.length === 0) return null;
+        const datasets = [];
+        const palette = ['#38BDF8', '#f97316', '#22c55e', '#a78bfa', '#f43f5e', '#eab308'];
+        for (let i = 0; i < bodyRows.length; i++) {
+          const cells = bodyRows[i].querySelectorAll('td');
+          if (cells.length < 2) continue;
+          datasets.push({
+            label: cells[0].textContent.trim(),
+            data: Array.from(cells).slice(1).map(c => parseFloat(c.textContent.replace(/[^0-9.\-]/g, '')) || 0),
+            backgroundColor: palette[i % palette.length],
+            borderColor: palette[i % palette.length],
+          });
+        }
+        return { labels, datasets };
+      }
+
+      /**
+       * 用 Chart.js 渲染图表到 canvas。
+       * @param {HTMLCanvasElement} canvas - 画布元素
+       * @param {string} type - 图表类型（bar/line/pie）
+       * @param {{labels: string[], datasets: Array}} data - 图表数据
+       * @returns {Chart} Chart.js 实例
+       */
+      function renderChart(canvas, type, data) {
+        const config = {
+          type,
+          data: {
+            labels: data.labels,
+            datasets: data.datasets.map(ds => ({ ...ds, borderWidth: 1 })),
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
+              tooltip: { backgroundColor: '#1C1C1E', titleColor: '#E2E8F0', bodyColor: '#94a3b8' },
+            },
+            scales: type === 'pie' ? {} : {
+              x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.08)' } },
+              y: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.08)' } },
+            },
+          },
+        };
+        return new Chart(canvas, config);
+      }
+
+      /**
+       * 渲染引用来源芯片列表到当前 assistant Block 的 .sources 容器。
+       * @param {Array<{doc_name: string, score: number, chunk: {content: string}}>} sources - 检索命中来源列表
+       */
+      function renderSources(sources) {
+        lastSources = sources;
+        if (!currentAssistantEl) return;
+        const box = currentAssistantEl.querySelector('.sources');
+        box.innerHTML = '';
+        sources.forEach((s, i) => {
+          const chip = document.createElement('span');
+          chip.className = 'text-[11px] px-2.5 py-1 rounded-full bg-accent/10 text-accent border border-accent/25';
+          chip.textContent = `[${i + 1}] ${s.doc_name} · ${(s.score * 100).toFixed(0)}%`;
+          chip.title = s.chunk.content.slice(0, 200);
+          box.appendChild(chip);
+        });
+      }
+
+      /** 平滑滚动聊天区到底部。 */
+      function scrollToBottom() {
+        const area = $('chatArea');
+        area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' });
+      }
+
+      // ================== 发送与流控制（REQ-UI-003 / REQ-RAG-005） ==================
+      /**
+       * 设置输入框状态机（idle / streaming / error）。
+       * 状态迁移：streaming=true 时禁用输入、隐藏发送按钮、显示停止按钮。
+       * @param {'idle'|'streaming'|'error'} state - 目标状态
+       * @param {string} [hint=''] - 状态提示文案
+       */
+      function setInputState(state, hint = '') {
+        streaming = state === 'streaming';
+        $('queryInput').disabled = streaming;
+        $('sendBtn').classList.toggle('hidden', streaming);
+        $('stopBtn').classList.toggle('hidden', !streaming);
+        $('inputHint').textContent = hint;
+        if (!streaming) $('queryInput').focus();
+      }
+
+      /**
+       * 流结束后的状态收尾：清除思考指示器、将 assistant 消息追加到 history、重置临时状态。
+       * @param {boolean} ok - true=正常完成；false=错误/中断（不追加到 history）
+       */
+      function finalizeStream(ok) {
+        // 清除残留的思考指示器（秒中断 / 空回答等边界情况）
+        if (currentAssistantEl) {
+          const thinking = currentAssistantEl.querySelector('.thinking-indicator');
+          if (thinking) thinking.remove();
+          const mdEl = currentAssistantEl.querySelector('.md');
+          if (mdEl) mdEl.classList.remove('hidden');
+          // 消息操作栏：复制全文按钮（集 ChatGPT/Claude 操作栏之长）
+          if (ok && currentRawMarkdown) {
+            showMsgActions(currentAssistantEl, currentRawMarkdown);
+          }
+        }
+        if (ok && currentRawMarkdown) {
+          history.push({ role: 'assistant', content: currentRawMarkdown, sources: lastSources });
+        }
+        currentRawMarkdown = '';
+        lastSources = null;
+        currentAssistantEl = null;
+      }
+
+      /**
+       * 发送用户问题：追加 user Block、初始化 assistant Block、调用 chat IPC 启动流式对话。
+       * 流式 token 由 chat_token 事件驱动渲染（send 本身不等待流结束）。
+       * @throws {Error} chat IPC 调用失败时复位状态并以 error 态提示
+       */
+      async function send() {
+        const query = $('queryInput').value.trim();
+        if (!query || streaming) return;
+        $('queryInput').value = '';
+        $('queryInput').style.height = 'auto';
+        appendUserBlock(query);
+        history.push({ role: 'user', content: query, sources: null });
+
+        currentRawMarkdown = '';
+        lastSources = null;
+        currentAssistantEl = appendBlock('assistant');
+        setInputState('streaming', '正在检索知识库…');
+
+        try {
+          await invoke('chat', {
+            query,
+            history: history.slice(0, -1),
+            conversationId: currentConversationId,
+          });
+        } catch (err) {
+          toastError(err);
+          finalizeStream(false);
+          setInputState('error', sanitizeError(err));
+        }
+      }
+
+      $('stopBtn').onclick = async () => {
+        try {
+          // REQ-AUDIT-005：审计模式调用 abort_audit，对话模式调用 abort_chat
+          if (auditingDocId) {
+            await invoke('abort_audit', { docId: auditingDocId });
+          } else {
+            await invoke('abort_chat', { conversationId: currentConversationId });
+          }
+        } catch (err) {
+          toastError(err);
+        }
+      };
+
+      // ---- 事件监听（契约：REQ-RAG-001/005 / REQ-ING-001 / REQ-AUDIT-005）----
+      // REQ-AUDIT-005：审计阶段事件（extracting / comparing / reporting）
+      listen('audit_phase', (e) => {
+        const p = e.payload;
+        if (currentAssistantEl) {
+          const textEl = currentAssistantEl.querySelector('.thinking-text');
+          if (textEl) textEl.textContent = p.message;
+        }
+        $('inputHint').textContent = p.message;
+      });
+      listen('chat_phase', (e) => {
+        const p = e.payload;
+        // 更新思考指示器文案
+        if (currentAssistantEl) {
+          const textEl = currentAssistantEl.querySelector('.thinking-text');
+          if (textEl) textEl.textContent = p.message;
+        }
+        // 同步更新输入框提示
+        $('inputHint').textContent = p.message;
+      });
+      listen('chat_token', (e) => {
+        // 首个 token 到达：移除思考指示器，显示内容区
+        if (currentAssistantEl) {
+          const thinking = currentAssistantEl.querySelector('.thinking-indicator');
+          if (thinking) thinking.remove();
+          const mdEl = currentAssistantEl.querySelector('.md');
+          if (mdEl) mdEl.classList.remove('hidden');
+        }
+        currentRawMarkdown += e.payload;
+        scheduleRender();
+      });
+      listen('chat_sources', (e) => renderSources(e.payload));
+      listen('chat_error', (e) => {
+        const msg = String(e.payload);
+        if (msg.includes('已中断')) {
+          // 中断语义（REQ-RAG-005）：内容保留并标记，不视为错误
+          if (currentAssistantEl) {
+            const badge = document.createElement('div');
+            badge.className = 'mt-2 text-[11px] text-slate-500';
+            badge.textContent = '⏹ 已中断';
+            currentAssistantEl.querySelector('.md').appendChild(badge);
+          }
+          toast('生成已中断', 'info');
+        } else {
+          toastError(msg);
+          finalizeStream(false);
+          setInputState('error', sanitizeError(msg));
+        }
+      });
+      listen('chat_done', async () => {
+        // REQ-VIZ-001: chat_done 后渲染 Mermaid 图表为 SVG（必须在 finalizeStream 前调用，因其置空 currentAssistantEl）
+        if (currentAssistantEl) {
+          const mdEl = currentAssistantEl.querySelector('.md');
+          if (mdEl) await renderRichContent(mdEl);
+        }
+        finalizeStream(true);
+        setInputState('idle');
+        // REQ-AUDIT-005：审计结束后清除审计模式
+        if (auditingDocId) {
+          auditingDocId = null;
+        } else {
+          await loadConversations(); // 首轮后标题可能已更新（REQ-RAG-006）
+        }
+      });
+      listen('doc-status-changed', (e) => {
+        const p = e.payload;
+        // sub_phase 存在时在消息前添加子阶段标识（REQ-MM-004 多模态管线进度）
+        const phaseLabel = p.sub_phase ? `[${getSubPhaseLabel(p.sub_phase)}] ` : '';
+        toast(phaseLabel + p.message, p.status === 'error' ? 'error' : 'info');
+        loadDocuments(); // 状态徽标实时刷新（REQ-VEC-004）
+      });
+
+      // REQ-ING-006：导入进度事件（已完成数 / 总数 / 当前文件名）
+      listen('import-progress', (e) => {
+        const p = e.payload;
+        if (p.cancelled) {
+          toast('导入已取消', 'info');
+          hideImportProgress();
+          loadDocuments(); // 刷新已完成部分
+          return;
+        }
+        const percent = p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0;
+        $('importProgressBar').style.width = `${percent}%`;
+        $('importProgressText').textContent = `导入中（${p.completed}/${p.total}）· ${p.current_file}`;
+      });
+
+      // GB 级文档加速：向量化进度事件（每微批次推送一次）
+      listen('embedding_progress', (e) => {
+        const p = e.payload;
+        const percent = p.total > 0 ? Math.round((p.embedded / p.total) * 100) : 0;
+        // 向量化进度复用导入进度条区域（此时文件导入已完成，进度条空闲）
+        $('importProgressBar').style.width = `${percent}%`;
+        $('importProgressText').textContent = `向量化中（${p.embedded}/${p.total}）· ${p.doc_name}`;
+      });
+
+      // REQ-VEC-008：模型下载进度事件
+      listen('model_download_progress', (e) => {
+        const p = e.payload;
+        if (p.downloading) {
+          const pct = p.downloading.total > 0
+            ? Math.round((p.downloading.current / p.downloading.total) * 100)
+            : 0;
+          toast(`下载 ${p.downloading.file_name}: ${pct}%`, 'info');
+        } else if (p.loading !== undefined) {
+          toast('正在构建 ONNX 推理会话…', 'info');
+        } else if (p.done !== undefined) {
+          toastSuccess('模型就绪');
+          loadModelCacheInfo();
+        } else if (p.error) {
+          toastError(p.error.message || '模型下载失败');
+        }
+      });
+
+      // ---- 导入取消按钮（REQ-ING-006）----
+      $('importCancelBtn').onclick = async () => {
+        try {
+          await invoke('abort_import');
+          toast('正在取消导入…', 'info');
+        } catch (err) {
+          toastError(err);
+        }
+      };
+
+      // ---- 拖拽导入（REQ-UI-004：Tauri 原生拖拽事件）----
+      listen('tauri://drag-enter', () => $('dragOverlay').classList.remove('hidden'));
+      listen('tauri://drag-leave', () => $('dragOverlay').classList.add('hidden'));
+      listen('tauri://drag-drop', (e) => {
+        $('dragOverlay').classList.add('hidden');
+        importPaths(e.payload.paths);
+      });
+
+      /**
+       * 将多模态管线子阶段标识转换为可读文案（REQ-MM-004）。
+       * @param {string} phase - 子阶段标识（text_extracting / image_rendering / ocr / vlm_enhancing）
+       * @returns {string} 可读文案
+       */
+      function getSubPhaseLabel(phase) {
+        const labels = {
+          text_extracting: '文本提取',
+          image_rendering: '页面渲染',
+          ocr: 'OCR 识别',
+          vlm_enhancing: 'VLM 增强',
+        };
+        return labels[phase] || phase;
+      }
+
+      /**
+       * 批量导入文件路径：调用 import_files，成功刷新列表；配额/PDF 触顶时弹出付费墙。
+       * @param {string[]} paths - 原始文件路径数组
+       */
+      async function importPaths(paths) {
+        if (!paths || paths.length === 0) return;
+        // REQ-ING-006：显示导入进度条
+        showImportProgress(paths.length);
+        try {
+          const names = await invoke('import_files', { paths });
+          if (names.length > 0) {
+            toast(`导入完成：${names.join('、')}`, 'success');
+            await loadDocuments();
+          }
+        } catch (err) {
+          const msg = String(err);
+          if (msg.startsWith('LIMIT_REACHED') || msg.startsWith('PRO_REQUIRED')) {
+            const reason = msg.split(':').slice(1).join(':').trim() || '解锁更多功能';
+            showPaywall(reason);
+          } else {
+            toastError(err);
+          }
+        } finally {
+          hideImportProgress();
+        }
+      }
+
+      $('plusBtn').onclick = async () => {
+        try {
+          const selected = await tauriDialog.open({
+            multiple: true,
+            filters: [{ name: '文档', extensions: ['md', 'txt', 'pdf'] }],
+          });
+          if (selected) importPaths(Array.isArray(selected) ? selected : [selected]);
+        } catch (err) {
+          toastError(err);
+        }
+      };
+
+      // ---- 全局键盘快捷键 ----
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          // 按优先级关闭最上层的 Modal
+          if (!$('vlmConfirm').classList.contains('hidden')) {
+            cancelVlmEnable();
+          } else if (!$('paywall').classList.contains('hidden')) {
+            hidePaywall();
+          } else if (!$('settingsModal').classList.contains('hidden')) {
+            closeSettings();
+          }
+        }
+      });
+
+      // ---- 输入框微交互 ----
+      $('sendBtn').onclick = send;
+      $('queryInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+      });
+      $('queryInput').addEventListener('input', (e) => {
+        const ta = e.target;
+        const prevHeight = ta.clientHeight;
+        ta.style.height = 'auto';
+        const newHeight = Math.min(ta.scrollHeight, 160);
+        // 只在高度变化超过阈值时更新，减少微抖动
+        if (Math.abs(newHeight - prevHeight) > 2) {
+          ta.style.height = newHeight + 'px';
+        } else if (ta.value === '') {
+          ta.style.height = '24px';
+        }
+      });
+
+      // ================== 付费墙（REQ-LIC-003） ==================
+      /**
+       * 显示付费墙 Modal，设置升级原因文案。
+       * @param {string} reason - 触发付费墙的原因（配额触顶 / PDF 付费门）
+       */
+      function showPaywall(reason) {
+        $('paywallReason').textContent = reason || '解锁更多功能';
+        $('paywallError').classList.add('hidden');
+        $('licenseInput').value = '';
+        $('paywall').classList.remove('hidden');
+      }
+
+      /** 隐藏付费墙 Modal。 */
+      function hidePaywall() {
+        $('paywall').classList.add('hidden');
+      }
+
+      /**
+       * 根据 isPro 全局状态刷新侧栏授权状态文案与颜色。
+       */
+      function updateProStatus() {
+        const el = $('proStatus');
+        if (isPro) {
+          el.textContent = 'Pro 版 · 数据仅本地处理';
+          el.classList.add('text-accent');
+        } else {
+          el.textContent = '免费版 · 数据仅本地处理';
+          el.classList.remove('text-accent');
+        }
+      }
+
+      /**
+       * 激活 Pro License：调用 activate_pro 验证签名，成功后刷新 UI 与知识库列表。
+       * @throws {Error} License 验证失败时在 Modal 内联展示错误
+       */
+      async function activatePro() {
+        const key = $('licenseInput').value.trim();
+        if (!key) {
+          $('paywallError').textContent = '请输入 License Key';
+          $('paywallError').classList.remove('hidden');
+          return;
+        }
+        $('paywallActivate').disabled = true;
+        $('paywallActivate').textContent = '激活中…';
+        try {
+          const result = await invoke('activate_pro', { licenseKey: key });
+          if (result) {
+            isPro = true;
+            updateProStatus();
+            hidePaywall();
+            toast('Pro 版已激活！', 'success');
+            await loadDocuments();
+          }
+        } catch (err) {
+          $('paywallError').textContent = String(err);
+          $('paywallError').classList.remove('hidden');
+        }
+        $('paywallActivate').disabled = false;
+        $('paywallActivate').textContent = '激活 Pro';
+      }
+
+      /**
+       * 停用 Pro 授权（REQ-LIC-004）：调用 deactivate_pro，回落为免费版。
+       * 已入库文件保留可读，但新导入按免费版拦截。
+       */
+      async function deactivatePro() {
+        try {
+          await invoke('deactivate_pro');
+          isPro = false;
+          updateProStatus();
+          toast('已停用 Pro 授权，回落为免费版', 'info');
+          await loadDocuments();
+          await openSettings();
+        } catch (err) {
+          toastError(err);
+        }
+      }
+
+      /**
+       * 显示导入进度条（REQ-ING-006）。
+       * @param {number} total - 文件总数
+       */
+      function showImportProgress(total) {
+        importing = true;
+        $('importProgress').classList.remove('hidden');
+        $('importProgressBar').style.width = '0%';
+        $('importProgressText').textContent = `导入中（0/${total}）…`;
+      }
+
+      /** 隐藏导入进度条。 */
+      function hideImportProgress() {
+        importing = false;
+        $('importProgress').classList.add('hidden');
+      }
+
+      // ================== 设置面板（REQ-MM-003 前端接线） ==================
+      /**
+       * 打开设置面板：加载当前 LLM 配置与 VLM 开关状态并渲染。
+       * @throws {Error} get_settings 调用失败时以 toast 提示
+       */
+      async function openSettings() {
+        try {
+          const settings = await invoke('get_settings');
+          // 渲染 LLM 配置信息
+          const info = $('settingsLlmInfo');
+          if (settings.has_llm_config) {
+            info.innerHTML =
+              '<div class="flex justify-between"><span class="text-slate-500">端点</span><span class="text-slate-200 break-all text-right max-w-[60%]">' + settings.base_url + '</span></div>' +
+              '<div class="flex justify-between"><span class="text-slate-500">模型</span><span class="text-slate-200">' + settings.model + '</span></div>' +
+              '<div class="flex justify-between"><span class="text-slate-500">Key</span><span class="text-slate-200">' + settings.api_key_masked + '</span></div>';
+          } else {
+            info.innerHTML = '<div class="text-slate-400 text-center py-2">尚未配置 LLM</div>';
+          }
+          // VLM 开关状态
+          vlmEnabled = settings.vlm_enabled;
+          updateVlmToggle();
+          // 授权状态渲染（REQ-LIC-004）
+          const licenseInfo = $('settingsLicenseInfo');
+          if (isPro) {
+            licenseInfo.innerHTML = '<div class="flex items-center justify-between"><span class="text-accent">Pro 版 · 已激活</span><button id="deactivateBtn" class="text-xs text-red-400 hover:text-red-300 border border-red-400/40 rounded px-2 py-1 transition-colors">停用</button></div>';
+            $('deactivateBtn').onclick = deactivatePro;
+          } else {
+            licenseInfo.innerHTML = '<span class="text-slate-400">免费版 · 最多 50 文件 · PDF 为 Pro 功能</span>';
+          }
+          $('settingsModal').classList.remove('hidden');
+          // 加载模型缓存信息（REQ-VEC-008）
+          loadModelCacheInfo();
+        } catch (err) {
+          toastError(err);
+        }
+      }
+
+      /**
+       * 加载模型缓存信息（REQ-VEC-008-AC-5）。
+       */
+      async function loadModelCacheInfo() {
+        try {
+          const info = await invoke('get_model_cache_info');
+          const el = $('settingsCacheInfo');
+          if (info.models.length === 0) {
+            el.innerHTML = '<div class="text-slate-400">未安装模型（首次使用时自动下载）</div>';
+          } else {
+            const sizeStr = formatBytes(info.total_size_bytes);
+            const modelList = info.models.map(m => `${m.name} (${formatBytes(m.size_bytes)})`).join(' · ');
+            el.innerHTML = '<div class="flex justify-between"><span class="text-slate-500">总大小</span><span class="text-slate-200">' + sizeStr + '</span></div>' +
+              '<div class="text-[11px] text-slate-500">' + modelList + '</div>';
+          }
+        } catch (err) {
+          toastError(err);
+        }
+      }
+
+      /**
+       * 显式初始化向量化引擎（REQ-VEC-008-AC-1~4）。
+       */
+      async function initEmbedder() {
+        try {
+          toast('开始下载模型…', 'info');
+          await invoke('init_embedder');
+        } catch (err) {
+          toastError(err);
+        }
+      }
+
+      /**
+       * 清理模型缓存（REQ-VEC-008-AC-6）。
+       */
+      async function clearModelCache() {
+        try {
+          const freed = await invoke('clear_model_cache', { modelName: null });
+          toastSuccess('已清理 ' + formatBytes(freed));
+          loadModelCacheInfo();
+        } catch (err) {
+          toastError(err);
+        }
+      }
+
+      /**
+       * 格式化字节大小（REQ-VEC-008）。
+       */
+      function formatBytes(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+      }
+
+      /** 关闭设置面板。 */
+      function closeSettings() {
+        $('settingsModal').classList.add('hidden');
+      }
+
+      /**
+       * 更新 VLM Toggle 开关的视觉状态（轨道颜色 + 滑块位置 + 隐私提示可见性）。
+       */
+      function updateVlmToggle() {
+        const toggle = $('vlmToggle');
+        const knob = toggle.querySelector('span');
+        const privacy = $('vlmPrivacy');
+        if (vlmEnabled) {
+          toggle.classList.remove('bg-slate-600');
+          toggle.classList.add('bg-accent');
+          toggle.setAttribute('aria-checked', 'true');
+          knob.classList.add('translate-x-5');
+          privacy.classList.remove('hidden');
+        } else {
+          toggle.classList.add('bg-slate-600');
+          toggle.classList.remove('bg-accent');
+          toggle.setAttribute('aria-checked', 'false');
+          knob.classList.remove('translate-x-5');
+          privacy.classList.add('hidden');
+        }
+      }
+
+      /**
+       * VLM Toggle 点击事件：开启时弹出隐私确认弹窗，关闭时直接生效。
+       */
+      function onVlmToggle() {
+        if (vlmEnabled) {
+          // 当前已开启 → 关闭（无需确认）
+          vlmEnabled = false;
+          updateVlmToggle();
+          saveVlmSetting(false);
+        } else {
+          // 当前关闭 → 开启（弹出隐私确认弹窗）
+          $('vlmConfirm').classList.remove('hidden');
+        }
+      }
+
+      /**
+       * 隐私确认弹窗：确认开启 VLM。持久化到后端并刷新 UI。
+       */
+      async function confirmVlmEnable() {
+        $('vlmConfirm').classList.add('hidden');
+        vlmEnabled = true;
+        updateVlmToggle();
+        await saveVlmSetting(true);
+      }
+
+      /** 隐私确认弹窗：取消（不开启，保持关闭状态）。 */
+      function cancelVlmEnable() {
+        $('vlmConfirm').classList.add('hidden');
+      }
+
+      /**
+       * 持久化 VLM 开关状态到后端。失败时回滚 UI 状态。
+       * @param {boolean} enabled - 目标开关状态
+       */
+      async function saveVlmSetting(enabled) {
+        try {
+          await invoke('set_vlm_enabled', { enabled });
+          toast(enabled ? 'VLM 增强已开启' : 'VLM 增强已关闭', 'success');
+        } catch (err) {
+          toastError(err);
+          // 回滚 UI 状态
+          vlmEnabled = !enabled;
+          updateVlmToggle();
+        }
+      }
+
+      // ---- 侧栏 ----
+      $('collapseBtn').onclick = () => {
+        const sb = $('sidebar');
+        sb.classList.toggle('w-60');
+        sb.classList.toggle('w-14');
+        sb.querySelectorAll('.side-label').forEach((el) => el.classList.toggle('hidden'));
+        $('collapseBtn').textContent = sb.classList.contains('w-14') ? '›' : '‹';
+      };
+      $('newChatBtn').onclick = newChat;
+      $('settingsBtn').onclick = () => { openSettings(); };
+
+      // ---- 付费墙按钮 ----
+      $('paywallClose').onclick = hidePaywall;
+      $('paywallActivate').onclick = activatePro;
+      $('licenseInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') activatePro();
+      });
+
+      // ---- 设置面板按钮（REQ-MM-003 前端接线） ----
+      $('settingsClose').onclick = closeSettings;
+      $('settingsEditLlm').onclick = () => { closeSettings(); showWizard(); };
+$('settingsInitEmbedder').onclick = initEmbedder;
+$('settingsClearCache').onclick = clearModelCache;
+      $('vlmToggle').onclick = onVlmToggle;
+      $('vlmConfirmOk').onclick = confirmVlmEnable;
+      $('vlmConfirmCancel').onclick = cancelVlmEnable;
+
+      // ---- 向导按钮 ----
+      $('wizStart').onclick = startWizard;
+      $('wizKeyLink').onclick = async () => {
+        const url = PRESETS[activePreset].keyUrl;
+        try { await tauriOpener.openUrl(url); }
+        catch (_) { toast('请手动访问：' + url, 'info'); }
+      };
+
+      // ================== 启动引导 ==================
+      // ==text== 高亮标记扩展（集 Notion/Markdown 扩展语法之长）
+      marked.use({
+        extensions: [{
+          name: 'highlight',
+          level: 'inline',
+          start(src) { return src.indexOf('=='); },
+          tokenizer(src) {
+            const match = /^==(?=\S)([\s\S]*?\S)==/.exec(src);
+            if (match) return { type: 'highlight', raw: match[0], text: match[1] };
+          },
+          renderer(token) { return '<mark>' + token.text + '</mark>'; }
+        }]
+      });
+      marked.setOptions({ breaks: true, gfm: true });
+      // REQ-VIZ-001: Mermaid 初始化 — 安全级别 strict 禁止脚本注入，暗色主题，不自动渲染
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        securityLevel: 'strict',
+        fontFamily: 'inherit',
+      });
+      renderPresetCards();
+      applyPreset();
+      resetChatArea('向你的知识库提问', '回答仅基于本地数据与你自己配置的模型。点击左下角 ＋ 或直接把文件拖进来，开始构建知识库。');
+      (async () => {
+        try {
+          const settings = await invoke('get_settings');
+          if (settings.has_llm_config) {
+            isPro = await invoke('get_pro_status');
+            updateProStatus();
+            showApp();
+            await initConversations();
+          } else {
+            showWizard();
+          }
+        } catch (_) {
+          showWizard();
+        }
+      })();
+    </script>
+  </body>
+</html>

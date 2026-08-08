@@ -1,0 +1,37 @@
+#!/bin/sh
+# EchoMind Pre-Commit Hook
+# Runs formatting and linting checks before commit
+# Bypass with: git commit --no-verify
+
+echo "🔍 Running pre-commit checks..."
+
+# Check for common issues
+staged_files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(rs|js|ts|json|html|css)$')
+
+if [ -z "$staged_files" ]; then
+    exit 0
+fi
+
+# Check for merge conflict markers
+if echo "$staged_files" | xargs grep -l '<<<<<<<\|>>>>>>>' 2>/dev/null; then
+    echo "❌ Merge conflict markers found in staged files!"
+    exit 1
+fi
+
+# Check for TODO/FIXME without issue reference
+todo_files=$(echo "$staged_files" | xargs grep -l 'TODO\|FIXME' 2>/dev/null | grep -v node_modules)
+if [ -n "$todo_files" ]; then
+    echo "⚠️  TODO/FIXME found in staged files (consider linking to issues):"
+    echo "$todo_files"
+fi
+
+# Check for sensitive data (API keys, passwords, etc.)
+sensitive_patterns='sk-[a-zA-Z0-9]\{20,\}|password\s*=\s*["\x27][^"\x27]\{8,\}|api_key\s*=\s*["\x27][^"\x27]\{8,\}'
+if echo "$staged_files" | xargs grep -l "$sensitive_patterns" 2>/dev/null | grep -v node_modules | grep -v '_tests\|test_'; then
+    echo "❌ Potential sensitive data detected in staged files!"
+    echo "   If this is a false positive (e.g., test fixture), use --no-verify"
+    exit 1
+fi
+
+echo "✅ Pre-commit checks passed"
+exit 0

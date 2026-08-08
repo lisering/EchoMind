@@ -4,15 +4,24 @@
 resolver = "3"
 members = [
     "crates/models",
+    "crates/prompt",
+    "crates/compact",
+    "crates/context",
     "crates/core",
     "crates/infra",
     "crates/tauri-app",
+    "crates/license-issuer",
 ]
 
-# 体系三铁律：生产代码严禁 unwrap() / expect()（cargo clippy 时强制拒绝）
+# 体系三铁律五：生产代码严禁 unwrap() / expect() / panic!() / unreachable!() / todo!() / unimplemented!()
+# CI 以 clippy deny lint 全覆盖强制（测试代码通过 #![allow(...)] 豁免）
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
 
 # DevOps 基线：dev 模式下全部依赖 crate 以 opt-level 3 编译，避免重型计算库拖慢调试体验
 [profile.dev.package."*"]

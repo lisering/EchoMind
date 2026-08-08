@@ -1,0 +1,17 @@
+{
+  "name": "echomind",
+  "private": true,
+  "version": "0.1.0",
+  "description": "EchoMind (灵犀) — Local RAG knowledge base",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "typecheck:watch": "tsc --noEmit --watch",
+    "build:ui": "node scripts/build-ui.mjs",
+    "build:ui:dev": "node scripts/build-ui.mjs --dev"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "typescript": "^5.7.3"
+  }
+}

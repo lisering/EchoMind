@@ -5,8 +5,8 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0.0 |
-| 生效日期 | 2026-07-24 |
+| 文档版本 | v1.2.0 |
+| 生效日期 | 2026-07-25 |
 | 维护者 | TPM（Git 规范）+ DevOps（目录与密钥基线） |
 
 ---
@@ -56,6 +56,27 @@ cargo check
 cargo test
 ```
 四项全绿方可提交；禁止 `--no-verify` 跳过 hooks。
+
+### 2.4 Git Hooks 自动化（v1.1.0 新增）
+
+项目内置 `.githooks/` 目录，提供提交前自动化检查：
+
+| Hook | 文件 | 检查内容 |
+| --- | --- | --- |
+| pre-commit | `.githooks/pre-commit` | 合并冲突标记检测、TODO/FIXME 提醒、敏感数据（API Key 密钥模式）拦截 |
+| commit-msg | `.githooks/commit-msg` | Conventional Commits 格式校验（`type(scope): description` 正则匹配）、超长标题警告 |
+
+**安装命令**（克隆后执行一次）：
+```bash
+git config core.hooksPath .githooks
+```
+
+验证安装：
+```bash
+git config --get core.hooksPath  # 应输出 .githooks
+```
+
+跳过 hooks（仅紧急情况）：`git commit --no-verify`，但必须在 PR 描述中说明原因。
 
 ---
 
@@ -140,3 +161,7 @@ EchoMind/
 | 版本 | 日期 | 修订摘要 | 批准 |
 | --- | --- | --- | --- |
 | v1.0.0 | 2026-07-24 | 创世版：Git 规范、上下文重建 SOP、变更审查与目录基线确立 | TPM / DevOps |
+| v1.1.0 | 2026-07-25 | 新增 §2.4 Git Hooks 自动化（pre-commit + commit-msg，Conventional Commits 强制校验） | TPM / DevOps |
+| v1.1.1 | 2026-07-25 | VIZ Phase 1：新增 ui/vendor/mermaid.min.js（v11.16.0）+ ui/vendor/MANIFEST.json（SRI 资产清单） | TPM / DevOps |
+| v1.1.2 | 2026-07-25 | VIZ Phase 2：新增 ui/vendor/katex/（KaTeX v0.18.1：JS 272KB + CSS 25KB + mhchem 34KB + 20 woff2 字体 296KB ≈ 627KB）；MANIFEST.json 已更新 SRI 哈希 | TPM / DevOps |
+| v1.2.0 | 2026-07-25 | SRS v2.1.0 原子化重构同步：唯一真相源清单无变更（SRS 仍为唯一需求规格源）；6 个软件资产文档同步更新——frontend-modules（补全已实现函数 + DS/IX/ERR 交叉引用）、UI_ACCEPTANCE（新增 §3.10~3.12 三域验收矩阵 47 用例）、E2E_COVERAGE（新增 §2.8~2.10 三域追溯矩阵）、TEST_STRATEGY（追溯矩阵新增 DS/IX/ERR 条目）、code-contracts（新增 §7 前端原子契约 + 错误前缀系统）、ASSET_MANAGEMENT（本条修订记录） | TPM |

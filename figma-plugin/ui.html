@@ -1,0 +1,66 @@
+<div style="font-family: -apple-system, 'SF Pro SC', 'PingFang SC', sans-serif; padding: 24px; background: #0A0A0B; color: #F8FAFC; height: 100%; overflow-y: auto;">
+  <h1 style="font-size: 20px; font-weight: 700; margin: 0 0 8px;">EchoMind Design System Generator</h1>
+  <p style="font-size: 13px; color: #94A3B8; margin: 0 0 24px; line-height: 1.6;">
+    一键生成 EchoMind 完整设计系统到当前 Figma 文件中。<br>
+    包含 3 个页面：Design Tokens / Components / Layouts。
+  </p>
+
+  <div style="background: #131316; border: 1px solid #2A2A2E; border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+    <h3 style="font-size: 14px; font-weight: 600; margin: 0 0 12px; color: #38BDF8;">🎨 生成内容</h3>
+    <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #CBD5E1; line-height: 2;">
+      <li><b>Design Tokens</b> — Surface/Border/Text/Accent/Semantic 色板 + 字号 + 圆角 + 间距 + 阴影</li>
+      <li><b>Components</b> — 按钮(4状态) / 输入框(3状态) / 徽标 / Toggle / 引用芯片 / 思考指示器 / 消息气泡 / 代码块 / 预设卡片</li>
+      <li><b>Layouts</b> — 向导 / 主界面(侧栏+聊天区+输入框) / 命令面板 / 付费墙 / 设置面板</li>
+    </ul>
+  </div>
+
+  <div style="background: #131316; border: 1px solid #2A2A2E; border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+    <h3 style="font-size: 14px; font-weight: 600; margin: 0 0 12px; color: #38BDF8;">📐 设计规格</h3>
+    <table style="width: 100%; font-size: 12px; color: #94A3B8; border-collapse: collapse;">
+      <tr><td style="padding: 4px 0;">主题</td><td style="text-align: right; color: #CBD5E1;">暗色主题</td></tr>
+      <tr><td style="padding: 4px 0;">主色</td><td style="text-align: right; color: #38BDF8;">#38BDF8 (Sky Blue)</td></tr>
+      <tr><td style="padding: 4px 0;">背景</td><td style="text-align: right; color: #CBD5E1;">#0A0A0B → #303036 (5级)</td></tr>
+      <tr><td style="padding: 4px 0;">字体</td><td style="text-align: right; color: #CBD5E1;">Inter / SF Pro SC</td></tr>
+      <tr><td style="padding: 4px 0;">圆角</td><td style="text-align: right; color: #CBD5E1;">4/8/12/16/20/24px</td></tr>
+    </table>
+  </div>
+
+  <button id="generate" style="width: 100%; background: #38BDF8; color: #0C1116; font-weight: 600; font-size: 14px; border: none; border-radius: 12px; padding: 12px; cursor: pointer; margin-bottom: 8px;">
+    🚀 生成设计系统
+  </button>
+  <button id="cancel" style="width: 100%; background: transparent; color: #94A3B8; font-weight: 400; font-size: 13px; border: 1px solid #2A2A2E; border-radius: 12px; padding: 10px; cursor: pointer;">
+    取消
+  </button>
+
+  <div id="status" style="margin-top: 16px; font-size: 12px; color: #94A3B8; text-align: center;"></div>
+</div>
+
+<script>
+  document.getElementById('generate').onclick = () => {
+    const btn = document.getElementById('generate');
+    btn.disabled = true;
+    btn.textContent = '⏳ 正在生成…';
+    document.getElementById('status').textContent = '正在创建页面和组件…';
+    parent.postMessage({ pluginMessage: { type: 'generate' } }, '*');
+  };
+
+  document.getElementById('cancel').onclick = () => {
+    parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*');
+  };
+
+  window.onmessage = (event) => {
+    const msg = event.data.pluginMessage;
+    if (msg.type === 'done') {
+      const btn = document.getElementById('generate');
+      btn.disabled = false;
+      btn.textContent = '✅ 生成完成';
+      btn.style.background = '#4ADE80';
+      document.getElementById('status').textContent = `已生成 ${msg.pages} 个页面`;
+    } else if (msg.type === 'error') {
+      const btn = document.getElementById('generate');
+      btn.disabled = false;
+      btn.textContent = '❌ 失败，重试';
+      document.getElementById('status').textContent = msg.message;
+    }
+  };
+</script>

@@ -1,14 +1,87 @@
 # L3 E2E 强制门禁（TEST_STRATEGY §7）：
 # - e2e-gui：真实 GUI（WebdriverIO + tauri-driver，ubuntu / windows 矩阵，tauri-driver 不支持 macOS）
-# - e2e-bridge：桥接层（Playwright headless，全平台）
+# - e2e-bridge：桥接层（Playwright headless，全平台，REQ-NFR-003）
+# - build：跨平台构建产出（macOS arm64/x64 + Windows x64 + Linux x64，REQ-NFR-003）
 name: e2e
 
 on:
   pull_request:
+  push:
+    branches: [main]
   schedule:
     - cron: '0 18 * * *'
 
 jobs:
+  # ==================================================================
+  # Rust 编译/lint/测试门禁（铁律五 CI 门禁自动化）
+  # 包括：fmt 格式检查 + clippy deny lint + 全量单元测试
+  # ==================================================================
+  rust-check:
+    name: Rust Check & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '.'
+
+      - name: Format check (cargo fmt --check)
+        run: cargo fmt --check
+
+      - name: Clippy (deny lint: unwrap/expect/panic/unreachable/todo/unimplemented)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Compile check
+        run: cargo check --workspace
+
+      - name: Run all tests
+        run: cargo test --workspace
+
+      - name: Cache embedding model (all-MiniLM-L6-v2)
+        uses: actions/cache@v4
+        with:
+          path: target/fastembed-cache
+          key: fastembed-model-v1
+
+      - name: Generate chaos test corpus
+        run: python3 tests/fixtures/generate_corpus.py
+
+      - name: Run chaos tests (include ignored model-dependent tests)
+        run: cargo test --workspace -- --nocapture --include-ignored
+
+  # ==================================================================
+  # 供应链安全扫描（与测试并行，快速门禁）
+  # 包括：cargo-audit（RustSec 漏洞）+ cargo-deny（许可证/来源）
+  # ==================================================================
+  supply-chain:
+    name: Supply Chain Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '.'
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo-audit (RustSec vulnerability scan)
+        run: cargo audit
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: Run cargo-deny (license + source + bans check)
+        run: cargo deny check
+
   e2e-gui:
     strategy:
       fail-fast: false
@@ -67,7 +140,13 @@ jobs:
         run: npm run test:e2e
 
   e2e-bridge:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        shardIndex: [1, 2, 3, 4]
+        shardTotal: [4]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -84,6 +163,113 @@ jobs:
         working-directory: e2e-tests
         run: npx playwright install --with-deps chromium
 
-      - name: 运行 L3-lite 桥接层测试
+      - name: 运行 L3-lite 桥接层测试（分片 ${{ matrix.shardIndex }}/${{ matrix.shardTotal }}）
         working-directory: e2e-tests
-        run: npm run test:bridge
+        env:
+        # CI 加速：Mock 延迟倍率 0.2（5 倍速）
+          E2E_SPEED: '0.2'
+        run: npx playwright test --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
+
+      - name: 上传 blob 报告
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ matrix.os }}-${{ matrix.shardIndex }}
+          path: e2e-tests/blob-report/*
+          include-hidden-files: true
+          retention-days: 1
+
+  # 合并分片报告
+  e2e-bridge-report:
+    if: ${{ !cancelled() }}
+    needs: [e2e-bridge]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装 E2E 依赖
+        working-directory: e2e-tests
+        run: npm ci
+
+      - name: 下载 blob 报告
+        uses: actions/download-artifact@v4
+        with:
+          path: e2e-tests/blob-report
+          pattern: blob-report-*
+          merge-multiple: true
+
+      - name: 合并报告
+        working-directory: e2e-tests
+        run: npx playwright merge-reports --reporter=html blob-report
+
+      - name: 上传 HTML 报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-bridge-html-report
+          path: e2e-tests/playwright-report
+          retention-days: 7
+
+  # ==================================================================
+  # 跨平台构建产出（REQ-NFR-003 AC-1）
+  # 产出 macOS（arm64 / x64）、Windows（x64）、Linux（x64）安装包
+  # ==================================================================
+  build:
+    name: Build ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            label: macOS-arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            label: macOS-x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: Windows-x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            label: Linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '.'
+
+      - name: 安装 Linux 系统依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装 Tauri CLI
+        run: cargo install tauri-cli --locked
+
+      - name: 构建安装包（${{ matrix.label }}）
+        run: cargo tauri build --target ${{ matrix.target }}
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: echomind-${{ matrix.label }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/**/*.dmg
+            target/${{ matrix.target }}/release/bundle/**/*.msi
+            target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            target/${{ matrix.target }}/release/bundle/**/*.deb

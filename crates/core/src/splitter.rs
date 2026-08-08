@@ -1,6 +1,10 @@
-//! 文本分块器（REQ-VEC-001）：基于 tiktoken（cl100k_base）的 token 窗口分块。
-//! BPE 编码器为重型资源，经 `OnceLock` 全局单例化；编码/解码为 CPU 密集任务，
-//! 经 `spawn_blocking` 执行（体系三异步安全铁律，全程零 unwrap/expect）。
+//! 文本分块器（REQ-VEC-001）：段落感知 + token 窗口分块。
+//! 策略：优先在段落边界（`\n\n`）切分，保持语义完整性；单段超窗口时回退到
+//! token 窗口切分（含重叠）。BPE 编码器为重型资源，经 `OnceLock` 全局单例化；
+//! 编码/解码为 CPU 密集任务，经 `spawn_blocking` 执行。
+//!
+//! 段落感知分块解决「大分块语义稀释」问题（TC-RAG-001b 回归教训）：
+//! 标题与其正文保持在同一 chunk，embedding 聚焦单一主题，检索质量显著提升。
 
 use std::sync::OnceLock;
 
@@ -10,14 +14,20 @@ use tiktoken_rs::{CoreBPE, cl100k_base};
 use crate::Splitter;
 
 /// 默认分块窗口（tokens，REQ-VEC-001）
-pub const DEFAULT_CHUNK_TOKENS: usize = 512;
+/// 256 tokens：较小的窗口使 embedding 聚焦于单一主题，
+/// 避免 512 tokens 大分块导致语义稀释、检索分数偏低（TC-RAG-001b 回归教训）。
+pub const DEFAULT_CHUNK_TOKENS: usize = 256;
 /// 默认重叠窗口（tokens，REQ-VEC-001）
-pub const DEFAULT_OVERLAP_TOKENS: usize = 64;
+/// 仅用于单段超窗口时的 token 窗口切分；段落感知切分天然在语义边界分块，无需重叠。
+pub const DEFAULT_OVERLAP_TOKENS: usize = 32;
 
 static CL100K: OnceLock<CoreBPE> = OnceLock::new();
 
 /// 获取全局共享的 cl100k_base 编码器；初始化失败显式返回 Err（零 expect）。
-fn bpe() -> anyhow::Result<&'static CoreBPE> {
+///
+/// `pub` 可见性使 `echomind-compact` 等外部 crate 能复用同一 BPE 实例，
+/// 避免重复加载词表（词表加载约 100ms+）。
+pub fn bpe() -> anyhow::Result<&'static CoreBPE> {
     if let Some(b) = CL100K.get() {
         return Ok(b);
     }
@@ -25,7 +35,12 @@ fn bpe() -> anyhow::Result<&'static CoreBPE> {
     Ok(CL100K.get_or_init(|| encoder))
 }
 
-/// 同步分块实现（供 `spawn_blocking` 调用）。
+/// 段落感知分块（供 `spawn_blocking` 调用）。
+///
+/// 1. 按 `\n\n` 分段（MarkdownLoader 保留的段落边界）
+/// 2. 逐段累加，超过 token 窗口时在段落边界切分
+/// 3. 单段超窗口 → 回退到 token 窗口切分（含重叠）
+/// 4. 无段落分隔（纯文本/代码） → 直接 token 窗口切分
 fn split_sync(
     text: &str,
     chunk_tokens: usize,
@@ -34,6 +49,67 @@ fn split_sync(
     if text.trim().is_empty() {
         return Ok(Vec::new());
     }
+    let bpe = bpe()?;
+
+    // 短文本直接返回（含标题+正文的小段落保持完整）
+    let total = bpe.encode_with_special_tokens(text);
+    if total.len() <= chunk_tokens {
+        return Ok(vec![text.to_string()]);
+    }
+
+    // 尝试段落感知切分
+    let paragraphs: Vec<&str> = text
+        .split("\n\n")
+        .filter(|p| !p.trim().is_empty())
+        .collect();
+    if paragraphs.len() <= 1 {
+        // 无段落分隔 → 回退到 token 窗口切分
+        return token_window_split(text, chunk_tokens, overlap_tokens);
+    }
+
+    let mut chunks = Vec::new();
+    let mut current_parts: Vec<&str> = Vec::new();
+    let mut current_tokens: usize = 0;
+
+    for para in &paragraphs {
+        let para_tokens = bpe.encode_with_special_tokens(para).len();
+
+        if current_tokens + para_tokens <= chunk_tokens {
+            // 段落加入当前 chunk
+            current_parts.push(para);
+            current_tokens += para_tokens;
+        } else {
+            // 当前 chunk 已满，先保存
+            if !current_parts.is_empty() {
+                chunks.push(current_parts.join("\n\n"));
+                current_parts.clear();
+                current_tokens = 0;
+            }
+            // 超长段落单独 token 窗口切分
+            if para_tokens > chunk_tokens {
+                let sub = token_window_split(para, chunk_tokens, overlap_tokens)?;
+                chunks.extend(sub);
+            } else {
+                current_parts.push(para);
+                current_tokens = para_tokens;
+            }
+        }
+    }
+    if !current_parts.is_empty() {
+        chunks.push(current_parts.join("\n\n"));
+    }
+    Ok(chunks)
+}
+
+/// token 窗口切分（回退路径）：按固定 token 窗口 + 重叠切分。
+/// 用于无段落分隔的纯文本/代码，或超长单段。
+///
+/// `pub(crate)` 可见性使 `semantic_splitter` 在子句仍超窗口时复用此函数。
+pub(crate) fn token_window_split(
+    text: &str,
+    chunk_tokens: usize,
+    overlap_tokens: usize,
+) -> anyhow::Result<Vec<String>> {
     let bpe = bpe()?;
     let tokens = bpe.encode_with_special_tokens(text);
     if tokens.len() <= chunk_tokens {
@@ -56,7 +132,7 @@ fn split_sync(
     Ok(chunks)
 }
 
-/// token 窗口分块器（默认 512 tokens / 重叠 64，REQ-VEC-001）。
+/// token 窗口分块器（默认 256 tokens / 重叠 32，REQ-VEC-001）。
 pub struct TextSplitter {
     chunk_tokens: usize,
     overlap_tokens: usize,

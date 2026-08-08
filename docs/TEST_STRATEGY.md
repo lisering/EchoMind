@@ -5,8 +5,8 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 文档版本 | v1.1.0 |
-| 生效日期 | 2026-07-24 |
+| 文档版本 | v1.6.0 |
+| 生效日期 | 2026-07-26 |
 | 维护者 | QA Lead |
 
 ---
@@ -134,9 +134,52 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 
 任何门禁失败时不允许 `git commit` 合入主干；禁止跳过 hooks 与 CI 检查。
 
----
+## 7.5 UI 验收测试体系（v1.4.0 新增）
 
-## 8. 完成定义（Definition of Done）
+> 详细规范见 `docs/UI_ACCEPTANCE.md`。
+
+### 7.5.1 体系范围
+
+UI 验收测试体系覆盖 **8 大基础维度 + 9 大新增维度 = 17 个验收维度**，~150 个自动化用例，分布在 19 个 Playwright spec 文件中。
+
+### 7.5.2 Mock 覆盖率
+
+- **IPC 命令**：24/24 全覆盖（`tauri-stub.js`）
+- **事件**：10/10 全覆盖（chat_phase / chat_token / chat_sources / chat_error / chat_done / doc-status-changed / audit_phase / import-progress / embedding_progress / model_download_progress）
+
+### 7.5.3 新增验收维度
+
+| 维度 | spec 文件 | 用例数 | 覆盖 REQ |
+| --- | --- | --- | --- |
+| 审计功能 UI | audit.spec.ts | 7 | REQ-AUDIT-001/004/005 |
+| 文档操作按钮 | document-actions.spec.ts | 8 | REQ-VEC-005/ING-005/AUDIT-001 |
+| 导入进度与取消 | import-progress.spec.ts | 7 | REQ-ING-006 |
+| 模型缓存管理 | model-cache.spec.ts | 8 | REQ-VEC-008 |
+| Toast 系统行为 | toast.spec.ts | 8 | REQ-UI-005 |
+| Markdown 渲染完整性 | markdown-render.spec.ts | 10 | REQ-UI-002 |
+| 键盘导航与无障碍 | keyboard-a11y.spec.ts | 10 | REQ-UI-001/003/007 |
+| 侧栏折叠与交互 | sidebar-behavior.spec.ts | 9 | REQ-UI-001 |
+| License 停用 UI | license-deactivate.spec.ts | 8 | REQ-LIC-004 |
+
+### 7.5.4 缺陷发现
+
+体系建立过程中已发现并修复 8 个缺陷：
+
+| 编号 | 严重性 | 描述 |
+| --- | --- | --- |
+| BUG-UI-001 | P0 | `toastSuccess()` 被调用但未定义，导致 JS 运行时错误 |
+| BUG-UI-002 | P1 | `toContainText('A|B|C')` 误将 `|` 作字面量，审计阶段文案匹配失败 |
+| BUG-UI-003 | P1 | `locator('button').click()` 多按钮匹配触发 strict mode violation |
+| BUG-UI-004 | P2 | `#stopBtn` 初始隐藏态被断言为 `toBeVisible` |
+| BUG-UI-005 | P1 | Mock `import_files` 同步返回导致进度条闪现 |
+| BUG-UI-006 | P1 | Toast 通知层遮挡 `#importCancelBtn`，Playwright click 被拦截 |
+| BUG-UI-007 | P2 | `#importProgressText` 初始文本不含文件名，`innerText()` 时序竞争 |
+| BUG-UI-008 | P2 | Mock `audit_document` token 间隔过短，取消测试时序不可靠 |
+| BUG-UI-009 | P1 | `#queryInput` textarea 缺少 `py-1.5` 垂直内边距，单行高度（24px）比按钮（36px）矮 12px，`items-end` 导致 placeholder/光标偏下 |
+
+全量 141/141 测试绿灯。
+
+---
 
 一个原子任务被 TPM 关闭前，必须同时满足：
 
@@ -209,11 +252,47 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | REQ-MM-004 | AC-1/AC-2/AC-3 | TC-MM-004（多模态导入管线图文混排可检索） | L2 | 红灯→绿灯 |
 | REQ-MM-003 | 前端接线 AC-1/AC-2/AC-3/AC-4 | TC-MM-005（VLM 开关持久化与重启恢复） | L2 | 绿灯 |
 | REQ-MM-003 | 前端接线 AC-1/AC-2/AC-3/AC-4 | TC-MM-006（vision_provider 运行时开关响应） | L2 | 绿灯 |
+| REQ-MM-005 | AC-1/AC-3 / 4 级分级策略框架 | TC-MM-007（VLM_TIERED_PROMPT 含 Level 1~4 全部等级标记 + 表格/Markdown/Mermaid/数据图表关键词） | L1 | 绿灯 |
+| REQ-MM-005 | AC-1 / Level 3 CSV 提取 | TC-MM-007a（prompt 含坐标轴/数据系列/CSV/数值/趋势提取引导） | L1 | 绿灯 |
+| REQ-MM-005 | AC-3 / 误差标注 | TC-MM-007b（prompt 含「AI 视觉提取」/「可能存在误差」/「请核对原文」三段标注） | L1 | 绿灯 |
+| REQ-MM-005 | AC-2 / LaTeX 公式提取 | TC-MM-007（prompt 含公式/LaTeX/$ 定界符引导） | L1 | 绿灯 |
+| REQ-MM-005 | AC-1/AC-3/AC-5 / CSV 端到端管线 | TC-MM-007c（mock VLM 返回 CSV 数据 → chunks 含坐标轴+3 数据点+误差标注 + prompt 含 Level 3/CSV/LaTeX 验证） | L2 | 绿灯 |
 | REQ-MM-003 | 前端接线 | E2E-MM-001~009（设置面板 + VLM 开关 + 隐私弹窗 9 场景） | L3-lite | 绿灯 |
 | REQ-VEC-001 | AC-3 / 段落感知 / 代码块完整性 | TC-VEC-002（SemanticSplitter 端到端分块入库：sequence 连续 + 标题正文同 chunk + 代码块内容完整 + token_count 合理） | L1 | 绿灯 |
 | REQ-RAG-003 | AC-1 / Phase 4 Chunk Expansion | TC-RAG-009（检索命中后扩展前后各 1 个相邻 chunk，补全跨 chunk 上下文，去重 + 按 sequence 排序） | L1 | 绿灯 |
 | REQ-VEC-002 | AC-2 / Phase 3 ContextualEmbedding | TC-RAG-010（build_contextual_text 拼接文档名前缀，使嵌入向量包含文档上下文信息） | L1 | 绿灯 |
 | REQ-VEC-006 | AC-1/2/3/4 | TC-VEC-010（SectionAwareSplitter 章节感知分块：标题层级 → section 切分 → 章节路径前缀，无标题退化） | L1 | 绿灯 |
+| REQ-AUDIT-001 | AC-1/AC-2/AC-3/AC-4 | TC-AUDIT-001/001b（全量审计 list_chunks 非 vector_search + audit_phase 事件 + 取消部分报告 + 空文档 NoChunks）；TC-AUDIT-006（免费版审计门控）；TC-AUDIT-007（Pro 未配置 LLM 拦截）；TC-AUDIT-009（Pro Indexed 文档审计前置数据验证）；TC-AUDIT-010（空文档边界处理） | L1+L2 | 绿灯 |
+| REQ-AUDIT-002 | AC-1/AC-2/AC-3/AC-4 | TC-AUDIT-002/002b（原子声明提取 JSON + chunk_id/sequence 来源追溯 + 非声明过滤 + JSON 解析失败降级） | L1 | 绿灯 |
+| REQ-AUDIT-003 | AC-1/AC-2/AC-3/AC-4 | TC-AUDIT-003/003b（SIFiD 预筛 cosine≥0.65 + LLM 精判 contradiction/consistent/unverifiable + 语义无关过滤） | L1 | 绿灯 |
+| REQ-AUDIT-004 | AC-1/AC-2/AC-3/AC-4/AC-5 | TC-AUDIT-004/004b（report_to_markdown 摘要+矛盾清单+免责声明 + 空矛盾文案 + DOMPurify 安全） | L1 | 绿灯 |
+| REQ-AUDIT-005 | AC-1/AC-2/AC-3/AC-4 | TC-AUDIT-005（audit_phase 进度 + abort_audit 取消 + 部分报告保留 + chat_done 完成）；TC-AUDIT-008（abort_audit 设置 AtomicBool 标志 + clear_audit_cancel 清理语义） | L1+L2 | 绿灯 |
+| REQ-NFR-002 | AC-1 | TC-NFR-002（10k chunks / 384-dim / 20 queries / P95 断言 ≤ 500ms，`#[ignore]` 基准测试） | L1 | 绿灯 |
+| REQ-SEC-004 | AC-1 | TC-SEC-004（数据目录权限 0700 + 密钥文件 0600 + 数据隔离 + 卸载清除） | L1 | 绿灯 |
+| REQ-RAG-010 | AC-1~AC-5 / RRF 融合 + 混合检索 | TC-RRF-001~014（RRF 算法单元测试：空列表/单通道/重叠 chunk 去重/top-k 限制/权重/字段保留）；TC-HYBRID-001~005（混合检索集成测试：向量+关键词融合/空库/关键词单通道命中/阈值过滤/Chunk Expansion）；TC-KEYWORD-001~006（FTS5 关键词测试：匹配/空查询/top-k/删除文档同步/短查询 LIKE 回退） | L1 | 绿灯 |
+| REQ-NFR-006 | AC-1/AC-2/AC-3 / 首 Token 延迟 | TC-NFR-006（build_rag_prompt 20 条 sources ≤ 500ms + ChatEngine.chat 本地管线 ≤ 500ms + chat_phase 三阶段事件顺序验证）；E2E-RAG-014（chat_phase 事件更新指示器文案——已有绿灯用例旁证 AC-2） | L1+L3-lite | 绿灯 |
+| REQ-NFR-007 | AC-1~AC-5 / 嵌入吞吐量 | TC-PERF-001~008（会话池大小/分片/并行推理/微批次进度事件/分块大小自动选择——已有绿灯用例） | L1+L2 | 绿灯 |
+| REQ-NFR-008 | AC-1~AC-6 / UI 交互响应延迟 | E2E-NFR-008（点击列表项 ≤ 100ms 高亮 + 输入框 ≤ 16ms/字符 + 拖拽遮罩 ≤ 100ms + 长耗时操作 ≤ 100ms 加载态 + 滚动 ≥ 30fps + DB 不阻塞 UI） | L3-lite | 规划 |
+| REQ-NFR-009 | AC-1~AC-5 / 崩溃恢复可靠性 | TC-DB-001（已提交数据完整可读 + 外键级联无孤儿）；TC-DB-002（Processing→Failed 僵尸清理）；TC-RAG-005（中断 persist_exchange 保留部分内容） | L1+L2 | 绿灯 |
+| REQ-NFR-010 | AC-1~AC-5 / 流式生成中断容错 | TC-RAG-003（停止按钮 ≤ 200ms 中断 + 内容保留）；TC-RAG-005（中断 persist_exchange + clear_abort 清理） | L1+L2 | 绿灯 |
+| REQ-NFR-011 | AC-1~AC-5 / 数据库并发写入安全 | TC-DB-001（r2d2 连接池 max_size=8 + busy_timeout=5000 + WAL 模式并发读写不阻塞） | L1+L2 | 绿灯 |
+| REQ-NFR-012 | AC-1~AC-5 / 知识库容量可扩展性 | TC-NFR-002（10k chunks P95 ≤ 500ms）；TC-NFR-005c（100k+ HNSW P95 ≤ 10ms `#[ignore]`）；TC-PERF-006（FTS5 分块后立即可用 + auto_chunk_tokens >1MB 切 1024 窗口） | L1+L2 | 绿灯 |
+| REQ-NFR-013 | AC-1~AC-5 / 嵌入并发并行度 | TC-PERF-001~005（default_pool_size / shard_texts / 并行 vs 单会话一致性 / MAX_POOL_SIZE=8 封顶 / 并行吞吐 ≥ 4x） | L1 | 绿灯 |
+| REQ-NFR-014 | AC-1~AC-5 / 代码质量门禁 | CI-BUILD（cargo clippy --all-targets -D warnings + cargo fmt --check + cargo deny check 四维 + workspace.lints 继承） | CI | 绿灯 |
+| REQ-NFR-015 | AC-1~AC-5 / 测试金字塔覆盖率 | CI-TEST（cargo test 全量通过 0 failed + L1 单元 ~136 + L2 集成 ~39 + L3 E2E ~141 + `#[ignore]` 基准手动可跑） | CI | 绿灯 |
+| REQ-NFR-016 | AC-1~AC-5 / 文档实时同步 | TPM/QA 人工审计（SRS 契约字段与代码一致 + 关联测试与实际用例对应 + IPC 命令数一致 + 设置键值一致 + 修订记录追加） | 人工审计 | 绿灯 |
+| REQ-NFR-017 | AC-1~AC-5 / OS 版本兼容性 | CI-BUILD（e2e.yml build 矩阵 macOS arm64/x64 + Windows x64 + Linux x64 + `#[cfg(unix)]`/`#[cfg(not(unix))]` 平台条件） | CI | 规划 |
+| REQ-NFR-018 | AC-1~AC-5 / 开发工具链版本约束 | CI-BUILD（Cargo.toml edition=2024 + resolver=3 + `#[async_trait]` grep 断言 + `[profile.dev.package."*"] opt-level=3` + Rust ≥1.85） | CI | 绿灯 |
+| REQ-NFR-019 | AC-1~AC-5 / 构建产物体积 | CI-BUILD（macOS .dmg ≤ 50MB + Windows .msi ≤ 60MB + ONNX 模型不打包 + ui/vendor/ ≤ 5MB + release LTO+strip） | CI | 规划 |
+| REQ-NFR-020 | AC-1~AC-5 / 增量编译性能 | 手动计时验证（首次 cargo build ~5-10min + 增量 ≤ 30s + cargo check ≤ 10s + cargo clippy ≤ 60s + tauri dev 前端热重载） | 手动验证 | 绿灯 |
+| REQ-NFR-021 | AC-1~AC-5 / 核心功能离线可用性 | E2E-OFFLINE-001~005（前端零 CDN + 零外部网络请求 + 断网下导入/会话/设置正常 + 仅 LLM/VLM/模型下载需联网）；E2E-UI-004（已有 CDN 审计旁证 AC-4） | L3-lite | 绿灯 |
+| REQ-DS-001~007 | AC-1~AC-7 / 色板/字体/间距/图标/组件/动效/圆角阴影 | E2E-DS-001~014（设计系统原子规格 E2E 断言：tailwind.config 色值断言 + `.md` 计算样式 + padding/间距实测 + 按钮变体色值 + fade-in 动画时长 + border-radius 实测） | L3-lite | 规划 |
+| REQ-IX-001~007 | AC-1~AC-7 / 右键菜单/拖拽排序/复制/悬停/确认框/骨架屏 | E2E-IX-001~018（交互设计原子规格 E2E 断言：右键菜单弹出/边界偏移/Esc 关闭/拖拽 opacity/插入线/复制 clipboard/hover 背景色/确认框 500ms 防误触/骨架屏 animate-pulse） | L3-lite | 规划 |
+| REQ-ERR-001~005 | AC-1~AC-5 / 错误分类/重试/离线/崩溃恢复/输入校验 | E2E-ERR-001~015（错误处理原子规格 E2E 断言：LIMIT_REACHED 前缀/showPaywall/sanitizeError 脱敏/LLM 重试退避/离线模式 disabled/崩溃恢复 Processing→Failed/路径遍历拒绝/标题截断） | L3-lite | 规划 |
+| REQ-OBS-001~003 | AC-1~AC-6/AC-1~AC-5/AC-1~AC-5 / 本地日志/性能指标采集/诊断信息导出 | E2E-OBS-001~010（可观测性原子规格 E2E 断言：JSON Lines 日志格式 + 日期轮转 + 日志字段 + 敏感信息过滤 + 性能指标记录 + 诊断信息导出按钮 + 导出文件脱敏） | L3-lite | 规划 |
+| REQ-WIN-001~005 | AC-1~AC-5 / 窗口尺寸/高 DPI/系统托盘/开机自启/系统主题跟随 | E2E-WIN-001~010（窗口管理原子规格 E2E 断言：最小窗口 800×600 + 默认 1200×800 + 窗口位置持久化 + Retina 渲染清晰 + 系统托盘菜单 + 开机自启开关 + prefers-color-scheme 检测） | L3-lite | 规划 |
+| REQ-I18N-001~003 | AC-1~AC-5/AC-1~AC-3/AC-1~AC-4 / 文案外部化/日期本地化/数字本地化 | E2E-I18N-001~008（国际化原子规格 E2E 断言：zh-CN.json 键值对 + 字符串 key 引用 + 缺失 key 回退 + 日期 YYYY-MM-DD HH:mm + 相对时间 + 文件大小 B/KB/MB + 千分位分隔符） | L3-lite | 规划 |
+| REQ-HELP-001~004 | AC-1~AC-5/AC-1~AC-5/AC-1~AC-5/AC-1~AC-6 / 首次引导/FAQ/关于页面/更新检查 | E2E-HELP-001~010（帮助系统原子规格 E2E 断言：Coach Marks 引导 + 跳过/完成持久化 + FAQ 面板 Markdown 渲染 + 关于页面版本号/技术栈 + 更新检查徽标 + 24h 频率限制） | L3-lite | 规划 |
 | （其余条目待 QA 阶段登记） | | | | |
 
 | 版本 | 日期 | 修订摘要 | 批准 |
@@ -232,3 +311,11 @@ Clippy 强制配置（写入 workspace 根 `Cargo.toml` 或 `clippy.toml`，Phas
 | v1.2.8 | 2026-07-25 | Phase 4 Chunk Expansion：TC-RAG-009 绿灯（VectorRetriever.retrieve 命中后扩展前后各 1 个相邻 chunk，补全跨 chunk 上下文，去重 + 按 sequence 排序）；MockStorage 扩展 all_chunks 字段 | TPM |
 | v1.2.9 | 2026-07-25 | Phase 3 ContextualEmbedding：TC-RAG-010 绿灯（build_contextual_text 拼接文档名前缀，零 LLM 成本规则方案）；commands.rs embed_document_chunks 接入 | TPM |
 | v1.3.0 | 2026-07-25 | REQ-VEC-006 章节感知分块：TC-VEC-010 绿灯（SectionAwareSplitter pulldown-cmark 标题层级解析 → section 切分 → 委托 SemanticSplitter → 章节路径前缀）；ImportService.index_inner .md 接入 SectionAwareSplitter | TPM |
+| v1.3.1 | 2026-07-25 | REQ-MM-005 分级图表理解：TC-MM-007/007a/007b/007c 全部绿灯（vlm_prompt 模块 VLM_TIERED_PROMPT 4 级策略 + loader/import 消除重复 + mock VLM CSV 端到端管线） | TPM |
+| v1.3.2 | 2026-07-25 | AUDIT 域 + NFR-002 + SEC-004：TC-AUDIT-001~005b 全部绿灯（9/9 审计单元测试）；TC-AUDIT-006~010 全部绿灯（5/5 审计集成测试——Pro 门控 + LLM 配置检查 + 取消机制 + Indexed 文档前置验证 + 空文档边界）；TC-NFR-002 绿灯（10k chunks P95=178ms ≤ 500ms）；TC-SEC-004 绿灯（数据目录 0700 + 密钥 0600 + 隔离 + 卸载清除） | QA Lead / TPM |
+| v1.3.3 | 2026-07-25 | REQ-RAG-010 混合检索：TC-RRF-001~014 全部绿灯（14/14 RRF 融合算法单元测试——空列表/单通道/重叠去重/top-k/权重/字段保留）；TC-HYBRID-001~005 全部绿灯（5/5 混合检索集成测试——向量+关键词融合/空库/关键词单通道/阈值过滤/Chunk Expansion）；TC-KEYWORD-001~006 全部绿灯（6/6 FTS5 关键词检索测试——匹配/空查询/top-k/删除同步/短查询 LIKE 回退） | QA Lead / TPM |
+| v1.4.0 | 2026-07-25 | UI 验收体系全面升级：新增 §7.5 UI 验收测试体系（17 维度 ~150 用例 19 spec 文件）；Mock 覆盖 24/24 命令 + 10 事件；修复 toastSuccess 未定义 P0 缺陷（BUG-UI-001） | QA Lead / TPM |
+| v1.4.1 | 2026-07-25 | 全量 133/133 绿灯：修复 7 个测试缺陷（BUG-UI-002~008：正则误用/多按钮匹配/toast遮挡/stopBtn可见性/进度条时序/审计取消时序）；Mock 增强 import_files 延迟 + audit token 间隔 | QA Lead |
+| v1.4.2 | 2026-07-25 | 新增输入框视觉对齐维度（input-bar-align.spec.ts 8 用例）；修复 BUG-UI-009 textarea py-1.5 垂直内边距；全量 141/141 绿灯 | QA Lead |
+| v1.5.0 | 2026-07-25 | SRS v2.1.0 原子化重构同步：追溯矩阵新增 DS 域（E2E-DS-001~014）、IX 域（E2E-IX-001~018）、ERR 域（E2E-ERR-001~015）三域 47 条 E2E 用例规划条目；全部状态标注为「规划」（Draft 需求待实现后编写测试） | QA Lead / TPM |
+| v1.6.0 | 2026-07-26 | SRS v2.0/v2.1 同步补全：(1) 追溯矩阵新增 NFR-006~021 共 16 条条目（含 TC-NFR-006 新增 L1 绿灯 + NFR-021 离线 E2E 绿灯 + NFR-007/009/010/011/012/013 已有用例映射 + NFR-014~016/018/020 CI/人工审计绿灯 + NFR-008/017/019 规划）；(2) 追溯矩阵新增 OBS/WIN/I18N/HELP 四域规划条目（E2E-OBS-001~010 / E2E-WIN-001~010 / E2E-I18N-001~008 / E2E-HELP-001~010）；(3) 新增 TC-NFR-006 L1 测试（build_rag_prompt 计时 + ChatEngine 本地管线计时 + 三阶段事件验证）；(4) 新增 E2E-OFFLINE-001~005 离线可用性 E2E 测试（零 CDN + 零外部网络请求 + 断网下导入/会话/设置正常）；(5) tauri-stub.js 增强 chat_phase emitting preparing 阶段 | QA Lead / TPM |

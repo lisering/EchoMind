@@ -55,29 +55,72 @@ fn extract_data_lines(event: &str) -> String {
 pub enum StreamItem {
     /// 增量 token
     Token(String),
+    /// 推理内容增量（reasoning_content，DeepSeek R1 / Qwen 等推理模型的思考过程）
+    Reasoning(String),
+    /// Token 用量统计（流末尾的 usage 字段）
+    Usage(echomind_models::TokenUsage),
     /// `[DONE]` 结束标记
     Done,
 }
 
-/// 解析单条 SSE data 载荷：token 提取与 `[DONE]` 识别；非 token 载荷返回 None。
+/// 解析单条 SSE data 载荷：token 提取、usage 统计与 `[DONE]` 识别；非有效载荷返回 None。
+///
+/// 当 `stream_options.include_usage` 开启时，API 在流末尾发送一个含 `usage` 字段、
+/// `choices` 为空的最终 chunk，此函数将其解析为 `StreamItem::Usage`。
+///
+/// 推理模型（DeepSeek R1 等）在正式回答前会通过 `delta.reasoning_content` 逐段推送
+/// 思考过程，这里优先提取并返回 `StreamItem::Reasoning`；两种字段在同一 chunk 中
+/// 不会同时出现（推理阶段与回答阶段互斥）。
 pub fn parse_openai_payload(payload: &str) -> Option<StreamItem> {
     let trimmed = payload.trim();
     if trimmed == "[DONE]" {
         return Some(StreamItem::Done);
     }
     let chunk: ChatCompletionChunk = serde_json::from_str(trimmed).ok()?;
-    chunk
-        .choices
+    let ChatCompletionChunk { choices, usage } = chunk;
+
+    // 推理阶段：优先提取 reasoning_content
+    if let Some(reasoning) = choices
+        .first()
+        .and_then(|c| c.delta.reasoning_content.as_deref())
+        .filter(|content| !content.is_empty())
+    {
+        return Some(StreamItem::Reasoning(reasoning.to_string()));
+    }
+
+    // 回答阶段：提取 content token（绝大多数 chunk 携带 token）
+    if let Some(token) = choices
         .into_iter()
         .next()
         .and_then(|c| c.delta.content)
         .filter(|content| !content.is_empty())
-        .map(StreamItem::Token)
+    {
+        return Some(StreamItem::Token(token));
+    }
+
+    // 流末尾的 usage chunk（choices 为空 + usage 非空）
+    usage.map(|u| {
+        StreamItem::Usage(echomind_models::TokenUsage {
+            prompt_tokens: u.prompt_tokens,
+            completion_tokens: u.completion_tokens,
+            total_tokens: u.total_tokens,
+        })
+    })
 }
 
 #[derive(serde::Deserialize)]
 struct ChatCompletionChunk {
+    #[serde(default)]
     choices: Vec<ChunkChoice>,
+    #[serde(default)]
+    usage: Option<UsagePayload>,
+}
+
+#[derive(serde::Deserialize)]
+struct UsagePayload {
+    prompt_tokens: u32,
+    completion_tokens: u32,
+    total_tokens: u32,
 }
 
 #[derive(serde::Deserialize)]
@@ -89,4 +132,7 @@ struct ChunkChoice {
 struct ChunkDelta {
     #[serde(default)]
     content: Option<String>,
+    /// 推理内容（DeepSeek R1 / Qwen 等推理模型在回答前推送的思考过程）
+    #[serde(default)]
+    reasoning_content: Option<String>,
 }

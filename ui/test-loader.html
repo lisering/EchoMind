@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>EchoMind Test Loader</title>
+</head>
+<body>
+<iframe id="appFrame" style="width:100vw;height:100vh;border:none;"></iframe>
+<script>
+// Load tauri-stub first, then load index.html in an iframe
+const frame = document.getElementById('appFrame');
+
+frame.addEventListener('load', function() {
+  // Inject the tauri-stub into the iframe's window
+  const frameWindow = frame.contentWindow;
+  const frameDoc = frame.contentDocument;
+  
+  // Copy __TAURI__ from stub
+  const stubScript = frameDoc.createElement('script');
+  stubScript.textContent = `
+    // === tauri-stub injection ===
+    ${document.getElementById('stubSource').textContent}
+  `;
+  // Actually, let's do it differently - fetch the stub and inject
+});
+
+// Better approach: fetch stub, then create a blob URL for modified index.html
+async function loadApp() {
+  // Fetch the tauri-stub
+  const stubResp = await fetch('/e2e-tests/tests/bridge/tauri-stub.js');
+  const stubCode = await stubResp.text();
+  
+  // Fetch index.html
+  const htmlResp = await fetch('/ui/index.html');
+  let html = await htmlResp.text();
+  
+  // Insert the stub script right after <head> tag, before any other scripts
+  const stubTag = '<script>\n' + stubCode + '\n</script>\n';
+  html = html.replace('<head>', '<head>\n' + stubTag);
+  
+  // Create a blob URL and load it in the iframe
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  frame.src = url;
+}
+
+loadApp();
+</script>
+</body>
+</html>

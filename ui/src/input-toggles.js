@@ -1,0 +1,138 @@
+/**
+ * EchoMind 输入区快速 Toggle - DeepSeek 风格输入框旁快速开关。
+ *
+ * 职责：
+ * 1. 创建可点击的 toggle 按钮（混合搜索 / Agent 模式）
+ * 2. 点击切换 active 状态并调用后端 IPC 命令
+ * 3. 暴露 getToggleState() 查询当前状态
+ *
+ * 设计参考：DeepSeek 输入框旁的「深度思考」「联网搜索」快速 toggle
+ * - 默认不激活：灰色文字 + 透明背景
+ * - 激活态：accent 色 + 微染背景
+ * - 点击即时切换，无需打开设置面板
+ */
+
+import { t } from './i18n.js';
+import { invoke } from './ipc.js';
+
+/** SVG 图标 */
+const ICON_HYBRID = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
+const ICON_AGENT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v1a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4z"/><path d="M5 12h14M12 8v8"/></svg>`;
+const ICON_SUB_AGENT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>`;
+const ICON_MEMORY = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 2h20v20H2z"/><path d="M6 6h4v4H6zM14 6h4v4h-4zM6 14h4v4H6zM14 14h4v4h-4z"/></svg>`;
+const ICON_WEB_SEARCH = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;
+
+/**
+ * Toggle 配置表 - 每个-toggle 的 IPC 命令 + 图标 + i18n key。
+ */
+const TOGGLE_CONFIG = {
+  hybrid: {
+    icon: ICON_HYBRID,
+    labelKey: 'chat.toggle_hybrid',
+    ipcCommand: 'set_hybrid_search',
+  },
+  agent: {
+    icon: ICON_AGENT,
+    labelKey: 'chat.toggle_agent',
+    ipcCommand: 'set_agent_enabled',
+  },
+  sub_agent: {
+    icon: ICON_SUB_AGENT,
+    labelKey: 'chat.toggle_sub_agent',
+    ipcCommand: 'set_sub_agent_enabled',
+  },
+  memory: {
+    icon: ICON_MEMORY,
+    labelKey: 'chat.toggle_memory',
+    ipcCommand: 'set_memory_enabled',
+  },
+  web_search: {
+    icon: ICON_WEB_SEARCH,
+    labelKey: 'chat.toggle_web_search',
+    ipcCommand: 'set_web_search_enabled',
+  },
+};
+
+/** 当前 toggle 状态（内存缓存，初始化时从后端加载） */
+const _toggleStates = { hybrid: false, agent: false, sub_agent: false, memory: false, web_search: false };
+
+/**
+ * 创建输入框旁的快速 toggle 按钮。
+ *
+ * @param {string} settingKey - 'hybrid' | 'agent' | 'sub_agent' | 'memory' | 'web_search'
+ * @param {boolean} [initialActive=false] - 初始激活状态
+ * @returns {HTMLDivElement} toggle 按钮元素
+ */
+export function createInputToggle(settingKey, initialActive = false) {
+  const config = TOGGLE_CONFIG[settingKey];
+  if (!config) {
+    console.warn(`[input-toggles] 未知 settingKey: ${settingKey}`);
+    return document.createElement('div');
+  }
+
+  _toggleStates[settingKey] = initialActive;
+
+  const toggle = document.createElement('div');
+  toggle.className = 'input-toggle flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer text-sm transition-colors duration-150 select-none';
+  toggle.dataset.settingKey = settingKey;
+  toggle.setAttribute('role', 'switch');
+  toggle.setAttribute('aria-checked', String(initialActive));
+  toggle.tabIndex = 0;
+  toggle.innerHTML = `${config.icon}<span>${t(config.labelKey)}</span>`;
+
+  /** 更新视觉状态 */
+  function updateVisual() {
+    const active = _toggleStates[settingKey];
+    toggle.classList.toggle('text-accent', active);
+    toggle.classList.toggle('bg-accent/10', active);
+    toggle.classList.toggle('text-text-tertiary', !active);
+    toggle.classList.toggle('hover:text-text-secondary', !active);
+    toggle.classList.toggle('hover:bg-surface-3', !active);
+    toggle.setAttribute('aria-checked', String(active));
+  }
+
+  updateVisual();
+
+  /** 切换状态 */
+  async function doToggle() {
+    const newState = !_toggleStates[settingKey];
+    _toggleStates[settingKey] = newState;
+    updateVisual();
+    try {
+      await invoke(config.ipcCommand, { enabled: newState });
+    } catch (err) {
+      // 回滚状态
+      _toggleStates[settingKey] = !newState;
+      updateVisual();
+      console.error(`[input-toggles] ${settingKey} 切换失败:`, err);
+    }
+  }
+
+  toggle.onclick = doToggle;
+  toggle.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      doToggle();
+    }
+  };
+
+  return toggle;
+}
+
+/**
+ * 获取指定 toggle 的当前状态。
+ * @param {string} settingKey - 'hybrid' | 'agent' | 'sub_agent' | 'memory' | 'web_search'
+ * @returns {boolean}
+ */
+export function getToggleState(settingKey) {
+  return _toggleStates[settingKey] || false;
+}
+
+/**
+ * 设置 toggle 状态（外部同步用，不触发 IPC）。
+ * @param {string} settingKey
+ * @param {boolean} value
+ */
+export function setToggleState(settingKey, value) {
+  _toggleStates[settingKey] = value;
+}

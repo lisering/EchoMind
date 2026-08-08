@@ -7,7 +7,7 @@
 | --- | --- |
 | 产品 | EchoMind（灵犀）—— 商业级本地 AI 知识库桌面应用 |
 | 价值主张 | Rust 极速 · 隐私不出域 · BYOK 买断制 |
-| 文档版本 | v1.2.0 |
+| 文档版本 | v1.4.0 |
 | 生效日期 | 2026-07-25 |
 | 维护者 | TPM（修订须走附则流程） |
 
@@ -77,9 +77,18 @@ AI 引擎在每次任务中按角色视角协同工作。各角色**严禁越位
 
 ## 体系三：架构纯洁性与代码铁律
 
-### 3.0 工程纪律三条铁律（v1.1.0 新增，优先级最高）
+### 3.0 工程纪律铁律（v1.6.0 新增铁律十五 Spec-driven Development，完整规则见 `.catpaw/rules/iron-rules.md`）
 
-#### 铁律一：网络代理规范
+#### 铁律一：网络代理规范（仅限开发调研，软件本身禁止代理）
+
+**⚠️ 核心原则：代理仅用于 AI Agent 的开发调研活动（搜索资料、下载依赖、抓取文档）。EchoMind 软件本身运行时（LLM API 调用、模型下载、Web 搜索等用户面向的网络请求）绝对禁止使用代理。**
+
+**✅ 允许使用代理的场景（开发调研）**：
+- `cargo build` / `cargo update` 下载 crates
+- `npm install` 下载 E2E 依赖
+- HuggingFace 模型下载（仅限开发环境）
+- `web_fetch` / `curl` 抓取外部文档
+- 技术选型调研（GitHub API / crates.io 搜索）
 
 开发环境中若遇无法访问的地址（如 crates.io、huggingface.co 等），允许使用本地代理：
 
@@ -93,7 +102,14 @@ export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_pr
 unset https_proxy http_proxy all_proxy
 ```
 
-此规则同样适用于 `cargo build`、`cargo update`、模型下载等所有需要联网的操作。代理仅在确认直连失败时启用，不得作为默认行为。
+**🚫 禁止使用代理的场景（软件运行时）**：
+- LLM API 调用（`OpenAIProvider` 的 reqwest 请求）
+- 模型下载（`ModelManager` 下载 GGUF 模型）
+- fastembed ONNX 模型下载（运行时首次加载）
+- Web 搜索（`DuckDuckGoProvider`）
+- 任何其他用户面向的网络请求
+
+**代码强制要求**：所有 `reqwest::Client::builder()` 必须加 `.no_proxy()` 确保软件直连，不受 `https_proxy` / `http_proxy` 环境变量影响。
 
 #### 铁律二：TDD 驱动开发
 
@@ -118,6 +134,118 @@ unset https_proxy http_proxy all_proxy
 2. **前端 JavaScript**：所有函数必须有 JSDoc 注释（`/** ... */`），标注 `@param`、`@returns`、`@throws`。复杂状态机和事件流必须有注释说明状态迁移与数据流向。严禁「无注释魔法函数」。
 3. **注释与代码同步**：修改代码时必须同步更新注释。过时注释比没有注释更危险。Code review 时注释与代码不一致视为 review 阻塞项。
 4. **杜绝屎山**：每个函数单一职责，命名自解释。超过 50 行的函数必须拆分。重复代码必须抽取。任何「暂时这样写，以后再改」的代码必须在注释中标记 `// TODO(req-xxx): 说明` 并关联需求编号。
+
+#### 铁律五：生产级代码质量（零 unwrap / 零 panic / 零裸溢出）
+
+> 本铁律将 §3.2.1 的 unwrap 禁令升格为独立铁律，并扩展至 panic 与整数溢出，适用于全部 `crates/` 生产代码（测试代码豁免）。
+
+1. **零 unwrap / 零 expect**：生产代码严禁出现 `.unwrap()`、`.expect()`、`panic!()`、`unreachable!()`、`todo!()`、`unimplemented!()`。所有可能失败的操作必须经 `?` 传播或 `match` 显式处理，错误类型用 `thiserror`（领域层）或 `anyhow`（组装层）定义。CI 以 `clippy::unwrap_used = "deny"`、`clippy::expect_used = "deny"`、`clippy::panic = "deny"`、`clippy::unreachable = "deny"`、`clippy::todo = "deny"`、`clippy::unimplemented = "deny"` 强制。
+2. **零裸整数溢出**：涉及用户输入或外部数据的算术运算（文件大小、配额计数、分块偏移等）必须使用 `checked_*` / `saturating_*` 系列方法或显式范围校验，严禁依赖默认 wrapping 行为。`clippy::arithmetic_side_effects = "deny"` 在高危 crate 启用。
+3. **零 unwrap 链式调用**：禁止 `.map(|x| x.unwrap())`、`if let Some(x) = opt.unwrap()` 等变体绕过 lint。`Option::unwrap` 与 `Result::unwrap` 一视同仁，均以 `ok_or` / `context` / `map_err` 替代。
+4. **错误信息安全**：错误消息严禁包含 API Key、文件路径中的用户名、数据库连接串等敏感信息。`anyhow::Context` 的描述须聚焦「做了什么」而非「内部细节」。
+5. **防御性编程**：对外部输入（文件内容、网络响应、Tauri 参数）执行长度截断、类型校验与字符边界检查后再使用。`String::from_utf8` 失败时用 `from_utf8_lossy` 容错，不得 panic。
+6. **CI 门禁自动化**：每次 PR 必须通过 `cargo clippy --all-targets -- -D warnings`（含上述全部 deny lint），任何违反铁律五的代码不得合入主干。新增 crate 时须在 `Cargo.toml` 继承 workspace lints（`[lints] workspace = true`）。
+
+#### 铁律六：最新版本依赖原则
+
+**所有用到的技术和依赖必须使用最新稳定版本。** 面对新版本时，必须去官网查阅 API 文档和迁移指南，不能凭记忆假设 API 用法。
+
+核心技术栈版本要求：
+
+| 技术 | 最低版本 | 官方文档 |
+| --- | --- | --- |
+| Rust Edition 2024 | Rust 1.85+ | https://www.rust-lang.org/ |
+| Tauri | v2.x | https://v2.tauri.app/ |
+| fastembed | 最新 crates.io 版本 | https://crates.io/crates/fastembed |
+| rusqlite | 最新 crates.io 版本 | https://crates.io/crates/rusqlite |
+| reqwest | 最新 crates.io 版本 | https://crates.io/crates/reqwest |
+| tokio | 最新 crates.io 版本 | https://crates.io/crates/tokio |
+| pulldown-cmark | 最新 crates.io 版本 | https://crates.io/crates/pulldown-cmark |
+| thiserror | 最新 crates.io 版本 | https://crates.io/crates/thiserror |
+| Playwright | 最新 npm 版本 | https://playwright.dev/ |
+| Tailwind CSS | v4+ | https://tailwindcss.com/ |
+
+版本更新规则：
+
+1. **每次开始新功能开发前**，运行 `cargo update --dry-run` 和 `npm outdated` 检查是否有新版本。
+2. **遇到 API 破坏性变更**时，必须查阅官方迁移指南（Migration Guide），不能凭旧记忆编写代码。
+3. **新增依赖**时，必须在 `crates.io` 或 `npm` 确认最新版本号，不能手动猜测版本。
+4. **构建失败**时，首先考虑是否是依赖版本过旧导致的不兼容。
+5. **技术选型**时，优先选择官方维护活跃、文档完善的最新方案。
+
+#### 铁律七：文档实时同步（大模型开发友好度保障）
+
+**代码变更必须同步更新文档，文档与代码的脱节是项目质量的最大威胁。**
+
+同步规则：
+
+| 代码变更类型 | 必须同步更新的文档 | 时限 |
+| --- | --- | --- |
+| 新增/修改 IPC 命令 | `docs/api/ipc-commands.md` | 同一 PR 内 |
+| 新增/修改数据库表 | `docs/api/database-schema.md` | 同一 PR 内 |
+| 新增/修改 trait 方法 | `docs/api/code-contracts.md` | 同一 PR 内 |
+| 新增/修改数据模型 | `docs/api/code-contracts.md` | 同一 PR 内 |
+| 新增/修改 AppState 字段 | `docs/api/code-contracts.md` | 同一 PR 内 |
+| 新增前端 JS 文件 | `docs/api/frontend-modules.md` | 同一 PR 内 |
+| 新增 settings 键 | `docs/api/settings-reference.md` | 同一 PR 内 |
+| 新增 Tauri 事件 | `docs/api/settings-reference.md` | 同一 PR 内 |
+| 功能实现/补齐 | `docs/SRS_v1.0.md` 对应 REQ 状态 | 同一 PR 内 |
+| 新增架构决策 | `docs/architecture/adr/` 新建 ADR | 同一 PR 内 |
+
+检查清单（每次 PR 提交前）：
+
+1. [ ] 是否新增了 IPC 命令？→ 更新 `ipc-commands.md` 并在 `invoke_handler` 注册
+2. [ ] 是否修改了数据库结构？→ 更新 `database-schema.md`
+3. [ ] 是否新增了 trait 方法或数据模型？→ 更新 `code-contracts.md`
+4. [ ] 是否新增了前端文件？→ 更新 `frontend-modules.md`
+5. [ ] 是否新增了设置键或事件？→ 更新 `settings-reference.md`
+6. [ ] 功能状态是否变化？→ 更新 SRS 对应 REQ 状态
+7. [ ] 是否有重大架构决策？→ 新建 ADR
+
+大模型开发文档优先级：
+
+AI Agent 在开发前必须先查阅以下文档（按优先级）：
+
+1. `PROJECT_RULES.md` — 找回纪律约束（最高优先级）
+2. `docs/api/code-contracts.md` — 了解 trait 签名和数据模型（**第一技术参考**）
+3. `docs/api/ipc-commands.md` — 确认命令参数和返回值
+4. `docs/api/database-schema.md` — 确认表名/列名
+5. `AGENTS.md` — 架构速查和已知陷阱
+6. `.catpaw/rules/iron-rules.md` — 铁律规则（跨会话持久化）
+
+#### 铁律八：开发决策必须互联网搜索（杜绝闭门造车）
+
+**在进行产品决策、技术选型、架构设计、头脑风暴等开发活动时，必须先通过互联网搜索获取最新最权威的资料，不能凭记忆做判断。**
+
+适用场景：
+
+- 技术选型（选择 crate / npm 包 / 框架 / API）
+- 竞品分析（了解同类产品的最新功能和架构）
+- 架构设计（查找最新最佳实践和设计模式）
+- 版本兼容性确认（API 是否有破坏性变更）
+- 安全漏洞检查（依赖是否有已知 CVE）
+- 产品决策（行业趋势、用户需求验证）
+
+搜索方法（按可靠性排序）：
+
+1. **`curl` + 代理**（最可靠）：
+   ```bash
+   export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890
+   curl -sL "https://api.github.com/search/repositories?q=关键词&sort=stars&order=desc&per_page=10"
+   curl -sL "https://crates.io/api/v1/crates?q=关键词&sort=downloads"
+   curl -sL "https://raw.githubusercontent.com/用户/仓库/分支/文件路径"
+   ```
+2. **`web_fetch` 工具**（部分网站可用，不稳定）
+3. **浏览器工具**（Google/DuckDuckGo 搜索可能超时或遇到 CAPTCHA）
+
+搜索规则：
+
+1. **每次技术选型前**：在 GitHub API / crates.io 搜索同类项目，对比 stars、活跃度、最近更新。
+2. **每次竞品分析时**：搜索同类开源项目，读取 README 了解最新功能定位。
+3. **每次 API 使用前**：查阅最新官方文档，不凭记忆假设 API 用法（铁律六也要求此点）。
+4. **每次架构决策时**：搜索行业最佳实践和最新趋势验证方案。
+5. **搜索结果必须引用来源**：在文档和决策中标注信息来源（URL / 项目名 / 调研日期）。
+6. **DuckDuckGo 直接搜索会遇到 CAPTCHA**：优先使用 GitHub API 间接搜索或直接访问已知 URL。
 
 ### 3.1 六边形架构
 1. 核心逻辑位于 `crates/core`：**绝对禁止依赖** Tauri、reqwest、rusqlite 等任何具体实现；对外只暴露领域模型与端口 Trait（原生 `async fn` in trait）。
@@ -164,3 +292,7 @@ unset https_proxy http_proxy all_proxy
 | v1.0.0 | 2026-07-24 | 创世版：四大纪律体系确立 | TPM |
 | v1.1.0 | 2026-07-25 | 新增体系三 3.0 三条铁律：网络代理规范、TDD 驱动开发、代码注释规范 | TPM / Chief Architect |
 | v1.2.0 | 2026-07-25 | 新增铁律四：真实数据测试（真实语料、混沌测试、LLM 环境变量、语料自动化） | TPM / QA Lead |
+| v1.3.0 | 2026-07-25 | 新增铁律五：生产级代码质量（零 unwrap / 零 panic / 零裸溢出，CI deny lint 全覆盖） | TPM / Chief Architect |
+| v1.4.0 | 2026-07-25 | 新增铁律六/七/八：最新版本依赖原则、文档实时同步操作清单、开发决策必须互联网搜索 | TPM / Chief Architect |
+| v1.5.0 | 2026-08-04 | 新增铁律九~十四：Rust 生态优先、最前沿技术追踪、GitHub 发布同步、Session 上下文全自动管理、Tailwind 样式规范、SOLID 原则（详见 `.catpaw/rules/iron-rules.md`） | TPM / Chief Architect |
+| v1.6.0 | 2026-08-08 | 新增铁律十五：Spec-driven Development 规格驱动开发（先写规格 REQ+AC+TC 再写代码，测试从 AC 派生） | TPM / Chief Architect |

@@ -1,0 +1,108 @@
+/**
+ * EchoMind 打印样式（REQ-EXP-005）— @media print 规则。
+ *
+ * 当用户通过 window.print() 触发浏览器打印对话框时：
+ * 1. 隐藏非打印元素（侧栏/导航/输入框/工具栏等）
+ * 2. 优化字体（serif 打印友好）/行距/页边距
+ * 3. 分页控制（page-break-inside: avoid 防止消息跨页截断）
+ * 4. 源引用样式优化
+ * 5. 对话气泡排版
+ *
+ * 注意：打印 CSS 主要内联在 iframe HTML 中（export.js buildPrintCss()），
+ * 此文件用于主页面 @media print 规则（当用户直接 Ctrl+P 打印主页面时生效）。
+ */
+
+@media print {
+  /* 隐藏非打印元素 */
+  #sidebar,
+  #inputBar,
+  #settingsPanel,
+  #kbModal,
+  .nav-header,
+  .toolbar,
+  .input-toggles,
+  #micBtn,
+  #sendBtn,
+  #stopBtn,
+  #plusBtn,
+  .tts-btn,
+  .msg-actions,
+  .chat-phase-indicator,
+  #topBar,
+  #jumpToLatest,
+  .sources-toggle,
+  .regen-carousel,
+  .followup-suggestions,
+  .ai-disclaimer,
+  .empty-state-wrapper,
+  .context-collapsed-hint,
+  .thinking-panel,
+  #ctxMenu,
+  #toasts,
+  #commandPalette,
+  #searchPopup,
+  #paywall,
+  #dbError,
+  #graphViewer,
+  #dreamPanel,
+  #symbolSearchPanel,
+  #workflowPanel,
+  #codeExecutorPanel,
+  #downloadManager,
+  .conv-nav-container {
+    display: none !important;
+  }
+
+  /* 打印排版优化 */
+  body {
+    font-family: 'Times New Roman', 'PingFang SC', 'Microsoft YaHei', serif;
+    font-size: 12pt;
+    line-height: 1.6;
+    color: #000;
+    background: #fff;
+  }
+
+  /* 对话消息分页控制 */
+  .msg-block {
+    page-break-inside: avoid;
+    margin-bottom: 16pt;
+  }
+
+  /* 代码块分页 */
+  pre {
+    page-break-inside: avoid;
+    font-size: 10pt;
+  }
+
+  /* 引用来源样式 */
+  .sources {
+    page-break-inside: avoid;
+    margin-top: 2em;
+    border-top: 1px solid #ccc;
+    font-size: 10pt;
+  }
+
+  /* 消息内容打印优化 */
+  .md {
+    color: #000;
+  }
+
+  .md pre {
+    background: #f5f5f5 !important;
+    border: 1px solid #ddd !important;
+  }
+
+  .md code {
+    font-family: 'Courier New', 'Consolas', monospace;
+  }
+
+  /* 表格分页 */
+  table {
+    page-break-inside: avoid;
+  }
+
+  /* 标题不与后续内容分离 */
+  h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+  }
+}

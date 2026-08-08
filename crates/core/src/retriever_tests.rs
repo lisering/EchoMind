@@ -11,7 +11,7 @@
 use anyhow::Result;
 use echomind_models::{ChatMessage, Chunk, DocStatus, Document, RetrievalResult};
 
-use crate::retriever::{build_contextual_text, DEFAULT_SCORE_THRESHOLD, VectorRetriever};
+use crate::retriever::{DEFAULT_SCORE_THRESHOLD, VectorRetriever, build_contextual_text};
 use crate::{Embedder, Retriever, Storage};
 
 /// 固定向量 Embedder（检索内容不影响本测试断言）。
@@ -79,6 +79,10 @@ impl Storage for MockStorage {
         Ok(0)
     }
 
+    async fn count_chunks(&self) -> Result<usize> {
+        Ok(0)
+    }
+
     async fn cleanup_zombies(&self) -> Result<usize> {
         Ok(0)
     }
@@ -131,6 +135,14 @@ impl Storage for MockStorage {
 
     async fn list_chunks(&self, _doc_id: &str) -> Result<Vec<Chunk>> {
         Ok(self.all_chunks.clone())
+    }
+
+    async fn delete_chunks_by_doc(&self, _doc_id: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn keyword_search(&self, _query: &str, _top_k: usize) -> Result<Vec<RetrievalResult>> {
+        Ok(vec![])
     }
 }
 
@@ -202,16 +214,12 @@ async fn tc_rag_009_chunk_expansion_includes_neighbors() {
 
     // 断言：包含前一段落
     assert!(
-        results
-            .iter()
-            .any(|r| r.chunk.content.contains("前一段落")),
+        results.iter().any(|r| r.chunk.content.contains("前一段落")),
         "应包含前一个相邻 chunk"
     );
     // 断言：包含后一段落
     assert!(
-        results
-            .iter()
-            .any(|r| r.chunk.content.contains("后一段落")),
+        results.iter().any(|r| r.chunk.content.contains("后一段落")),
         "应包含后一个相邻 chunk"
     );
     // 断言：包含命中本身
@@ -231,10 +239,7 @@ async fn tc_rag_009_chunk_expansion_includes_neighbors() {
 #[test]
 fn tc_rag_010_contextual_text_includes_doc_name() {
     let text = build_contextual_text("lisp-intro.md", "Lisp 是第二古老的编程语言");
-    assert!(
-        text.contains("lisp-intro.md"),
-        "应包含文档名作为上下文前缀"
-    );
+    assert!(text.contains("lisp-intro.md"), "应包含文档名作为上下文前缀");
     assert!(
         text.contains("Lisp 是第二古老的编程语言"),
         "应包含原始 chunk 内容"

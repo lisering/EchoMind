@@ -1,0 +1,21 @@
+[package]
+name = "license-issuer"
+version = "1.4.0"
+edition = "2024"
+description = "EchoMind License 签发 CLI 工具（REQ-LIC-005）：生成 Ed25519 密钥对 + 签发 License Key"
+
+[dependencies]
+anyhow = "1.0"
+# 启用 rand_core feature 以使用 SigningKey::generate（rand_core 0.6.x 与 rand 0.8.x 兼容）
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+base64 = "0.22"
+# CLI 参数解析
+clap = { version = "4.5", features = ["derive"] }
+# rand 0.8.x 依赖 rand_core 0.6.x，与 ed25519-dalek 2.x 兼容
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

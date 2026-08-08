@@ -1,4 +1,11 @@
-#![allow(clippy::unwrap_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::unimplemented
+)]
 //! QA 红灯测试：TC-LLM-001 SSE 粘包/拆包解析（REQ-LLM-001-AC-1）。
 
 use crate::stream_parse::{SseParser, StreamItem, parse_openai_payload};
@@ -62,4 +69,69 @@ fn tc_llm_001_ignores_non_token_payloads() {
     let chunk = b": comment\n\ndata: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n";
     let items = feed_and_collect(&mut parser, &[chunk]);
     assert!(items.is_empty(), "注释与无 content 的 delta 必须被忽略");
+}
+
+/// TC-LLM-004：推理模型（DeepSeek R1 等）的 reasoning_content 被解析为
+/// `StreamItem::Reasoning`，且与 content token 互斥（推理阶段/回答阶段分离）。
+#[test]
+fn tc_llm_004_reasoning_content_parsed() {
+    let mut parser = SseParser::new();
+
+    // 推理阶段：仅含 reasoning_content 的 delta
+    let reasoning = b"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Let me analyze this first\"}}]}\n\n";
+    let items = feed_and_collect(&mut parser, &[reasoning]);
+    assert_eq!(items.len(), 1, "推理 chunk 应产出 1 个 StreamItem");
+    match &items[0] {
+        StreamItem::Reasoning(t) => assert_eq!(t, "Let me analyze this first"),
+        other => panic!("期望 Reasoning，得到 {:?}", other),
+    }
+
+    // 回答阶段：仅含 content 的 delta（不含 reasoning_content 时行为不变）
+    let answer = b"data: {\"choices\":[{\"delta\":{\"content\":\"The answer is...\"}}]}\n\n";
+    let items = feed_and_collect(&mut parser, &[answer]);
+    match &items[0] {
+        StreamItem::Token(t) => assert_eq!(t, "The answer is..."),
+        other => panic!("期望 Token，得到 {:?}", other),
+    }
+
+    // reasoning_content 为空字符串时不产出 Reasoning（与 content 空字符串一致）
+    let empty_reasoning = b"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"\"}}]}\n\n";
+    let items = feed_and_collect(&mut parser, &[empty_reasoning]);
+    assert!(items.is_empty(), "空 reasoning_content 必须被忽略");
+}
+
+/// TC-LLM-002：流末尾的 usage chunk 被解析为 `StreamItem::Usage`。
+///
+/// 当 `stream_options.include_usage` 开启时，OpenAI API 在流末尾发送一个
+/// `choices` 为空、`usage` 非空的最终 chunk，此测试验证该 chunk 被正确解析。
+#[test]
+fn tc_llm_002_usage_chunk_parsed() {
+    let mut parser = SseParser::new();
+    let chunk = b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n";
+    let items = feed_and_collect(&mut parser, &[chunk]);
+    assert_eq!(items.len(), 1, "usage chunk 应产出 1 个 StreamItem");
+    match &items[0] {
+        StreamItem::Usage(u) => {
+            assert_eq!(u.prompt_tokens, 10);
+            assert_eq!(u.completion_tokens, 5);
+            assert_eq!(u.total_tokens, 15);
+        }
+        other => panic!("期望 Usage，得到 {:?}", other),
+    }
+}
+
+/// TC-LLM-003：usage chunk 在 token chunk 之后、[DONE] 之前到达。
+///
+/// 验证完整的流式序列：token → token → usage → [DONE]。
+#[test]
+fn tc_llm_003_token_then_usage_then_done() {
+    let mut parser = SseParser::new();
+    let chunk = b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n\
+        data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\n\
+        data: [DONE]\n\n";
+    let items = feed_and_collect(&mut parser, &[chunk]);
+    assert_eq!(items.len(), 3, "应产出 token + usage + done");
+    assert!(matches!(&items[0], StreamItem::Token(t) if t == "hello"));
+    assert!(matches!(&items[1], StreamItem::Usage(u) if u.total_tokens == 4));
+    assert!(matches!(&items[2], StreamItem::Done));
 }
