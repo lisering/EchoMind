@@ -17,3 +17,4 @@ crates/tauri-app/gen/schemas/
 # 日志与系统杂物
 *.log
 .DS_Store
+sreenshot/
