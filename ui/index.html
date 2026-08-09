@@ -18113,6 +18113,7 @@
           actions.appendChild(tagBtn);
           const del = document.createElement("button");
           del.className = "invisible group-hover:visible text-text-quaternary hover:text-red-400 px-1 text-xs transition-opacity";
+          del.dataset.action = "delete";
           del.textContent = "\xD7";
           del.title = t("knowledge_base.delete_doc");
           del.onclick = async (ev) => {
