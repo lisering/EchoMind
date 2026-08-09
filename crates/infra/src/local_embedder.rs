@@ -144,7 +144,7 @@ fn is_chinese_locale() -> bool {
 
 /// 中文环境检测的缓存结果（LazyLock 保证线程安全的延迟初始化，仅执行一次）。
 static IS_CHINESE_LOCALE: std::sync::LazyLock<bool> =
-    std::sync::LazyLock::new(|| detect_chinese_locale());
+    std::sync::LazyLock::new(detect_chinese_locale);
 
 /// 实际的中文环境检测逻辑（仅由 LazyLock 调用一次）。
 fn detect_chinese_locale() -> bool {
@@ -178,7 +178,7 @@ fn detect_chinese_locale() -> bool {
 /// - 不可达：用户在中国大陆无 VPN，魔搭优先（境内 CDN 速度 16-38 MB/s）
 ///
 /// 这样即使外国人到中国出差（系统语言为英文），也能自动切换到魔搭源。
-static HF_REACHABLE: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| probe_huggingface());
+static HF_REACHABLE: std::sync::LazyLock<bool> = std::sync::LazyLock::new(probe_huggingface);
 
 /// 探测 HuggingFace 是否可达（3 秒超时 HEAD 请求）。
 fn probe_huggingface() -> bool {

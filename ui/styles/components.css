@@ -2114,6 +2114,44 @@ pointer-events: none;
 }
 
 /* ============================================================
+ * 录音遮罩 + 音频电平可视化（REQ-RAG-034 增强）
+ * ============================================================ */
+
+/* 录音指示红点脉冲动画 */
+@keyframes recordingPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.recording-pulse {
+  animation: recordingPulse 1.2s ease-in-out infinite;
+}
+
+/* 音频电平条激活态 */
+.level-bar.active {
+  background-color: var(--accent, #38BDF8);
+}
+
+/* 录音遮罩警告态（接近最大时长） */
+#recordingOverlay.recording-warning .recording-pulse {
+  background-color: #EF4444;
+}
+
+#recordingOverlay.recording-warning #recordingTimer {
+  color: #EF4444;
+}
+
+/* 减弱动画偏好：禁用电平条过渡 */
+@media (prefers-reduced-motion: reduce) {
+  .recording-pulse {
+    animation: none;
+  }
+  .level-bar {
+    transition: none;
+  }
+}
+
+/* ============================================================
  * 对话分支树面板（REQ-RAG-039）
  * ============================================================ */
 

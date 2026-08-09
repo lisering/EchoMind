@@ -2833,6 +2833,44 @@
       }
       
       /* ============================================================
+       * 录音遮罩 + 音频电平可视化（REQ-RAG-034 增强）
+       * ============================================================ */
+      
+      /* 录音指示红点脉冲动画 */
+      @keyframes recordingPulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.5; transform: scale(0.85); }
+      }
+      
+      .recording-pulse {
+        animation: recordingPulse 1.2s ease-in-out infinite;
+      }
+      
+      /* 音频电平条激活态 */
+      .level-bar.active {
+        background-color: var(--accent, #38BDF8);
+      }
+      
+      /* 录音遮罩警告态（接近最大时长） */
+      #recordingOverlay.recording-warning .recording-pulse {
+        background-color: #EF4444;
+      }
+      
+      #recordingOverlay.recording-warning #recordingTimer {
+        color: #EF4444;
+      }
+      
+      /* 减弱动画偏好：禁用电平条过渡 */
+      @media (prefers-reduced-motion: reduce) {
+        .recording-pulse {
+          animation: none;
+        }
+        .level-bar {
+          transition: none;
+        }
+      }
+      
+      /* ============================================================
        * 对话分支树面板（REQ-RAG-039）
        * ============================================================ */
       
@@ -4249,6 +4287,24 @@
       </main>
     </div>
 
+    <!-- ============ 录音遮罩（REQ-RAG-034 增强） ============ -->
+    <div id="recordingOverlay" class="hidden fixed bottom-[120px] left-1/2 -translate-x-1/2 z-40 bg-surface-1 border border-border-strong rounded-2xl shadow-modal px-5 py-3 flex items-center gap-3 fade-in">
+      <!-- 录音指示红点 -->
+      <div class="shrink-0 w-3 h-3 rounded-full bg-red-500 recording-pulse"></div>
+      <!-- 音频电平可视化 -->
+      <div class="flex items-end gap-0.5 h-6" id="levelBarsContainer">
+        <div class="level-bar w-1 h-2 rounded-sm bg-text-quaternary transition-all duration-100"></div>
+        <div class="level-bar w-1 h-3 rounded-sm bg-text-quaternary transition-all duration-100"></div>
+        <div class="level-bar w-1 h-4 rounded-sm bg-text-quaternary transition-all duration-100"></div>
+        <div class="level-bar w-1 h-5 rounded-sm bg-text-quaternary transition-all duration-100"></div>
+        <div class="level-bar w-1 h-6 rounded-sm bg-text-quaternary transition-all duration-100"></div>
+      </div>
+      <!-- 录音计时器 -->
+      <span id="recordingTimer" class="text-sm font-mono text-text-secondary tabular-nums">00:00</span>
+      <!-- 提示文字 -->
+      <span class="text-sm text-text-tertiary" data-i18n="voice.recording_hint"></span>
+    </div>
+
     <!-- ============ 拖拽全屏遮罩（REQ-UI-004） ============ -->
     <div id="dragOverlay" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center pointer-events-none">
       <div class="border-2 border-dashed border-accent rounded-3xl w-[86%] h-[80%] flex flex-col items-center justify-center fade-in">
@@ -4592,9 +4648,42 @@
                 </div>
                 <span id="voiceRateLabel" class="text-sm text-text-quaternary">1.0x</span>
               </div>
-              <input id="voiceRateSlider" type="range" min="0.5" max="2.0" step="0.1" value="1.0" class="w-full accent-accent cursor-pointer" />
-            </div>
-          </div>
+<input id="voiceRateSlider" type="range" min="0.5" max="2.0" step="0.1" value="1.0" class="w-full accent-accent cursor-pointer" />
+</div>
+<!-- STT 配置（REQ-RAG-034 增强：独立 STT API Key / Base URL / Model / Language） -->
+<div id="sttConfigSection" class="border-t border-border-default pt-3 mt-3 space-y-2">
+<div class="text-sm text-text-primary" data-i18n="voice.stt_config"></div>
+<div class="text-[11px] text-text-quaternary" data-i18n="voice.stt_hint"></div>
+<div class="text-[11px] text-text-quaternary opacity-60" data-i18n="voice.stt_groq_hint"></div>
+<!-- STT API Key -->
+<div>
+<label class="text-[11px] text-text-quaternary block mb-1" data-i18n="voice.stt_api_key"></label>
+<input id="sttApiKeyInput" type="password" class="w-full bg-surface-0 border border-border-default rounded-lg px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent/60" placeholder="" />
+</div>
+<!-- STT Base URL -->
+<div>
+<label class="text-[11px] text-text-quaternary block mb-1" data-i18n="voice.stt_base_url"></label>
+<input id="sttBaseUrlInput" type="text" class="w-full bg-surface-0 border border-border-default rounded-lg px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent/60" placeholder="https://api.openai.com/v1" />
+</div>
+<!-- STT Model + Language -->
+<div class="grid grid-cols-2 gap-2">
+<div>
+<label class="text-[11px] text-text-quaternary block mb-1" data-i18n="voice.stt_model"></label>
+<input id="sttModelInput" type="text" class="w-full bg-surface-0 border border-border-default rounded-lg px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent/60" placeholder="whisper-1" />
+</div>
+<div>
+<label class="text-[11px] text-text-quaternary block mb-1" data-i18n="voice.stt_language"></label>
+<select id="sttLanguageSelect" class="w-full bg-surface-0 border border-border-default rounded-lg px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent/60">
+<option value="zh" data-i18n="voice.stt_language_zh"></option>
+<option value="en" data-i18n="voice.stt_language_en"></option>
+<option value="ja" data-i18n="voice.stt_language_ja"></option>
+</select>
+</div>
+</div>
+<!-- Save button -->
+<button id="sttSaveBtn" type="button" class="w-full bg-accent hover:opacity-90 text-ink text-sm font-medium rounded-lg py-1.5 transition-opacity" data-i18n="settings.save"></button>
+</div>
+</div>
           <!-- PDF 导出设置（REQ-EXP-005） -->
           <div class="space-y-3 mb-5">
             <div class="text-xs uppercase tracking-wider text-text-quaternary" data-i18n="export_pdf.settings_section"></div>
@@ -4912,6 +5001,82 @@
             __defProp(target, name, { get: all[name], enumerable: true });
         };
       
+        // ui/src/utils.js
+        function $(id) {
+          return document.getElementById(id);
+        }
+        function sanitizeError(err) {
+          let msg = String(err);
+          msg = msg.replace(/sk-[a-zA-Z0-9]{8,}/g, "sk-****");
+          msg = msg.replace(/\\Users\\[^\\]+?\\/g, "\\Users\\****\\");
+          msg = msg.replace(/\/Users\/[^/]+?\//g, "/Users/****/");
+          return msg;
+        }
+        function displayDocName(filePath) {
+          const base = filePath.split("/").pop() || filePath;
+          return base.length > 33 && base[32] === "-" ? base.slice(33) : base;
+        }
+        function docStatusOf(d) {
+          return typeof d.status === "string" ? d.status : "Failed";
+        }
+        function formatBytes(bytes) {
+          if (bytes < 1024) return bytes + " B";
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+          return (bytes / 1024 / 1024).toFixed(1) + " MB";
+        }
+        function isInputFocused() {
+          const el = document.activeElement;
+          return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+        }
+        async function copyToClipboard(text) {
+          if (!window.isSecureContext || !navigator.clipboard || !navigator.clipboard.writeText) {
+            try {
+              const textarea = document.createElement("textarea");
+              textarea.value = text;
+              textarea.style.position = "fixed";
+              textarea.style.top = "-9999px";
+              textarea.style.opacity = "0";
+              document.body.appendChild(textarea);
+              textarea.select();
+              const ok = document.execCommand("copy");
+              document.body.removeChild(textarea);
+              return ok;
+            } catch (_) {
+              return false;
+            }
+          }
+          try {
+            await navigator.clipboard.writeText(text);
+            return true;
+          } catch (_) {
+            return false;
+          }
+        }
+        var DOC_STATUS_STYLE, PRESETS, WORKSPACE;
+        var init_utils = __esm({
+          "ui/src/utils.js"() {
+            DOC_STATUS_STYLE = {
+              Pending: ["status_pending", "text-slate-400 border-slate-500/40"],
+              Processing: ["status_processing", "text-amber-300 border-amber-400/40"],
+              Indexed: ["status_indexed", "text-accent border-accent/40"],
+              Failed: ["status_failed", "text-red-400 border-red-400/40"]
+            };
+            PRESETS = {
+              deepseek: { label: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-chat", keyUrl: "https://platform.deepseek.com/api_keys", needKey: true, descKey: "presets.deepseek_desc" },
+              openai: { label: "OpenAI", base_url: "https://api.openai.com", model: "gpt-4o-mini", keyUrl: "https://platform.openai.com/api-keys", needKey: true, descKey: "presets.openai_desc" },
+              qwen: { label: "Qwen", base_url: "https://dashscope.aliyuncs.com/compatible-mode", model: "qwen-plus", keyUrl: "https://dashscope.console.aliyun.com/apiKey", needKey: true, descKey: "presets.qwen_desc" },
+              kimi: { label: "Kimi", base_url: "https://api.moonshot.cn", model: "moonshot-v1-8k", keyUrl: "https://platform.moonshot.cn/console/api-keys", needKey: true, descKey: "presets.kimi_desc" },
+              glm: { label: "GLM", base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash", keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", needKey: true, descKey: "presets.glm_desc" },
+              minimax: { label: "MiniMax", base_url: "https://api.minimax.chat", model: "MiniMax-Text-01", keyUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key", needKey: true, descKey: "presets.minimax_desc" },
+              mistral: { label: "Mistral", base_url: "https://api.mistral.ai", model: "mistral-large-latest", keyUrl: "https://console.mistral.ai/api-keys", needKey: true, descKey: "presets.mistral_desc" },
+              grok: { label: "Grok", base_url: "https://api.x.ai", model: "grok-3", keyUrl: "https://console.x.ai", needKey: true, descKey: "presets.grok_desc" },
+              ollama: { label: "Ollama", base_url: "http://localhost:11434", model: "llama3.1", keyUrl: "https://ollama.com/library", needKey: false, descKey: "presets.ollama_desc" },
+              custom: { label: "Custom", base_url: "", model: "", keyUrl: "", needKey: true, descKey: "presets.custom_desc" }
+            };
+            WORKSPACE = "default";
+          }
+        });
+      
         // ui/src/ipc.js
         var ipc_exports = {};
         __export(ipc_exports, {
@@ -5090,181 +5255,7 @@
           }
         });
       
-        // ui/src/state.js
-        var initialState = {
-          history: [],
-          currentRawMarkdown: "",
-          lastSources: null,
-          streaming: false,
-          currentAssistantEl: null,
-          renderScheduled: false,
-          currentConversationId: null,
-          isNewConversation: false,
-          activePreset: "deepseek",
-          isPro: false,
-          vlmEnabled: false,
-          rerankEnabled: false,
-          hydeEnabled: false,
-          auditingDocId: null,
-          importing: false,
-          docCount: 0,
-          chunkCount: 0,
-          documents: [],
-          activeSidebarTab: "conversations",
-          cmdSelectedIndex: 0,
-          cmdFiltered: [],
-          cmdPrevFocus: null,
-          // 当前 LLM 模型信息（TC-QA-004：每条 assistant 消息标注模型）
-          currentModel: "",
-          // 如 'claude-3.5-sonnet' 或 'qwen2.5-7b.gguf'
-          currentLlmMode: "remote",
-          // 'remote' 或 'local'
-          // 上下文窗口用量（TC-QA-020~026：上下文窗口指示器）
-          contextTokens: 0,
-          // 当前对话已用 token 数
-          contextLimit: 8e3,
-          // 模型上下文窗口大小（默认 8K）
-          // 安全状态
-          securityState: "unencrypted",
-          // 'unencrypted' | 'encrypted_unlocked' | 'locked'
-          piiDetectionEnabled: false,
-          autoLockTimeout: 0,
-          // 0 = disabled
-          theme: "dark"
-          // REQ-UI-011：主题模式 dark/light/system
-        };
-        var _state = { ...initialState };
-        var _subscribers = /* @__PURE__ */ new Map();
-        var _globalSubscribers = /* @__PURE__ */ new Set();
-        function getState() {
-          return { ..._state };
-        }
-        function get(key) {
-          return _state[key];
-        }
-        function setState(partial) {
-          const changed = [];
-          for (const key of Object.keys(partial)) {
-            if (_state[key] !== partial[key]) {
-              changed.push(key);
-            }
-          }
-          if (changed.length === 0) return _state;
-          _state = { ..._state, ...partial };
-          for (const key of changed) {
-            const subs = _subscribers.get(key);
-            if (subs) {
-              for (const cb of subs) {
-                try {
-                  cb(_state[key], key);
-                } catch (_) {
-                }
-              }
-            }
-          }
-          for (const cb of _globalSubscribers) {
-            try {
-              cb(_state, changed);
-            } catch (_) {
-            }
-          }
-          return _state;
-        }
-        function subscribe(key, callback) {
-          if (!_subscribers.has(key)) {
-            _subscribers.set(key, /* @__PURE__ */ new Set());
-          }
-          _subscribers.get(key).add(callback);
-          return () => _subscribers.get(key)?.delete(callback);
-        }
-        function isEncrypted() {
-          return _state.securityState !== "unencrypted";
-        }
-        function isLocked() {
-          return _state.securityState === "locked";
-        }
-      
-        // ui/src/utils.js
-        function $(id) {
-          return document.getElementById(id);
-        }
-        function sanitizeError(err) {
-          let msg = String(err);
-          msg = msg.replace(/sk-[a-zA-Z0-9]{8,}/g, "sk-****");
-          msg = msg.replace(/\\Users\\[^\\]+?\\/g, "\\Users\\****\\");
-          msg = msg.replace(/\/Users\/[^/]+?\//g, "/Users/****/");
-          return msg;
-        }
-        function displayDocName(filePath) {
-          const base = filePath.split("/").pop() || filePath;
-          return base.length > 33 && base[32] === "-" ? base.slice(33) : base;
-        }
-        function docStatusOf(d) {
-          return typeof d.status === "string" ? d.status : "Failed";
-        }
-        function formatBytes(bytes) {
-          if (bytes < 1024) return bytes + " B";
-          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-          return (bytes / 1024 / 1024).toFixed(1) + " MB";
-        }
-        function isInputFocused() {
-          const el = document.activeElement;
-          return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-        }
-        var DOC_STATUS_STYLE = {
-          Pending: ["status_pending", "text-slate-400 border-slate-500/40"],
-          Processing: ["status_processing", "text-amber-300 border-amber-400/40"],
-          Indexed: ["status_indexed", "text-accent border-accent/40"],
-          Failed: ["status_failed", "text-red-400 border-red-400/40"]
-        };
-        var PRESETS = {
-          deepseek: { label: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-chat", keyUrl: "https://platform.deepseek.com/api_keys", needKey: true, descKey: "presets.deepseek_desc" },
-          openai: { label: "OpenAI", base_url: "https://api.openai.com", model: "gpt-4o-mini", keyUrl: "https://platform.openai.com/api-keys", needKey: true, descKey: "presets.openai_desc" },
-          qwen: { label: "Qwen", base_url: "https://dashscope.aliyuncs.com/compatible-mode", model: "qwen-plus", keyUrl: "https://dashscope.console.aliyun.com/apiKey", needKey: true, descKey: "presets.qwen_desc" },
-          kimi: { label: "Kimi", base_url: "https://api.moonshot.cn", model: "moonshot-v1-8k", keyUrl: "https://platform.moonshot.cn/console/api-keys", needKey: true, descKey: "presets.kimi_desc" },
-          glm: { label: "GLM", base_url: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash", keyUrl: "https://open.bigmodel.cn/usercenter/apikeys", needKey: true, descKey: "presets.glm_desc" },
-          minimax: { label: "MiniMax", base_url: "https://api.minimax.chat", model: "MiniMax-Text-01", keyUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key", needKey: true, descKey: "presets.minimax_desc" },
-          mistral: { label: "Mistral", base_url: "https://api.mistral.ai", model: "mistral-large-latest", keyUrl: "https://console.mistral.ai/api-keys", needKey: true, descKey: "presets.mistral_desc" },
-          grok: { label: "Grok", base_url: "https://api.x.ai", model: "grok-3", keyUrl: "https://console.x.ai", needKey: true, descKey: "presets.grok_desc" },
-          ollama: { label: "Ollama", base_url: "http://localhost:11434", model: "llama3.1", keyUrl: "https://ollama.com/library", needKey: false, descKey: "presets.ollama_desc" },
-          custom: { label: "Custom", base_url: "", model: "", keyUrl: "", needKey: true, descKey: "presets.custom_desc" }
-        };
-        var WORKSPACE = "default";
-        async function copyToClipboard(text) {
-          if (!window.isSecureContext || !navigator.clipboard || !navigator.clipboard.writeText) {
-            try {
-              const textarea = document.createElement("textarea");
-              textarea.value = text;
-              textarea.style.position = "fixed";
-              textarea.style.top = "-9999px";
-              textarea.style.opacity = "0";
-              document.body.appendChild(textarea);
-              textarea.select();
-              const ok = document.execCommand("copy");
-              document.body.removeChild(textarea);
-              return ok;
-            } catch (_) {
-              return false;
-            }
-          }
-          try {
-            await navigator.clipboard.writeText(text);
-            return true;
-          } catch (_) {
-            return false;
-          }
-        }
-      
-        // ui/src/main.js
-        init_ipc();
-      
         // ui/src/i18n.js
-        var SUPPORTED_LOCALES = ["en", "zh-CN", "ja"];
-        var DEFAULT_LOCALE = "en";
-        var FALLBACK_LOCALE = "en";
-        var STORAGE_KEY = "echomind_locale";
-        var _locale = DEFAULT_LOCALE;
-        var _cache = /* @__PURE__ */ new Map();
         function flatten(obj, prefix = "") {
           const result = {};
           for (const key of Object.keys(obj)) {
@@ -5387,17 +5378,25 @@
           refreshI18nElements();
           document.documentElement.lang = _locale;
         }
+        var SUPPORTED_LOCALES, DEFAULT_LOCALE, FALLBACK_LOCALE, STORAGE_KEY, _locale, _cache;
+        var init_i18n = __esm({
+          "ui/src/i18n.js"() {
+            SUPPORTED_LOCALES = ["en", "zh-CN", "ja"];
+            DEFAULT_LOCALE = "en";
+            FALLBACK_LOCALE = "en";
+            STORAGE_KEY = "echomind_locale";
+            _locale = DEFAULT_LOCALE;
+            _cache = /* @__PURE__ */ new Map();
+          }
+        });
       
         // ui/src/toast.js
-        var ERROR_PREFIX_MESSAGES = {
-          NETWORK: { kind: "error", msgKey: "errors.network" },
-          AUTH: { kind: "error", msgKey: "errors.auth" },
-          LLM: { kind: "error", msgKey: "errors.llm" },
-          PARSE: { kind: "error", msgKey: "errors.parse" },
-          EMBED: { kind: "error", msgKey: "errors.embed" },
-          STORAGE: { kind: "error", msgKey: "errors.storage" },
-          UNKNOWN: { kind: "error", msgKey: "errors.unknown" }
-        };
+        var toast_exports = {};
+        __export(toast_exports, {
+          toast: () => toast,
+          toastError: () => toastError,
+          toastSuccess: () => toastSuccess
+        });
         function toast(message, kind = "info") {
           const el = document.createElement("div");
           const color = kind === "error" ? "border-red-400/40 text-red-300" : kind === "success" ? "border-accent/50 text-accent" : kind === "warning" ? "border-amber-400/40 text-amber-300" : "border-border-default text-slate-300";
@@ -5433,15 +5432,136 @@
           toast(sanitized, "error");
           return sanitized;
         }
+        var ERROR_PREFIX_MESSAGES;
+        var init_toast = __esm({
+          "ui/src/toast.js"() {
+            init_utils();
+            init_i18n();
+            ERROR_PREFIX_MESSAGES = {
+              NETWORK: { kind: "error", msgKey: "errors.network" },
+              AUTH: { kind: "error", msgKey: "errors.auth" },
+              LLM: { kind: "error", msgKey: "errors.llm" },
+              PARSE: { kind: "error", msgKey: "errors.parse" },
+              EMBED: { kind: "error", msgKey: "errors.embed" },
+              STORAGE: { kind: "error", msgKey: "errors.storage" },
+              UNKNOWN: { kind: "error", msgKey: "errors.unknown" }
+            };
+          }
+        });
+      
+        // ui/src/state.js
+        var initialState = {
+          history: [],
+          currentRawMarkdown: "",
+          lastSources: null,
+          streaming: false,
+          currentAssistantEl: null,
+          renderScheduled: false,
+          currentConversationId: null,
+          isNewConversation: false,
+          activePreset: "deepseek",
+          isPro: false,
+          vlmEnabled: false,
+          rerankEnabled: false,
+          hydeEnabled: false,
+          auditingDocId: null,
+          importing: false,
+          docCount: 0,
+          chunkCount: 0,
+          documents: [],
+          activeSidebarTab: "conversations",
+          cmdSelectedIndex: 0,
+          cmdFiltered: [],
+          cmdPrevFocus: null,
+          // 当前 LLM 模型信息（TC-QA-004：每条 assistant 消息标注模型）
+          currentModel: "",
+          // 如 'claude-3.5-sonnet' 或 'qwen2.5-7b.gguf'
+          currentLlmMode: "remote",
+          // 'remote' 或 'local'
+          // 上下文窗口用量（TC-QA-020~026：上下文窗口指示器）
+          contextTokens: 0,
+          // 当前对话已用 token 数
+          contextLimit: 8e3,
+          // 模型上下文窗口大小（默认 8K）
+          // 安全状态
+          securityState: "unencrypted",
+          // 'unencrypted' | 'encrypted_unlocked' | 'locked'
+          piiDetectionEnabled: false,
+          autoLockTimeout: 0,
+          // 0 = disabled
+          theme: "dark"
+          // REQ-UI-011：主题模式 dark/light/system
+        };
+        var _state = { ...initialState };
+        var _subscribers = /* @__PURE__ */ new Map();
+        var _globalSubscribers = /* @__PURE__ */ new Set();
+        function getState() {
+          return { ..._state };
+        }
+        function get(key) {
+          return _state[key];
+        }
+        function setState(partial) {
+          const changed = [];
+          for (const key of Object.keys(partial)) {
+            if (_state[key] !== partial[key]) {
+              changed.push(key);
+            }
+          }
+          if (changed.length === 0) return _state;
+          _state = { ..._state, ...partial };
+          for (const key of changed) {
+            const subs = _subscribers.get(key);
+            if (subs) {
+              for (const cb of subs) {
+                try {
+                  cb(_state[key], key);
+                } catch (_) {
+                }
+              }
+            }
+          }
+          for (const cb of _globalSubscribers) {
+            try {
+              cb(_state, changed);
+            } catch (_) {
+            }
+          }
+          return _state;
+        }
+        function subscribe(key, callback) {
+          if (!_subscribers.has(key)) {
+            _subscribers.set(key, /* @__PURE__ */ new Set());
+          }
+          _subscribers.get(key).add(callback);
+          return () => _subscribers.get(key)?.delete(callback);
+        }
+        function isEncrypted() {
+          return _state.securityState !== "unencrypted";
+        }
+        function isLocked() {
+          return _state.securityState === "locked";
+        }
+      
+        // ui/src/main.js
+        init_utils();
+        init_ipc();
+        init_toast();
       
         // ui/src/chat-render.js
+        init_utils();
         init_ipc();
       
         // ui/src/import.js
+        init_utils();
         init_ipc();
+        init_toast();
       
         // ui/src/paywall.js
+        init_utils();
         init_ipc();
+        init_toast();
+        init_i18n();
       
         // ui/src/focus-trap.js
         var FOCUSABLE_SELECTORS = [
@@ -5606,6 +5726,7 @@
         }
       
         // ui/src/import.js
+        init_i18n();
         function showImportProgress(total) {
           setState({ importing: true });
           $("importProgress").classList.remove("hidden");
@@ -5745,8 +5866,16 @@
           };
         }
       
+        // ui/src/chat-render.js
+        init_toast();
+      
+        // ui/src/markdown.js
+        init_utils();
+        init_i18n();
+      
         // ui/src/wiki-links.js
         init_ipc();
+        init_i18n();
         function enhanceWikiLinks(mdEl) {
           if (!mdEl) return;
           const walker = document.createTreeWalker(mdEl, NodeFilter.SHOW_TEXT, {
@@ -6245,6 +6374,9 @@
           enhanceTablesForChart(mdEl);
         }
       
+        // ui/src/chat-render.js
+        init_i18n();
+      
         // ui/src/caret.js
         var CARET_CLASS = "inline-block w-[2px] h-[1.1em] bg-accent ml-[2px] animate-caret-blink align-text-bottom rounded-[1px] motion-reduce:animate-none motion-reduce:opacity-50";
         function showCaret(container) {
@@ -6317,9 +6449,15 @@
         }
       
         // ui/src/chat.js
+        init_utils();
         init_ipc();
+        init_toast();
+        init_i18n();
       
         // ui/src/guards.js
+        init_utils();
+        init_i18n();
+        init_toast();
         function requireDocuments() {
           if (get("docCount") === 0) {
             return { passed: false, reason: "chat.empty_kb_error" };
@@ -6379,6 +6517,7 @@
         }
       
         // ui/src/error-detail.js
+        init_i18n();
         var ERROR_RULES = [
           {
             type: "kb_empty",
@@ -6535,6 +6674,7 @@
         }
       
         // ui/src/context-bar.js
+        init_i18n();
         var DEFAULT_CONTEXT_LIMIT = 8e3;
         function getContextPercentage(used, limit) {
           if (!limit || limit <= 0) return 0;
@@ -6590,6 +6730,7 @@
         }
       
         // ui/src/slash-commands.js
+        init_i18n();
         init_ipc();
         var SLASH_COMMANDS = [
           {
@@ -6792,6 +6933,7 @@
         }
       
         // ui/src/doc-mention.js
+        init_i18n();
         function extractDocMentions(text) {
           if (!text) return [];
           const regex = /@(\S+)/g;
@@ -6870,6 +7012,7 @@
         }
       
         // ui/src/regen-carousel.js
+        init_i18n();
         function createCarousel(blockEl) {
           const existing = blockEl.querySelector(".regen-carousel");
           if (existing) return existing;
@@ -6978,10 +7121,14 @@
           return blockEl.querySelector(".regen-carousel") || null;
         }
       
+        // ui/src/feedback.js
+        init_i18n();
+      
         // ui/src/retrieval-feedback.js
         init_ipc();
       
         // ui/src/input-toggles.js
+        init_i18n();
         init_ipc();
         var ICON_HYBRID = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
         var ICON_AGENT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v1a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4z"/><path d="M5 12h14M12 8v8"/></svg>`;
@@ -7265,6 +7412,7 @@
         }
       
         // ui/src/queue-send.js
+        init_i18n();
         var _queue = [];
         function enqueueQuery(query) {
           if (!query || !query.trim()) return _queue.length;
@@ -7307,6 +7455,7 @@
         }
       
         // ui/src/followup.js
+        init_i18n();
         var MAX_SUGGESTIONS = 3;
         var FOLLOWUP_TEMPLATES = {
           // 实体深入型：对回答中提到的关键概念追问
@@ -7606,6 +7755,7 @@
       
         // ui/src/turn-tree.js
         init_ipc();
+        init_i18n();
         var _turnTree = [];
         function buildTurnTree(messages) {
           if (!messages || messages.length === 0) return [];
@@ -7915,6 +8065,7 @@
         }
       
         // ui/src/message-edit.js
+        init_i18n();
         init_ipc();
         var _editingBlock = null;
         var _onResendCallback = null;
@@ -8875,6 +9026,7 @@
         }
       
         // ui/src/empty-state.js
+        init_i18n();
         var DEFAULT_RECOMMENDATIONS = [
           "summarize_key_points",
           "compare_differences",
@@ -9022,6 +9174,7 @@
         }
       
         // ui/src/privacy-indicator.js
+        init_i18n();
         var PRIVACY_STATUS_TEXT = {
           encrypted: "AES-256 \u52A0\u5BC6",
           notEncrypted: "\u672A\u52A0\u5BC6",
@@ -9098,6 +9251,7 @@
         }
       
         // ui/src/thinking-panel.js
+        init_i18n();
         var THINKING_EXPANDED_PREFIX = "echomind_thinking_expanded_";
         function loadExpandedState(msgId) {
           if (msgId) {
@@ -9307,7 +9461,16 @@
         }
       
         // ui/src/voice-input.js
-        var _isRecording = false;
+        init_utils();
+        init_toast();
+        init_i18n();
+        var RecordingState = {
+          IDLE: "idle",
+          REQUESTING: "requesting",
+          RECORDING: "recording",
+          TRANSCRIBING: "transcribing"
+        };
+        var _state2 = RecordingState.IDLE;
         var _mediaRecorder = null;
         var _audioChunks = [];
         var _mediaStream = null;
@@ -9318,11 +9481,15 @@
         var _silenceCheckTimer = null;
         var _hasSpeechStarted = false;
         var _silenceStartTime = null;
+        var _recordingTimer = null;
+        var _recordingStartTime = 0;
+        var _levelBars = [];
         var AUTO_STOP_MS = 6e4;
         var SILENCE_CHECK_INTERVAL = 200;
         var SILENCE_THRESHOLD = 0.01;
         var SILENCE_DURATION_MS = 2e3;
         var INITIAL_TIMEOUT_MS = 8e3;
+        var NUM_LEVEL_BARS = 5;
         function initVoiceInput() {
           const micBtn = $("micBtn");
           if (!micBtn) return;
@@ -9339,16 +9506,24 @@
           micBtn.addEventListener("click", toggleRecording);
         }
         async function toggleRecording() {
-          if (_isRecording) {
-            stopRecording();
-          } else {
+          if (_state2 === RecordingState.IDLE) {
             await startRecording();
+          } else if (_state2 === RecordingState.RECORDING) {
+            stopRecording();
           }
         }
         async function startRecording() {
+          _setState(RecordingState.REQUESTING);
           try {
-            _mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            _mediaStream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+              }
+            });
           } catch (err) {
+            _setState(RecordingState.IDLE);
             const name = err?.name || "";
             if (name === "NotAllowedError" || name === "SecurityError") {
               toastError(t("voice.permission_denied"));
@@ -9360,14 +9535,19 @@
             return;
           }
           try {
-            _mediaRecorder = new MediaRecorder(_mediaStream, { mimeType: _mimeType });
-          } catch (err) {
+            _mediaRecorder = new MediaRecorder(_mediaStream, {
+              mimeType: _mimeType,
+              audioBitsPerSecond: 128e3
+              // 128kbps 足够语音识别
+            });
+          } catch {
             try {
               _mediaRecorder = new MediaRecorder(_mediaStream);
               _mimeType = _mediaRecorder.mimeType || "audio/webm";
-            } catch (err2) {
-              toastError(t("voice.start_failed"));
+            } catch {
+              _setState(RecordingState.IDLE);
               cleanupStream();
+              toastError(t("voice.start_failed"));
               return;
             }
           }
@@ -9382,15 +9562,13 @@
             _audioChunks = [];
             cleanupStream();
             stopSilenceDetection();
+            stopRecordingTimer();
             if (blob.size < 10) {
-              updateMicButtonState();
+              _setState(RecordingState.IDLE);
+              toast(t("voice.no_speech_detected"), "warning");
               return;
             }
-            const micBtn = $("micBtn");
-            if (micBtn) {
-              micBtn.classList.add("transcribing");
-              micBtn.title = t("voice.transcribing");
-            }
+            _setState(RecordingState.TRANSCRIBING);
             try {
               const arrayBuffer = await blob.arrayBuffer();
               const audioData = Array.from(new Uint8Array(arrayBuffer));
@@ -9401,37 +9579,47 @@
               });
               const input = $("queryInput");
               if (input && text) {
-                input.value = text;
+                const existing = input.value.trim();
+                if (existing) {
+                  input.value = existing + " " + text;
+                } else {
+                  input.value = text;
+                }
                 input.dispatchEvent(new Event("input", { bubbles: true }));
                 input.focus();
+                input.setSelectionRange(input.value.length, input.value.length);
               }
             } catch (err) {
               const msg = String(err?.message || err || "");
               if (msg.includes("VALIDATION")) {
                 toastError(t("voice.no_api_config"));
-              } else if (msg.includes("\u7A7A\u6587\u672C")) {
+              } else if (msg.includes("\u7A7A\u6587\u672C") || msg.includes("\u7A7A\u8BED\u97F3")) {
                 toast(t("voice.no_speech_detected"), "warning");
+              } else if (msg.includes("\u8D85\u65F6")) {
+                toastError(t("voice.timeout"));
+              } else if (msg.includes("\u65E0\u6CD5\u8FDE\u63A5")) {
+                toastError(t("voice.connection_failed"));
               } else {
                 toastError(t("voice.transcribe_failed"));
               }
             } finally {
-              if (micBtn) micBtn.classList.remove("transcribing");
-              updateMicButtonState();
+              _setState(RecordingState.IDLE);
             }
           };
           _mediaRecorder.onerror = () => {
             cleanupStream();
             stopSilenceDetection();
-            _isRecording = false;
-            updateMicButtonState();
+            stopRecordingTimer();
+            _setState(RecordingState.IDLE);
             toastError(t("voice.start_failed"));
           };
           _mediaRecorder.start();
-          _isRecording = true;
           _hasSpeechStarted = false;
           _silenceStartTime = null;
-          updateMicButtonState();
+          _setState(RecordingState.RECORDING);
           startSilenceDetection();
+          startRecordingTimer();
+          showRecordingOverlay();
           clearAutoStopTimer();
           _autoStopTimer = setTimeout(() => {
             stopRecording();
@@ -9440,14 +9628,23 @@
         function stopRecording() {
           clearAutoStopTimer();
           stopSilenceDetection();
-          if (_isRecording && _mediaRecorder && _mediaRecorder.state !== "inactive") {
+          stopRecordingTimer();
+          hideRecordingOverlay();
+          if (_mediaRecorder && _mediaRecorder.state !== "inactive") {
             try {
               _mediaRecorder.stop();
-            } catch (_) {
+            } catch {
             }
           }
-          _isRecording = false;
+          const micBtn = $("micBtn");
+          if (micBtn) {
+            micBtn.classList.remove("recording");
+          }
+        }
+        function _setState(newState) {
+          _state2 = newState;
           updateMicButtonState();
+          updateRecordingOverlay();
         }
         function startSilenceDetection() {
           try {
@@ -9457,13 +9654,13 @@
             _analyser.fftSize = 512;
             _analyser.smoothingTimeConstant = 0.5;
             source.connect(_analyser);
-          } catch (err) {
+          } catch {
             return;
           }
           const buffer = new Uint8Array(_analyser.fftSize);
           let initialWaitStart = Date.now();
           _silenceCheckTimer = setInterval(() => {
-            if (!_analyser || !_isRecording) {
+            if (!_analyser || _state2 !== RecordingState.RECORDING) {
               stopSilenceDetection();
               return;
             }
@@ -9474,6 +9671,7 @@
               sum += v * v;
             }
             const rms = Math.sqrt(sum / buffer.length);
+            updateLevelBars(rms);
             if (rms > SILENCE_THRESHOLD) {
               _hasSpeechStarted = true;
               _silenceStartTime = null;
@@ -9500,13 +9698,72 @@
           if (_audioContext) {
             try {
               _audioContext.close();
-            } catch (_) {
+            } catch {
             }
             _audioContext = null;
           }
           _analyser = null;
           _hasSpeechStarted = false;
           _silenceStartTime = null;
+        }
+        function startRecordingTimer() {
+          _recordingStartTime = Date.now();
+          _recordingTimer = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - _recordingStartTime) / 1e3);
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            const display = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+            const timerEl = document.getElementById("recordingTimer");
+            if (timerEl) {
+              timerEl.textContent = display;
+            }
+            if (elapsed >= 50) {
+              const overlay = document.getElementById("recordingOverlay");
+              if (overlay) overlay.classList.add("recording-warning");
+            }
+          }, 1e3);
+        }
+        function stopRecordingTimer() {
+          if (_recordingTimer !== null) {
+            clearInterval(_recordingTimer);
+            _recordingTimer = null;
+          }
+        }
+        function showRecordingOverlay() {
+          let overlay = document.getElementById("recordingOverlay");
+          if (!overlay) return;
+          overlay.classList.remove("hidden");
+          overlay.classList.remove("recording-warning");
+          _levelBars = Array.from(overlay.querySelectorAll(".level-bar"));
+        }
+        function hideRecordingOverlay() {
+          const overlay = document.getElementById("recordingOverlay");
+          if (overlay) {
+            overlay.classList.add("hidden");
+            overlay.classList.remove("recording-warning");
+          }
+          _levelBars = [];
+        }
+        function updateRecordingOverlay() {
+          const overlay = document.getElementById("recordingOverlay");
+          if (!overlay) return;
+          if (_state2 === RecordingState.RECORDING) {
+            overlay.classList.remove("hidden");
+          } else if (_state2 === RecordingState.TRANSCRIBING) {
+            overlay.classList.add("hidden");
+          }
+        }
+        function updateLevelBars(rms) {
+          if (!_levelBars || _levelBars.length === 0) return;
+          const normalized = Math.min(rms / 0.15, 1);
+          const activeBars = Math.round(normalized * NUM_LEVEL_BARS);
+          _levelBars.forEach((bar, i) => {
+            if (i < activeBars) {
+              bar.classList.add("active");
+            } else {
+              bar.classList.remove("active");
+            }
+          });
         }
         function cleanupStream() {
           if (_mediaStream) {
@@ -9524,11 +9781,20 @@
         function updateMicButtonState() {
           const micBtn = $("micBtn");
           if (!micBtn) return;
-          if (_isRecording) {
+          if (_state2 === RecordingState.RECORDING) {
             micBtn.classList.add("recording");
             micBtn.classList.remove("transcribing");
             micBtn.title = t("voice.stop_recording");
             micBtn.setAttribute("aria-label", t("voice.stop_recording"));
+          } else if (_state2 === RecordingState.TRANSCRIBING) {
+            micBtn.classList.remove("recording");
+            micBtn.classList.add("transcribing");
+            micBtn.title = t("voice.transcribing");
+            micBtn.setAttribute("aria-label", t("voice.transcribing"));
+          } else if (_state2 === RecordingState.REQUESTING) {
+            micBtn.classList.add("transcribing");
+            micBtn.title = t("voice.requesting_permission");
+            micBtn.setAttribute("aria-label", t("voice.requesting_permission"));
           } else {
             micBtn.classList.remove("recording", "transcribing");
             micBtn.title = t("voice.start_recording");
@@ -9539,7 +9805,7 @@
           if (typeof window.speechSynthesis !== "undefined" && window.speechSynthesis) {
             try {
               window.speechSynthesis.cancel();
-            } catch (_) {
+            } catch {
             }
           }
           document.querySelectorAll(".tts-btn.speaking").forEach((btn) => {
@@ -9557,7 +9823,7 @@
             const rate = parseFloat(localStorage.getItem("voice.rate") || "1.0");
             if (isNaN(rate) || rate < 0.5 || rate > 2) return 1;
             return rate;
-          } catch (_) {
+          } catch {
             return 1;
           }
         }
@@ -9575,7 +9841,7 @@
               if (window.speechSynthesis) {
                 try {
                   window.speechSynthesis.cancel();
-                } catch (_) {
+                } catch {
                 }
               }
               btn.classList.remove("speaking");
@@ -9600,7 +9866,7 @@
               if (window.speechSynthesis) {
                 try {
                   window.speechSynthesis.cancel();
-                } catch (_) {
+                } catch {
                 }
               }
               document.querySelectorAll(".tts-btn.speaking").forEach((b) => {
@@ -10140,9 +10406,13 @@
         }
       
         // ui/src/sidebar.js
+        init_utils();
         init_ipc();
+        init_i18n();
+        init_toast();
       
         // ui/src/confirm-dialog.js
+        init_i18n();
         var _activeDialog = null;
         var _activeResolve = null;
         var _enableTimer = null;
@@ -10888,6 +11158,8 @@
         }
       
         // ui/src/command-palette.js
+        init_utils();
+        init_i18n();
         function filterCommands(query, commands) {
           const q = query.trim().toLowerCase();
           if (!q) return [...commands];
@@ -11002,6 +11274,9 @@
             $("cmdPaletteClose").onclick = closeCommandPalette;
           }
         }
+      
+        // ui/src/keyboard.js
+        init_utils();
       
         // ui/src/action.js
         var ActionRegistry = class {
@@ -11218,7 +11493,10 @@
         }
       
         // ui/src/wizard.js
+        init_utils();
         init_ipc();
+        init_toast();
+        init_i18n();
         var _wizardTrap = null;
         var _currentStep = 1;
         var _onComplete = null;
@@ -11654,11 +11932,16 @@
         }
       
         // ui/src/settings.js
+        init_utils();
         init_ipc();
         init_ipc();
+        init_toast();
+        init_i18n();
       
         // ui/src/security.js
         init_ipc();
+        init_i18n();
+        init_toast();
         var _lockOverlayEl = null;
         var _lockPasswordInputEl = null;
         var _lockErrorEl = null;
@@ -12186,7 +12469,10 @@
         }
       
         // ui/src/perf-settings.js
+        init_utils();
         init_ipc();
+        init_i18n();
+        init_toast();
         async function renderPerfSettings(container) {
           if (!container) return;
           let cacheStats = null;
@@ -12520,7 +12806,10 @@
         }
       
         // ui/src/memory-panel.js
+        init_utils();
         init_ipc();
+        init_i18n();
+        init_toast();
         var TIER_CONFIG = [
           { key: "wing", labelKey: "memory.tier_wing", color: "#38bdf8" },
           { key: "hall", labelKey: "memory.tier_hall", color: "#a78bfa" },
@@ -12670,10 +12959,16 @@
         }
       
         // ui/src/settings-local-llm.js
+        init_utils();
         init_ipc();
+        init_toast();
+        init_i18n();
       
         // ui/src/download-manager.js
+        init_utils();
         init_ipc();
+        init_toast();
+        init_i18n();
         var _downloads = /* @__PURE__ */ new Map();
         var _panelOpen = false;
         var _panelTrap = null;
@@ -13384,6 +13679,8 @@
       
         // ui/src/export.js
         init_ipc();
+        init_toast();
+        init_i18n();
         function getPdfPageSize() {
           try {
             return localStorage.getItem("export.pdf_page_size") || "A4";
@@ -14488,6 +14785,48 @@
             } catch (_) {
             }
           };
+          initSttConfig();
+        }
+        async function initSttConfig() {
+          const section = $("sttConfigSection");
+          if (!section) return;
+          const apiKeyInput = $("sttApiKeyInput");
+          const baseUrlInput = $("sttBaseUrlInput");
+          const modelInput = $("sttModelInput");
+          const langSelect = $("sttLanguageSelect");
+          const saveBtn = $("sttSaveBtn");
+          if (!apiKeyInput || !baseUrlInput || !modelInput || !saveBtn) return;
+          try {
+            const { invoke: invoke2 } = await Promise.resolve().then(() => (init_ipc(), ipc_exports));
+            const config = await invoke2("get_stt_config");
+            apiKeyInput.placeholder = config.stt_api_key_masked || t("voice.stt_api_key");
+            baseUrlInput.value = config.stt_base_url || "";
+            modelInput.value = config.stt_model || "whisper-1";
+            if (langSelect) langSelect.value = config.stt_language || "zh";
+          } catch {
+          }
+          saveBtn.onclick = async () => {
+            try {
+              const { invoke: invoke2 } = await Promise.resolve().then(() => (init_ipc(), ipc_exports));
+              const apiKey = apiKeyInput.value.trim();
+              const baseUrl = baseUrlInput.value.trim();
+              const model = modelInput.value.trim();
+              const lang = langSelect ? langSelect.value : void 0;
+              await invoke2("set_stt_config", {
+                sttApiKey: apiKey || null,
+                sttBaseUrl: baseUrl || null,
+                sttModel: model || null,
+                sttLanguage: lang || null
+              });
+              apiKeyInput.value = "";
+              apiKeyInput.placeholder = "****";
+              const { toast: toast2 } = await Promise.resolve().then(() => (init_toast(), toast_exports));
+              toast2(t("voice.stt_saved"), "success");
+            } catch (err) {
+              const { toastError: toastError2 } = await Promise.resolve().then(() => (init_toast(), toast_exports));
+              toastError2(String(err?.message || err || "Save failed"));
+            }
+          };
         }
         function initPdfExportSettings() {
           const pageSizeSelect = $("pdfPageSizeSelect");
@@ -14779,7 +15118,11 @@
           nameInput.focus();
         }
       
+        // ui/src/main.js
+        init_i18n();
+      
         // ui/src/conv-nav.js
+        init_utils();
         var _navItems = [];
         var _observer = null;
         var _activeIndex = -1;
@@ -14901,6 +15244,9 @@
         }
       
         // ui/src/context-menu.js
+        init_utils();
+        init_i18n();
+        init_toast();
         var _visible = false;
         function initContextMenu() {
           const menu = $("ctxMenu");
@@ -15062,7 +15408,9 @@
         }
       
         // ui/src/graph-viewer.js
+        init_utils();
         init_ipc();
+        init_i18n();
         var RELATION_COLORS = {
           defined_as: "#38bdf8",
           // 天蓝
@@ -16154,12 +16502,17 @@
         }
       
         // ui/src/code-executor.js
+        init_i18n();
         init_ipc();
+        init_toast();
         function initCodeExecutor() {
         }
       
         // ui/src/dream-panel.js
+        init_utils();
         init_ipc();
+        init_i18n();
+        init_toast();
         var _dreamTrap = null;
         var _unlistenDreamProgress = null;
         var SEVERITY_COLORS = {
@@ -16329,7 +16682,10 @@
         }
       
         // ui/src/symbol-search.js
+        init_utils();
         init_ipc();
+        init_i18n();
+        init_toast();
         var SYMBOL_ICONS = {
           Function: "fn",
           Method: "m",
@@ -16465,7 +16821,10 @@
         }
       
         // ui/src/workflow-panel.js
+        init_utils();
         init_ipc();
+        init_i18n();
+        init_toast();
         var _workflowTrap = null;
         var _unlistenWorkflowProgress = null;
         async function openWorkflowPanel() {
@@ -16707,6 +17066,7 @@
       
         // ui/src/main.js
         init_ipc();
+        init_utils();
         function updateChatInputState() {
           syncChatInputState();
         }

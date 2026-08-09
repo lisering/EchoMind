@@ -301,8 +301,10 @@ pub fn run() {
             commands::push_burst_turn,
             commands::flush_memory_burst_buffer,
             commands::get_burst_buffer_status,
-// 语音转写（REQ-RAG-034 桌面应用方案：getUserMedia + MediaRecorder + OpenAI Whisper API）
-commands::transcribe_audio,
+            // 语音转写（REQ-RAG-034 桌面应用方案：getUserMedia + MediaRecorder + OpenAI Whisper API）
+            commands::transcribe_audio,
+            commands::get_stt_config,
+            commands::set_stt_config,
             // 网页搜索集成（REQ-RAG-036：本地检索不足时搜索互联网）
             commands::set_web_search_enabled,
             commands::web_search,

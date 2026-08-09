@@ -951,7 +951,22 @@
     "consent_title": "Microphone Voice Input",
     "consent_body": "EchoMind needs microphone access for voice input. After clicking \"Allow\", macOS will show a system permission dialog. Please click \"Allow\". Your voice data is never uploaded or stored.",
     "consent_confirm": "Allow",
-    "recognition_timeout": "Voice recognition timed out. The microphone may be unavailable. Please check system permissions and try again."
+    "recognition_timeout": "Voice recognition timed out. The microphone may be unavailable. Please check system permissions and try again.",
+    "requesting_permission": "Requesting microphone permission…",
+    "recording_hint": "Speak now, auto-stops after 2s of silence",
+    "timeout": "Transcription timed out (90s). Try shorter recording",
+    "connection_failed": "Cannot connect to speech service. Check network or API URL",
+    "stt_config": "Speech-to-Text Configuration",
+    "stt_api_key": "STT API Key (optional, uses LLM key if empty)",
+    "stt_base_url": "STT API Base URL (optional, uses LLM URL if empty)",
+    "stt_model": "STT Model",
+    "stt_language": "Recognition Language",
+    "stt_language_zh": "Chinese",
+    "stt_language_en": "English",
+    "stt_language_ja": "Japanese",
+    "stt_hint": "Configure a dedicated STT service (e.g. Groq Whisper for faster transcription). Leave empty to use LLM API settings.",
+    "stt_groq_hint": "Groq: https://api.groq.com/openai, model: whisper-large-v3",
+    "stt_saved": "STT settings saved ✓"
   },
   "web_search": {
     "title": "Web Search",
