@@ -208,6 +208,8 @@ async function startRecording() {
       }
     } catch (err) {
       const msg = String(err?.message || err || '');
+      console.error('[voice-input] 转写失败:', msg);
+
       if (msg.includes('VALIDATION')) {
         toastError(t('voice.no_api_config'));
       } else if (msg.includes('空文本') || msg.includes('空语音')) {
@@ -216,8 +218,17 @@ async function startRecording() {
         toastError(t('voice.timeout'));
       } else if (msg.includes('无法连接')) {
         toastError(t('voice.connection_failed'));
+      } else if (msg.includes('404') || msg.includes('Not Found') || msg.includes('not_found')) {
+        // STT 端点不存在 — LLM 提供商不支持语音转写
+        toastError(t('voice.stt_endpoint_not_found'));
+      } else if (msg.includes('401') || msg.includes('Unauthorized') || msg.includes('invalid_api_key')) {
+        toastError(t('voice.stt_unauthorized'));
+      } else if (msg.includes('400') || msg.includes('Bad Request')) {
+        toastError(t('voice.stt_bad_request'));
       } else {
-        toastError(t('voice.transcribe_failed'));
+        // 显示截断的实际错误信息，而非笼统的"转写失败"
+        const detail = msg.length > 120 ? msg.slice(0, 120) + '…' : msg;
+        toastError(`${t('voice.transcribe_failed')}（${detail}）`);
       }
     } finally {
       _setState(RecordingState.IDLE);

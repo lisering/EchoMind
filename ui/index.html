@@ -9591,6 +9591,7 @@
               }
             } catch (err) {
               const msg = String(err?.message || err || "");
+              console.error("[voice-input] \u8F6C\u5199\u5931\u8D25:", msg);
               if (msg.includes("VALIDATION")) {
                 toastError(t("voice.no_api_config"));
               } else if (msg.includes("\u7A7A\u6587\u672C") || msg.includes("\u7A7A\u8BED\u97F3")) {
@@ -9599,8 +9600,15 @@
                 toastError(t("voice.timeout"));
               } else if (msg.includes("\u65E0\u6CD5\u8FDE\u63A5")) {
                 toastError(t("voice.connection_failed"));
+              } else if (msg.includes("404") || msg.includes("Not Found") || msg.includes("not_found")) {
+                toastError(t("voice.stt_endpoint_not_found"));
+              } else if (msg.includes("401") || msg.includes("Unauthorized") || msg.includes("invalid_api_key")) {
+                toastError(t("voice.stt_unauthorized"));
+              } else if (msg.includes("400") || msg.includes("Bad Request")) {
+                toastError(t("voice.stt_bad_request"));
               } else {
-                toastError(t("voice.transcribe_failed"));
+                const detail = msg.length > 120 ? msg.slice(0, 120) + "\u2026" : msg;
+                toastError(`${t("voice.transcribe_failed")}\uFF08${detail}\uFF09`);
               }
             } finally {
               _setState(RecordingState.IDLE);
