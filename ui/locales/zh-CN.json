@@ -240,6 +240,7 @@
     "filter_all_status": "全部状态",
     "filter_all_formats": "全部格式",
     "no_match": "未找到匹配文档",
+"filter_toggle": "筛选",
 "tag_input_placeholder": "添加标签（回车确认）",
 "tag_remove_hint": "点击移除标签",
 "filter_tag": "按标签筛选",

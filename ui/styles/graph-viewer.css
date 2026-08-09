@@ -12,7 +12,7 @@
 .graph-overlay {
   position: fixed;
   inset: 0;
-  z-index: 99998;
+  z-index: 90; /* Z_INDEX.GRAPH_VIEWER */
   display: flex;
   flex-direction: column;
   background: var(--surface-0, #0f1115);

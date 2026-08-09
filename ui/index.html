@@ -730,18 +730,17 @@
       #topBar.topbar-fs { padding-left: 8px; }
       
       /* ============================================================
-       * 侧栏折叠（REQ-NAV-001）：FLIP transform 方案（零抖动）
+       * 侧栏折叠（REQ-NAV-001）：CSS transition 方案（自然平滑）
        *
        * 核心原理：
-       * 1. #sidebar 使用 position:fixed 脱离文档流 + transform:translateX 滑动
-       *    （GPU 合成层加速，不触发任何布局重排）
-       * 2. <main> padding-left 瞬时切换布局（240px↔0，CSS 无过渡），视觉位移
-       *    由 sidebar.js 的 FLIP 动画承担：transform 补偿当前视觉位置后播放
-       *    300ms 滑动。transform 不触发布局重排 → 文本不逐帧换行 → 零抖动。
-       *    （旧 padding-left 过渡方案每帧改变内容宽度 → CJK 文本每帧重排
-       *    = 抖动根源；FLIP 仅在切换瞬间重排一次，动画期间零重排）
-       * 3. 窗口缩放/最大化时侧栏 fixed 不参与布局 → 主区域自适应；
-       *    动画中窗口缩放时 transform 偏移为固定像素 → 视觉位置稳定
+       * 1. #sidebar 使用 position:fixed + transform:translateX 滑动
+       *    （GPU 合成层加速，侧栏滑出动效流畅）
+       * 2. <main> 使用 CSS transition: padding-left 300ms ease-out
+       *    让内容区域宽度渐进变化，文本逐帧重排而非瞬间跳变
+       *    （旧 FLIP 方案在切换瞬间瞬时改 padding → 内容宽度突变
+       *    → 文本瞬间重排换行 → 高度跳变 = 「跳动」根源）
+       * 3. 侧栏 transform 与 main padding-left 使用相同 300ms ease-out
+       *    → 两侧动画完美同步
        * ============================================================ */
       
       /* 侧栏固定定位 — 脱离文档流，transform 动画零布局抖动 */
@@ -751,21 +750,24 @@
         top: 28px;           /* #topBar 高度 h-7 = 28px */
         bottom: 0;
         width: 240px;        /* 固定宽度，不参与宽度动画 */
-        transition: transform 300ms ease-out;
+        transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
         will-change: transform;
         z-index: 20;
         border-right: 1px solid var(--border-subtle);
         background: var(--surface-1);
       }
       
-      /* 折叠态：向左滑出视口（GPU 加速，零布局抖动） */
+      /* 折叠态：向左滑出视口（GPU 加速） */
       #sidebar.sidebar-collapsed {
         transform: translateX(-100%);
       }
       
-      /* 主区域 — 始终全宽，padding-left 为布局终态（瞬时切换）
-       * 注意：这里不声明 transition —— 视觉动画由 sidebar.js 的 FLIP
-       * transform 承担（transition 由 JS 在动画期间临时设置并清理） */
+      /* 主区域 — padding-left 使用 CSS transition 渐进变化
+       * 内容宽度逐帧缩小/扩大 → 文本平滑重排 → 零跳动
+       * cubic-bezier(0.4, 0, 0.2, 1) 与侧栏 transform 同步 */
+      #app > main {
+        transition: padding-left 300ms cubic-bezier(0.4, 0, 0.2, 1);
+      }
       #app:not(.sidebar-collapsed) > main {
         padding-left: 240px;
       }
@@ -1780,11 +1782,14 @@
       }
       
       /* ============================================================
-       * 消息列表容器 — 全宽，仅靠 px-5(20px) 控制左右边距 */
+       * 消息列表容器 — 全宽，仅靠 px-5(20px) 控制左右边距
+       * overflow-anchor: auto — 浏览器原生滚动锚定，侧栏折叠/展开时
+       * 内容宽度渐变导致文本重排，原生锚定自动维持滚动位置 */
       #chatArea {
         width: 100%;
         max-width: 100%;
         margin: 0;
+        overflow-anchor: auto;
       }
       
       /* 输入框容器 — 全宽，与聊天区一致 */
@@ -2268,15 +2273,11 @@
         box-shadow: 0 0 0 2px var(--surface-2, #1c1c1e);
       }
       
-      /* Token 估算 — 输入框底部右侧灰色小字 */
+      /* Token 估算 — 右侧按钮组内灰色小字（plusBtn 左侧），不破坏 justify-between */
       .token-estimate {
         font-size: 10px;
         color: var(--text-quaternary);
-        margin-left: auto;
-        padding-right: 4px;
         white-space: nowrap;
-        opacity: 0;
-        transition: opacity 0.2s ease;
         pointer-events: none;
         user-select: none;
       }
@@ -2287,7 +2288,6 @@
       }
       #sendBtn.cursor-default {
         cursor: default;
-      }
       }
       
       /* ============================================================
@@ -2925,7 +2925,7 @@
       .conversation-tree-panel {
         position: fixed;
         inset: 0;
-        z-index: 200;
+        z-index: 50; /* Z_INDEX.PANEL_1 */
         display: flex;
         align-items: center;
         justify-content: center;
@@ -3160,7 +3160,7 @@
       .graph-overlay {
         position: fixed;
         inset: 0;
-        z-index: 99998;
+        z-index: 90; /* Z_INDEX.GRAPH_VIEWER */
         display: flex;
         flex-direction: column;
         background: var(--surface-0, #0f1115);
@@ -4446,63 +4446,82 @@
       </div>
     </div>
 
-    <!-- ============ 知识库 Modal（REQ-NAV-002 知识库弹框） ============ -->
-    <div id="kbModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[15vh]" role="dialog" aria-modal="true" aria-label="knowledge_base.title">
-      <div class="w-full max-w-lg bg-surface-1 border border-border-strong rounded-lg shadow-modal scale-in overflow-hidden flex flex-col" style="max-height: 70vh">
-        <div class="flex items-center justify-between px-5 h-12 border-b border-border-subtle shrink-0">
-          <div class="flex items-center gap-3">
-            <h2 class="text-sm font-semibold text-text-primary" data-i18n="knowledge_base.title"></h2>
-            <span id="kbDocCount" class="text-xs text-text-quaternary">0/50</span>
-          </div>
+    <!-- ============ 知识库 Modal（REQ-NAV-002 知识库弹框 — 全面重新设计） ============ -->
+    <div id="kbModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[12vh]" role="dialog" aria-modal="true" aria-label="knowledge_base.title">
+      <div class="w-full max-w-lg bg-surface-1 border border-border-strong rounded-lg shadow-modal scale-in overflow-hidden flex flex-col" style="max-height: 76vh">
+        <!-- Header: title + count + multi-select + close -->
+        <div class="flex items-center justify-between px-4 h-11 border-b border-border-subtle shrink-0">
           <div class="flex items-center gap-2">
-            <button id="kbSelectToggle" class="p-1.5 text-text-quaternary hover:text-accent transition-colors" data-i18n-title="knowledge_base.multiselect" data-i18n-aria-label="knowledge_base.multiselect"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></button>
-            <button id="kbCloseBtn" class="modal-close-btn" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            <h2 class="text-sm font-semibold text-text-primary" data-i18n="knowledge_base.title"></h2>
+            <span id="kbDocCount" class="text-[11px] text-text-quaternary"></span>
+          </div>
+          <div class="flex items-center gap-1">
+            <button id="kbSelectToggle" class="p-1.5 text-text-quaternary hover:text-accent rounded-lg hover:bg-surface-2 transition-colors" data-i18n-title="knowledge_base.multiselect" data-i18n-aria-label="knowledge_base.multiselect"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></button>
+            <button id="kbCloseBtn" class="modal-close-btn" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
           </div>
         </div>
-        <div class="overflow-y-auto scrollbar-thin px-5 py-4 flex-1">
-          <div class="mb-3">
-            <input id="docSearchInput" type="text" data-i18n-placeholder="knowledge_base.search_docs" data-i18n-aria-label="knowledge_base.search_docs" class="w-full bg-surface-2 border border-border-default rounded-xl px-4 py-2.5 text-sm outline-none focus:border-accent transition-colors text-text-secondary placeholder:text-text-quaternary" />
+        <!-- Search + Filter toggle -->
+        <div class="px-4 py-2.5 border-b border-border-subtle shrink-0">
+          <div class="flex items-center gap-2">
+            <div class="relative flex-1">
+              <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-quaternary pointer-events-none" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input id="docSearchInput" type="text" data-i18n-placeholder="knowledge_base.search_docs" data-i18n-aria-label="knowledge_base.search_docs" class="w-full bg-surface-2 border border-border-default rounded-lg pl-8 pr-3 py-2 text-xs outline-none focus:border-accent transition-colors text-text-primary placeholder:text-text-quaternary" />
+            </div>
+            <button id="kbFilterToggle" class="shrink-0 px-2.5 py-2 rounded-lg text-xs border border-border-default bg-surface-2 text-text-secondary hover:text-accent hover:border-accent transition-colors flex items-center gap-1" data-i18n="knowledge_base.filter_toggle"></button>
           </div>
-          <div class="mb-3 flex gap-2">
-            <select id="docStatusFilter" class="flex-1 appearance-none bg-no-repeat bg-[right_0.75rem_center] bg-[length:0.75rem_0.75rem] bg-dropdown-arrow bg-surface-2 border border-border-default rounded-lg px-3 py-1.5 pr-9 text-sm text-text-primary outline-none focus:border-accent transition-colors cursor-pointer" data-i18n-aria-label="knowledge_base.filter_status">
+          <!-- Collapsible filter panel (hidden by default) -->
+          <div id="kbFilterPanel" class="hidden mt-2 flex gap-2">
+            <select id="docStatusFilter" class="flex-1 appearance-none bg-no-repeat bg-[right_0.625rem_center] bg-[length:0.625rem_0.625rem] bg-dropdown-arrow bg-surface-2 border border-border-default rounded-md px-2.5 py-1.5 pr-7 text-[11px] text-text-primary outline-none focus:border-accent transition-colors cursor-pointer" data-i18n-aria-label="knowledge_base.filter_status">
               <option value="" data-i18n="knowledge_base.filter_all_status"></option>
               <option value="Indexed" data-i18n="knowledge_base.status_indexed"></option>
               <option value="Processing" data-i18n="knowledge_base.status_processing"></option>
               <option value="Pending" data-i18n="knowledge_base.status_pending"></option>
               <option value="Failed" data-i18n="knowledge_base.status_failed"></option>
             </select>
-            <select id="docFormatFilter" class="flex-1 appearance-none bg-no-repeat bg-[right_0.75rem_center] bg-[length:0.75rem_0.75rem] bg-dropdown-arrow bg-surface-2 border border-border-default rounded-lg px-3 py-1.5 pr-9 text-sm text-text-primary outline-none focus:border-accent transition-colors cursor-pointer" data-i18n-aria-label="knowledge_base.filter_format">
+            <select id="docFormatFilter" class="flex-1 appearance-none bg-no-repeat bg-[right_0.625rem_center] bg-[length:0.625rem_0.625rem] bg-dropdown-arrow bg-surface-2 border border-border-default rounded-md px-2.5 py-1.5 pr-7 text-[11px] text-text-primary outline-none focus:border-accent transition-colors cursor-pointer" data-i18n-aria-label="knowledge_base.filter_format">
               <option value="" data-i18n="knowledge_base.filter_all_formats"></option>
               <option value="md">.md</option>
               <option value="txt">.txt</option>
               <option value="pdf">.pdf</option>
+              <option value="docx">.docx</option>
+              <option value="html">.html</option>
+              <option value="pptx">.pptx</option>
+              <option value="epub">.epub</option>
+              <option value="xlsx">.xlsx</option>
+              <option value="csv">.csv</option>
+              <option value="rs">.rs</option>
+              <option value="ts">.ts</option>
+              <option value="py">.py</option>
+              <option value="go">.go</option>
             </select>
-          </div>
-          <div class="mb-3">
-            <select id="docTagFilter" class="w-full appearance-none bg-no-repeat bg-[right_0.75rem_center] bg-[length:0.75rem_0.75rem] bg-dropdown-arrow bg-surface-2 border border-border-default rounded-lg px-3 py-1.5 pr-9 text-sm text-text-primary outline-none focus:border-accent transition-colors cursor-pointer" data-i18n-aria-label="knowledge_base.filter_tag">
+            <select id="docTagFilter" class="flex-1 appearance-none bg-no-repeat bg-[right_0.625rem_center] bg-[length:0.625rem_0.625rem] bg-dropdown-arrow bg-surface-2 border border-border-default rounded-md px-2.5 py-1.5 pr-7 text-[11px] text-text-primary outline-none focus:border-accent transition-colors cursor-pointer" data-i18n-aria-label="knowledge_base.filter_tag">
               <option value="" data-i18n="knowledge_base.filter_all_tags"></option>
             </select>
           </div>
-          <div id="docList" class="space-y-1"></div>
         </div>
-        <!-- 批量操作栏（多选模式时显示） -->
-        <div id="kbBatchBar" class="hidden items-center justify-between gap-3 px-5 py-3 border-t border-border-subtle shrink-0">
-          <span id="kbSelectedCount" class="text-xs text-text-secondary"></span>
+        <!-- Document list (scrollable, infinite scroll) -->
+        <div id="kbDocScroll" class="overflow-y-auto scrollbar-thin flex-1 px-2 py-2">
+          <div id="docList" class="space-y-0.5"></div>
+          <div id="kbScrollSentinel" class="h-1"></div>
+        </div>
+        <!-- Batch bar (multi-select mode) -->
+        <div id="kbBatchBar" class="hidden items-center justify-between gap-3 px-4 py-2.5 border-t border-border-subtle shrink-0">
+          <span id="kbSelectedCount" class="text-[11px] text-text-secondary"></span>
           <div class="flex gap-2">
-            <button id="kbBatchCancel" class="border border-border-default rounded-xl px-3 py-2 text-xs text-text-secondary hover:bg-surface-2 transition-colors" data-i18n="common.cancel"></button>
-            <button id="kbBatchDelete" class="bg-red-500/10 text-red-400 border border-red-400/30 rounded-xl px-3 py-2 text-xs hover:bg-red-500/20 transition-colors" data-i18n="knowledge_base.batch_delete"></button>
+            <button id="kbBatchCancel" class="border border-border-default rounded-lg px-3 py-1.5 text-[11px] text-text-secondary hover:bg-surface-2 transition-colors" data-i18n="common.cancel"></button>
+            <button id="kbBatchDelete" class="bg-red-500/10 text-red-400 border border-red-400/30 rounded-lg px-3 py-1.5 text-[11px] hover:bg-red-500/20 transition-colors" data-i18n="knowledge_base.batch_delete"></button>
           </div>
         </div>
-        <!-- 常规底部栏 -->
-        <div id="kbFooter" class="flex gap-3 px-5 py-3 border-t border-border-subtle shrink-0">
-          <button id="kbClose" class="flex-1 border border-border-default rounded-xl px-4 py-2.5 text-sm text-text-secondary hover:bg-surface-2 transition-colors" data-i18n="knowledge_base.close"></button>
-          <button id="kbImport" class="flex-1 bg-accent/10 text-accent border border-accent/30 rounded-xl px-4 py-2.5 text-sm hover:bg-accent/20 transition-colors flex items-center justify-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <!-- Footer: result count + import -->
+        <div id="kbFooter" class="flex items-center justify-between px-4 py-2.5 border-t border-border-subtle shrink-0">
+          <span id="kbResultCount" class="text-[11px] text-text-quaternary"></span>
+          <button id="kbImport" class="bg-accent/10 text-accent border border-accent/30 rounded-lg px-3.5 py-2 text-xs hover:bg-accent/20 transition-colors flex items-center gap-1.5">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             <span data-i18n="knowledge_base.import_files"></span>
           </button>
         </div>
       </div>
-      <!-- 批量删除确认对话框 -->
+      <!-- 批量删除确认对话框（兼容保留） -->
       <div id="kbConfirmDialog" class="hidden fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center">
         <div class="bg-surface-1 border border-border-strong rounded-lg p-6 max-w-sm mx-4">
           <p class="text-sm text-text-primary mb-1" data-i18n="knowledge_base.confirm_delete_title"></p>
@@ -5541,8 +5560,21 @@
           // REQ-UI-011：主题模式 dark/light/system
           llmConfigured: false,
           // LLM 是否已配置
-          drafts: {}
+          drafts: {},
           // 会话级草稿（conversationId → 未发送文本）
+          // 功能开关状态（方案4：input-toggles.js 状态补全）
+          hybridEnabled: false,
+          // 混合搜索开关
+          agentEnabled: false,
+          // Agent 模式开关
+          subAgentEnabled: false,
+          // 子代理开关
+          memoryEnabled: false,
+          // 记忆开关
+          webSearchEnabled: false,
+          // 网页搜索开关
+          docList: []
+          // 文档提及列表（chat.js doc-mention 需要）
         };
         var _state = { ...initialState };
         var _subscribers = /* @__PURE__ */ new Map();
@@ -5624,6 +5656,7 @@
           "select:not([disabled])",
           '[tabindex]:not([tabindex="-1"])'
         ].join(", ");
+        var _trapStack = [];
         function isVisible(el) {
           if (!el) return false;
           if (el.offsetWidth === 0 && el.offsetHeight === 0) return false;
@@ -5638,12 +5671,28 @@
             container.querySelectorAll(FOCUSABLE_SELECTORS)
           ).filter(isVisible);
         }
+        function _getTopTrap() {
+          for (let i = _trapStack.length - 1; i >= 0; i--) {
+            const trap = _trapStack[i];
+            if (trap !== null) {
+              return trap;
+            }
+          }
+          return null;
+        }
+        function _cleanupStack() {
+          while (_trapStack.length > 0 && _trapStack[_trapStack.length - 1] === null) {
+            _trapStack.pop();
+          }
+        }
         function createFocusTrap(element) {
           let previouslyFocused = null;
           let active = false;
+          let paused = false;
           let keydownHandler = null;
+          let stackIndex = -1;
           function handleKeyDown(e) {
-            if (!active) return;
+            if (!active || paused) return;
             if (e.key !== "Tab") return;
             const focusable = getFocusableElements(element);
             if (focusable.length === 0) {
@@ -5665,10 +5714,17 @@
               }
             }
           }
-          function activate() {
-            if (active) return;
-            active = true;
-            previouslyFocused = document.activeElement;
+          function _pause() {
+            if (!active || paused) return;
+            paused = true;
+            if (keydownHandler) {
+              document.removeEventListener("keydown", keydownHandler, true);
+              keydownHandler = null;
+            }
+          }
+          function _resume() {
+            if (!active || !paused) return;
+            paused = false;
             keydownHandler = handleKeyDown;
             document.addEventListener("keydown", keydownHandler, true);
             const focusable = getFocusableElements(element);
@@ -5681,9 +5737,43 @@
               element.focus();
             }
           }
+          function activate() {
+            if (active && !paused) return;
+            if (!active) {
+              active = true;
+              for (let i = 0; i < _trapStack.length; i++) {
+                const otherTrap = _trapStack[i];
+                if (otherTrap !== null && otherTrap.element !== element) {
+                  otherTrap._pause();
+                }
+              }
+              _trapStack.push(null);
+              const trap = {
+                element,
+                activate,
+                deactivate,
+                _pause,
+                _resume,
+                get active() {
+                  return active && !paused;
+                },
+                get stackIndex() {
+                  return stackIndex;
+                }
+              };
+              _trapStack[_trapStack.length - 1] = trap;
+              stackIndex = _trapStack.length - 1;
+              previouslyFocused = document.activeElement;
+            }
+            _resume();
+          }
           function deactivate() {
             if (!active) return;
+            if (stackIndex >= 0 && stackIndex < _trapStack.length) {
+              _trapStack[stackIndex] = null;
+            }
             active = false;
+            paused = false;
             if (keydownHandler) {
               document.removeEventListener("keydown", keydownHandler, true);
               keydownHandler = null;
@@ -5692,8 +5782,35 @@
               previouslyFocused.focus();
             }
             previouslyFocused = null;
+            const topTrap = _getTopTrap();
+            if (topTrap && topTrap.element !== element && !topTrap.active) {
+              topTrap._resume();
+            }
+            _cleanupStack();
           }
           return { activate, deactivate };
+        }
+      
+        // ui/src/panel-stack.js
+        var _stack = [];
+        function pushPanel(panel) {
+          const existingIdx = _stack.findIndex((p) => p.id === panel.id);
+          if (existingIdx >= 0) {
+            _stack.splice(existingIdx, 1);
+          }
+          _stack.push(panel);
+        }
+        function removePanel(id) {
+          const idx = _stack.findIndex((p) => p.id === id);
+          if (idx >= 0) {
+            _stack.splice(idx, 1);
+          }
+        }
+        function closeTopPanel() {
+          const top = _stack[_stack.length - 1];
+          if (!top) return false;
+          top.close();
+          return true;
         }
       
         // ui/src/paywall.js
@@ -5708,8 +5825,10 @@
           }
           _paywallTrap = createFocusTrap($("paywall"));
           _paywallTrap.activate();
+          pushPanel({ id: "paywall", close: hidePaywall, element: $("paywall"), label: "Paywall" });
         }
         function hidePaywall() {
+          removePanel("paywall");
           if (_paywallTrap) {
             _paywallTrap.deactivate();
             _paywallTrap = null;
@@ -7254,20 +7373,6 @@
             versions
           };
         }
-        function updateCarouselDisplay(carousel, mdContainer) {
-          const state = getCarouselState(carousel);
-          if (state.total === 0 || !state.versions[state.current]) return;
-          const version = state.versions[state.current];
-          mdContainer.textContent = version.content;
-          mdContainer.dataset.rawMarkdown = version.content;
-          const blockEl = carousel.closest(".msg-block");
-          if (blockEl) {
-            const sourcesEl = blockEl.querySelector(".sources");
-            if (sourcesEl && version.sources) {
-              blockEl.dataset.pendingSources = JSON.stringify(version.sources);
-            }
-          }
-        }
         function renderCarouselControls(carousel) {
           const total = carousel._versions ? carousel._versions.length : 0;
           if (total === 0) return null;
@@ -7347,14 +7452,30 @@
             ipcCommand: "set_web_search_enabled"
           }
         };
-        var _toggleStates = { hybrid: false, agent: false, sub_agent: false, memory: false, web_search: false };
+        function settingKeyToStateKey(settingKey) {
+          switch (settingKey) {
+            case "hybrid":
+              return "hybridEnabled";
+            case "agent":
+              return "agentEnabled";
+            case "sub_agent":
+              return "subAgentEnabled";
+            case "memory":
+              return "memoryEnabled";
+            case "web_search":
+              return "webSearchEnabled";
+            default:
+              return settingKey;
+          }
+        }
         function createInputToggle(settingKey, initialActive = false) {
           const config = TOGGLE_CONFIG[settingKey];
           if (!config) {
             console.warn(`[input-toggles] \u672A\u77E5 settingKey: ${settingKey}`);
             return document.createElement("div");
           }
-          _toggleStates[settingKey] = initialActive;
+          const stateKey = settingKeyToStateKey(settingKey);
+          setState({ [stateKey]: initialActive });
           const toggle = document.createElement("div");
           toggle.className = "input-toggle flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer text-sm transition-colors duration-150 select-none";
           toggle.dataset.settingKey = settingKey;
@@ -7363,7 +7484,8 @@
           toggle.tabIndex = 0;
           toggle.innerHTML = `${config.icon}<span>${t(config.labelKey)}</span>`;
           function updateVisual() {
-            const active = _toggleStates[settingKey];
+            const stateKey2 = settingKeyToStateKey(settingKey);
+            const active = get(stateKey2);
             toggle.classList.toggle("text-accent", active);
             toggle.classList.toggle("bg-accent/10", active);
             toggle.classList.toggle("text-text-tertiary", !active);
@@ -7372,14 +7494,17 @@
             toggle.setAttribute("aria-checked", String(active));
           }
           updateVisual();
+          const unsubscribe = subscribe(stateKey, updateVisual);
           async function doToggle() {
-            const newState = !_toggleStates[settingKey];
-            _toggleStates[settingKey] = newState;
+            const stateKey2 = settingKeyToStateKey(settingKey);
+            const currentState = get(stateKey2);
+            const newState = !currentState;
+            setState({ [stateKey2]: newState });
             updateVisual();
             try {
               await invoke(config.ipcCommand, { enabled: newState });
             } catch (err) {
-              _toggleStates[settingKey] = !newState;
+              setState({ [stateKey2]: currentState });
               updateVisual();
               console.error(`[input-toggles] ${settingKey} \u5207\u6362\u5931\u8D25:`, err);
             }
@@ -7391,10 +7516,14 @@
               doToggle();
             }
           };
+          toggle.addEventListener("remove", () => {
+            unsubscribe();
+          });
           return toggle;
         }
         function getToggleState(settingKey) {
-          return _toggleStates[settingKey] || false;
+          const stateKey = settingKeyToStateKey(settingKey);
+          return get(stateKey);
         }
       
         // ui/src/retrieval-feedback.js
@@ -7696,17 +7825,21 @@
             _tokenEstEl = document.createElement("span");
             _tokenEstEl.className = "token-estimate";
             _tokenEstEl.setAttribute("aria-hidden", "true");
+            _tokenEstEl.style.display = "none";
             const toolbar = inputBar.querySelector(".flex.items-center.justify-between");
             if (toolbar) {
-              toolbar.appendChild(_tokenEstEl);
+              const rightSide = toolbar.children[1];
+              if (rightSide) {
+                rightSide.insertBefore(_tokenEstEl, rightSide.firstChild);
+              }
             }
           }
           if (tokens > 0) {
             _tokenEstEl.textContent = `~${tokens} tokens`;
-            _tokenEstEl.style.opacity = "1";
+            _tokenEstEl.style.display = "inline";
           } else {
             _tokenEstEl.textContent = "";
-            _tokenEstEl.style.opacity = "0";
+            _tokenEstEl.style.display = "none";
           }
         }
       
@@ -8223,6 +8356,14 @@
           _treePanel.addEventListener("click", (e) => {
             if (e.target === _treePanel) closeConversationTreePanel();
           });
+          _treePanel.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              closeConversationTreePanel();
+            }
+          });
+          pushPanel({ id: "turn-tree", close: closeConversationTreePanel, element: _treePanel, label: "Conversation Tree" });
           const titleEl = _treePanel.querySelector(".conversation-tree-title");
           const bodyEl = _treePanel.querySelector(".conversation-tree-body");
           const loadingEl = _treePanel.querySelector(".conversation-tree-loading");
@@ -8260,6 +8401,7 @@
           }
         }
         function closeConversationTreePanel() {
+          removePanel("turn-tree");
           if (_treePanel) {
             _treePanel.remove();
             _treePanel = null;
@@ -9243,42 +9385,6 @@
             queryInput.addEventListener("input", () => {
               checkSlashCommand();
               checkDocMention();
-            });
-            queryInput.addEventListener("keydown", (e) => {
-              const panel = document.querySelector(".slash-command-panel");
-              if (panel) {
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  const filtered = filterSlashCommands(queryInput.value);
-                  navigateSlashCommand(filtered, "down");
-                } else if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  const filtered = filterSlashCommands(queryInput.value);
-                  navigateSlashCommand(filtered, "up");
-                } else if (e.key === "Enter" || e.key === "Tab") {
-                  const filtered = filterSlashCommands(queryInput.value);
-                  const selected = getSelectedSlashCommand(filtered);
-                  if (selected) {
-                    e.preventDefault();
-                    applySlashCommand(selected, queryInput);
-                    removeSlashCommandPanel(queryInput.parentElement);
-                  }
-                } else if (e.key === "Escape") {
-                  removeSlashCommandPanel(queryInput.parentElement);
-                }
-              }
-              if ((e.metaKey || e.ctrlKey) && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
-                const carousel = document.querySelector(".regen-carousel");
-                if (carousel) {
-                  e.preventDefault();
-                  navigateCarousel(carousel, e.key === "ArrowLeft" ? "left" : "right");
-                  const blockEl = carousel.closest(".msg-block");
-                  if (blockEl) {
-                    const mdEl = blockEl.querySelector(".md");
-                    if (mdEl) updateCarouselDisplay(carousel, mdEl);
-                  }
-                }
-              }
             });
             document.addEventListener("click", (e) => {
               if (!queryInput.contains(e.target)) {
@@ -10688,6 +10794,42 @@
       
         // ui/src/confirm-dialog.js
         init_i18n();
+      
+        // ui/src/zindex.js
+        var Z_INDEX = {
+          /** 主界面（侧栏 + 聊天区 + 输入区） */
+          BASE: 0,
+          /** 启动向导 */
+          WIZARD: 40,
+          /** 用户主动打开的主面板：设置 / 付费墙 / 代码执行 / Dream / 符号搜索 / 工作流 / 分支树 */
+          PANEL_1: 50,
+          /** 叠加在 PANEL_1 之上的确认弹窗：confirm-dialog / VLM 确认 */
+          PANEL_2: 55,
+          /** Toast 通知 */
+          TOAST: 60,
+          /** 下载管理器 */
+          PANEL_3: 65,
+          /** DB 错误 Modal */
+          PANEL_4: 70,
+          /** 搜索弹框 / 下载恢复 */
+          PANEL_5: 75,
+          /** 命令面板（最高用户交互层） */
+          COMMAND_PALETTE: 80,
+          /** 知识图谱全屏查看器（沉浸式，独立层级） */
+          GRAPH_VIEWER: 90,
+          /** 审计日志面板（安全相关，独立层级） */
+          AUDIT_LOG: 95,
+          /** 锁屏遮罩（最高安全优先级，不可被任何面板遮挡） */
+          LOCK_OVERLAY: 99999
+        };
+        function zClass(value) {
+          if ([0, 10, 20, 30, 40, 50].includes(value)) {
+            return `z-${value}`;
+          }
+          return `z-[${value}]`;
+        }
+      
+        // ui/src/confirm-dialog.js
         var _activeDialog = null;
         var _activeResolve = null;
         var _enableTimer = null;
@@ -10698,6 +10840,7 @@
             clearTimeout(_enableTimer);
             _enableTimer = null;
           }
+          removePanel("confirm-dialog");
           if (_activeTrap) {
             _activeTrap.deactivate();
             _activeTrap = null;
@@ -10737,7 +10880,7 @@
             _activeResolve = resolve;
             const overlay = document.createElement("div");
             overlay.id = "confirmDialog";
-            overlay.className = "fixed inset-0 z-[55] bg-surface-0/95 backdrop-blur-sm flex items-center justify-center";
+            overlay.className = `fixed inset-0 ${zClass(Z_INDEX.PANEL_2)} bg-surface-0/95 backdrop-blur-sm flex items-center justify-center`;
             overlay.setAttribute("role", "alertdialog");
             overlay.setAttribute("aria-modal", "true");
             overlay.setAttribute("aria-labelledby", "confirmDialogTitle");
@@ -10800,6 +10943,7 @@
             document.addEventListener("keydown", _onKeyDown, true);
             _activeTrap = createFocusTrap(overlay);
             _activeTrap.activate();
+            pushPanel({ id: "confirm-dialog", close: () => _closeDialog(false), element: overlay, label: "Confirm Dialog" });
             _enableTimer = setTimeout(() => {
               if (confirmBtn) {
                 confirmBtn.disabled = false;
@@ -10824,7 +10968,23 @@
         var _scrollListenerAttached = false;
         function onChatScroll() {
           const chatArea = $("chatArea");
-          if (chatArea && chatArea.scrollTop === _lastProgrammaticScrollTop) return;
+          if (!chatArea) return;
+          if (chatArea.scrollTop === _lastProgrammaticScrollTop) return;
+          if (!_anchorRafId) return;
+          if (_userScrolledDuringToggle) return;
+          if (_pinBottom) {
+            _lastProgrammaticScrollTop = chatArea.scrollHeight;
+            chatArea.scrollTop = _lastProgrammaticScrollTop;
+          } else if (_anchorEl && _anchorEl.isConnected) {
+            const newOffset = _anchorEl.getBoundingClientRect().top - chatArea.getBoundingClientRect().top;
+            const delta = newOffset - _anchorTargetOffset;
+            if (Math.abs(delta) > 0.5) {
+              _lastProgrammaticScrollTop = chatArea.scrollTop + delta;
+              chatArea.scrollTop = _lastProgrammaticScrollTop;
+            }
+          }
+        }
+        function onUserScrollInput() {
           if (_anchorRafId) _userScrolledDuringToggle = true;
         }
         var _resizeTimer = null;
@@ -10870,6 +11030,8 @@
           if (!chatArea) return;
           if (!_scrollListenerAttached) {
             chatArea.addEventListener("scroll", onChatScroll, { passive: true });
+            chatArea.addEventListener("wheel", onUserScrollInput, { passive: true });
+            chatArea.addEventListener("touchstart", onUserScrollInput, { passive: true });
             _scrollListenerAttached = true;
           }
           const rect = chatArea.getBoundingClientRect();
@@ -10889,20 +11051,7 @@
           const app = $("app");
           const expanded = $("sidebarExpanded");
           const chatArea = $("chatArea");
-          const main = app ? app.querySelector("main") : null;
           const willCollapse = !sb.classList.contains("sidebar-collapsed");
-          let visualX = 0;
-          if (main) {
-            const cs = getComputedStyle(main);
-            const pad = parseFloat(cs.paddingLeft) || 0;
-            let tx = 0;
-            const tf = cs.transform;
-            if (tf && tf !== "none") {
-              const v = parseFloat(tf.split(",")[4]);
-              if (Number.isFinite(v)) tx = v;
-            }
-            visualX = pad + tx;
-          }
           const seq = ++_toggleSeq;
           if (chatArea) startAnchorLoop(chatArea);
           if (willCollapse) {
@@ -10918,36 +11067,33 @@
             $("collapseBtn").classList.remove("hidden");
             $("expandBtn").classList.add("hidden");
           }
-          if (main) {
-            const newPad = willCollapse ? 0 : 240;
-            main.style.transition = "none";
-            main.style.transform = `translateX(${visualX - newPad}px)`;
-            void main.offsetHeight;
-            main.style.transition = "transform 300ms ease-out";
-            main.style.transform = "translateX(0px)";
-          }
           const finish = () => {
             if (seq !== _toggleSeq) return;
             stopAnchorLoop();
-            if (main) {
-              main.style.transition = "none";
-              main.style.transform = "";
-            }
           };
           const onAnimEnd = (ev) => {
-            if (ev.propertyName !== "transform") return;
+            if (ev.propertyName !== "padding-left" && ev.propertyName !== "transform") return;
             sb.removeEventListener("transitionend", onAnimEnd);
-            if (main) main.removeEventListener("transitionend", onAnimEnd);
+            if (app) {
+              const main = app.querySelector("main");
+              if (main) main.removeEventListener("transitionend", onAnimEnd);
+            }
             clearTimeout(_toggleEndTimer);
             _toggleEndTimer = null;
             finish();
           };
           sb.addEventListener("transitionend", onAnimEnd);
-          if (main) main.addEventListener("transitionend", onAnimEnd);
+          if (app) {
+            const main = app.querySelector("main");
+            if (main) main.addEventListener("transitionend", onAnimEnd);
+          }
           clearTimeout(_toggleEndTimer);
           _toggleEndTimer = setTimeout(() => {
             sb.removeEventListener("transitionend", onAnimEnd);
-            if (main) main.removeEventListener("transitionend", onAnimEnd);
+            if (app) {
+              const main = app.querySelector("main");
+              if (main) main.removeEventListener("transitionend", onAnimEnd);
+            }
             finish();
           }, 350);
           try {
@@ -10963,7 +11109,10 @@
             const expanded = $("sidebarExpanded");
             if (collapsed) {
               sb.style.transition = "none";
-              if (app) app.style.transition = "none";
+              if (app) {
+                const main = app.querySelector("main");
+                if (main) main.style.transition = "none";
+              }
               sb.classList.add("sidebar-collapsed");
               if (app) app.classList.add("sidebar-collapsed");
               if (expanded) expanded.classList.add("opacity-0", "pointer-events-none");
@@ -10972,7 +11121,10 @@
               requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                   sb.style.transition = "";
-                  if (app) app.style.transition = "";
+                  if (app) {
+                    const main = app.querySelector("main");
+                    if (main) main.style.transition = "";
+                  }
                 });
               });
             }
@@ -11028,8 +11180,10 @@
           _searchMode = "title";
           _updateSearchModeUI();
           _renderSearchResults();
+          pushPanel({ id: "conv-search-popup", close: closeSearchPopup, element: popup, label: "Conversation Search" });
         }
         function closeSearchPopup() {
+          removePanel("conv-search-popup");
           const popup = $("convSearchPopup");
           if (popup) popup.classList.add("hidden");
         }
@@ -11255,15 +11409,19 @@
           const selected = items[_searchSelectedIndex];
           if (selected) selected.scrollIntoView({ block: "nearest" });
         }
+        var _onFilterChange = () => {
+        };
+        function setFilterChangeCallback(fn) {
+          _onFilterChange = fn || (() => {
+          });
+        }
+        var _kbSearchTimer = null;
         function initSidebar() {
           $("collapseBtn").onclick = toggleSidebar;
           $("expandBtn").onclick = toggleSidebar;
           initResizeAnchoring();
           if ($("kbBtn")) {
             $("kbBtn").onclick = openKbModal;
-          }
-          if ($("kbClose")) {
-            $("kbClose").onclick = closeKbModal;
           }
           if ($("kbCloseBtn")) {
             $("kbCloseBtn").onclick = closeKbModal;
@@ -11281,17 +11439,26 @@
               }
             });
           }
+          if ($("kbFilterToggle")) {
+            $("kbFilterToggle").onclick = () => {
+              const panel = $("kbFilterPanel");
+              if (panel) panel.classList.toggle("hidden");
+            };
+          }
           if ($("docSearchInput")) {
-            $("docSearchInput").addEventListener("input", filterDocuments2);
+            $("docSearchInput").addEventListener("input", () => {
+              if (_kbSearchTimer) clearTimeout(_kbSearchTimer);
+              _kbSearchTimer = setTimeout(() => _onFilterChange(), 300);
+            });
           }
           if ($("docStatusFilter")) {
-            $("docStatusFilter").addEventListener("change", filterDocuments2);
+            $("docStatusFilter").addEventListener("change", () => _onFilterChange());
           }
           if ($("docFormatFilter")) {
-            $("docFormatFilter").addEventListener("change", filterDocuments2);
+            $("docFormatFilter").addEventListener("change", () => _onFilterChange());
           }
           if ($("docTagFilter")) {
-            $("docTagFilter").addEventListener("change", filterDocuments2);
+            $("docTagFilter").addEventListener("change", () => _onFilterChange());
           }
           if ($("kbSelectToggle")) {
             $("kbSelectToggle").onclick = toggleMultiSelect;
@@ -11393,44 +11560,6 @@
           const dialog = $("kbConfirmDialog");
           if (dialog) dialog.classList.add("hidden");
         }
-        function filterDocuments2() {
-          const box = $("docList");
-          if (!box) return;
-          const searchQ = ($("docSearchInput")?.value || "").trim().toLowerCase();
-          const statusFilter = $("docStatusFilter")?.value || "";
-          const formatFilter = $("docFormatFilter")?.value || "";
-          const tagFilter = $("docTagFilter")?.value || "";
-          const noMatch = box.querySelector(".doc-no-match");
-          if (noMatch) noMatch.remove();
-          const items = box.querySelectorAll("[data-doc-name]");
-          let visibleCount = 0;
-          items.forEach((item) => {
-            const name = (item.dataset.docName || "").toLowerCase();
-            const status = item.dataset.docStatus || "";
-            const format = item.dataset.docFormat || "";
-            const matchSearch = !searchQ || name.includes(searchQ);
-            const matchStatus = !statusFilter || status === statusFilter;
-            const matchFormat = !formatFilter || format === formatFilter;
-            let tagList = [];
-            try {
-              tagList = JSON.parse(item.dataset.docTags || "[]");
-            } catch (_) {
-            }
-            const matchTag = !tagFilter || tagList.includes(tagFilter);
-            if (matchSearch && matchStatus && matchFormat && matchTag) {
-              item.style.display = "";
-              visibleCount++;
-            } else {
-              item.style.display = "none";
-            }
-          });
-          if (visibleCount === 0 && items.length > 0) {
-            const empty = document.createElement("div");
-            empty.className = "doc-no-match px-3 py-4 text-center text-[11px] text-text-quaternary";
-            empty.textContent = t("knowledge_base.no_match");
-            box.appendChild(empty);
-          }
-        }
       
         // ui/src/command-palette.js
         init_utils();
@@ -11506,8 +11635,10 @@
           $("cmdSearch").value = "";
           renderCommandList(_commands, "");
           $("cmdSearch").focus();
+          pushPanel({ id: "command-palette", close: closeCommandPalette, element: $("commandPalette"), label: "Command Palette" });
         }
         function closeCommandPalette() {
+          removePanel("command-palette");
           $("commandPalette").classList.add("hidden");
           const prev = get("cmdPrevFocus");
           if (prev) prev.focus();
@@ -11733,6 +11864,7 @@
             });
             if (handled) return;
             if (e.key === "Escape") {
+              if (closeTopPanel()) return;
               const searchPopup = $("convSearchPopup");
               if (searchPopup && !searchPopup.classList.contains("hidden")) {
                 handlers.onCloseSearchPopup();
@@ -12226,7 +12358,7 @@
           if (_lockOverlayEl) return;
           _lockOverlayEl = document.createElement("div");
           _lockOverlayEl.id = "lockOverlay";
-          _lockOverlayEl.className = "fixed inset-0 z-[99999] flex items-center justify-center bg-[rgba(15,17,21,0.92)] backdrop-blur-[12px] opacity-0 pointer-events-none transition-opacity duration-300";
+          _lockOverlayEl.className = `fixed inset-0 ${zClass(Z_INDEX.LOCK_OVERLAY)} flex items-center justify-center bg-[rgba(15,17,21,0.92)] backdrop-blur-[12px] opacity-0 pointer-events-none transition-opacity duration-300`;
           _lockOverlayEl.innerHTML = `
           <div class="flex flex-col items-center px-10 py-12 max-w-[400px] text-center text-text-secondary">
             <div class="text-info mb-6 opacity-90">
@@ -12268,6 +12400,8 @@
           }
           _lockTrap = createFocusTrap(_lockOverlayEl);
           _lockTrap.activate();
+          pushPanel({ id: "lock-overlay", close: () => {
+          }, element: _lockOverlayEl, label: "Lock Overlay" });
           if (_lockErrorEl) _lockErrorEl.textContent = "";
           if (_lockPasswordInputEl) _lockPasswordInputEl.value = "";
         }
@@ -12504,7 +12638,7 @@
         }
         function showEncryptDialog() {
           const dialog = document.createElement("div");
-          dialog.className = "fixed inset-0 z-[99998] flex items-center justify-center bg-black/50 backdrop-blur-[4px]";
+          dialog.className = `fixed inset-0 ${zClass(Z_INDEX.AUDIT_LOG)} flex items-center justify-center bg-black/50 backdrop-blur-[4px]`;
           dialog.innerHTML = `
           <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[480px] w-[90%] max-h-[85vh] overflow-y-auto">
             <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="security.encrypt_title">\u{1F512} \u542F\u7528\u6570\u636E\u5E93\u52A0\u5BC6</h3>
@@ -13544,8 +13678,10 @@
             _panelTrap = createFocusTrap(panel);
             _panelTrap.activate();
           }
+          pushPanel({ id: "download-manager", close: closeDownloadManager, element: overlay, label: "Download Manager" });
         }
         function closeDownloadManager() {
+          removePanel("download-manager");
           const overlay = $("downloadManagerOverlay");
           if (!overlay) return;
           overlay.classList.add("hidden");
@@ -14404,6 +14540,13 @@
             updateRerankToggle();
             setState({ hydeEnabled: settings.hyde_enabled });
             updateHydeToggle();
+            setState({
+              hybridEnabled: settings.hybrid_search || false,
+              agentEnabled: settings.agent_enabled || false,
+              subAgentEnabled: settings.sub_agent_enabled || false,
+              memoryEnabled: settings.memory_enabled || false,
+              webSearchEnabled: settings.web_search_enabled || false
+            });
             const subAgentToggleEl = $("subAgentToggle");
             if (subAgentToggleEl && settings.sub_agent_enabled) {
               subAgentToggleEl.setAttribute("aria-checked", "true");
@@ -14488,11 +14631,13 @@
             }
             _settingsTrap = createFocusTrap($("settingsModal"));
             _settingsTrap.activate();
+            pushPanel({ id: "settings", close: closeSettings, element: $("settingsModal"), label: "Settings" });
           } catch (err) {
             toastError(err);
           }
         }
         function closeSettings() {
+          removePanel("settings");
           if (_settingsTrap) {
             _settingsTrap.deactivate();
             _settingsTrap = null;
@@ -14666,8 +14811,9 @@
         async function onSubAgentToggle() {
           const toggle = $("subAgentToggle");
           if (!toggle) return;
-          const enabled = toggle.getAttribute("aria-checked") === "true";
-          const newEnabled = !enabled;
+          const currentEnabled = get("subAgentEnabled");
+          const newEnabled = !currentEnabled;
+          setState({ subAgentEnabled: newEnabled });
           toggle.setAttribute("aria-checked", String(newEnabled));
           toggle.classList.toggle("bg-accent", newEnabled);
           toggle.classList.toggle("bg-slate-600", !newEnabled);
@@ -14677,10 +14823,11 @@
             toast(newEnabled ? t("settings.sub_agent_enabled") : t("settings.sub_agent_disabled"), "success");
           } catch (err) {
             toastError(err);
-            toggle.setAttribute("aria-checked", String(enabled));
-            toggle.classList.toggle("bg-accent", enabled);
-            toggle.classList.toggle("bg-slate-600", !enabled);
-            toggle.querySelector("span").classList.toggle("translate-x-5", enabled);
+            setState({ subAgentEnabled: currentEnabled });
+            toggle.setAttribute("aria-checked", String(currentEnabled));
+            toggle.classList.toggle("bg-accent", currentEnabled);
+            toggle.classList.toggle("bg-slate-600", !currentEnabled);
+            toggle.querySelector("span").classList.toggle("translate-x-5", currentEnabled);
           }
         }
         function initSettings() {
@@ -16008,10 +16155,12 @@
           _overlayEl.addEventListener("keydown", (e) => {
             if (e.key === "Escape") {
               e.preventDefault();
+              e.stopPropagation();
               closeGraphViewer();
             }
           });
           _trap = createFocusTrap(_overlayEl);
+          pushPanel({ id: "graph-viewer", close: closeGraphViewer, element: _overlayEl, label: "Graph Viewer" });
         }
         async function openGraphViewer() {
           ensureOverlay();
@@ -16066,6 +16215,7 @@
         }
         function closeGraphViewer() {
           if (!_overlayEl) return;
+          removePanel("graph-viewer");
           _overlayEl.classList.remove("graph-visible");
           if (_trap) _trap.deactivate();
           if (_simulation) {
@@ -16833,6 +16983,19 @@
         init_i18n();
         init_ipc();
         init_toast();
+        var _panel = null;
+        var _trap2 = null;
+        function closeCodeExecutorPanel() {
+          removePanel("code-executor");
+          if (_trap2) {
+            _trap2.deactivate();
+            _trap2 = null;
+          }
+          if (_panel) {
+            _panel.remove();
+            _panel = null;
+          }
+        }
         function initCodeExecutor() {
         }
       
@@ -16893,6 +17056,7 @@
           if (_dreamTrap) _dreamTrap.deactivate();
           _dreamTrap = createFocusTrap(overlay);
           _dreamTrap.activate();
+          pushPanel({ id: "dream-panel", close: closeDreamPanel, element: overlay, label: "Dream Panel" });
           if (_unlistenDreamProgress) {
             _unlistenDreamProgress();
           }
@@ -16919,6 +17083,7 @@
           });
         }
         function closeDreamPanel() {
+          removePanel("dream-panel");
           const overlay = $("dreamPanelOverlay");
           if (overlay) overlay.classList.add("hidden");
           if (_dreamTrap) {
@@ -17003,6 +17168,8 @@
             if (e.key === "Escape") {
               const overlay = $("dreamPanelOverlay");
               if (overlay && !overlay.classList.contains("hidden")) {
+                e.preventDefault();
+                e.stopPropagation();
                 closeDreamPanel();
               }
             }
@@ -17041,7 +17208,7 @@
           if (!overlay) {
             overlay = document.createElement("div");
             overlay.id = "symbolSearchOverlay";
-            overlay.className = "hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[10vh]";
+            overlay.className = `hidden fixed inset-0 ${zClass(Z_INDEX.PANEL_1)} bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[10vh]`;
             overlay.setAttribute("role", "dialog");
             overlay.setAttribute("aria-modal", "true");
             overlay.innerHTML = `
@@ -17082,8 +17249,10 @@
           _symbolTrap = createFocusTrap(overlay);
           _symbolTrap.activate();
           if (input) input.focus();
+          pushPanel({ id: "symbol-search", close: closeSymbolSearch, element: overlay, label: "Symbol Search" });
         }
         function closeSymbolSearch() {
+          removePanel("symbol-search");
           const overlay = $("symbolSearchOverlay");
           if (overlay) overlay.classList.add("hidden");
           if (_symbolTrap) {
@@ -17142,6 +17311,8 @@
             if (e.key === "Escape") {
               const overlay = $("symbolSearchOverlay");
               if (overlay && !overlay.classList.contains("hidden")) {
+                e.preventDefault();
+                e.stopPropagation();
                 closeSymbolSearch();
               }
             }
@@ -17160,7 +17331,7 @@
           if (!overlay) {
             overlay = document.createElement("div");
             overlay.id = "workflowPanelOverlay";
-            overlay.className = "hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[8vh]";
+            overlay.className = `hidden fixed inset-0 ${zClass(Z_INDEX.PANEL_1)} bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[8vh]`;
             overlay.setAttribute("role", "dialog");
             overlay.setAttribute("aria-modal", "true");
             overlay.innerHTML = `
@@ -17211,6 +17382,7 @@
           if (_workflowTrap) _workflowTrap.deactivate();
           _workflowTrap = createFocusTrap(overlay);
           _workflowTrap.activate();
+          pushPanel({ id: "workflow-panel", close: closeWorkflowPanel, element: overlay, label: "Workflow Panel" });
           if (_unlistenWorkflowProgress) {
             _unlistenWorkflowProgress();
           }
@@ -17229,6 +17401,7 @@
           });
         }
         function closeWorkflowPanel() {
+          removePanel("workflow-panel");
           const overlay = $("workflowPanelOverlay");
           if (overlay) overlay.classList.add("hidden");
           if (_workflowTrap) {
@@ -17394,15 +17567,137 @@
       
         // ui/src/main.js
         init_ipc();
+      
+        // ui/src/input-keymap.js
+        function checkPopups() {
+          const slashPanel = document.querySelector(".slash-command-panel");
+          const docMentionPopup = document.querySelector(".doc-mention-popup");
+          return {
+            hasSlashPanel: !!slashPanel,
+            hasDocMention: !!docMentionPopup
+          };
+        }
+        function handleSlashNavigation(e) {
+          const panel = document.querySelector(".slash-command-panel");
+          if (panel) {
+            const target = (
+              /** @type {HTMLTextAreaElement} */
+              e.target
+            );
+            const filtered = filterSlashCommands(target.value);
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              navigateSlashCommand(filtered, "down");
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              navigateSlashCommand(filtered, "up");
+            } else if (e.key === "Enter" || e.key === "Tab") {
+              const selected = getSelectedSlashCommand(filtered);
+              if (selected) {
+                e.preventDefault();
+                applySlashCommand(selected, target);
+                removeSlashCommandPanel(target.parentElement);
+              }
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              removeSlashCommandPanel(target.parentElement);
+            }
+            return;
+          }
+        }
+        function handleHistoryNavigation(e, inputEl) {
+          const target = (
+            /** @type {HTMLTextAreaElement} */
+            e.target
+          );
+          const cursorAtFirstLine = target.selectionStart === 0 || target.value.substring(0, target.selectionStart).indexOf("\n") === -1;
+          const cursorAtLastLine = target.selectionStart === target.value.length || target.value.substring(target.selectionStart).indexOf("\n") === -1;
+          if (e.key === "ArrowUp" && cursorAtFirstLine) {
+            const histText = navigateHistoryUp();
+            if (histText !== null) {
+              e.preventDefault();
+              target.value = histText;
+              target.style.height = "auto";
+              const MIN_INPUT_HEIGHT = 48;
+              const MAX_INPUT_HEIGHT = 160;
+              target.style.height = Math.min(Math.max(target.scrollHeight, MIN_INPUT_HEIGHT), MAX_INPUT_HEIGHT) + "px";
+              const len = target.value.length;
+              target.setSelectionRange(len, len);
+            }
+            return;
+          }
+          if (e.key === "ArrowDown" && cursorAtLastLine) {
+            const histText = navigateHistoryDown();
+            if (histText !== null) {
+              e.preventDefault();
+              target.value = histText;
+              target.style.height = "auto";
+              const MIN_INPUT_HEIGHT = 48;
+              const MAX_INPUT_HEIGHT = 160;
+              target.style.height = Math.min(Math.max(target.scrollHeight, MIN_INPUT_HEIGHT), MAX_INPUT_HEIGHT) + "px";
+              const len = target.value.length;
+              target.setSelectionRange(len, len);
+            }
+            return;
+          }
+        }
+        function createInputKeyHandler(handlers) {
+          return (e) => {
+            const { hasSlashPanel, hasDocMention } = checkPopups();
+            if (hasSlashPanel || hasDocMention) {
+              if (["ArrowUp", "ArrowDown", "Escape", "Enter"].includes(e.key)) {
+                handleSlashNavigation(e);
+                if (e.defaultPrevented) return;
+              }
+            }
+            if (e.key === "Enter" && !e.shiftKey) {
+              if (hasSlashPanel || hasDocMention) {
+                return;
+              }
+              e.preventDefault();
+              const target = (
+                /** @type {HTMLTextAreaElement} */
+                e.target
+              );
+              if (!target.value.trim()) return;
+              handlers.send();
+              return;
+            }
+            if (!hasSlashPanel && !hasDocMention) {
+              if (["ArrowUp", "ArrowDown"].includes(e.key)) {
+                handleHistoryNavigation(e, e.target);
+                return;
+              }
+            }
+            if (e.key === "Escape") {
+              resetHistoryNav();
+            }
+          };
+        }
+      
+        // ui/src/main.js
         init_utils();
         function updateChatInputState() {
           updateInputUI();
+        }
+        function closeAllPanels() {
+          closeSettings();
+          closeGraphViewer();
+          closeCodeExecutorPanel();
+          closeDreamPanel();
+          closeSymbolSearch();
+          closeWorkflowPanel();
+          closeSearchPopup();
+          closeCommandPalette();
+          hidePaywall();
+          closeConversationTreePanel();
         }
         async function newChat() {
           if (get("streaming")) {
             await onStop();
             await new Promise((r) => setTimeout(r, 100));
           }
+          closeAllPanels();
           stopAllTTS();
           saveDraft();
           clearQueue();
@@ -17424,6 +17719,7 @@
             await onStop();
             await new Promise((r) => setTimeout(r, 100));
           }
+          closeAllPanels();
           saveDraft();
           clearQueue();
           const messages = await invoke("get_messages", { conversationId: id });
@@ -17612,182 +17908,294 @@
             }
           }
         }
+        var KB_PAGE_SIZE = 20;
+        var _kbAllDocs = [];
+        var _kbFilteredDocs = [];
+        var _kbRenderedCount = 0;
+        var _kbObserver = null;
+        var FILE_ICONS = {
+          md: "\u{1F4DD}",
+          txt: "\u{1F4C4}",
+          pdf: "\u{1F4D5}",
+          docx: "\u{1F4D8}",
+          html: "\u{1F310}",
+          pptx: "\u{1F4CA}",
+          epub: "\u{1F4D6}",
+          xlsx: "\u{1F4D7}",
+          csv: "\u{1F4D7}",
+          rs: "\u{1F980}",
+          ts: "\u{1F537}",
+          tsx: "\u{1F537}",
+          py: "\u{1F40D}",
+          go: "\u{1F439}"
+        };
+        var STATUS_DOT_COLORS = {
+          Indexed: "bg-emerald-400",
+          Processing: "bg-amber-400 animate-pulse",
+          Pending: "bg-slate-400",
+          Failed: "bg-red-400"
+        };
         async function loadDocuments() {
           try {
-            const docs = await invoke("get_documents");
+            _kbAllDocs = await invoke("get_documents");
             const isPro = get("isPro");
-            setState({ docCount: docs.length });
+            setState({ docCount: _kbAllDocs.length });
             updateChatInputState();
-            $("kbDocCount").textContent = isPro ? t("knowledge_base.doc_count_pro", { count: docs.length }) : t("knowledge_base.doc_count_free", { count: docs.length });
-            const box = $("docList");
-            box.innerHTML = "";
-            if (docs.length === 0) {
-              const empty = document.createElement("div");
-              empty.className = "px-3 py-4 text-center text-[11px] text-text-quaternary empty-state-hint";
-              empty.innerHTML = `
-              <div class="expanded-hint">
-                ${t("knowledge_base.empty_title")}<br>${t("knowledge_base.empty_hint")}<br><span class="text-slate-600">${t("knowledge_base.empty_formats")}</span>
-              </div>
-              <div class="collapsed-hint hidden" title="${t("knowledge_base.empty_title")}">
-                <div class="text-2xl mb-1">\u{1F4DA}</div>
-                <div class="text-[10px] opacity-70">${t("knowledge_base.empty_collapsed")}</div>
-              </div>`;
-              box.appendChild(empty);
-              return;
+            const countEl = $("kbDocCount");
+            if (countEl) {
+              countEl.textContent = isPro ? t("knowledge_base.doc_count_pro", { count: _kbAllDocs.length }) : t("knowledge_base.doc_count_free", { count: _kbAllDocs.length });
             }
-            for (const d of docs) {
-              const name = displayDocName(d.file_path);
-              const [labelKey, style] = DOC_STATUS_STYLE[docStatusOf(d)] || DOC_STATUS_STYLE.Failed;
-              const wrapper = document.createElement("div");
-              wrapper.dataset.docId = d.id;
-              wrapper.dataset.docName = name;
-              wrapper.dataset.docStatus = docStatusOf(d);
-              wrapper.dataset.docFormat = name.split(".").pop()?.toLowerCase() || "";
-              wrapper.dataset.docTags = JSON.stringify(d.tags || []);
-              const item = document.createElement("div");
-              item.className = "group flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs hover:bg-white/5";
-              if (isMultiSelectMode()) {
-                const checkbox = document.createElement("input");
-                checkbox.type = "checkbox";
-                checkbox.dataset.docId = d.id;
-                checkbox.className = "shrink-0 w-3.5 h-3.5 accent-accent cursor-pointer";
-                checkbox.onclick = (ev) => ev.stopPropagation();
-                checkbox.onchange = () => {
-                  const checked = document.querySelectorAll('#docList input[type="checkbox"]:checked').length;
-                  const countEl = $("kbSelectedCount");
-                  if (countEl) countEl.textContent = t("knowledge_base.selected_count", { count: checked });
-                };
-                item.appendChild(checkbox);
-              }
-              const left = document.createElement("span");
-              left.className = "truncate text-slate-300";
-              left.textContent = name;
-              left.title = d.file_path;
-              const right = document.createElement("span");
-              right.className = "flex items-center gap-2 shrink-0";
-              const badge = document.createElement("span");
-              badge.className = `px-1.5 py-0.5 rounded border ${style}`;
-              badge.textContent = t("knowledge_base." + labelKey);
-              const sumToggle = document.createElement("button");
-              sumToggle.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1";
-              sumToggle.dataset.action = "summary";
-              sumToggle.textContent = "\u{1F4DD}";
-              sumToggle.title = t("knowledge_base.summary_toggle");
-              sumToggle.style.display = docStatusOf(d) === "Indexed" ? "" : "none";
-              sumToggle.onclick = async (ev) => {
-                ev.stopPropagation();
-                const panel = wrapper.querySelector(".doc-summary-panel");
-                if (panel) {
-                  panel.classList.toggle("hidden");
-                  return;
-                }
-                const newPanel = document.createElement("div");
-                newPanel.className = "doc-summary-panel px-3 pb-2 pt-1 text-[11px] text-text-secondary leading-relaxed";
-                newPanel.innerHTML = `<span class="text-text-quaternary">${t("knowledge_base.summary_loading")}</span>`;
-                wrapper.appendChild(newPanel);
-                try {
-                  const summary = await invoke("get_document_summary", { docId: d.id });
-                  renderSummaryPanel(newPanel, d.id, name, summary);
-                } catch (err) {
-                  newPanel.innerHTML = `<span class="text-red-400">${t("knowledge_base.summary_load_failed")}</span>`;
-                }
-              };
-              const retry = document.createElement("button");
-              retry.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1";
-              retry.dataset.action = "retry";
-              retry.textContent = "\u21BB";
-              retry.title = t("knowledge_base.retry_index");
-              retry.style.display = docStatusOf(d) === "Failed" ? "" : "none";
-              retry.onclick = async (ev) => {
-                ev.stopPropagation();
-                await retryDocument(d.id, name);
-              };
-              const del = document.createElement("button");
-              del.className = "invisible group-hover:visible text-text-quaternary hover:text-red-400 px-1";
-              del.dataset.action = "delete";
-              del.textContent = "\xD7";
-              del.title = t("knowledge_base.delete_doc");
-              del.onclick = async (ev) => {
-                ev.stopPropagation();
-                await removeDocument(d.id, name);
-              };
-              const audit = document.createElement("button");
-              audit.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1";
-              audit.dataset.action = "audit";
-              audit.textContent = "\u{1F50D}";
-              audit.title = t("knowledge_base.audit_doc");
-              audit.style.display = isPro && docStatusOf(d) === "Indexed" ? "" : "none";
-              audit.onclick = async (ev) => {
-                ev.stopPropagation();
-                await auditDocument(d.id, name);
-              };
-              if (isMultiSelectMode()) {
-                retry.style.display = "none";
-                del.style.display = "none";
-                audit.style.display = "none";
-                sumToggle.style.display = "none";
-              }
-              right.appendChild(badge);
-              right.appendChild(sumToggle);
-              right.appendChild(retry);
-              right.appendChild(audit);
-              right.appendChild(del);
-              item.appendChild(left);
-              item.appendChild(right);
-              wrapper.appendChild(item);
-              if (d.tags && d.tags.length > 0) {
-                const tagRow = document.createElement("div");
-                tagRow.className = "flex flex-wrap gap-1 px-3 pb-1";
-                for (const tag of d.tags) {
-                  const tagBadge = document.createElement("span");
-                  tagBadge.className = "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-accent/10 text-accent border border-accent/20";
-                  tagBadge.textContent = tag;
-                  tagBadge.style.cursor = "pointer";
-                  tagBadge.title = t("knowledge_base.tag_remove_hint");
-                  tagBadge.onclick = async (ev) => {
-                    ev.stopPropagation();
-                    try {
-                      await invoke("remove_document_tag", { docId: d.id, tag });
-                      loadDocuments();
-                    } catch (err) {
-                      toastError(err);
-                    }
-                  };
-                  tagRow.appendChild(tagBadge);
-                }
-                wrapper.appendChild(tagRow);
-              }
-              const tagInputRow = document.createElement("div");
-              tagInputRow.className = "hidden px-3 pb-1 flex items-center gap-1";
-              const tagInput = document.createElement("input");
-              tagInput.type = "text";
-              tagInput.placeholder = t("knowledge_base.tag_input_placeholder");
-              tagInput.className = "flex-1 px-1.5 py-0.5 rounded text-[10px] bg-surface-3 border border-border-default text-text-primary placeholder-text-quaternary focus:outline-none focus:border-accent";
-              tagInput.onkeydown = async (ev) => {
-                if (ev.key === "Enter" && tagInput.value.trim()) {
-                  ev.preventDefault();
-                  try {
-                    await invoke("add_document_tag", { docId: d.id, tag: tagInput.value.trim() });
-                    tagInput.value = "";
-                    loadDocuments();
-                  } catch (err) {
-                    toastError(err);
-                  }
-                }
-              };
-              tagInputRow.appendChild(tagInput);
-              wrapper.appendChild(tagInputRow);
-              wrapper.addEventListener("mouseenter", () => {
-                tagInputRow.classList.remove("hidden");
-              });
-              wrapper.addEventListener("mouseleave", () => {
-                tagInputRow.classList.add("hidden");
-              });
-              box.appendChild(wrapper);
-            }
-            if (typeof filterDocuments2 === "function") filterDocuments2();
+            applyKbFilters();
           } catch (err) {
             toastError(err);
+          }
+        }
+        function applyKbFilters() {
+          const searchQ = ($("docSearchInput")?.value || "").trim().toLowerCase();
+          const statusFilter = $("docStatusFilter")?.value || "";
+          const formatFilter = $("docFormatFilter")?.value || "";
+          const tagFilter = $("docTagFilter")?.value || "";
+          _kbFilteredDocs = _kbAllDocs.filter((d) => {
+            const name = displayDocName(d.file_path);
+            const nameLower = name.toLowerCase();
+            const status = docStatusOf(d);
+            const ext = name.split(".").pop()?.toLowerCase() || "";
+            const tags = d.tags || [];
+            const matchSearch = !searchQ || nameLower.includes(searchQ) || tags.some((tag) => tag.toLowerCase().includes(searchQ));
+            const matchStatus = !statusFilter || status === statusFilter;
+            const matchFormat = !formatFilter || ext === formatFilter;
+            const matchTag = !tagFilter || tags.includes(tagFilter);
+            return matchSearch && matchStatus && matchFormat && matchTag;
+          });
+          _kbRenderedCount = 0;
+          const box = $("docList");
+          if (box) box.innerHTML = "";
+          if (_kbObserver) {
+            _kbObserver.disconnect();
+            _kbObserver = null;
+          }
+          if (_kbFilteredDocs.length === 0) {
+            _renderKbEmptyState(box, _kbAllDocs.length === 0);
+          } else {
+            _renderKbDocPage();
+            _setupKbObserver();
+          }
+          _updateKbResultCount();
+        }
+        function _renderKbDocPage() {
+          const box = $("docList");
+          if (!box) return;
+          const isPro = get("isPro");
+          const multiSelect = isMultiSelectMode();
+          const start = _kbRenderedCount;
+          const end = Math.min(start + KB_PAGE_SIZE, _kbFilteredDocs.length);
+          for (let i = start; i < end; i++) {
+            box.appendChild(_createDocItem(_kbFilteredDocs[i], isPro, multiSelect));
+          }
+          _kbRenderedCount = end;
+        }
+        function _createDocItem(d, isPro, multiSelect) {
+          const name = displayDocName(d.file_path);
+          const status = docStatusOf(d);
+          const statusColor = STATUS_DOT_COLORS[status] || STATUS_DOT_COLORS.Failed;
+          const [labelKey] = DOC_STATUS_STYLE[status] || DOC_STATUS_STYLE.Failed;
+          const ext = name.split(".").pop()?.toLowerCase() || "";
+          const wrapper = document.createElement("div");
+          wrapper.dataset.docId = d.id;
+          wrapper.dataset.docName = name;
+          wrapper.dataset.docStatus = status;
+          wrapper.dataset.docFormat = ext;
+          wrapper.dataset.docTags = JSON.stringify(d.tags || []);
+          const item = document.createElement("div");
+          item.className = "group flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs hover:bg-white/5 transition-colors";
+          if (multiSelect) {
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.dataset.docId = d.id;
+            checkbox.className = "shrink-0 w-3.5 h-3.5 accent-accent cursor-pointer";
+            checkbox.onclick = (ev) => ev.stopPropagation();
+            checkbox.onchange = () => {
+              const checked = document.querySelectorAll('#docList input[type="checkbox"]:checked').length;
+              const countEl = $("kbSelectedCount");
+              if (countEl) countEl.textContent = t("knowledge_base.selected_count", { count: checked });
+            };
+            item.appendChild(checkbox);
+          }
+          const icon = document.createElement("span");
+          icon.className = "shrink-0 text-sm leading-none";
+          icon.textContent = FILE_ICONS[ext] || "\u{1F4C4}";
+          item.appendChild(icon);
+          const dot = document.createElement("span");
+          dot.className = `shrink-0 w-1.5 h-1.5 rounded-full ${statusColor}`;
+          dot.title = t("knowledge_base." + labelKey);
+          item.appendChild(dot);
+          const left = document.createElement("span");
+          left.className = "truncate flex-1 text-text-primary";
+          left.textContent = name;
+          left.title = d.file_path;
+          item.appendChild(left);
+          if (d.tags && d.tags.length > 0 && !multiSelect) {
+            const tagContainer = document.createElement("span");
+            tagContainer.className = "shrink-0 flex items-center gap-1";
+            const maxTags = 3;
+            for (let i = 0; i < Math.min(d.tags.length, maxTags); i++) {
+              const tagEl = document.createElement("span");
+              tagEl.className = "px-1 py-0.5 rounded text-[9px] bg-accent/10 text-accent border border-accent/15";
+              tagEl.textContent = d.tags[i];
+              tagContainer.appendChild(tagEl);
+            }
+            if (d.tags.length > maxTags) {
+              const more = document.createElement("span");
+              more.className = "text-[9px] text-text-quaternary";
+              more.textContent = `+${d.tags.length - maxTags}`;
+              tagContainer.appendChild(more);
+            }
+            item.appendChild(tagContainer);
+          }
+          const actions = document.createElement("span");
+          actions.className = "shrink-0 flex items-center gap-0.5";
+          const sumToggle = document.createElement("button");
+          sumToggle.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
+          sumToggle.textContent = "\u{1F4DD}";
+          sumToggle.title = t("knowledge_base.summary_toggle");
+          sumToggle.style.display = status === "Indexed" ? "" : "none";
+          sumToggle.onclick = async (ev) => {
+            ev.stopPropagation();
+            const panel = wrapper.querySelector(".doc-summary-panel");
+            if (panel) {
+              panel.classList.toggle("hidden");
+              return;
+            }
+            const newPanel = document.createElement("div");
+            newPanel.className = "doc-summary-panel px-2.5 pb-2 pt-1 text-[11px] text-text-secondary leading-relaxed";
+            newPanel.innerHTML = `<span class="text-text-quaternary">${t("knowledge_base.summary_loading")}</span>`;
+            wrapper.appendChild(newPanel);
+            try {
+              const summary = await invoke("get_document_summary", { docId: d.id });
+              renderSummaryPanel(newPanel, d.id, name, summary);
+            } catch (err) {
+              newPanel.innerHTML = `<span class="text-red-400">${t("knowledge_base.summary_load_failed")}</span>`;
+            }
+          };
+          actions.appendChild(sumToggle);
+          const retry = document.createElement("button");
+          retry.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
+          retry.textContent = "\u21BB";
+          retry.title = t("knowledge_base.retry_index");
+          retry.style.display = status === "Failed" ? "" : "none";
+          retry.onclick = async (ev) => {
+            ev.stopPropagation();
+            await retryDocument(d.id, name);
+          };
+          actions.appendChild(retry);
+          const audit = document.createElement("button");
+          audit.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
+          audit.textContent = "\u{1F50D}";
+          audit.title = t("knowledge_base.audit_doc");
+          audit.style.display = isPro && status === "Indexed" ? "" : "none";
+          audit.onclick = async (ev) => {
+            ev.stopPropagation();
+            await auditDocument(d.id, name);
+          };
+          actions.appendChild(audit);
+          const tagBtn = document.createElement("button");
+          tagBtn.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
+          tagBtn.textContent = "#";
+          tagBtn.title = t("knowledge_base.tag_input_placeholder");
+          tagBtn.onclick = (ev) => {
+            ev.stopPropagation();
+            const inputRow = wrapper.querySelector(".tag-input-row");
+            if (inputRow) {
+              inputRow.classList.toggle("hidden");
+              if (!inputRow.classList.contains("hidden")) inputRow.querySelector("input")?.focus();
+            }
+          };
+          actions.appendChild(tagBtn);
+          const del = document.createElement("button");
+          del.className = "invisible group-hover:visible text-text-quaternary hover:text-red-400 px-1 text-xs transition-opacity";
+          del.textContent = "\xD7";
+          del.title = t("knowledge_base.delete_doc");
+          del.onclick = async (ev) => {
+            ev.stopPropagation();
+            await removeDocument(d.id, name);
+          };
+          actions.appendChild(del);
+          if (multiSelect) {
+            retry.style.display = "none";
+            del.style.display = "none";
+            audit.style.display = "none";
+            sumToggle.style.display = "none";
+            tagBtn.style.display = "none";
+          }
+          item.appendChild(actions);
+          wrapper.appendChild(item);
+          const tagInputRow = document.createElement("div");
+          tagInputRow.className = "tag-input-row hidden px-2.5 pb-1.5 flex items-center gap-1";
+          const tagInput = document.createElement("input");
+          tagInput.type = "text";
+          tagInput.placeholder = t("knowledge_base.tag_input_placeholder");
+          tagInput.className = "flex-1 px-1.5 py-0.5 rounded text-[10px] bg-surface-3 border border-border-default text-text-primary placeholder:text-text-quaternary focus:outline-none focus:border-accent";
+          tagInput.onkeydown = async (ev) => {
+            if (ev.key === "Enter" && tagInput.value.trim()) {
+              ev.preventDefault();
+              try {
+                await invoke("add_document_tag", { docId: d.id, tag: tagInput.value.trim() });
+                tagInput.value = "";
+                loadDocuments();
+              } catch (err) {
+                toastError(err);
+              }
+            }
+            if (ev.key === "Escape") {
+              tagInput.value = "";
+              tagInputRow.classList.add("hidden");
+            }
+          };
+          tagInput.onblur = () => {
+            if (!tagInput.value.trim()) tagInputRow.classList.add("hidden");
+          };
+          tagInputRow.appendChild(tagInput);
+          wrapper.appendChild(tagInputRow);
+          return wrapper;
+        }
+        function _setupKbObserver() {
+          const sentinel = $("kbScrollSentinel");
+          if (!sentinel) return;
+          if (_kbObserver) _kbObserver.disconnect();
+          _kbObserver = new IntersectionObserver((entries) => {
+            if (entries[0]?.isIntersecting && _kbRenderedCount < _kbFilteredDocs.length) {
+              _renderKbDocPage();
+            }
+          }, { root: $("kbDocScroll"), threshold: 0.1 });
+          _kbObserver.observe(sentinel);
+        }
+        function _renderKbEmptyState(box, isEmpty) {
+          const empty = document.createElement("div");
+          empty.className = "px-3 py-8 text-center text-xs text-text-quaternary";
+          if (isEmpty) {
+            empty.innerHTML = `
+            <div class="text-3xl mb-3 opacity-50">\u{1F4DA}</div>
+            <div class="mb-1">${t("knowledge_base.empty_title")}</div>
+            <div class="text-[11px] opacity-70">${t("knowledge_base.empty_hint")}</div>
+            <div class="text-[10px] opacity-50 mt-2">${t("knowledge_base.empty_formats")}</div>`;
+          } else {
+            empty.innerHTML = `
+            <div class="text-2xl mb-2 opacity-50">\u{1F50D}</div>
+            <div>${t("knowledge_base.no_match")}</div>`;
+          }
+          box.appendChild(empty);
+        }
+        function _updateKbResultCount() {
+          const el = $("kbResultCount");
+          if (!el) return;
+          const total = _kbAllDocs.length;
+          const filtered = _kbFilteredDocs.length;
+          if (total === 0) {
+            el.textContent = "";
+          } else if (filtered < total) {
+            el.textContent = `${filtered}/${total}`;
+          } else {
+            el.textContent = `${total}`;
           }
         }
         function renderSummaryPanel(panel, docId, docName, summary) {
@@ -17935,6 +18343,7 @@
           initWizard(initConversations);
           initSidebar();
           setReloadDocsCallback(loadDocuments);
+          setFilterChangeCallback(applyKbFilters);
           restoreSidebarState();
           initSearchPopup(loadConversation);
           initCommandPalette(getCommands());
@@ -18028,50 +18437,8 @@
           const MIN_INPUT_HEIGHT = 48;
           const MAX_INPUT_HEIGHT = 160;
           const queryInputEl = $("queryInput");
-          queryInputEl.addEventListener("keydown", (e) => {
-            const slashPanel = document.querySelector(".slash-command-panel");
-            const docMentionPopup = document.querySelector(".doc-mention-popup");
-            const hasPopup = slashPanel || docMentionPopup;
-            if (e.key === "Enter" && !e.shiftKey) {
-              if (hasPopup) return;
-              e.preventDefault();
-              if (!e.target.value.trim()) return;
-              send();
-            } else if (e.key === "ArrowUp" && !hasPopup) {
-              const cursorAtFirstLine = e.target.selectionStart === 0 || e.target.value.substring(0, e.target.selectionStart).indexOf("\n") === -1;
-              if (cursorAtFirstLine) {
-                const histText = navigateHistoryUp();
-                if (histText !== null) {
-                  e.preventDefault();
-                  e.target.value = histText;
-                  e.target.style.height = "auto";
-                  e.target.style.height = Math.min(Math.max(e.target.scrollHeight, MIN_INPUT_HEIGHT), MAX_INPUT_HEIGHT) + "px";
-                  updateTokenEstimate();
-                  updateInputUI();
-                  const len = e.target.value.length;
-                  e.target.setSelectionRange(len, len);
-                }
-              }
-            } else if (e.key === "ArrowDown" && !hasPopup) {
-              const afterCursor = e.target.value.substring(e.target.selectionEnd);
-              const cursorAtLastLine = afterCursor.indexOf("\n") === -1;
-              if (cursorAtLastLine) {
-                const histText = navigateHistoryDown();
-                if (histText !== null) {
-                  e.preventDefault();
-                  e.target.value = histText;
-                  e.target.style.height = "auto";
-                  e.target.style.height = Math.min(Math.max(e.target.scrollHeight, MIN_INPUT_HEIGHT), MAX_INPUT_HEIGHT) + "px";
-                  updateTokenEstimate();
-                  updateInputUI();
-                  const len = e.target.value.length;
-                  e.target.setSelectionRange(len, len);
-                }
-              }
-            } else if (e.key === "Escape") {
-              resetHistoryNav();
-            }
-          });
+          const inputKeyHandler = createInputKeyHandler({ send });
+          queryInputEl.addEventListener("keydown", inputKeyHandler);
           queryInputEl.addEventListener("input", (e) => {
             const ta = e.target;
             ta.style.transition = "none";
@@ -18184,7 +18551,13 @@
                 isPro: await invoke("get_pro_status"),
                 vlmEnabled: settings.vlm_enabled,
                 currentModel: settings.model || "",
-                currentLlmMode: settings.llm_mode || "remote"
+                currentLlmMode: settings.llm_mode || "remote",
+                // 方案4：初始化功能toggle状态
+                hybridEnabled: settings.hybrid_search || false,
+                agentEnabled: settings.agent_enabled || false,
+                subAgentEnabled: settings.sub_agent_enabled || false,
+                memoryEnabled: settings.memory_enabled || false,
+                webSearchEnabled: settings.web_search_enabled || false
               });
               updateModelPill();
               updateProStatus();

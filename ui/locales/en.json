@@ -240,6 +240,7 @@
     "filter_all_status": "All statuses",
     "filter_all_formats": "All formats",
     "no_match": "No matching documents",
+"filter_toggle": "Filter",
 "tag_input_placeholder": "Add tag (Enter)",
 "tag_remove_hint": "Click to remove tag",
 "filter_tag": "Filter by tag",

@@ -11,18 +11,17 @@
 #topBar.topbar-fs { padding-left: 8px; }
 
 /* ============================================================
- * 侧栏折叠（REQ-NAV-001）：FLIP transform 方案（零抖动）
+ * 侧栏折叠（REQ-NAV-001）：CSS transition 方案（自然平滑）
  *
  * 核心原理：
- * 1. #sidebar 使用 position:fixed 脱离文档流 + transform:translateX 滑动
- *    （GPU 合成层加速，不触发任何布局重排）
- * 2. <main> padding-left 瞬时切换布局（240px↔0，CSS 无过渡），视觉位移
- *    由 sidebar.js 的 FLIP 动画承担：transform 补偿当前视觉位置后播放
- *    300ms 滑动。transform 不触发布局重排 → 文本不逐帧换行 → 零抖动。
- *    （旧 padding-left 过渡方案每帧改变内容宽度 → CJK 文本每帧重排
- *    = 抖动根源；FLIP 仅在切换瞬间重排一次，动画期间零重排）
- * 3. 窗口缩放/最大化时侧栏 fixed 不参与布局 → 主区域自适应；
- *    动画中窗口缩放时 transform 偏移为固定像素 → 视觉位置稳定
+ * 1. #sidebar 使用 position:fixed + transform:translateX 滑动
+ *    （GPU 合成层加速，侧栏滑出动效流畅）
+ * 2. <main> 使用 CSS transition: padding-left 300ms ease-out
+ *    让内容区域宽度渐进变化，文本逐帧重排而非瞬间跳变
+ *    （旧 FLIP 方案在切换瞬间瞬时改 padding → 内容宽度突变
+ *    → 文本瞬间重排换行 → 高度跳变 = 「跳动」根源）
+ * 3. 侧栏 transform 与 main padding-left 使用相同 300ms ease-out
+ *    → 两侧动画完美同步
  * ============================================================ */
 
 /* 侧栏固定定位 — 脱离文档流，transform 动画零布局抖动 */
@@ -32,21 +31,24 @@
   top: 28px;           /* #topBar 高度 h-7 = 28px */
   bottom: 0;
   width: 240px;        /* 固定宽度，不参与宽度动画 */
-  transition: transform 300ms ease-out;
+  transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
   will-change: transform;
   z-index: 20;
   border-right: 1px solid var(--border-subtle);
   background: var(--surface-1);
 }
 
-/* 折叠态：向左滑出视口（GPU 加速，零布局抖动） */
+/* 折叠态：向左滑出视口（GPU 加速） */
 #sidebar.sidebar-collapsed {
   transform: translateX(-100%);
 }
 
-/* 主区域 — 始终全宽，padding-left 为布局终态（瞬时切换）
- * 注意：这里不声明 transition —— 视觉动画由 sidebar.js 的 FLIP
- * transform 承担（transition 由 JS 在动画期间临时设置并清理） */
+/* 主区域 — padding-left 使用 CSS transition 渐进变化
+ * 内容宽度逐帧缩小/扩大 → 文本平滑重排 → 零跳动
+ * cubic-bezier(0.4, 0, 0.2, 1) 与侧栏 transform 同步 */
+#app > main {
+  transition: padding-left 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
 #app:not(.sidebar-collapsed) > main {
   padding-left: 240px;
 }
@@ -1061,11 +1063,14 @@ input[type="url"],
 }
 
 /* ============================================================
- * 消息列表容器 — 全宽，仅靠 px-5(20px) 控制左右边距 */
+ * 消息列表容器 — 全宽，仅靠 px-5(20px) 控制左右边距
+ * overflow-anchor: auto — 浏览器原生滚动锚定，侧栏折叠/展开时
+ * 内容宽度渐变导致文本重排，原生锚定自动维持滚动位置 */
 #chatArea {
   width: 100%;
   max-width: 100%;
   margin: 0;
+  overflow-anchor: auto;
 }
 
 /* 输入框容器 — 全宽，与聊天区一致 */
@@ -1549,15 +1554,11 @@ input[type="url"],
   box-shadow: 0 0 0 2px var(--surface-2, #1c1c1e);
 }
 
-/* Token 估算 — 输入框底部右侧灰色小字 */
+/* Token 估算 — 右侧按钮组内灰色小字（plusBtn 左侧），不破坏 justify-between */
 .token-estimate {
   font-size: 10px;
   color: var(--text-quaternary);
-  margin-left: auto;
-  padding-right: 4px;
   white-space: nowrap;
-  opacity: 0;
-  transition: opacity 0.2s ease;
   pointer-events: none;
   user-select: none;
 }
@@ -1568,7 +1569,6 @@ input[type="url"],
 }
 #sendBtn.cursor-default {
   cursor: default;
-}
 }
 
 /* ============================================================
@@ -2206,7 +2206,7 @@ pointer-events: none;
 .conversation-tree-panel {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 50; /* Z_INDEX.PANEL_1 */
   display: flex;
   align-items: center;
   justify-content: center;
