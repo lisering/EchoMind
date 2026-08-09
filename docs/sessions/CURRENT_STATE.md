@@ -4,7 +4,7 @@
 >
 > 每次 session 结束时**必须更新**此文件，确保反映最新状态。
 >
-> **最后更新**: 2026-08-08 | **更新人**: AI Agent (B06 Session Run Coordinator 完成)
+> **最后更新**: 2026-08-09 | **更新人**: AI Agent (S3 验证收尾 + 前端架构升级)
 
 ---
 
@@ -12,18 +12,20 @@
 
 | 指标 | 数值 | 备注 |
 |---|---|---|
-| Rust 单元+集成测试 (Free) | 822+ passed, 0 failed, 24 ignored | `cargo test`（B05 9 + B06 5 = 14 新增 tests）|
+| Rust 单元+集成测试 (Free) | 1028 passed, 9 failed (pre-existing), 20 ignored | `cargo test`（9 失败全为许可证/Pro 门控/配额 pre-existing）|
 | Rust 单元+集成测试 (Pro) | 1094 passed, 0 failed, 44 ignored | `cargo test --features pro`（v1.3.0 发布回归验证）|
 | Clippy (Free) | 零警告 | `cargo clippy --all-targets -- -D warnings` |
 | Clippy (Pro) | 零警告 | `cargo clippy --all-targets --features pro -- -D warnings`（6m39s）|
 | cargo fmt | 通过 | `cargo fmt --check` |
-| 前端单元测试 (Vitest) | 407 passed, 27 files | `npm run test:unit` |
+| 前端单元测试 (Vitest) | 419 passed, 27 files | `npm run test:unit`（修复 input-toggles 3 失败）|
 | UI 类型检查 | 0 errors | `npx tsc --noEmit` |
-| E2E 桥接测试 (Playwright) | 955 passed, 9 skipped | `npm run test:bridge`（v1.3 S54-S58 新增 18 测试）|
+| E2E 桥接测试 (Playwright) | 运行中 | `npm run test:bridge`（Session 1-2 改造后回归验证）|
 | 版本号 | 1.4.0 | 全部 7 crate + tauri.conf.json（v1.4.0 发布升级）|
 | IPC 命令数 | 162 | B05 新增 3 命令（admit_input + promote_input + get_pending_inputs）|
 | ADR 数 | 13 | 新增 ADR-013-knowledge-graph |
 | 供应链安全 | cargo audit + cargo deny | `deny.toml` 配置 |
+| 前端构建行数 | 13580 | esbuild 打包 IIFE 单文件（Session 1-2 改造后）|
+| 前端模块数 | 54 | `ui/src/*.js`（新增 zindex/panel-stack/input-keymap/input-history + focus-trap）|
 | Rust Edition | 2024 (≥1.85) | 原生 `async fn` in trait |
 
 ---

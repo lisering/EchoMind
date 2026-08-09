@@ -539,7 +539,7 @@ base64(payload)-base64(signature)
 
 ### 11.1 架构
 
-- **源码**: `ui/src/*.js` (49 个 ES Module)
+- **源码**: `ui/src/*.js` (54 个 ES Module，Session 1-2 新增 zindex/panel-stack/input-keymap/input-history + focus-trap 改造)
 - **构建产物**: `ui/index.html` (单文件内联，由 `scripts/build-ui.mjs` esbuild 打包生成)
 - **类型检查**: `tsconfig.json` (checkJs: true) + `types/*.d.ts` (dom-ext / tauri / vendor 全局声明)，`npx tsc --noEmit` 检查
 - **样式**: `ui/styles/*.css` (tokens.css + typography.css + components.css)
@@ -600,6 +600,10 @@ base64(payload)-base64(signature)
 | `perf-settings.js` | 性能优化设置面板 | 缓存/压缩比/检索记忆/渐进式/Speculative/质量门控/图谱检索 toggle（REQ-PERF-001~012） |
 | `retrieval-feedback.js` | 检索反馈 | 检索结果质量反馈 |
 | `turn-tree.js` | 对话轮次树 | 多版本回答分支管理 |
+| `zindex.js` | Z-index 统一分层 | 12 层级 Z-index 常量 + zClass() 辅助函数（Session 1） |
+| `panel-stack.js` | 全局面板栈管理器 | push/remove/closeTop/peek/isOpen/hasOpen/clear，ESC 键统一关闭栈顶面板（Session 1） |
+| `input-keymap.js` | 统一输入 keydown 处理器 | 斜杠命令导航 > Enter 发送 > 历史导航 > Escape 重置（Session 2） |
+| `input-history.js` | 输入历史 + 草稿持久化 + Token 估算 | 会话级历史导航（最多 50 条）+ 切换会话保存/恢复草稿 + ~N tokens 估算（Session 2） |
 
 ### 11.3 状态管理 (state.js)
 
@@ -676,7 +680,7 @@ opt-level = 3  # ML 依赖以 opt-level 3 编译
 |---|---|---|---|
 | Rust 单元测试 | `cargo test` | 718 (Free) / 1003 (Pro) | 全部 crate 模块 |
 | Rust 集成测试 | `crates/tauri-app/tests/integration.rs` | 125 | IPC 命令端到端 |
-| 前端单元测试 | Vitest | 407 (27 files) | `ui/src/*.js` 模块 |
+| 前端单元测试 | Vitest | 419 (27 files) | `ui/src/*.js` 模块（Session 3 修复 3 失败） |
 | E2E 桥接测试 | Playwright + tauri-stub.js | 986 | 前端 + Mock 后端 |
 | E2E 真实 GUI | WebdriverIO + tauri-driver | - | 全栈（macOS 不支持） |
 | 性能基准 | `#[ignore]` 测试 | 5 | TC-BENCH-001~005 |

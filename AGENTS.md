@@ -151,6 +151,10 @@ Frontend: `ui/src/*.js` modular source (vanilla JS ES modules, 50 files) built i
 - `ui/src/perf-settings.js` — 性能优化设置面板（缓存/压缩比/检索记忆/渐进式/Speculative/质量门控/图谱检索 toggle，REQ-PERF-001~012）
 - `ui/src/export.js` — PDF 导出模块（window.print() 零依赖，复用 Markdown 渲染管线 + 隐藏 iframe + @media print CSS，REQ-EXP-005）
 - `ui/styles/print.css` — 打印样式（@media print 规则：隐藏 UI 元素 + serif 字体 + 分页控制，REQ-EXP-005）
+- `ui/src/zindex.js` — 统一 Z-index 常量表 + zClass() 辅助函数（12 层级，禁止硬编码 z-index）
+- `ui/src/panel-stack.js` — 全局面板栈管理器（push/remove/closeTop/peek/isOpen/hasOpen/clear，ESC 键统一关闭栈顶面板）
+- `ui/src/input-keymap.js` — 统一输入区 keydown 处理器（斜杠命令导航 > Enter 发送 > 历史导航 > Escape 重置）
+- `ui/src/input-history.js` — 输入历史导航 + 草稿持久化 + Token 估算（会话级历史 + 切换会话保存/恢复草稿）
 
 ## Data flow (Document import)
 

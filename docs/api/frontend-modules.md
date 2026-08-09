@@ -1,6 +1,6 @@
 # 前端模块参考
 
-> **状态**：活跃 | **最后审阅**：2026-08-06（v2.4 新增 §8 Agentic AI 前端模块：workflow-panel / memory-panel / dream-panel / symbol-search / perf-settings / input-toggles 扩展；v2.3 新增采样参数函数；v2.2 补充 `handleModelLoadStatus` / `registerModelLoadListener` 函数；v2.1 同步 SRS 原子化重构）
+> **状态**：活跃 | **最后审阅**：2026-08-09（v2.5 新增 §11 前端架构基础设施模块：zindex / panel-stack / focus-trap / input-keymap / input-history；v2.4 新增 §8 Agentic AI 前端模块；v2.3 新增采样参数函数；v2.2 补充 `handleModelLoadStatus` / `registerModelLoadListener` 函数；v2.1 同步 SRS 原子化重构）
 >
 > 本文档记录 `ui/index.html` 的模块划分与函数职责。
 > 前端为单文件 SPA（vanilla JS + Tailwind CSS 本地构建），**无框架、无 CDN**。
@@ -618,3 +618,64 @@ finalizeStream()
 | `wiki.rebuilding` | Rebuilding wiki links... | 正在重建 Wiki 链接... |
 | `wiki.rebuild_success` | Wiki links rebuilt ({count} links) | Wiki 链接已重建（{count} 条链接）|
 | `wiki.rebuild_failed` | Failed to rebuild wiki links | 重建 Wiki 链接失败 |
+
+---
+
+## 11. 前端架构基础设施模块（Session 1-2 前端架构升级）
+
+### 11.1 Z-index 统一分层（`ui/src/zindex.js`）
+
+| 函数/常量 | 说明 |
+|---|---|
+| `Z_INDEX` | 统一 Z-index 常量表（12 层级：BASE/WIZARD/PANEL_1~5/TOAST/COMMAND_PALETTE/GRAPH_VIEWER/AUDIT_LOG/LOCK_OVERLAY），禁止硬编码 z-index |
+| `zClass(value)` | 将 Z_INDEX 值转为 Tailwind 任意值类名（如 50→`'z-50'`，55→`'z-[55]'`） |
+
+### 11.2 全局面板栈管理器（`ui/src/panel-stack.js`）
+
+| 函数 | 说明 |
+|---|---|
+| `pushPanel(panel)` | 将面板推入栈（幂等：同 id 先移除旧条目再推入栈顶） |
+| `removePanel(id)` | 从栈中移除指定面板（不调用 close 函数） |
+| `closeTopPanel()` | 关闭栈顶面板（调用其 close 函数），返回 true=有面板被关闭；false=栈为空 |
+| `peekTopPanel()` | 查询栈顶面板（不移除） |
+| `isPanelOpen(id)` | 查询指定面板是否在栈中 |
+| `hasOpenPanels()` | 查询栈是否非空 |
+| `getStackDepth()` | 获取当前栈深度 |
+| `listOpenPanels()` | 获取所有打开面板的 id 列表（从底到顶） |
+| `clearStack()` | 清空栈（不调用 close 函数），用于会话切换强制清理 |
+
+### 11.3 Focus Trap 栈管理（`ui/src/focus-trap.js`）
+
+| 函数 | 说明 |
+|---|---|
+| `createFocusTrap(element)` | 创建 Focus Trap 实例（WAI-ARIA Dialog Modal Pattern），返回 `{ activate, deactivate }` |
+| `activate()` | 激活 Trap：暂停栈中所有已激活的 Trap → push 新 Trap → 记录焦点 → 注册 keydown → 聚焦首个可聚焦元素 |
+| `deactivate()` | 停用 Trap：从栈中移除 → 移除 keydown → 恢复焦点到激活前元素 → 恢复栈顶 Trap |
+| `_pause()` | 暂停 Trap（栈中但非栈顶时调用）：移除 keydown 监听器，不从栈中移除 |
+| `_resume()` | 恢复 Trap（从暂停状态恢复）：重新注册 keydown + 聚焦容器内首个元素 |
+
+> **设计要点**：全局 `_trapStack` 数组（LIFO），只激活栈顶 Trap，解决多面板叠加时 Tab 行为冲突。向后兼容：现有调用方不需要改动。
+
+### 11.4 统一输入 keydown 处理器（`ui/src/input-keymap.js`）
+
+| 函数 | 说明 |
+|---|---|
+| `createInputKeyHandler(handlers)` | 工厂函数，创建统一的输入区 keydown 处理器。合并 main.js 和 chat.js 的两个 keydown 监听器。优先级：斜杠命令导航 > Enter 发送 > 历史导航 > Escape 重置 |
+| `checkPopups()` | 检查当前是否有 popup 面板打开（斜杠命令面板 / 文档提及弹框） |
+| `handleSlashNavigation(e)` | 处理斜杠命令面板内的 ↑↓ 导航 + Enter/Tab 选择 + Escape 关闭 |
+| `handleHistoryNavigation(e, inputEl)` | 处理输入空行时 ↑↓ 历史导航（光标在首行/末行时触发） |
+
+### 11.5 输入历史 + 草稿持久化 + Token 估算（`ui/src/input-history.js`）
+
+| 函数 | 说明 |
+|---|---|
+| `recordInput(query)` | 记录一条输入到历史（会话级，最多 50 条，去重） |
+| `navigateHistoryUp()` | 向上导航历史（Up 键触发）：保存当前输入 → 导航到最新一条 → 返回历史文本 |
+| `navigateHistoryDown()` | 向下导航历史（Down 键触发）：到底部后恢复用户原始输入 |
+| `resetHistoryNav()` | 重置历史导航状态（发送、失焦、切换会话时调用） |
+| `clearHistory(convId)` | 清除指定会话的历史记录 |
+| `saveDraft()` | 保存当前输入框内容为当前会话的草稿 |
+| `restoreDraft()` | 恢复当前会话的草稿到输入框 |
+| `clearDraft(convId)` | 清除指定会话的草稿 |
+| `estimateTokens(text)` | 粗略估算文本的 token 数（CJK ~1.5 char/token，其他 ~4 char/token） |
+| `updateTokenEstimate()` | 更新 token 估算显示（输入框右下角 `~N tokens`） |
