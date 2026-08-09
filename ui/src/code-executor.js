@@ -19,6 +19,8 @@ import { t } from './i18n.js';
 import { invoke } from './ipc.js';
 import { toastError } from './toast.js';
 import { createFocusTrap } from './focus-trap.js';
+import { Z_INDEX, zClass } from './zindex.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 /** @type {HTMLElement|null} 当前活动面板的 DOM 根节点 */
 let _panel = null;
@@ -41,7 +43,7 @@ export function openCodeExecutorPanel() {
   }
 
   _panel = document.createElement('div');
-  _panel.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/50';
+  _panel.className = `fixed inset-0 ${zClass(Z_INDEX.PANEL_1)} flex items-center justify-center bg-black/50`;
   _panel.dataset.role = 'code-executor-overlay';
 
   _panel.innerHTML = `
@@ -138,14 +140,26 @@ export function openCodeExecutorPanel() {
   const runBtn = _panel.querySelector('[data-role="ce-run"]');
   const codeInput = _panel.querySelector('[data-role="code-input"]');
 
-  closeBtn.addEventListener('click', closeCodeExecutorPanel);
-  cancelBtn.addEventListener('click', closeCodeExecutorPanel);
-  _panel.addEventListener('click', (e) => {
-    if (e.target === _panel) closeCodeExecutorPanel();
-  });
+closeBtn.addEventListener('click', closeCodeExecutorPanel);
+cancelBtn.addEventListener('click', closeCodeExecutorPanel);
+_panel.addEventListener('click', (e) => {
+  if (e.target === _panel) closeCodeExecutorPanel();
+});
+
+// ESC 关闭（面板自身处理，不依赖全局 keyboard.js）
+_panel.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closeCodeExecutorPanel();
+  }
+});
 
   runBtn.addEventListener('click', handleRun);
   codeInput.focus();
+
+  // 注册到面板栈（ESC 关闭 + 生命周期追踪）
+  pushPanel({ id: 'code-executor', close: closeCodeExecutorPanel, element: _panel, label: 'Code Executor' });
 
   // 键盘快捷键：Ctrl/Cmd + Enter 执行
   codeInput.addEventListener('keydown', (e) => {
@@ -160,6 +174,7 @@ export function openCodeExecutorPanel() {
  * 关闭代码执行面板。
  */
 export function closeCodeExecutorPanel() {
+  removePanel('code-executor');
   if (_trap) {
     _trap.deactivate();
     _trap = null;

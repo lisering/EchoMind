@@ -14,6 +14,7 @@ import { invoke } from './ipc.js';
 import { toast, toastError, toastSuccess } from './toast.js';
 import { t } from './i18n.js';
 import { createFocusTrap } from './focus-trap.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 /** 付费墙的 Focus Trap 实例（REQ-A11Y-002） */
 let _paywallTrap = null;
@@ -34,10 +35,15 @@ export function showPaywall(reason) {
   }
   _paywallTrap = createFocusTrap($('paywall'));
   _paywallTrap.activate();
+
+  // 注册到面板栈
+  pushPanel({ id: 'paywall', close: hidePaywall, element: $('paywall'), label: 'Paywall' });
 }
 
 /** 隐藏付费墙 Modal。 */
 export function hidePaywall() {
+  // 从面板栈移除
+  removePanel('paywall');
   // 停用 Focus Trap（恢复焦点到触发元素，REQ-A11Y-002）
   if (_paywallTrap) {
     _paywallTrap.deactivate();

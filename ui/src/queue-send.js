@@ -3,16 +3,20 @@
  *
  * 职责：
  * 1. 在流式生成期间允许用户输入并排队问题
- * 2. 发送按钮在流式时变为"排队"样式
+ * 2. 发送按钮在流式时变为"停止"形态 + 排队徽章
  * 3. 当前回答完成后自动发送队列中的问题
- * 4. 队列管理（入队/出队/清空/查询大小）
+ * 4. 队列管理（入队/出队/清空/查询大小/查看队列）
  *
  * 设计参考：QA_UI_DESIGN_PROPOSAL.md §4.4.4 流式期间不锁定输入框
  * AC-QA-012：流式期间排队发送
+ *
+ * V5 重构：新增排队徽章 UI + 队列查看面板
  */
 
 import { get, setState } from './state.js';
+import { $ } from './utils.js';
 import { t } from './i18n.js';
+import { updateInputUI } from './guards.js';
 
 // ============================================================
 // 模块状态
@@ -34,6 +38,8 @@ let _queue = [];
 export function enqueueQuery(query) {
   if (!query || !query.trim()) return _queue.length;
   _queue.push(query.trim());
+  updateQueueBadge();
+  updateQueueHint();
   return _queue.length;
 }
 
@@ -44,7 +50,10 @@ export function enqueueQuery(query) {
  */
 export function dequeueQuery() {
   if (_queue.length === 0) return null;
-  return _queue.shift();
+  const q = _queue.shift();
+  updateQueueBadge();
+  updateQueueHint();
+  return q;
 }
 
 /**
@@ -57,12 +66,36 @@ export function getQueueSize() {
 }
 
 /**
+ * 获取队列内容副本（用于查看面板）。
+ *
+ * @returns {string[]} 队列内容数组
+ */
+export function getQueueItems() {
+  return [..._queue];
+}
+
+/**
  * 清空队列。
  *
  * @returns {void}
  */
 export function clearQueue() {
   _queue = [];
+  updateQueueBadge();
+  updateQueueHint();
+}
+
+/**
+ * 移除队列中指定索引的问题。
+ *
+ * @param {number} index - 要移除的问题索引
+ * @returns {void}
+ */
+export function removeQueueItem(index) {
+  if (index < 0 || index >= _queue.length) return;
+  _queue.splice(index, 1);
+  updateQueueBadge();
+  updateQueueHint();
 }
 
 // ============================================================
@@ -79,6 +112,51 @@ export function isQueueMode() {
 }
 
 // ============================================================
+// 排队徽章 UI
+// ============================================================
+
+/**
+ * 更新发送按钮上的排队徽章。
+ * 流式期间队列非空时显示数字徽章。
+ *
+ * @returns {void}
+ */
+export function updateQueueBadge() {
+  const sendBtn = $('sendBtn');
+  if (!sendBtn) return;
+  const size = _queue.length;
+  let badge = $('queueBadge');
+
+  if (size > 0 && get('streaming')) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.id = 'queueBadge';
+      badge.className = 'queue-badge';
+      sendBtn.style.position = 'relative';
+      sendBtn.appendChild(badge);
+    }
+    badge.textContent = String(size);
+    badge.setAttribute('aria-label', t('chat.queue_count_hint').replace('{count}', String(size)));
+  } else {
+    if (badge) badge.remove();
+  }
+}
+
+/**
+ * 更新 inputHint 显示排队信息。
+ *
+ * @returns {void}
+ */
+function updateQueueHint() {
+  if (_queue.length > 0 && get('streaming')) {
+    const hint = $('inputHint');
+    if (hint) {
+      hint.textContent = t('chat.queue_count_hint').replace('{count}', String(_queue.length));
+    }
+  }
+}
+
+// ============================================================
 // 发送按钮状态管理
 // ============================================================
 
@@ -86,27 +164,31 @@ export function isQueueMode() {
  * 更新发送按钮的显示状态（发送/停止合二为一）。
  *
  * - 流式生成中：按钮变为「停止」形态（stop-mode 红色 + 停止方块图标），
- *   点击停止生成（onStop）。
- * - 非流式状态：恢复「发送」形态（accent 底色 + 纸飞机图标）。
+ *   点击停止生成（onStop）。若有排队，显示排队徽章。
+ * - 非流式状态：恢复「发送」形态（accent 底色 + 纸飞机图标），
+ *   空输入时视觉降级。
  *
  * @returns {void}
  */
 export function updateSendButton() {
-  const sendBtn = document.getElementById('sendBtn');
+  const sendBtn = $('sendBtn');
   if (!sendBtn) return;
 
   const streaming = get('streaming');
-  const sendIcon = document.getElementById('sendIcon');
-  const stopIcon = document.getElementById('stopIcon');
+  const sendIcon = $('sendIcon');
+  const stopIcon = $('stopIcon');
 
   if (streaming) {
     // 流式期间：停止形态
     sendBtn.classList.add('stop-mode', 'bg-red-500/15', 'text-red-300', 'border-red-400/40', 'hover:bg-red-500/25');
-    sendBtn.classList.remove('bg-accent', 'text-ink', 'hover:opacity-90');
+    sendBtn.classList.remove('bg-accent', 'text-ink', 'hover:opacity-90', 'opacity-40', 'cursor-default');
     sendBtn.disabled = false; // 停止按钮始终可用
+    sendBtn.classList.remove('opacity-30', 'cursor-not-allowed');
     if (sendIcon) sendIcon.classList.add('hidden');
     if (stopIcon) stopIcon.classList.remove('hidden');
     sendBtn.setAttribute('title', t('chat.stop_generation'));
+    sendBtn.setAttribute('aria-label', t('chat.stop_generation'));
+    updateQueueBadge();
   } else {
     // 空闲态：发送形态
     sendBtn.classList.remove('stop-mode', 'bg-red-500/15', 'text-red-300', 'border-red-400/40', 'hover:bg-red-500/25');
@@ -114,6 +196,9 @@ export function updateSendButton() {
     if (sendIcon) sendIcon.classList.remove('hidden');
     if (stopIcon) stopIcon.classList.add('hidden');
     sendBtn.setAttribute('title', t('chat.send'));
+    sendBtn.setAttribute('aria-label', t('chat.send'));
+    updateQueueBadge(); // 清除徽章
+    updateInputUI(); // 重新评估空输入降级
   }
 }
 

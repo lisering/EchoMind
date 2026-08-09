@@ -14,6 +14,7 @@
 
 import { t } from './i18n.js';
 import { invoke } from './ipc.js';
+import { get, setState, subscribe } from './state.js';
 
 /** SVG 图标 */
 const ICON_HYBRID = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
@@ -53,8 +54,21 @@ const TOGGLE_CONFIG = {
   },
 };
 
-/** 当前 toggle 状态（内存缓存，初始化时从后端加载） */
-const _toggleStates = { hybrid: false, agent: false, sub_agent: false, memory: false, web_search: false };
+/**
+ * 将 settingKey 转换为 state.js 中的字段名
+ * @param {string} settingKey - 'hybrid' | 'agent' | 'sub_agent' | 'memory' | 'web_search'
+ * @returns {string}
+ */
+function settingKeyToStateKey(settingKey) {
+  switch (settingKey) {
+    case 'hybrid': return 'hybridEnabled';
+    case 'agent': return 'agentEnabled';
+    case 'sub_agent': return 'subAgentEnabled';
+    case 'memory': return 'memoryEnabled';
+    case 'web_search': return 'webSearchEnabled';
+    default: return settingKey;
+  }
+}
 
 /**
  * 创建输入框旁的快速 toggle 按钮。
@@ -70,7 +84,9 @@ export function createInputToggle(settingKey, initialActive = false) {
     return document.createElement('div');
   }
 
-  _toggleStates[settingKey] = initialActive;
+  // 初始化时将状态同步到 state.js（无论 true/false 都要同步，确保覆盖上一轮残留状态）
+  const stateKey = settingKeyToStateKey(settingKey);
+  setState({ [stateKey]: initialActive });
 
   const toggle = document.createElement('div');
   toggle.className = 'input-toggle flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer text-sm transition-colors duration-150 select-none';
@@ -82,7 +98,8 @@ export function createInputToggle(settingKey, initialActive = false) {
 
   /** 更新视觉状态 */
   function updateVisual() {
-    const active = _toggleStates[settingKey];
+    const stateKey = settingKeyToStateKey(settingKey);
+    const active = get(stateKey);
     toggle.classList.toggle('text-accent', active);
     toggle.classList.toggle('bg-accent/10', active);
     toggle.classList.toggle('text-text-tertiary', !active);
@@ -93,16 +110,24 @@ export function createInputToggle(settingKey, initialActive = false) {
 
   updateVisual();
 
+  // 订阅状态变化以更新UI
+  const unsubscribe = subscribe(stateKey, updateVisual);
+
   /** 切换状态 */
   async function doToggle() {
-    const newState = !_toggleStates[settingKey];
-    _toggleStates[settingKey] = newState;
+    const stateKey = settingKeyToStateKey(settingKey);
+    const currentState = get(stateKey);
+    const newState = !currentState;
+    
+    // 立即更新UI状态（乐观更新）
+    setState({ [stateKey]: newState });
     updateVisual();
+    
     try {
       await invoke(config.ipcCommand, { enabled: newState });
     } catch (err) {
       // 回滚状态
-      _toggleStates[settingKey] = !newState;
+      setState({ [stateKey]: currentState });
       updateVisual();
       console.error(`[input-toggles] ${settingKey} 切换失败:`, err);
     }
@@ -116,6 +141,11 @@ export function createInputToggle(settingKey, initialActive = false) {
     }
   };
 
+  // 清理订阅（避免内存泄漏）
+  toggle.addEventListener('remove', () => {
+    unsubscribe();
+  });
+
   return toggle;
 }
 
@@ -125,7 +155,8 @@ export function createInputToggle(settingKey, initialActive = false) {
  * @returns {boolean}
  */
 export function getToggleState(settingKey) {
-  return _toggleStates[settingKey] || false;
+  const stateKey = settingKeyToStateKey(settingKey);
+  return get(stateKey);
 }
 
 /**
@@ -134,5 +165,6 @@ export function getToggleState(settingKey) {
  * @param {boolean} value
  */
 export function setToggleState(settingKey, value) {
-  _toggleStates[settingKey] = value;
+  const stateKey = settingKeyToStateKey(settingKey);
+  setState({ [stateKey]: value });
 }

@@ -20,6 +20,7 @@ import { toast, toastError, toastSuccess } from './toast.js';
 import { t } from './i18n.js';
 import { showConfirmDialog } from './confirm-dialog.js';
 import { createFocusTrap } from './focus-trap.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 // ============================================================
 // 模块级状态
@@ -387,12 +388,15 @@ export function openDownloadManager() {
     _panelTrap = createFocusTrap(panel);
     _panelTrap.activate();
   }
+  // 注册到面板栈
+  pushPanel({ id: 'download-manager', close: closeDownloadManager, element: overlay, label: 'Download Manager' });
 }
 
 /**
  * 关闭下载管理器面板。
  */
 export function closeDownloadManager() {
+  removePanel('download-manager');
   const overlay = $('downloadManagerOverlay');
   if (!overlay) return;
   overlay.classList.add('hidden');

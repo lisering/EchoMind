@@ -14,6 +14,7 @@
 import { convApi } from './ipc.js';
 import { get } from './state.js';
 import { t } from './i18n.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 // ============================================================
 // 类型定义（JSDoc）
@@ -412,6 +413,18 @@ export async function openConversationTreePanel() {
     if (e.target === _treePanel) closeConversationTreePanel();
   });
 
+  // ESC 关闭（面板自身处理）
+  _treePanel.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeConversationTreePanel();
+    }
+  });
+
+  // 注册到面板栈（ESC 关闭 + 生命周期追踪）
+  pushPanel({ id: 'turn-tree', close: closeConversationTreePanel, element: _treePanel, label: 'Conversation Tree' });
+
   // 加载树数据
   const titleEl = _treePanel.querySelector('.conversation-tree-title');
   const bodyEl = _treePanel.querySelector('.conversation-tree-body');
@@ -467,6 +480,7 @@ export async function openConversationTreePanel() {
  * @returns {void}
  */
 export function closeConversationTreePanel() {
+  removePanel('turn-tree');
   if (_treePanel) {
     _treePanel.remove();
     _treePanel = null;

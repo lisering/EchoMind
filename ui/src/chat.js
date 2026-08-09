@@ -28,7 +28,9 @@ import { filterSlashCommands, renderSlashCommandPanel, navigateSlashCommand, get
 import { extractDocMentions, getDocFilter, renderDocMentionPopup, insertDocMention, removeDocMentionPopup, filterDocuments } from './doc-mention.js';
 import { navigateCarousel, updateCarouselDisplay, addCarouselVersion } from './regen-carousel.js';
 import { createFeedbackButtons } from './feedback.js';
-import { enqueueQuery, processQueue, updateSendButton } from './queue-send.js';
+import { enqueueQuery, processQueue, updateSendButton, clearQueue } from './queue-send.js';
+import { updateInputUI } from './guards.js';
+import { recordInput, resetHistoryNav, saveDraft } from './input-history.js';
 import { renderFollowupSuggestions } from './followup.js';
 import { buildHistoryFromTurns, updateVersionAssistant } from './turn-tree.js';
 import { renderBranchPagination, removeBranchPagination } from './message-edit.js';
@@ -104,26 +106,40 @@ function clearChatWatchdog() {
 
 /**
  * 设置输入框状态机（idle / streaming / error）。
+ *
+ * V5 重构：不再直接操作 DOM，委托给统一的 updateInputUI()。
+ * 流式期间输入框保持启用（支持排队发送），仅由 updateSendButton() 管理按钮形态切换。
+ *
  * @param {'idle'|'streaming'|'error'} state - 目标状态
  * @param {string} [hint=''] - 状态提示文案
  */
 export function setInputState(state, hint = '') {
   const isStreaming = state === 'streaming';
   setState({ streaming: isStreaming });
-  const docCount = get('docCount');
-  const shouldDisable = isStreaming || docCount === 0;
-  // 禁聊：流式生成期间输入框完全禁用（无法输入新问题，需等回答完成）
-  $('queryInput').disabled = shouldDisable;
-  if (isStreaming) {
-    updateSendButton();
-  } else {
-    $('sendBtn').disabled = shouldDisable;
-    updateSendButton();
+  setInputHint(hint);
+  updateSendButton();
+  updateInputUI();
+  if (!isStreaming) {
+    const docCount = get('docCount');
+    if (docCount > 0 && !requireUnlocked_guard()) {
+      $('queryInput').focus();
+    }
   }
-  $('sendBtn').classList.toggle('opacity-30', shouldDisable && !isStreaming);
-  $('sendBtn').classList.toggle('cursor-not-allowed', shouldDisable && !isStreaming);
-  $('inputHint').textContent = hint;
-  if (!isStreaming && docCount > 0) $('queryInput').focus();
+}
+
+/** 安全锁定守卫内联检查（避免循环导入） */
+function requireUnlocked_guard() {
+  return get('securityState') === 'locked';
+}
+
+/**
+ * 统一设置 inputHint 文案（所有 hint 更新都经过此函数，避免碎片化）。
+ * @param {string} text - 提示文案（空字符串清空）
+ */
+export function setInputHint(text) {
+  const hint = $('inputHint');
+  if (!hint) return;
+  hint.textContent = text || '';
 }
 
 // ============================================================
@@ -239,8 +255,13 @@ export async function send() {
       return;
     }
     if (!runGuard(canSend())) return;
+    // 记录输入历史（供 Up/Down 导航回溯）
+    recordInput(query);
+    // 清除草稿（已发送）
+    saveDraft();
     input.value = '';
     input.style.height = '48px';
+    resetHistoryNav();
     // S56：快捷指令展开 — /command query → promptTemplate.replace('{query}', query)
     const slashResult = processSlashCommand(query);
     if (slashResult.matched) {
@@ -256,12 +277,14 @@ export async function send() {
     return;
   }
 
-  const history = [...get('history'), { role: 'user', content: query, sources: null }];
-  setState({
-    history,
-    currentRawMarkdown: '',
-    lastSources: null,
-  });
+    const history = [...get('history'), { role: 'user', content: query, sources: null }];
+    setState({
+      history,
+      currentRawMarkdown: '',
+      lastSources: null,
+    });
+    // 更新输入区 UI（发送后空输入）
+    updateInputUI();
 
   const assistantEl = appendBlock('assistant');
   assistantEl.dataset.query = query;
@@ -574,7 +597,7 @@ function handleErrorAction(action, queryContext) {
  * 在 main.js 中调用。
  */
 export function initChatEventListeners(callbacks) {
-  const { onChatDone, onDocStatusChanged, onImportProgress, onEmbeddingProgress, onModelDownload } = callbacks;
+  const { onChatDone, onDocStatusChanged, onImportProgress, onEmbeddingProgress, onModelDownload, onIndexingPhase } = callbacks;
 
   const chatArea = $('chatArea');
   if (chatArea) {
@@ -716,8 +739,13 @@ export function initChatEventListeners(callbacks) {
 
   listen('doc-status-changed', (e) => {
     const p = e.payload;
-    if (p.status === 'error') {
+    if (p.status === 'indexing') {
+      // 索引阶段：转发到进度条回调（不弹 toast，避免刷屏）
+      onIndexingPhase?.(p);
+    } else if (p.status === 'error') {
       toastError(p.message);
+    } else if (p.status === 'done') {
+      // 完成时静默（导入流程自行处理完成提示）
     } else {
       toast(p.message, 'info');
     }
@@ -810,45 +838,6 @@ export function initChatEventListeners(callbacks) {
       checkDocMention();
     });
 
-    queryInput.addEventListener('keydown', (e) => {
-      const panel = document.querySelector('.slash-command-panel');
-      if (panel) {
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          const filtered = filterSlashCommands(queryInput.value);
-          navigateSlashCommand(filtered, 'down');
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          const filtered = filterSlashCommands(queryInput.value);
-          navigateSlashCommand(filtered, 'up');
-        } else if (e.key === 'Enter' || e.key === 'Tab') {
-          const filtered = filterSlashCommands(queryInput.value);
-          const selected = getSelectedSlashCommand(filtered);
-          if (selected) {
-            e.preventDefault();
-            applySlashCommand(selected, queryInput);
-            removeSlashCommandPanel(queryInput.parentElement);
-          }
-        } else if (e.key === 'Escape') {
-          removeSlashCommandPanel(queryInput.parentElement);
-        }
-      }
-
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-        const carousel = document.querySelector('.regen-carousel');
-        if (carousel) {
-          e.preventDefault();
-          // @ts-expect-error Element extended with HTMLElement properties via dom-ext.d.ts
-          navigateCarousel(carousel, e.key === 'ArrowLeft' ? 'left' : 'right');
-          const blockEl = carousel.closest('.msg-block');
-          if (blockEl) {
-            const mdEl = blockEl.querySelector('.md');
-            // @ts-expect-error Element extended with HTMLElement properties via dom-ext.d.ts
-            if (mdEl) updateCarouselDisplay(carousel, mdEl);
-          }
-        }
-      }
-    });
 
     document.addEventListener('click', (e) => {
       if (!queryInput.contains(e.target)) {

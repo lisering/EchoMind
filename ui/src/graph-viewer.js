@@ -28,6 +28,7 @@ import { $ } from './utils.js';
 import { invoke } from './ipc.js';
 import { t } from './i18n.js';
 import { createFocusTrap } from './focus-trap.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 // ============================================================
 // 常量
@@ -418,12 +419,16 @@ document.getElementById('graphExportJsonld').addEventListener('click', () => exp
   _overlayEl.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
+      e.stopPropagation();
       closeGraphViewer();
     }
   });
 
   // 创建 Focus Trap
   _trap = createFocusTrap(_overlayEl);
+
+  // 注册到面板栈（ESC 关闭 + 生命周期追踪）
+  pushPanel({ id: 'graph-viewer', close: closeGraphViewer, element: _overlayEl, label: 'Graph Viewer' });
 }
 
 /**
@@ -524,6 +529,9 @@ export async function openGraphViewer() {
  */
 export function closeGraphViewer() {
   if (!_overlayEl) return;
+
+  // 从面板栈移除
+  removePanel('graph-viewer');
 
   _overlayEl.classList.remove('graph-visible');
 

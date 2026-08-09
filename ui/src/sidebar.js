@@ -9,29 +9,26 @@ import { invoke } from './ipc.js';
 import { t } from './i18n.js';
 import { toast, toastError } from './toast.js';
 import { showConfirmDialog } from './confirm-dialog.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 /**
  * 侧栏折叠/展开切换（REQ-NAV-001 AC-1/AC-2）。
  *
- * FLIP transform 方案（零重排 + 左右联动动画）：
+ * CSS transition 方案（自然平滑）:
  * 1. #sidebar 使用 position:fixed + transform:translateX(-100%) 滑出视口
- *    （GPU 合成层加速，不触发任何布局重排 → 侧栏动画零抖动）
- * 2. <main> padding-left 瞬时切换布局（240px↔0，CSS 无过渡），视觉位移
- *    由 transform 补偿后播放 300ms 滑动（FLIP：记录当前视觉偏移 → 布局
- *    切到终态 + transform 补偿回原位 → 动画滑到 0）
- *    transform 不触发布局重排 → 聊天文本不逐帧换行 → 零抖动
- *    （旧 padding-left 过渡方案每帧改变内容宽度 → CJK 文本每帧重排 = 抖动根源）
- * 3. 窗口缩放/最大化时侧栏 fixed 不参与布局 → 主区域自适应；
- *    动画中窗口缩放时 transform 偏移为固定像素 → 视觉位置稳定
+ *    （GPU 合成层加速，侧栏滑动流畅）
+ * 2. <main> 使用 CSS transition: padding-left 300ms cubic-bezier(0.4,0,0.2,1)
+ *    让内容区域宽度渐进变化，文本逐帧重排而非瞬间跳变
+ *    （旧 FLIP 方案在切换瞬间瞬时改 padding → 内容宽度突变
+ *    → 文本瞬间重排换行 → 高度跳变 = 「跳动」根源）
+ * 3. 侧栏 transform 与 main padding-left 使用相同 300ms 缓动曲线 → 两侧同步
  *
- * rAF 锚定循环（切换瞬间布局重排一次时补偿滚动位置）：
+ * rAF 锚定循环（动画期间补偿滚动位置）:
  * 1. 用户原本在底部 → scrollTop 钉住 scrollHeight，底部始终贴住视口。
  * 2. 用户在中部 → 记录视口顶部首个可见内容元素的相对偏移，逐帧补偿
  *    重排造成的位移，用户看到的同一批内容停留在同一视口位置。
  * 3. 用户动画期间主动滚动 → 立即停止锚定，不与用户抢滚动。
  * 4. 快速连点时由最后一次切换收尾（代际计数），避免竞态。
- * 浏览器原生 scroll anchoring 在下方兜底（零延迟修正），本循环只做
- * 拮余修正，保证在无 scroll anchoring 的引擎上也确定性成立。
  */
 
 /** 距底部多少像素内视为「在底部」，动画期间钉住底部。 */
@@ -55,11 +52,43 @@ let _lastProgrammaticScrollTop = -1;
 /** scroll 监听器是否已挂载（幂等，只挂一次）。 */
 let _scrollListenerAttached = false;
 
-/** 聊天区 scroll 监听：区分程序自身滚动与用户主动滚动。 */
+/**
+ * 聊天区 scroll 监听：动画期间补偿浏览器布局变化导致的滚动位移。
+ *
+ * CSS transition 方案下，padding-left 每帧渐变 → 内容宽度逐帧变化 →
+ * 文本逐帧重排 → 浏览器布局变化导致 scrollTop 位移。rAF 在浏览器
+ * 样式重算之前运行，无法看到当前帧的布局变化，因此用 scroll 事件
+ * 做即时补偿（scroll 事件在布局变化后、绘制前触发）。
+ *
+ * 用户主动滚动（wheel/touch）由独立监听器检测并设置 _userScrolledDuringToggle。
+ */
 function onChatScroll() {
   const chatArea = $('chatArea');
-  if (chatArea && chatArea.scrollTop === _lastProgrammaticScrollTop) return; // 程序自身设置
-  if (_anchorRafId) _userScrolledDuringToggle = true; // 动画期间用户主动滚动
+  if (!chatArea) return;
+  if (chatArea.scrollTop === _lastProgrammaticScrollTop) return; // 程序自身设置
+  if (!_anchorRafId) return; // 非动画期间，忽略
+  if (_userScrolledDuringToggle) return; // 用户已主动滚动，放弃补偿
+
+  // 动画期间：浏览器布局变化导致的滚动位移 → 立即补偿
+  if (_pinBottom) {
+    _lastProgrammaticScrollTop = chatArea.scrollHeight;
+    chatArea.scrollTop = _lastProgrammaticScrollTop;
+  } else if (_anchorEl && _anchorEl.isConnected) {
+    const newOffset = _anchorEl.getBoundingClientRect().top - chatArea.getBoundingClientRect().top;
+    const delta = newOffset - _anchorTargetOffset;
+    if (Math.abs(delta) > 0.5) {
+      _lastProgrammaticScrollTop = chatArea.scrollTop + delta;
+      chatArea.scrollTop = _lastProgrammaticScrollTop;
+    }
+  }
+}
+
+/**
+ * 用户主动滚动检测：wheel/touchstart 事件表示真实用户交互。
+ * scroll 事件无法区分「浏览器布局位移」和「用户滚动」，因此用输入事件检测。
+ */
+function onUserScrollInput() {
+  if (_anchorRafId) _userScrolledDuringToggle = true;
 }
 
 /** 窗口 resize 防抖计时器（最大化/恢复/拖动窗口后校正滚动位置）。 */
@@ -122,9 +151,13 @@ function anchorLoopFrame() {
 function startAnchorLoop(chatArea) {
   if (!chatArea) return;
 
-  // scroll 监听器只挂载一次（检测用户主动滚动）
+  // 事件监听器只挂载一次（幂等）
   if (!_scrollListenerAttached) {
+    // scroll 事件：动画期间补偿浏览器布局变化导致的滚动位移
     chatArea.addEventListener('scroll', onChatScroll, { passive: true });
+    // wheel/touchstart：检测真实用户滚动（区别于浏览器布局位移）
+    chatArea.addEventListener('wheel', onUserScrollInput, { passive: true });
+    chatArea.addEventListener('touchstart', onUserScrollInput, { passive: true });
     _scrollListenerAttached = true;
   }
 
@@ -146,37 +179,20 @@ export async function toggleSidebar() {
   const app = $('app');
   const expanded = $('sidebarExpanded');
   const chatArea = $('chatArea');
-  const main = app ? app.querySelector('main') : null;
   const willCollapse = !sb.classList.contains('sidebar-collapsed');
 
-  // FLIP 第一步：修改布局前记录当前视觉偏移（padding + transform 当前值）。
-  // 兼容动画中途二次切换：从任意中间位置平滑续播。
-  let visualX = 0;
-  if (main) {
-    const cs = getComputedStyle(main);
-    const pad = parseFloat(cs.paddingLeft) || 0;
-    let tx = 0;
-    const tf = cs.transform;
-    if (tf && tf !== 'none') {
-      const v = parseFloat(tf.split(',')[4]); // matrix(1,0,0,1,tx,ty)
-      if (Number.isFinite(v)) tx = v;
-    }
-    visualX = pad + tx;
-  }
-
-  // FLIP 第二步：先捕获锚点（重排前），动画循环会补偿切换瞬间的一次性重排
+  // 启动视觉锚定循环（动画期间补偿滚动位置）
   const seq = ++_toggleSeq;
   if (chatArea) startAnchorLoop(chatArea);
 
+  // 切换 CSS 类 — CSS transition 自动处理 padding-left 和 transform 的平滑过渡
   if (willCollapse) {
-    // 折叠：侧栏 translateX(-100%) 滑出，主区域 padding-left 瞬时→0
     sb.classList.add('sidebar-collapsed');
     if (app) app.classList.add('sidebar-collapsed');
     if (expanded) expanded.classList.add('opacity-0', 'pointer-events-none');
     $('collapseBtn').classList.add('hidden');
     $('expandBtn').classList.remove('hidden');
   } else {
-    // 展开：侧栏 translateX(0) 滑入，主区域 padding-left 瞬时→240px
     sb.classList.remove('sidebar-collapsed');
     if (app) app.classList.remove('sidebar-collapsed');
     if (expanded) expanded.classList.remove('opacity-0', 'pointer-events-none');
@@ -184,45 +200,37 @@ export async function toggleSidebar() {
     $('expandBtn').classList.add('hidden');
   }
 
-  // FLIP 第三步：padding 已切到终态，transform 补偿回当前视觉位置后播放滑动。
-  // transform 走 GPU 合成层，动画期间不触发布局重排 → 文本零换行抖动。
-  // 注意：transition 必须在 invert 提交（reflow）之后才启用 —— 若 invert 时
-  // transition 已激活，本引擎会将 retarget 与 invert 合并为瞬时跳变（实测）；
-  // 播放目标用显式 translateX(0px)（清空为 '' 同样不触发过渡）
-  if (main) {
-    const newPad = willCollapse ? 0 : 240;
-    main.style.transition = 'none'; // invert 必须瞬间生效
-    main.style.transform = `translateX(${visualX - newPad}px)`;
-    void main.offsetHeight; // 强制 reflow，提交 invert 起始状态
-    main.style.transition = 'transform 300ms ease-out';
-    main.style.transform = 'translateX(0px)'; // 播放滑动动画 → 0
-  }
-
-  // 过渡结束后清理（transform 已归零，清除 inline 样式无视觉变化；
-  // transitionend 优先，setTimeout 兜底，侧栏与 main 任一结束即收尾）
+  // 过渡结束后清理（停止锚定循环）
+  // transitionend 优先，setTimeout 兜底
   const finish = () => {
     if (seq !== _toggleSeq) return;
     stopAnchorLoop();
-    if (main) {
-      main.style.transition = 'none';
-      main.style.transform = '';
-    }
   };
   const onAnimEnd = (ev) => {
-    if (ev.propertyName !== 'transform') return;
+    // 只响应 padding-left（main）和 transform（sidebar）的过渡结束
+    if (ev.propertyName !== 'padding-left' && ev.propertyName !== 'transform') return;
     sb.removeEventListener('transitionend', onAnimEnd);
-    if (main) main.removeEventListener('transitionend', onAnimEnd);
+    if (app) {
+      const main = app.querySelector('main');
+      if (main) main.removeEventListener('transitionend', onAnimEnd);
+    }
     clearTimeout(_toggleEndTimer);
     _toggleEndTimer = null;
     finish();
   };
   sb.addEventListener('transitionend', onAnimEnd);
-  if (main) main.addEventListener('transitionend', onAnimEnd);
+  if (app) {
+    const main = app.querySelector('main');
+    if (main) main.addEventListener('transitionend', onAnimEnd);
+  }
   // 兜底：如果 transitionend 未触发
   clearTimeout(_toggleEndTimer);
   _toggleEndTimer = setTimeout(() => {
     sb.removeEventListener('transitionend', onAnimEnd);
-    if (main) main.removeEventListener('transitionend', onAnimEnd);
+    if (app) {
+      const main = app.querySelector('main');
+      if (main) main.removeEventListener('transitionend', onAnimEnd);
+    }
     finish();
   }, 350); // 300ms transition + 50ms buffer
 
@@ -249,7 +257,10 @@ export async function restoreSidebarState() {
     if (collapsed) {
       // 临时禁用过渡避免启动动画
       sb.style.transition = 'none';
-      if (app) app.style.transition = 'none';
+      if (app) {
+        const main = app.querySelector('main');
+        if (main) main.style.transition = 'none';
+      }
       sb.classList.add('sidebar-collapsed');
       if (app) app.classList.add('sidebar-collapsed');
       if (expanded) expanded.classList.add('opacity-0', 'pointer-events-none');
@@ -259,7 +270,10 @@ export async function restoreSidebarState() {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           sb.style.transition = '';
-          if (app) app.style.transition = '';
+          if (app) {
+            const main = app.querySelector('main');
+            if (main) main.style.transition = '';
+          }
         });
       });
     }
@@ -348,10 +362,13 @@ export function openSearchPopup() {
   _searchMode = 'title';
   _updateSearchModeUI();
   _renderSearchResults();
+  // 注册到面板栈
+  pushPanel({ id: 'conv-search-popup', close: closeSearchPopup, element: popup, label: 'Conversation Search' });
 }
 
 /** 关闭会话搜索弹框。 */
 export function closeSearchPopup() {
+  removePanel('conv-search-popup');
   const popup = $('convSearchPopup');
   if (popup) popup.classList.add('hidden');
 }
@@ -646,6 +663,21 @@ function _updateSearchSelection() {
 /**
  * 初始化侧栏事件绑定。
  */
+/** 筛选条件变更回调（由 main.js 注入，调用 applyKbFilters 而非重新请求后端） */
+let _onFilterChange = () => {};
+
+/**
+ * 设置筛选条件变更回调（由 main.js 在初始化时注入）。
+ * 搜索输入和筛选器变化时调用此回调，触发前端缓存筛选+重新渲染。
+ * @param {() => void} fn - 回调函数
+ */
+export function setFilterChangeCallback(fn) {
+  _onFilterChange = fn || (() => {});
+}
+
+/** 搜索防抖计时器 */
+let _kbSearchTimer = null;
+
 export function initSidebar() {
   $('collapseBtn').onclick = toggleSidebar;
   $('expandBtn').onclick = toggleSidebar;
@@ -655,9 +687,6 @@ export function initSidebar() {
   // 知识库按钮 → 打开 KB Modal
   if ($('kbBtn')) {
     $('kbBtn').onclick = openKbModal;
-  }
-  if ($('kbClose')) {
-    $('kbClose').onclick = closeKbModal;
   }
   if ($('kbCloseBtn')) {
     $('kbCloseBtn').onclick = closeKbModal;
@@ -674,18 +703,29 @@ export function initSidebar() {
     });
   }
 
-  // 文档搜索 + 状态筛选 + 格式筛选（REQ-ING-007）
+  // 筛选面板切换（默认折叠）
+  if ($('kbFilterToggle')) {
+    $('kbFilterToggle').onclick = () => {
+      const panel = $('kbFilterPanel');
+      if (panel) panel.classList.toggle('hidden');
+    };
+  }
+
+  // 文档搜索（300ms 防抖）+ 筛选器变化
   if ($('docSearchInput')) {
-    $('docSearchInput').addEventListener('input', filterDocuments);
+    $('docSearchInput').addEventListener('input', () => {
+      if (_kbSearchTimer) clearTimeout(_kbSearchTimer);
+      _kbSearchTimer = setTimeout(() => _onFilterChange(), 300);
+    });
   }
   if ($('docStatusFilter')) {
-    $('docStatusFilter').addEventListener('change', filterDocuments);
+    $('docStatusFilter').addEventListener('change', () => _onFilterChange());
   }
   if ($('docFormatFilter')) {
-    $('docFormatFilter').addEventListener('change', filterDocuments);
+    $('docFormatFilter').addEventListener('change', () => _onFilterChange());
   }
   if ($('docTagFilter')) {
-    $('docTagFilter').addEventListener('change', filterDocuments);
+    $('docTagFilter').addEventListener('change', () => _onFilterChange());
   }
 
   // 多选模式 + 批量删除（REQ-ING-009, REQ-IX-005 统一确认对话框）
@@ -833,49 +873,9 @@ async function confirmBatchDelete() {
 }
 
 /**
- * 组合筛选文档列表：搜索关键词 + 索引状态 + 文件格式，三者取交集（REQ-ING-007）。
- * 筛选条件为空时显示全部文档。无匹配结果时显示「未找到匹配文档」空状态。
+ * 筛选文档列表 — 委托给 main.js 的 applyKbFilters 回调。
+ * 保留导出以兼容旧调用点（如 main.js 的 import）。
  */
 export function filterDocuments() {
-  const box = $('docList');
-  if (!box) return;
-
-  const searchQ = ($('docSearchInput')?.value || '').trim().toLowerCase();
-  const statusFilter = $('docStatusFilter')?.value || '';
-  const formatFilter = $('docFormatFilter')?.value || '';
-  const tagFilter = $('docTagFilter')?.value || '';
-
-  // 移除之前的「无匹配」空状态
-  const noMatch = box.querySelector('.doc-no-match');
-  if (noMatch) noMatch.remove();
-
-  const items = box.querySelectorAll('[data-doc-name]');
-  let visibleCount = 0;
-  items.forEach((item) => {
-    const name = (item.dataset.docName || '').toLowerCase();
-    const status = item.dataset.docStatus || '';
-    const format = item.dataset.docFormat || '';
-
-    const matchSearch = !searchQ || name.includes(searchQ);
-    const matchStatus = !statusFilter || status === statusFilter;
-    const matchFormat = !formatFilter || format === formatFilter;
-    let tagList = [];
-    try { tagList = JSON.parse(item.dataset.docTags || '[]'); } catch (_) { /* ignore parse errors */ }
-    const matchTag = !tagFilter || tagList.includes(tagFilter);
-
-    if (matchSearch && matchStatus && matchFormat && matchTag) {
-      item.style.display = '';
-      visibleCount++;
-    } else {
-      item.style.display = 'none';
-    }
-  });
-
-  // 无匹配结果时显示空状态（REQ-ING-007 AC-4）
-  if (visibleCount === 0 && items.length > 0) {
-    const empty = document.createElement('div');
-    empty.className = 'doc-no-match px-3 py-4 text-center text-[11px] text-text-quaternary';
-    empty.textContent = t('knowledge_base.no_match');
-    box.appendChild(empty);
-  }
+  _onFilterChange();
 }

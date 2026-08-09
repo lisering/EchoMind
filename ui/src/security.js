@@ -17,6 +17,8 @@ import { securityApi } from './ipc.js';
 import { t } from './i18n.js';
 import { toast as showToast } from './toast.js';
 import { createFocusTrap } from './focus-trap.js';
+import { Z_INDEX, zClass } from './zindex.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 // ============================================================
 // 锁屏遮罩
@@ -38,7 +40,7 @@ function ensureLockOverlay() {
 
   _lockOverlayEl = document.createElement('div');
   _lockOverlayEl.id = 'lockOverlay';
-  _lockOverlayEl.className = 'fixed inset-0 z-[99999] flex items-center justify-center bg-[rgba(15,17,21,0.92)] backdrop-blur-[12px] opacity-0 pointer-events-none transition-opacity duration-300';
+  _lockOverlayEl.className = `fixed inset-0 ${zClass(Z_INDEX.LOCK_OVERLAY)} flex items-center justify-center bg-[rgba(15,17,21,0.92)] backdrop-blur-[12px] opacity-0 pointer-events-none transition-opacity duration-300`;
   _lockOverlayEl.innerHTML = `
     <div class="flex flex-col items-center px-10 py-12 max-w-[400px] text-center text-text-secondary">
       <div class="text-info mb-6 opacity-90">
@@ -90,6 +92,8 @@ function showLockOverlay() {
   }
   _lockTrap = createFocusTrap(_lockOverlayEl);
   _lockTrap.activate();
+  // 注册到面板栈（锁屏遮罩不可被 ESC 关闭，但需追踪生命周期）
+  pushPanel({ id: 'lock-overlay', close: () => {}, element: _lockOverlayEl, label: 'Lock Overlay' });
   // 清除上一次的错误信息
   if (_lockErrorEl) _lockErrorEl.textContent = '';
   if (_lockPasswordInputEl) _lockPasswordInputEl.value = '';
@@ -410,7 +414,7 @@ function bindSecuritySettingsEvents(container) {
  */
 function showEncryptDialog() {
   const dialog = document.createElement('div');
-  dialog.className = 'fixed inset-0 z-[99998] flex items-center justify-center bg-black/50 backdrop-blur-[4px]';
+  dialog.className = `fixed inset-0 ${zClass(Z_INDEX.AUDIT_LOG)} flex items-center justify-center bg-black/50 backdrop-blur-[4px]`;
   dialog.innerHTML = `
     <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[480px] w-[90%] max-h-[85vh] overflow-y-auto">
       <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="security.encrypt_title">🔒 启用数据库加密</h3>

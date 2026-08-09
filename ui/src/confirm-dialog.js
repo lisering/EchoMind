@@ -15,6 +15,8 @@
 
 import { t } from './i18n.js';
 import { createFocusTrap } from './focus-trap.js';
+import { Z_INDEX, zClass } from './zindex.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 /** @type {HTMLElement|null} 当前活动对话框的 DOM 根节点 */
 let _activeDialog = null;
@@ -40,6 +42,8 @@ function _closeDialog(result) {
     clearTimeout(_enableTimer);
     _enableTimer = null;
   }
+  // 从面板栈移除
+  removePanel('confirm-dialog');
   // 停用 Focus Trap（恢复焦点到触发元素）
   if (_activeTrap) {
     _activeTrap.deactivate();
@@ -113,7 +117,7 @@ export function showConfirmDialog(opts = {}) {
     // 构建 DOM
     const overlay = document.createElement('div');
     overlay.id = 'confirmDialog';
-    overlay.className = 'fixed inset-0 z-[55] bg-surface-0/95 backdrop-blur-sm flex items-center justify-center';
+    overlay.className = `fixed inset-0 ${zClass(Z_INDEX.PANEL_2)} bg-surface-0/95 backdrop-blur-sm flex items-center justify-center`;
     overlay.setAttribute('role', 'alertdialog');
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('aria-labelledby', 'confirmDialogTitle');
@@ -206,6 +210,9 @@ export function showConfirmDialog(opts = {}) {
     // 激活 Focus Trap（REQ-A11Y-002）：Tab 键锁定在对话框内
     _activeTrap = createFocusTrap(overlay);
     _activeTrap.activate();
+
+    // 注册到面板栈（ESC 关闭 + 生命周期追踪）
+    pushPanel({ id: 'confirm-dialog', close: () => _closeDialog(false), element: overlay, label: 'Confirm Dialog' });
 
     // 500ms 后启用确认按钮
     _enableTimer = setTimeout(() => {

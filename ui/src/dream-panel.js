@@ -18,6 +18,8 @@ import { invoke, listen } from './ipc.js';
 import { t } from './i18n.js';
 import { createFocusTrap } from './focus-trap.js';
 import { toast, toastError } from './toast.js';
+import { Z_INDEX, zClass } from './zindex.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 /** Dream 面板 Focus Trap 实例 */
 let _dreamTrap = null;
@@ -90,6 +92,9 @@ export async function openDreamPanel() {
   _dreamTrap = createFocusTrap(overlay);
   _dreamTrap.activate();
 
+  // 注册到面板栈（ESC 关闭 + 生命周期追踪）
+  pushPanel({ id: 'dream-panel', close: closeDreamPanel, element: overlay, label: 'Dream Panel' });
+
   // 监听 dream_progress 事件
   if (_unlistenDreamProgress) {
     _unlistenDreamProgress();
@@ -121,6 +126,7 @@ export async function openDreamPanel() {
  * 关闭 Dream 面板。
  */
 export function closeDreamPanel() {
+  removePanel('dream-panel');
   const overlay = $('dreamPanelOverlay');
   if (overlay) overlay.classList.add('hidden');
   if (_dreamTrap) {
@@ -224,10 +230,13 @@ async function loadDreamSuggestions() {
  * 初始化 Dream 面板事件（ESC 关闭）。
  */
 export function initDreamPanel() {
+  // ESC 关闭现由 panel-stack 统一管理，此处保留兼容回退
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       const overlay = $('dreamPanelOverlay');
       if (overlay && !overlay.classList.contains('hidden')) {
+        e.preventDefault();
+        e.stopPropagation();
         closeDreamPanel();
       }
     }

@@ -17,6 +17,7 @@
 import { $, isInputFocused } from './utils.js';
 import { openCommandPalette, closeCommandPalette } from './command-palette.js';
 import { createDefaultRegistry, setGlobalRegistry } from './action.js';
+import { closeTopPanel, hasOpenPanels } from './panel-stack.js';
 
 /**
  * 初始化全局键盘快捷键。
@@ -61,8 +62,12 @@ export function initKeyboardShortcuts(handlers) {
     });
     if (handled) return;
 
-    // 2. Esc — 按优先级关闭最上层 Modal（非 Action，涉及多元素优先级）
+    // 2. Esc — 先尝试关闭面板栈栈顶（动态面板）
     if (e.key === 'Escape') {
+      // 优先关闭 panel-stack 中的栈顶面板
+      if (closeTopPanel()) return;
+
+      // 然后检查静态面板（按优先级）
       // 命令面板优先级最高
       const searchPopup = $('convSearchPopup');
       if (searchPopup && !searchPopup.classList.contains('hidden')) {

@@ -9,6 +9,7 @@
 import { getState, setState, get } from './state.js';
 import { $ } from './utils.js';
 import { t } from './i18n.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 // ============================================================
 // 命令定义
@@ -137,12 +138,15 @@ export function openCommandPalette() {
   $('cmdSearch').value = '';
   renderCommandList(_commands, '');
   $('cmdSearch').focus();
+  // 注册到面板栈
+  pushPanel({ id: 'command-palette', close: closeCommandPalette, element: $('commandPalette'), label: 'Command Palette' });
 }
 
 /**
  * 关闭命令面板：隐藏、恢复焦点。
  */
 export function closeCommandPalette() {
+  removePanel('command-palette');
   $('commandPalette').classList.add('hidden');
   const prev = get('cmdPrevFocus');
   if (prev) prev.focus();

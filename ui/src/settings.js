@@ -23,6 +23,7 @@ import { createFocusTrap } from './focus-trap.js';
 import { renderPerfSettings } from './perf-settings.js';
 import { renderMemorySettings } from './memory-panel.js';
 import { resetCustomTemplates, loadCustomTemplates } from './slash-commands.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 import { loadLlmModeSetting, loadLocalModels, loadRecommendedModels,
          registerModelLoadListener, onLlmModeChange, downloadLocalModel,
          deleteLocalModel, selectLocalModel, onCancelDownload, onPauseDownload } from './settings-local-llm.js';
@@ -49,10 +50,19 @@ info.innerHTML =
     }
     setState({ vlmEnabled: settings.vlm_enabled });
     updateVlmToggle();
-setState({ rerankEnabled: settings.rerank_enabled });
-updateRerankToggle();
-setState({ hydeEnabled: settings.hyde_enabled });
-updateHydeToggle();
+    setState({ rerankEnabled: settings.rerank_enabled });
+    updateRerankToggle();
+    setState({ hydeEnabled: settings.hyde_enabled });
+    updateHydeToggle();
+    
+    // 方案4：同步功能toggle状态到state.js
+    setState({ 
+      hybridEnabled: settings.hybrid_search || false,
+      agentEnabled: settings.agent_enabled || false,
+      subAgentEnabled: settings.sub_agent_enabled || false,
+      memoryEnabled: settings.memory_enabled || false,
+      webSearchEnabled: settings.web_search_enabled || false
+    });
 
 // 子代理舰队初始状态（REQ-RAG-025 扩展）
 const subAgentToggleEl = $('subAgentToggle');
@@ -182,6 +192,9 @@ if (coordinatorToggleEl) {
     }
     _settingsTrap = createFocusTrap($('settingsModal'));
     _settingsTrap.activate();
+
+    // 注册到面板栈
+    pushPanel({ id: 'settings', close: closeSettings, element: $('settingsModal'), label: 'Settings' });
   } catch (err) {
     toastError(err);
   }
@@ -189,6 +202,8 @@ if (coordinatorToggleEl) {
 
 /** 关闭设置面板。 */
 export function closeSettings() {
+  // 从面板栈移除
+  removePanel('settings');
   // 停用 Focus Trap（恢复焦点到触发元素，REQ-A11Y-002）
   if (_settingsTrap) {
     _settingsTrap.deactivate();
@@ -412,24 +427,32 @@ toggle.querySelector('span').classList.toggle('translate-x-5', enabled);
 
 /** 切换子代理舰队模式开关（REQ-RAG-025 扩展）。 */
 export async function onSubAgentToggle() {
-const toggle = $('subAgentToggle');
-if (!toggle) return;
-const enabled = toggle.getAttribute('aria-checked') === 'true';
-const newEnabled = !enabled;
-toggle.setAttribute('aria-checked', String(newEnabled));
-toggle.classList.toggle('bg-accent', newEnabled);
-toggle.classList.toggle('bg-slate-600', !newEnabled);
-toggle.querySelector('span').classList.toggle('translate-x-5', newEnabled);
-try {
-await invoke('set_sub_agent_enabled', { enabled: newEnabled });
-toast(newEnabled ? t('settings.sub_agent_enabled') : t('settings.sub_agent_disabled'), 'success');
-} catch (err) {
-toastError(err);
-toggle.setAttribute('aria-checked', String(enabled));
-toggle.classList.toggle('bg-accent', enabled);
-toggle.classList.toggle('bg-slate-600', !enabled);
-toggle.querySelector('span').classList.toggle('translate-x-5', enabled);
-}
+  const toggle = $('subAgentToggle');
+  if (!toggle) return;
+  const currentEnabled = get('subAgentEnabled');
+  const newEnabled = !currentEnabled;
+  
+  // 乐观更新state
+  setState({ subAgentEnabled: newEnabled });
+  
+  // 更新UI
+  toggle.setAttribute('aria-checked', String(newEnabled));
+  toggle.classList.toggle('bg-accent', newEnabled);
+  toggle.classList.toggle('bg-slate-600', !newEnabled);
+  toggle.querySelector('span').classList.toggle('translate-x-5', newEnabled);
+  
+  try {
+    await invoke('set_sub_agent_enabled', { enabled: newEnabled });
+    toast(newEnabled ? t('settings.sub_agent_enabled') : t('settings.sub_agent_disabled'), 'success');
+  } catch (err) {
+    toastError(err);
+    // 回滚state
+    setState({ subAgentEnabled: currentEnabled });
+    toggle.setAttribute('aria-checked', String(currentEnabled));
+    toggle.classList.toggle('bg-accent', currentEnabled);
+    toggle.classList.toggle('bg-slate-600', !currentEnabled);
+    toggle.querySelector('span').classList.toggle('translate-x-5', currentEnabled);
+  }
 }
 
 /**

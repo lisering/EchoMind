@@ -18,6 +18,8 @@ import { invoke, listen } from './ipc.js';
 import { t } from './i18n.js';
 import { createFocusTrap } from './focus-trap.js';
 import { toast, toastError, toastSuccess } from './toast.js';
+import { Z_INDEX, zClass } from './zindex.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 /** 工作流面板 Focus Trap 实例 */
 let _workflowTrap = null;
@@ -33,7 +35,7 @@ export async function openWorkflowPanel() {
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'workflowPanelOverlay';
-    overlay.className = 'hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[8vh]';
+    overlay.className = `hidden fixed inset-0 ${zClass(Z_INDEX.PANEL_1)} bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[8vh]`;
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
     overlay.innerHTML = `
@@ -94,6 +96,9 @@ export async function openWorkflowPanel() {
   _workflowTrap = createFocusTrap(overlay);
   _workflowTrap.activate();
 
+  // 注册到面板栈（ESC 关闭 + 生命周期追踪）
+  pushPanel({ id: 'workflow-panel', close: closeWorkflowPanel, element: overlay, label: 'Workflow Panel' });
+
   // 监听 workflow_progress 事件
   if (_unlistenWorkflowProgress) {
     _unlistenWorkflowProgress();
@@ -118,6 +123,7 @@ export async function openWorkflowPanel() {
  * 关闭工作流面板。
  */
 export function closeWorkflowPanel() {
+  removePanel('workflow-panel');
   const overlay = $('workflowPanelOverlay');
   if (overlay) overlay.classList.add('hidden');
   if (_workflowTrap) {

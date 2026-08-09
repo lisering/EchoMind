@@ -16,6 +16,8 @@ import { invoke } from './ipc.js';
 import { t } from './i18n.js';
 import { createFocusTrap } from './focus-trap.js';
 import { toast, toastError, toastSuccess } from './toast.js';
+import { Z_INDEX, zClass } from './zindex.js';
+import { pushPanel, removePanel } from './panel-stack.js';
 
 /** 符号类型 → 图标映射 */
 const SYMBOL_ICONS = {
@@ -55,7 +57,7 @@ export async function openSymbolSearch() {
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'symbolSearchOverlay';
-    overlay.className = 'hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[10vh]';
+    overlay.className = `hidden fixed inset-0 ${zClass(Z_INDEX.PANEL_1)} bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[10vh]`;
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
     overlay.innerHTML = `
@@ -107,12 +109,16 @@ export async function openSymbolSearch() {
 
   // 聚焦搜索框
   if (input) input.focus();
+
+  // 注册到面板栈（ESC 关闭 + 生命周期追踪）
+  pushPanel({ id: 'symbol-search', close: closeSymbolSearch, element: overlay, label: 'Symbol Search' });
 }
 
 /**
  * 关闭符号搜索面板。
  */
 export function closeSymbolSearch() {
+  removePanel('symbol-search');
   const overlay = $('symbolSearchOverlay');
   if (overlay) overlay.classList.add('hidden');
   if (_symbolTrap) {
@@ -182,10 +188,13 @@ async function rebuildSymbolIndex() {
  * 初始化符号搜索面板事件（ESC 关闭）。
  */
 export function initSymbolSearch() {
+  // ESC 关闭现由 panel-stack 统一管理，此处保留兼容回退
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       const overlay = $('symbolSearchOverlay');
       if (overlay && !overlay.classList.contains('hidden')) {
+        e.preventDefault();
+        e.stopPropagation();
         closeSymbolSearch();
       }
     }

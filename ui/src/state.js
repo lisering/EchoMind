@@ -46,6 +46,14 @@
  * @property {boolean} piiDetectionEnabled - PII 检测开关
  * @property {number} autoLockTimeout      - 自动锁屏超时（0=disabled）
  * @property {string} theme                - 当前主题模式（dark/light/system，REQ-UI-011）
+ * @property {boolean} llmConfigured       - LLM 是否已配置（API Key + Base URL + Model）
+ * @property {Object<string, string>} drafts - 会话级草稿（conversationId → 未发送文本）
+ * @property {boolean} hybridEnabled       - 混合搜索开关
+ * @property {boolean} agentEnabled        - Agent 模式开关
+ * @property {boolean} subAgentEnabled     - 子代理开关
+ * @property {boolean} memoryEnabled       - 记忆开关
+ * @property {boolean} webSearchEnabled    - 网页搜索开关
+ * @property {Array} docList              - 文档提及列表
  */
 
 // ============================================================
@@ -87,6 +95,16 @@ hydeEnabled: false,
   piiDetectionEnabled: false,
   autoLockTimeout: 0,             // 0 = disabled
   theme: 'dark',                  // REQ-UI-011：主题模式 dark/light/system
+  llmConfigured: false,            // LLM 是否已配置
+  drafts: {},                      // 会话级草稿（conversationId → 未发送文本）
+  
+  // 功能开关状态（方案4：input-toggles.js 状态补全）
+  hybridEnabled: false,            // 混合搜索开关
+  agentEnabled: false,             // Agent 模式开关
+  subAgentEnabled: false,          // 子代理开关
+  memoryEnabled: false,            // 记忆开关
+  webSearchEnabled: false,         // 网页搜索开关
+  docList: [],                     // 文档提及列表（chat.js doc-mention 需要）
 };
 
 // ============================================================
