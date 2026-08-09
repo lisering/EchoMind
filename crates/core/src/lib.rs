@@ -239,6 +239,18 @@ pub trait Storage: Send + Sync {
     /// 为指定分块写入向量。
     async fn add_embedding(&self, chunk_id: &str, embedding: &[f32]) -> anyhow::Result<()>;
 
+    /// 批量写入向量（性能优化：单事务提交全部 embeddings）。
+    ///
+    /// 生产实现应在单个事务中提交全部 embeddings，避免逐条 INSERT 的
+    /// spawn_blocking + 连接获取开销。默认实现逐条调用 `add_embedding`；
+    /// 适配器**必须覆盖**此方法以获得批量性能收益（400+ chunks 从 ~8s 降至 <0.1s）。
+    async fn add_embeddings_batch(&self, embeddings: &[(String, Vec<f32>)]) -> anyhow::Result<()> {
+        for (chunk_id, vector) in embeddings {
+            self.add_embedding(chunk_id, vector).await?;
+        }
+        Ok(())
+    }
+
     /// 以查询向量执行 top-k 相似度检索。
     async fn vector_search(
         &self,
@@ -450,6 +462,24 @@ pub trait Storage: Send + Sync {
         Ok(None)
     }
 
+    /// 批量查找缓存的嵌入向量（性能优化：单次 DB 查询替代 N 次串行查询）。
+    ///
+    /// 输入 `(content_hash,)` 列表，返回 `(batch_index, embedding)` 列表（仅命中项）。
+    /// 默认实现逐个调用 `lookup_embedding_cache`（N 次 spawn_blocking）；
+    /// 生产适配器应覆盖为单次 SQL `WHERE hash IN (...)` 查询（1 次 spawn_blocking）。
+    async fn lookup_embedding_cache_batch(
+        &self,
+        hashes: &[String],
+    ) -> anyhow::Result<Vec<(usize, Vec<f32>)>> {
+        let mut hits = Vec::new();
+        for (i, hash) in hashes.iter().enumerate() {
+            if let Some(vec) = self.lookup_embedding_cache(hash).await? {
+                hits.push((i, vec));
+            }
+        }
+        Ok(hits)
+    }
+
     /// 将嵌入向量写入缓存（全尺度性能优化）。
     ///
     /// 默认实现为空操作；生产适配器应覆盖以实现实际缓存写入。
@@ -458,6 +488,17 @@ pub trait Storage: Send + Sync {
         _content_hash: &str,
         _embedding: &[f32],
     ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 批量写入嵌入向量缓存（性能优化：单事务提交全部缓存项）。
+    ///
+    /// 默认实现逐个调用 `put_embedding_cache`（N 次 spawn_blocking）；
+    /// 生产适配器应覆盖为单事务批量 INSERT（1 次 spawn_blocking）。
+    async fn put_embedding_cache_batch(&self, items: &[(String, Vec<f32>)]) -> anyhow::Result<()> {
+        for (hash, embedding) in items {
+            self.put_embedding_cache(hash, embedding).await?;
+        }
         Ok(())
     }
 

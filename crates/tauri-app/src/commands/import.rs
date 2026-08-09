@@ -291,13 +291,13 @@ async fn index_pdf_multimodal<R: Runtime>(
     }
 }
 
-/// 嵌入写入链路（REQ-VEC-002/003）：分块读取 → 微批次 embed → add_embedding + 进度推送。
+/// 嵌入写入链路（REQ-VEC-002/003）：分块读取 → 微批次 embed → add_embeddings_batch + 进度推送。
 ///
-/// GB 级文档加速（路径 4）：
-/// - 将全部 chunks 按 `EMBED_BATCH_SIZE` 分为微批次
-/// - 每批调用 `embed_batch`（内部使用并行会话池，路径 2）
-/// - 每批完成后发射 `embedding_progress` 事件，前端渲染进度条
-/// - 逐批写入 `add_embedding`，已向量化的 chunk 立即可用于向量检索
+/// 性能优化（2026-08-09）：
+/// - 批量缓存查询：单次 DB 查询替代 64 次串行 `lookup_embedding_cache`
+/// - 批量缓存写入：单事务 INSERT 替代 64 次 `spawn put_embedding_cache`
+/// - 批量向量写入：单事务 `add_embeddings_batch` 替代 64 次逐条 `add_embedding`
+///   + 64 次 `invalidate_vector_cache`（现在仅失效一次）
 ///
 /// Phase 3 ContextualEmbedding：嵌入文本拼接文档名上下文前缀（`build_contextual_text`），
 /// 使向量包含文档上下文信息，提升检索质量（Anthropic Contextual Retrieval）。
@@ -345,59 +345,73 @@ pub(crate) async fn embed_document_chunks<R: Runtime>(
             })
             .collect();
 
-        // 步骤 1：查询嵌入缓存
-        let mut cache_hits: Vec<(usize, Vec<f32>)> = Vec::new(); // (batch_index, embedding)
+        // 步骤 1：批量查询嵌入缓存（1 次 spawn_blocking 替代 64 次）
+        let hashes: Vec<String> = texts_and_hashes.iter().map(|(_, h)| h.clone()).collect();
+        let cache_hits = state
+            .storage
+            .lookup_embedding_cache_batch(&hashes)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+
+        let mut cache_hit_map: std::collections::HashMap<usize, Vec<f32>> =
+            std::collections::HashMap::with_capacity(cache_hits.len());
+        for (idx, vector) in cache_hits {
+            cache_hit_map.insert(idx, vector);
+        }
+
+        // 步骤 2：收集缓存未命中文本，批量推理
         let mut miss_indices: Vec<usize> = Vec::new();
         let mut miss_texts: Vec<String> = Vec::new();
-
-        for (i, (_text, hash)) in texts_and_hashes.iter().enumerate() {
-            match state
-                .storage
-                .lookup_embedding_cache(hash)
-                .await
-                .map_err(|e| format!("{e:#}"))?
-            {
-                Some(cached) => cache_hits.push((i, cached)),
-                None => {
-                    miss_indices.push(i);
-                    miss_texts.push(texts_and_hashes[i].0.clone());
-                }
+        for (i, (text, _)) in texts_and_hashes.iter().enumerate() {
+            if !cache_hit_map.contains_key(&i) {
+                miss_indices.push(i);
+                miss_texts.push(text.clone());
             }
         }
 
-        // 步骤 2：对缓存未命中文本执行 ONNX 推理
         let mut all_vectors: Vec<Vec<f32>> = vec![vec![]; batch.len()];
+
+        // 填充缓存命中的向量
+        for (idx, vector) in &cache_hit_map {
+            all_vectors[*idx] = vector.clone();
+        }
+
+        // 对缓存未命中文本执行 ONNX 推理
         if !miss_texts.is_empty() {
             let computed = embedder
                 .embed_batch(&miss_texts)
                 .await
                 .map_err(|e| format!("{e:#}"))?;
+
+            // 填充推理结果 + 收集缓存写入项
+            let mut cache_writes: Vec<(String, Vec<f32>)> = Vec::with_capacity(miss_indices.len());
             for (miss_idx, vector) in miss_indices.iter().zip(computed) {
-                all_vectors[*miss_idx] = vector;
-                // 写回缓存（异步，不阻塞批次处理）
+                all_vectors[*miss_idx] = vector.clone();
                 let hash = &texts_and_hashes[*miss_idx].1;
-                let emb = all_vectors[*miss_idx].clone();
+                cache_writes.push((hash.clone(), vector));
+            }
+
+            // 步骤 3：批量写入缓存（1 次 spawn_blocking 替代 64 次 spawn）
+            if !cache_writes.is_empty() {
                 let storage = state.storage.clone();
-                let hash_clone = hash.clone();
-                tokio::spawn(async move {
-                    let _ = storage.put_embedding_cache(&hash_clone, &emb).await;
-                });
+                if let Err(e) = storage.put_embedding_cache_batch(&cache_writes).await {
+                    warn!("批量写入嵌入缓存失败（不影响导入流程）: {e:#}");
+                }
             }
         }
 
-        // 步骤 3：填充缓存命中的向量
-        for (hit_idx, vector) in cache_hits {
-            all_vectors[hit_idx] = vector;
-        }
+        // 步骤 4：批量写入所有 embeddings（1 次 spawn_blocking 替代 64 次）
+        let embeddings_to_write: Vec<(String, Vec<f32>)> = batch
+            .iter()
+            .zip(all_vectors.iter())
+            .map(|(chunk, vector)| (chunk.id.clone(), vector.clone()))
+            .collect();
+        state
+            .storage
+            .add_embeddings_batch(&embeddings_to_write)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
 
-        // 步骤 4：写入所有 embeddings
-        for (chunk, vector) in batch.iter().zip(all_vectors.iter()) {
-            state
-                .storage
-                .add_embedding(&chunk.id, vector)
-                .await
-                .map_err(|e| format!("{e:#}"))?;
-        }
         embedded += batch.len();
 
         // 推送向量化进度（每批一次）
