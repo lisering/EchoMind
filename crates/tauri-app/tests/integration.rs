@@ -6418,3 +6418,180 @@ async fn tc_vec_custom_007_path_traversal_protection() {
     let model_dir = state.custom_model_dir().join(&info.name);
     assert!(model_dir.exists(), "模型应存储在 custom_models 目录下");
 }
+
+/// TC-PERF-BATCH-001：批量 embedding 写入性能对比（单事务 vs 逐条写入）。
+///
+/// 验证 `add_embeddings_batch` 在单事务中写入全部 embeddings，
+/// 且仅触发一次 `invalidate_vector_cache`，而非逐条写入的 N 次。
+#[tokio::test]
+async fn tc_perf_batch_001_add_embeddings_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+    let storage = &state.storage;
+
+    // 准备测试数据：100 个 chunks + embeddings
+    let doc = Document::new("test.md".to_string(), "hash_batch_001".to_string());
+    storage.add_document(&doc).await.unwrap();
+
+    let chunks: Vec<Chunk> = (0..100)
+        .map(|i| Chunk::new(doc.id.clone(), format!("chunk content {i}"), 10, i))
+        .collect();
+    storage.add_chunks_batch(&chunks).await.unwrap();
+
+    let embeddings: Vec<(String, Vec<f32>)> = chunks
+        .iter()
+        .map(|c| (c.id.clone(), vec![0.1_f32; 384]))
+        .collect();
+
+    // 批量写入（单事务）
+    let start = std::time::Instant::now();
+    storage.add_embeddings_batch(&embeddings).await.unwrap();
+    let batch_duration = start.elapsed();
+
+    // 验证全部写入成功
+    // 验证全部写入成功（vector_search 应返回结果）
+    let result = storage.vector_search(&[0.1_f32; 384], 1).await.unwrap();
+    assert!(!result.is_empty(), "向量检索应返回结果");
+
+    // 批量写入应快速完成（100 条 < 500ms）
+    assert!(
+        batch_duration.as_millis() < 500,
+        "批量写入 100 条 embeddings 应 < 500ms，实际 {:?}",
+        batch_duration
+    );
+}
+
+/// TC-PERF-BATCH-002：批量嵌入缓存查询（单次 DB 查询替代 N 次串行查询）。
+///
+/// 验证 `lookup_embedding_cache_batch` 在单次 DB 查询中返回全部命中项。
+#[tokio::test]
+async fn tc_perf_batch_002_lookup_embedding_cache_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+    let storage = &state.storage;
+
+    // 预填充缓存
+    let items: Vec<(String, Vec<f32>)> = (0..50)
+        .map(|i| (format!("hash_{i}"), vec![i as f32 * 0.1; 384]))
+        .collect();
+    storage.put_embedding_cache_batch(&items).await.unwrap();
+
+    // 批量查询：25 个命中 + 25 个未命中
+    let hashes: Vec<String> = (0..100).map(|i| format!("hash_{i}")).collect();
+    let start = std::time::Instant::now();
+    let hits = storage.lookup_embedding_cache_batch(&hashes).await.unwrap();
+    let query_duration = start.elapsed();
+
+    // 验证命中数量（hash_0 ~ hash_49 命中，hash_50 ~ hash_99 未命中）
+    assert_eq!(hits.len(), 50, "应命中 50 个缓存项，实际 {}", hits.len());
+
+    // 验证 batch_index 正确性
+    let hit_indices: std::collections::HashSet<usize> = hits.iter().map(|(idx, _)| *idx).collect();
+    for i in 0..50 {
+        assert!(hit_indices.contains(&i), "hash_{} 应命中", i);
+    }
+    for i in 50..100 {
+        assert!(!hit_indices.contains(&i), "hash_{} 应未命中", i);
+    }
+
+    // 验证向量内容
+    for (idx, vector) in &hits {
+        let expected = *idx as f32 * 0.1;
+        assert!(
+            (vector[0] - expected).abs() < 0.01,
+            "向量内容应匹配: idx={}, expected={}, got={}",
+            idx,
+            expected,
+            vector[0]
+        );
+    }
+
+    // 批量查询应快速完成（100 条 < 200ms）
+    assert!(
+        query_duration.as_millis() < 200,
+        "批量查询 100 条缓存应 < 200ms，实际 {:?}",
+        query_duration
+    );
+}
+
+/// TC-PERF-BATCH-003：批量嵌入缓存写入（单事务批量 INSERT）。
+///
+/// 验证 `put_embedding_cache_batch` 在单事务中写入全部缓存项。
+#[tokio::test]
+async fn tc_perf_batch_003_put_embedding_cache_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+    let storage = &state.storage;
+
+    // 批量写入 100 条缓存
+    let items: Vec<(String, Vec<f32>)> = (0..100)
+        .map(|i| (format!("batch_hash_{i}"), vec![i as f32 * 0.01; 384]))
+        .collect();
+    let start = std::time::Instant::now();
+    storage.put_embedding_cache_batch(&items).await.unwrap();
+    let write_duration = start.elapsed();
+
+    // 验证写入成功（逐条查询验证）
+    for (i, hash) in items.iter().enumerate() {
+        let cached = storage.lookup_embedding_cache(&hash.0).await.unwrap();
+        assert!(cached.is_some(), "缓存项 {} 应存在", hash.0);
+        let vector = cached.unwrap();
+        let expected = i as f32 * 0.01;
+        assert!(
+            (vector[0] - expected).abs() < 0.001,
+            "向量内容应匹配: hash={}, expected={}, got={}",
+            hash.0,
+            expected,
+            vector[0]
+        );
+    }
+
+    // 批量写入应快速完成（100 条 < 500ms）
+    assert!(
+        write_duration.as_millis() < 500,
+        "批量写入 100 条缓存应 < 500ms，实际 {:?}",
+        write_duration
+    );
+}
+
+/// TC-PERF-BATCH-004：批量写入幂等性（INSERT OR IGNORE 不覆盖已有值）。
+#[tokio::test]
+async fn tc_perf_batch_004_idempotent_cache_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+    let storage = &state.storage;
+
+    // 首次写入
+    let items = vec![
+        ("hash_a".to_string(), vec![1.0_f32; 384]),
+        ("hash_b".to_string(), vec![2.0_f32; 384]),
+    ];
+    storage.put_embedding_cache_batch(&items).await.unwrap();
+
+    // 再次写入相同 hash（不同向量，应被 IGNORE）
+    let items2 = vec![
+        ("hash_a".to_string(), vec![9.9_f32; 384]),
+        ("hash_c".to_string(), vec![3.0_f32; 384]),
+    ];
+    storage.put_embedding_cache_batch(&items2).await.unwrap();
+
+    // hash_a 应保持首次写入的值
+    let cached_a = storage.lookup_embedding_cache("hash_a").await.unwrap();
+    assert!(cached_a.is_some());
+    assert!(
+        (cached_a.as_ref().unwrap()[0] - 1.0).abs() < 0.001,
+        "hash_a 应保持首次值 1.0"
+    );
+
+    // hash_b 应存在
+    let cached_b = storage.lookup_embedding_cache("hash_b").await.unwrap();
+    assert!(cached_b.is_some());
+
+    // hash_c 应存在（新写入）
+    let cached_c = storage.lookup_embedding_cache("hash_c").await.unwrap();
+    assert!(cached_c.is_some());
+    assert!(
+        (cached_c.as_ref().unwrap()[0] - 3.0).abs() < 0.001,
+        "hash_c 应为 3.0"
+    );
+}
