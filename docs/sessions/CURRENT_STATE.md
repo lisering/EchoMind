@@ -353,8 +353,13 @@ cd e2e-tests && npm run test:bridge # Playwright E2E
 ## 7. 当前 Git 状态
 
 - **分支**: `main`
-- **未提交变更**: 大量 untracked 文件（历史功能开发累积）
-- **发布仓库**: `EchoMind/EchoMind/`（通过 `sync-to-github.sh` 同步）
+- **未提交变更**: 0（Session 4 Git 状态清理完成，4 个分组提交）
+- **提交历史**:
+  - `323a0ef` — feat(ui): 前端架构升级（32 files, 3335+/1017-）
+  - `bf04c60` — feat(core): Rust 后端改进（6 files, 803+/113-）
+  - `2685c16` — docs: 文档同步（9 files, 574+/7-）
+  - `78bcd8e` — chore: submodule + .gitignore（2 files, 2+/1-）
+- **发布仓库**: `EchoMind/EchoMind/`（通过 `sync-to-github.sh` 同步，无 remote 配置，需手动 `git remote add` 后 `git push`）
 
 ---
 
