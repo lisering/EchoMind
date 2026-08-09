@@ -1,0 +1,93 @@
+[package]
+name = "echomind-infra"
+version = "0.1.0-alpha.1"
+edition = "2024"
+license = "MIT"
+description = "EchoMind 适配器层：SQLite 持久化与本地向量化引擎（实现 core 端口，六边形架构）"
+
+[features]
+default = []
+## Pro 功能：PDF 渲染（pdfium）、OCR（ocrs）、VLM 视觉模型、HNSW 向量索引、本地 LLM 推理
+pro = ["dep:pdfium-render", "dep:ocrs", "dep:rten", "dep:image", "dep:hnsw_rs", "dep:mistralrs", "dep:memmap2", "dep:half", "dep:libc", "dep:tree-sitter", "dep:tree-sitter-rust", "dep:tree-sitter-typescript", "dep:tree-sitter-python", "dep:tree-sitter-go", "dep:tempfile"]
+
+## GPU 加速（macOS Metal）——启用后 best_device(false) 自动选择 Metal 设备
+metal = ["mistralrs/metal"]
+
+## GPU 加速（NVIDIA CUDA，需要 CUDA toolkit）
+cuda = ["mistralrs/cuda"]
+
+## Apple Accelerate 框架（BLAS 加速，macOS）
+accelerate = ["mistralrs/accelerate"]
+
+[dependencies]
+echomind-core = { path = "../core" }
+echomind-models = { path = "../models" }
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+futures = "0.3"
+# rusqlite 属体系三禁止进入 core 的具体实现，仅允许存在于本适配器层
+# bundled-sqlcipher：自带 SQLCipher 编译，AES-256 透明数据库加密
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher"] }
+r2d2 = "0.8"
+# 版本对齐：0.25 对应 rusqlite 0.32
+r2d2_sqlite = { version = "0.25", features = ["bundled-sqlcipher"] }
+fastembed = "5"
+# HTTP 客户端仅允许存在于 infra（体系三网络出口约束）；blocking 供 spawn_blocking 内使用
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls", "json", "stream"] }
+serde_json = "1.0"
+# settings 加密（REQ-UI-008）：AES-256-GCM + 随机数 + base64
+aes-gcm = "0.10"
+rand = "0.8"
+base64 = "0.22"
+# 消息 ID 与时间戳（REQ-RAG-006）
+uuid = { version = "1.8", features = ["v4"] }
+chrono = "0.4"
+# 序列化（HnswIndex JSON 持久化 + 现有 serde_json 依赖补充 trait）
+serde = { version = "1.0", features = ["derive"] }
+
+# ---- Pro 依赖（可选，仅在 --features pro 时编译）----
+# MM Phase 1: PDF 页面渲染（REQ-MM-001，ADR-010 架构评审通过）
+pdfium-render = { version = "0.9.3", optional = true }
+# MM Phase 1: 本地 OCR（REQ-MM-002，纯 Rust PaddleOCR PP-OCRv4 + rten 推理引擎）
+ocrs = { version = "0.12.2", optional = true }
+rten = { version = "0.24.0", optional = true }
+# 图像处理（OCR 预处理：解码、缩放、对比度增强）
+image = { version = "0.25", optional = true }
+# HNSW 近似最近邻索引（REQ-NFR-005）：纯 Rust 实现，Cosine 距离
+hnsw_rs = { version = "0.3", optional = true }
+# 本地 LLM 推理引擎（REQ-LLM-003）：基于 mistral.rs 的纯 Rust 本地推理
+# v0.9.0 未发布到 crates.io（candle-core 使用 git 依赖），改用 git 源
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs", tag = "v0.9.0", optional = true }
+# GGUF 文件 mmap 零拷贝读取（Phase 3：自研量化内核 + 内存层次流式加载）
+memmap2 = { version = "0.9", optional = true }
+# f16 半精度浮点类型（Phase 3：量化块结构体中使用 f16 存储 scale/min）
+half = { version = "2", optional = true }
+# libc 系统调用（Phase 3 Session 21：madvise 流式预取，Unix-only）
+libc = { version = "0.2", optional = true }
+notify = "8.2.0"
+notify-debouncer-full = "0.7.0"
+# CancellationToken（S13 流取消集成）：tokio-util "rt" 特性包含 sync 模块
+tokio-util = { version = "0.7", features = ["rt"] }
+# 健壮下载系统重试策略（参考 backon crate，声明式重试 + 指数退避 + 条件重试）
+backon = "1"
+# SHA256 完整性校验（下载后哈希验证）
+sha2 = "0.10"
+# 代码符号引擎（tree-sitter 代码感知 RAG，REQ-RAG-031）
+# 纯本地 AST 解析（零网络），支持 Rust / TypeScript / Python / Go 四种语言
+tree-sitter = { version = "0.25", optional = true }
+tree-sitter-rust = { version = "0.24", optional = true }
+tree-sitter-typescript = { version = "0.23", optional = true }
+tree-sitter-python = { version = "0.25", optional = true }
+tree-sitter-go = { version = "0.25", optional = true }
+# 代码执行沙箱（REQ-RAG-032）：临时文件写入 + 执行后清理
+tempfile = { version = "3", optional = true }
+# 结构化日志（REQ-OBS-001）：tracing facade + subscriber + file appender
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

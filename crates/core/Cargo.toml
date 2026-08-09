@@ -1,0 +1,71 @@
+[package]
+name = "echomind-core"
+version = "0.1.0-alpha.1"
+edition = "2024"
+license = "MIT"
+description = "EchoMind 六边形架构核心层：端口 Trait 与领域逻辑，禁止依赖任何具体实现"
+
+[features]
+default = []
+## Pro 功能：文档审计引擎、VLM 提示词、多模态 PDF 加载器
+pro = []
+
+[dependencies]
+echomind-models = { path = "../models" }
+echomind-prompt = { path = "../prompt" }
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+futures = "0.3"
+# 纯计算解析/分词库（无 I/O、无网络），经架构评审准入 core（见 SRS REQ-ARCH-000）
+pulldown-cmark = { version = "0.13", default-features = false }
+tiktoken-rs = "0.12"
+md-5 = "0.10"
+# 纯计算解析库（REQ-PDF-001），与 pulldown-cmark 同类经架构评审准入 core
+lopdf = "0.42"
+# .docx 文件读取与解析（REQ-ING-015），纯 Rust 实现，无 C 依赖
+docx-rs = { version = "0.4", default-features = false }
+# .html 文件读取与解析（REQ-ING-016），纯 Rust HTML → 纯文本转换
+html2text = "0.17"
+# SSE/JSON 载荷解析（REQ-LLM-001），纯计算库
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# License 离线校验（REQ-LIC-001）：Ed25519 签名验证，纯计算库，经架构评审准入 core
+ed25519-dalek = "2.1"
+base64 = "0.22"
+# 零拷贝文件映射（全尺度 I/O 优化）：减小大文件的内存峰值
+memmap2 = "0.9"
+# ---- 安全防御模块（从 rs-pro 移植）----
+# 密钥派生：Argon2id 用于军工级密钥派生（替代 PBKDF2）
+argon2 = "0.5"
+# 兼容旧数据：HMAC-SHA256 用于 PBKDF2 向后兼容
+hmac = "0.12"
+sha2 = "0.10"
+# 恒量时间比较：用于密码验证，防止时序攻击
+subtle = "2"
+# 内存擦零：敏感数据用后即焚，防止内存 dump 泄露
+zeroize = { version = "1.8", features = ["derive"] }
+# PII 检测正则表达式
+regex = "1"
+# 随机数生成（salt 生成）
+rand = "0.8"
+# 结构化日志
+tracing = "0.1"
+# 时间戳（暴力破解防护、审计日志）
+chrono = { version = "0.4", features = ["serde"] }
+# UUID（审计日志 ID）
+uuid = { version = "1.8", features = ["v4"] }
+# .pptx 文件读取与解析（REQ-ING-017），纯 Rust 实现，MIT/Apache-2.0
+pptx-to-md = "1.0"
+# .epub 电子书读取与解析（REQ-ING-018），纯 Rust 实现，Apache-2.0
+rbook = { version = "0.7", default-features = false, features = ["threadsafe", "prelude"] }
+# .xlsx/.xls/.ods 电子表格读取（REQ-ING-021），纯 Rust 实现，MIT/Apache-2.0
+calamine = "0.36"
+# .csv 逗号分隔值读取（REQ-ING-021），纯 Rust 实现，MIT/Unlicense
+csv = "1.4"
+
+[dev-dependencies]
+tempfile = "3"
+proptest = "1.5"
+
+[lints]
+workspace = true

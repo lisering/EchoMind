@@ -1,0 +1,19 @@
+# 构建产物
+/target
+node_modules/
+/dist
+
+# E2E 测试产物
+e2e-tests/test-results/
+e2e-tests/playwright-report/
+
+# Tauri 构建生成物（tauri-build 每次构建重建）
+crates/tauri-app/gen/schemas/
+
+# 密钥与环境（体系三红线：严禁入库）
+.env
+.env.*
+
+# 日志与系统杂物
+*.log
+.DS_Store

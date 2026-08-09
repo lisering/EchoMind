@@ -1,0 +1,17 @@
+[package]
+name = "echomind-models"
+version = "0.1.0-alpha.1"
+edition = "2024"
+license = "MIT"
+description = "EchoMind 数据契约层：纯数据结构与枚举，零业务逻辑、零外部服务依赖"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+uuid = { version = "1.8", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+serde_json = "1.0"
+
+[lints]
+workspace = true

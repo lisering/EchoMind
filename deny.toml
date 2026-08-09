@@ -1,0 +1,87 @@
+# cargo-deny 配置 — 供应链安全检查
+# =====================================================================
+# 运行命令: cargo deny check
+# CI 集成: .github/workflows/e2e.yml 的 supply-chain job
+#
+# 检查维度:
+#   1. advisories — RustSec 安全公告数据库漏洞扫描
+#   2. licenses   — 许可证合规性检查（拒绝不兼容许可证）
+#   3. bans       — 禁用/警告特定 crate 和重复版本
+#   4. sources    — 限制 crate 来源（仅允许 crates.io）
+#
+# 文档: https://embarkstudios.github.io/cargo-deny/
+# =====================================================================
+
+# ─────────────────────────────────────────────────────────────────────
+# 1. 安全公告检查（RustSec Advisory Database）
+# ─────────────────────────────────────────────────────────────────────
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+# 如果有已知漏洞但暂时无法修复，在此列出 RUSTSEC ID + 理由
+ignore = []
+unmaintained = "workspace"
+yanked = "deny"
+
+# ─────────────────────────────────────────────────────────────────────
+# 2. 许可证合规检查
+# ─────────────────────────────────────────────────────────────────────
+[licenses]
+version = 2
+# 允许的许可证列表（BSL-1.1 项目兼容的所有常见许可证）
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "Zlib",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "OpenSSL",
+    "BSL-1.0",
+    "0BSD",
+    "Unlicense",
+    # EchoMind 自身许可证（Alpha 阶段：MIT；稳定后切换回 BUSL-1.1）
+    "MIT",
+    # 以下为传递依赖需要的许可证
+    "NCSA",
+    "CDLA-Permissive-2.0",
+    # bzip2 库许可证（BSD-like）
+    "bzip2-1.0.6",
+]
+confidence-threshold = 0.8
+exceptions = []
+
+# ─────────────────────────────────────────────────────────────────────
+# 3. Crate 禁用与重复版本控制
+# ─────────────────────────────────────────────────────────────────────
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+deny = []
+skip = [
+    { name = "windows-sys", version = "0.48" },
+    { name = "windows-sys", version = "0.52" },
+    { name = "windows-targets", version = "0.48" },
+    { name = "windows-targets", version = "0.52" },
+]
+skip-tree = []
+
+# ─────────────────────────────────────────────────────────────────────
+# 4. Crate 来源限制
+# ─────────────────────────────────────────────────────────────────────
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+# ─────────────────────────────────────────────────────────────────────
+# 5. 输出配置
+# ─────────────────────────────────────────────────────────────────────
+[output]
+feature-depth = 1

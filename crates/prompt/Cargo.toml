@@ -1,0 +1,14 @@
+[package]
+name = "echomind-prompt"
+version = "0.1.0-alpha.1"
+edition = "2024"
+license = "MIT"
+description = "EchoMind 提示词构建：RAG + Agent 系统提示词组装（Prompt Caching 优化）"
+
+[dependencies]
+echomind-models = { path = "../models" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[lints]
+workspace = true

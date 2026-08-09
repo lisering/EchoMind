@@ -1,0 +1,56 @@
+[package]
+name = "echomind-tauri-app"
+version = "0.1.0-alpha.1"
+edition = "2024"
+license = "MIT"
+description = "EchoMind Tauri 组装层：依赖注入、Command/Event 声明与错误码映射"
+
+[features]
+default = []
+## Pro 功能：PDF 多模态索引、OCR、VLM、文档审计
+## 转发到 echomind-core 和 echomind-infra 的 pro feature
+pro = ["echomind-core/pro", "echomind-infra/pro"]
+## GPU 加速转发（macOS Metal）
+metal = ["echomind-infra/metal"]
+## GPU 加速转发（NVIDIA CUDA）
+cuda = ["echomind-infra/cuda"]
+## Apple Accelerate 框架转发（BLAS 加速）
+accelerate = ["echomind-infra/accelerate"]
+
+[dependencies]
+echomind-core = { path = "../core" }
+echomind-prompt = { path = "../prompt" }
+echomind-compact = { path = "../compact" }
+echomind-infra = { path = "../infra" }
+echomind-models = { path = "../models" }
+tauri = { version = "2.0", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tokio = { version = "1.0", features = ["full"] }
+# CancellationToken 位于 "rt" 特性下（tokio-util 无 "sync" 特性）
+tokio-util = { version = "0.7", features = ["rt"] }
+anyhow = "1.0"
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# 语音转写：reqwest multipart 发送音频到 OpenAI Whisper API
+reqwest = { version = "0.12", features = ["rustls-tls", "json", "multipart"] }
+# 嵌入缓存：内容指纹 MD5（与 core 版本对齐）
+md-5 = "0.10"
+# 结构化日志（REQ-OBS-001）
+tracing = "0.1"
+
+# generate_context! 宏依赖构建脚本提供 OUT_DIR（tauri-build 与 tauri 主版本对齐）
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dev-dependencies]
+tauri = { version = "2.0", features = ["test"] }
+tempfile = "3"
+ed25519-dalek = "2.1"
+base64 = "0.22"
+# L2 契约测试需要 lopdf 创建含图片 XObject 的测试 PDF（TC-MM-001/002/004）
+lopdf = "0.42"
+
+[lints]
+workspace = true
