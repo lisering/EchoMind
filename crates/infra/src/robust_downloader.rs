@@ -89,9 +89,10 @@ impl Default for DownloadConfig {
 
 /// 下载源列表（多源容错）。
 ///
-/// 根据系统语言动态选择源顺序：
+/// 根据系统语言和网络探测动态选择源顺序：
 /// - 中文系统：ModelScope（魔搭）→ hf-mirror → HuggingFace
-/// - 其他系统：HuggingFace → hf-mirror → ModelScope
+/// - 非中文系统 + HuggingFace 可达：HuggingFace → hf-mirror → ModelScope
+/// - 非中文系统 + HuggingFace 不可达：ModelScope → hf-mirror → HuggingFace
 fn get_download_sources() -> Vec<DownloadSourceDef> {
     let hf = DownloadSourceDef {
         name: "HuggingFace".to_string(),
@@ -108,12 +109,32 @@ fn get_download_sources() -> Vec<DownloadSourceDef> {
         base_url: "https://modelscope.cn/models".to_string(),
         branch: "master".to_string(),
     };
-    if is_chinese_locale() {
+    if is_chinese_locale() || !*HF_REACHABLE {
+        // 中文系统 或 HuggingFace 不可达：魔搭优先
         vec![ms, mirror, hf]
     } else {
+        // 非中文系统且 HuggingFace 可达：HF 优先
         vec![hf, mirror, ms]
     }
 }
+
+/// HuggingFace 连通性探测结果缓存。
+static HF_REACHABLE: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
+    let client = match reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let url = "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/config.json";
+    client
+        .get(url)
+        .send()
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+});
 
 /// 检测系统是否为中文环境。
 fn is_chinese_locale() -> bool {

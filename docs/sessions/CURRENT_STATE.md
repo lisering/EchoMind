@@ -308,7 +308,7 @@ v1.4 版本规划已完成，原子计划见 `docs/architecture/V1.4_ATOMIC_PLAN
 | `docs/api/database-schema.md` | 数据库表结构 |
 | `docs/api/settings-reference.md` | 设置键 + 事件 |
 | `docs/api/frontend-modules.md` | 前端模块函数清单 |
-| `.catpaw/rules/iron-rules.md` | 铁律规则（14 条） |
+| `.catpaw/rules/system-constraints.md` | 铁律规则（21 条） |
 | `AGENTS.md` | AI Agent 指南 |
 | `CLAUDE.md` | Claude Code 指南 |
 | `PROJECT_RULES.md` | 项目宪法 |

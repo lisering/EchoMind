@@ -77,175 +77,46 @@ AI 引擎在每次任务中按角色视角协同工作。各角色**严禁越位
 
 ## 体系三：架构纯洁性与代码铁律
 
-### 3.0 工程纪律铁律（v1.6.0 新增铁律十五 Spec-driven Development，完整规则见 `.catpaw/rules/iron-rules.md`）
+### 3.0 工程纪律铁律（完整规则见 `.catpaw/rules/system-constraints.md`）
 
-#### 铁律一：网络代理规范（仅限开发调研，软件本身禁止代理）
+> **铁律一 ~ 铁律二十一** 已统一整合到 `.catpaw/rules/system-constraints.md`，本节仅保留 EchoMind 项目特定的架构补充约束。
+> 以下为铁律编号速查（详见 `.catpaw/rules/system-constraints.md`）：
 
-**⚠️ 核心原则：代理仅用于 AI Agent 的开发调研活动（搜索资料、下载依赖、抓取文档）。EchoMind 软件本身运行时（LLM API 调用、模型下载、Web 搜索等用户面向的网络请求）绝对禁止使用代理。**
+| 铁律 | 主题 |
+|---|---|
+| 一 | 网络代理设置（仅限开发调研，软件本身禁止代理） |
+| 二 | TDD 驱动开发 |
+| 三 | 代码注释规范 |
+| 四 | 真实数据测试 |
+| 五 | 生产级代码质量（零 unwrap / 零 panic / 零裸溢出） |
+| 六 | 最新版本依赖原则 |
+| 七 | 文档实时同步 |
+| 八 | 开发决策必须互联网搜索 |
+| 九 | Rust 生态优先原则 |
+| 十 | 最前沿技术追踪 |
+| 十一 | GitHub 发布同步规则（双仓库工作流） |
+| 十二 | Session 上下文全自动管理 |
+| 十三 | 前端样式必须使用 Tailwind 工具类 + CSS 变量 |
+| 十四 | SOLID 架构原则 |
+| 十五 | Spec-driven Development（规格驱动开发） |
+| 十六 | AI 生成代码审查与验证 |
+| 十七 | 结构化日志与可观测性 |
+| 十八 | LLM 应用安全防护 |
+| 十九 | 错误处理与弹性设计 |
+| 二十 | AI Agent 行为规范 |
+| 二十一 | RAG 安全防护（向量与嵌入弱点） |
 
-**✅ 允许使用代理的场景（开发调研）**：
-- `cargo build` / `cargo update` 下载 crates
-- `npm install` 下载 E2E 依赖
-- HuggingFace 模型下载（仅限开发环境）
-- `web_fetch` / `curl` 抓取外部文档
-- 技术选型调研（GitHub API / crates.io 搜索）
+#### EchoMind 特定补充约束
 
-开发环境中若遇无法访问的地址（如 crates.io、huggingface.co 等），允许使用本地代理：
-
-```bash
-export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890
-```
-
-**用完后必须立即 unset，防止代理泄露或影响其他任务：**
-
-```bash
-unset https_proxy http_proxy all_proxy
-```
-
-**🚫 禁止使用代理的场景（软件运行时）**：
-- LLM API 调用（`OpenAIProvider` 的 reqwest 请求）
-- 模型下载（`ModelManager` 下载 GGUF 模型）
+**网络代理 — 软件运行时禁止代理的代码位置**（铁律一项目特定落实点）：
 - fastembed ONNX 模型下载（运行时首次加载）
 - Web 搜索（`DuckDuckGoProvider`）
 - 任何其他用户面向的网络请求
 
 **代码强制要求**：所有 `reqwest::Client::builder()` 必须加 `.no_proxy()` 确保软件直连，不受 `https_proxy` / `http_proxy` 环境变量影响。
 
-#### 铁律二：TDD 驱动开发
-
-1. **所有功能必须 TDD 驱动**：先写红灯测试，再写实现代码使其变绿，严禁「先实现后补测试」。
-2. **用例必须有效且有意义**：禁止写永远通过的空断言（如 `assert!(true)`）；每个用例必须明确对应一条 AC（验收标准），断言聚焦行为而非实现细节。
-3. **根据开发进度持续调整**：随着需求演进和代码重构，测试用例必须同步更新。废弃的用例及时删除，新增的分支及时覆盖。测试代码与生产代码同等重要，接受同等质量的 review。
-4. **测试左移纪律**（体系二阶段 2）：QA 在开发写代码之前介入编写测试骨架，此时测试必须失败（红灯），失败原因必须是「未实现」而非「测试本身错误」。
-
-#### 铁律四：真实数据测试
-
-1. **测试必须覆盖真实世界语料**：禁止仅用 toy data（如 `b"hello"`）作为唯一测试输入。L2 及以上测试必须包含真实公开语料（GitHub README、arXiv 论文 PDF 等）和极端边缘数据（混合编码、恶意 XSS、空文件、深套目录），确保系统在野蛮场景下不崩溃。
-2. **混沌测试常态化**：每次大版本迭代必须执行混沌测试集（`chaos_tests` 模块），覆盖抗压、容错、安全、格式欺骗、海量并发等野蛮场景。混沌测试用例与功能测试同等重要，纳入 CI 门禁。
-3. **真实 LLM 联调测试**：需要真实 LLM 的集成测试通过环境变量注入凭据，严禁硬编码 API Key。环境变量配置见 `docs/TEST_STRATEGY.md` §5。测试中使用的 LLM 配置如下：
-   - API Key → 环境变量 `ANTHROPIC_AUTH_TOKEN`
-   - Base URL → 环境变量 `BASE_URL`
-   - Model → 环境变量 `CLAUDE_CODE_SUBAGENT_MODEL`
-4. **语料生成自动化**：测试 fixtures 由 `tests/fixtures/generate_corpus.py` 自动生成，确保可复现。网络获取失败时使用本地 fallback，保证 CI 离线可跑。
-
-#### 铁律三：代码注释规范
-
-1. **Rust**：充分发挥 Rust 强大的文档注释系统。所有 `pub` 项必须有 `///` 文档注释，说明用途、参数、返回值、错误条件与约束。模块级 `//!` 注释说明模块职责与架构约束。复杂逻辑用行内 `//` 注释说明「为什么」而非「是什么」。`cargo doc` 生成的文档必须可读且自解释。
-2. **前端 JavaScript**：所有函数必须有 JSDoc 注释（`/** ... */`），标注 `@param`、`@returns`、`@throws`。复杂状态机和事件流必须有注释说明状态迁移与数据流向。严禁「无注释魔法函数」。
-3. **注释与代码同步**：修改代码时必须同步更新注释。过时注释比没有注释更危险。Code review 时注释与代码不一致视为 review 阻塞项。
-4. **杜绝屎山**：每个函数单一职责，命名自解释。超过 50 行的函数必须拆分。重复代码必须抽取。任何「暂时这样写，以后再改」的代码必须在注释中标记 `// TODO(req-xxx): 说明` 并关联需求编号。
-
-#### 铁律五：生产级代码质量（零 unwrap / 零 panic / 零裸溢出）
-
-> 本铁律将 §3.2.1 的 unwrap 禁令升格为独立铁律，并扩展至 panic 与整数溢出，适用于全部 `crates/` 生产代码（测试代码豁免）。
-
-1. **零 unwrap / 零 expect**：生产代码严禁出现 `.unwrap()`、`.expect()`、`panic!()`、`unreachable!()`、`todo!()`、`unimplemented!()`。所有可能失败的操作必须经 `?` 传播或 `match` 显式处理，错误类型用 `thiserror`（领域层）或 `anyhow`（组装层）定义。CI 以 `clippy::unwrap_used = "deny"`、`clippy::expect_used = "deny"`、`clippy::panic = "deny"`、`clippy::unreachable = "deny"`、`clippy::todo = "deny"`、`clippy::unimplemented = "deny"` 强制。
-2. **零裸整数溢出**：涉及用户输入或外部数据的算术运算（文件大小、配额计数、分块偏移等）必须使用 `checked_*` / `saturating_*` 系列方法或显式范围校验，严禁依赖默认 wrapping 行为。`clippy::arithmetic_side_effects = "deny"` 在高危 crate 启用。
-3. **零 unwrap 链式调用**：禁止 `.map(|x| x.unwrap())`、`if let Some(x) = opt.unwrap()` 等变体绕过 lint。`Option::unwrap` 与 `Result::unwrap` 一视同仁，均以 `ok_or` / `context` / `map_err` 替代。
-4. **错误信息安全**：错误消息严禁包含 API Key、文件路径中的用户名、数据库连接串等敏感信息。`anyhow::Context` 的描述须聚焦「做了什么」而非「内部细节」。
-5. **防御性编程**：对外部输入（文件内容、网络响应、Tauri 参数）执行长度截断、类型校验与字符边界检查后再使用。`String::from_utf8` 失败时用 `from_utf8_lossy` 容错，不得 panic。
-6. **CI 门禁自动化**：每次 PR 必须通过 `cargo clippy --all-targets -- -D warnings`（含上述全部 deny lint），任何违反铁律五的代码不得合入主干。新增 crate 时须在 `Cargo.toml` 继承 workspace lints（`[lints] workspace = true`）。
-
-#### 铁律六：最新版本依赖原则
-
-**所有用到的技术和依赖必须使用最新稳定版本。** 面对新版本时，必须去官网查阅 API 文档和迁移指南，不能凭记忆假设 API 用法。
-
-核心技术栈版本要求：
-
-| 技术 | 最低版本 | 官方文档 |
-| --- | --- | --- |
-| Rust Edition 2024 | Rust 1.85+ | https://www.rust-lang.org/ |
-| Tauri | v2.x | https://v2.tauri.app/ |
-| fastembed | 最新 crates.io 版本 | https://crates.io/crates/fastembed |
-| rusqlite | 最新 crates.io 版本 | https://crates.io/crates/rusqlite |
-| reqwest | 最新 crates.io 版本 | https://crates.io/crates/reqwest |
-| tokio | 最新 crates.io 版本 | https://crates.io/crates/tokio |
-| pulldown-cmark | 最新 crates.io 版本 | https://crates.io/crates/pulldown-cmark |
-| thiserror | 最新 crates.io 版本 | https://crates.io/crates/thiserror |
-| Playwright | 最新 npm 版本 | https://playwright.dev/ |
-| Tailwind CSS | v4+ | https://tailwindcss.com/ |
-
-版本更新规则：
-
-1. **每次开始新功能开发前**，运行 `cargo update --dry-run` 和 `npm outdated` 检查是否有新版本。
-2. **遇到 API 破坏性变更**时，必须查阅官方迁移指南（Migration Guide），不能凭旧记忆编写代码。
-3. **新增依赖**时，必须在 `crates.io` 或 `npm` 确认最新版本号，不能手动猜测版本。
-4. **构建失败**时，首先考虑是否是依赖版本过旧导致的不兼容。
-5. **技术选型**时，优先选择官方维护活跃、文档完善的最新方案。
-
-#### 铁律七：文档实时同步（大模型开发友好度保障）
-
-**代码变更必须同步更新文档，文档与代码的脱节是项目质量的最大威胁。**
-
-同步规则：
-
-| 代码变更类型 | 必须同步更新的文档 | 时限 |
-| --- | --- | --- |
-| 新增/修改 IPC 命令 | `docs/api/ipc-commands.md` | 同一 PR 内 |
-| 新增/修改数据库表 | `docs/api/database-schema.md` | 同一 PR 内 |
-| 新增/修改 trait 方法 | `docs/api/code-contracts.md` | 同一 PR 内 |
-| 新增/修改数据模型 | `docs/api/code-contracts.md` | 同一 PR 内 |
-| 新增/修改 AppState 字段 | `docs/api/code-contracts.md` | 同一 PR 内 |
-| 新增前端 JS 文件 | `docs/api/frontend-modules.md` | 同一 PR 内 |
-| 新增 settings 键 | `docs/api/settings-reference.md` | 同一 PR 内 |
-| 新增 Tauri 事件 | `docs/api/settings-reference.md` | 同一 PR 内 |
-| 功能实现/补齐 | `docs/SRS_v1.0.md` 对应 REQ 状态 | 同一 PR 内 |
-| 新增架构决策 | `docs/architecture/adr/` 新建 ADR | 同一 PR 内 |
-
-检查清单（每次 PR 提交前）：
-
-1. [ ] 是否新增了 IPC 命令？→ 更新 `ipc-commands.md` 并在 `invoke_handler` 注册
-2. [ ] 是否修改了数据库结构？→ 更新 `database-schema.md`
-3. [ ] 是否新增了 trait 方法或数据模型？→ 更新 `code-contracts.md`
-4. [ ] 是否新增了前端文件？→ 更新 `frontend-modules.md`
-5. [ ] 是否新增了设置键或事件？→ 更新 `settings-reference.md`
-6. [ ] 功能状态是否变化？→ 更新 SRS 对应 REQ 状态
-7. [ ] 是否有重大架构决策？→ 新建 ADR
-
-大模型开发文档优先级：
-
-AI Agent 在开发前必须先查阅以下文档（按优先级）：
-
-1. `PROJECT_RULES.md` — 找回纪律约束（最高优先级）
-2. `docs/api/code-contracts.md` — 了解 trait 签名和数据模型（**第一技术参考**）
-3. `docs/api/ipc-commands.md` — 确认命令参数和返回值
-4. `docs/api/database-schema.md` — 确认表名/列名
-5. `AGENTS.md` — 架构速查和已知陷阱
-6. `.catpaw/rules/iron-rules.md` — 铁律规则（跨会话持久化）
-
-#### 铁律八：开发决策必须互联网搜索（杜绝闭门造车）
-
-**在进行产品决策、技术选型、架构设计、头脑风暴等开发活动时，必须先通过互联网搜索获取最新最权威的资料，不能凭记忆做判断。**
-
-适用场景：
-
-- 技术选型（选择 crate / npm 包 / 框架 / API）
-- 竞品分析（了解同类产品的最新功能和架构）
-- 架构设计（查找最新最佳实践和设计模式）
-- 版本兼容性确认（API 是否有破坏性变更）
-- 安全漏洞检查（依赖是否有已知 CVE）
-- 产品决策（行业趋势、用户需求验证）
-
-搜索方法（按可靠性排序）：
-
-1. **`curl` + 代理**（最可靠）：
-   ```bash
-   export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890
-   curl -sL "https://api.github.com/search/repositories?q=关键词&sort=stars&order=desc&per_page=10"
-   curl -sL "https://crates.io/api/v1/crates?q=关键词&sort=downloads"
-   curl -sL "https://raw.githubusercontent.com/用户/仓库/分支/文件路径"
-   ```
-2. **`web_fetch` 工具**（部分网站可用，不稳定）
-3. **浏览器工具**（Google/DuckDuckGo 搜索可能超时或遇到 CAPTCHA）
-
-搜索规则：
-
-1. **每次技术选型前**：在 GitHub API / crates.io 搜索同类项目，对比 stars、活跃度、最近更新。
-2. **每次竞品分析时**：搜索同类开源项目，读取 README 了解最新功能定位。
-3. **每次 API 使用前**：查阅最新官方文档，不凭记忆假设 API 用法（铁律六也要求此点）。
-4. **每次架构决策时**：搜索行业最佳实践和最新趋势验证方案。
-5. **搜索结果必须引用来源**：在文档和决策中标注信息来源（URL / 项目名 / 调研日期）。
-6. **DuckDuckGo 直接搜索会遇到 CAPTCHA**：优先使用 GitHub API 间接搜索或直接访问已知 URL。
+> **铁律二 ~ 铁律八**（TDD、代码注释、真实数据测试、生产级代码质量、最新版本依赖、文档实时同步、开发决策互联网搜索）的完整内容见 `.catpaw/rules/system-constraints.md`。
+> **铁律十六 ~ 铁律二十一**（AI 代码审查、结构化日志、LLM 安全、错误弹性、Agent 行为规范、RAG 安全防护）为 v3.0~v3.1 新增，来源：2026 年最新业界实践调研（含 OWASP GenAI LLM Top 10 2026、OpenSSF Scorecard、cargo-miri 等）。
 
 ### 3.1 六边形架构
 1. 核心逻辑位于 `crates/core`：**绝对禁止依赖** Tauri、reqwest、rusqlite 等任何具体实现；对外只暴露领域模型与端口 Trait（原生 `async fn` in trait）。
@@ -294,5 +165,9 @@ AI Agent 在开发前必须先查阅以下文档（按优先级）：
 | v1.2.0 | 2026-07-25 | 新增铁律四：真实数据测试（真实语料、混沌测试、LLM 环境变量、语料自动化） | TPM / QA Lead |
 | v1.3.0 | 2026-07-25 | 新增铁律五：生产级代码质量（零 unwrap / 零 panic / 零裸溢出，CI deny lint 全覆盖） | TPM / Chief Architect |
 | v1.4.0 | 2026-07-25 | 新增铁律六/七/八：最新版本依赖原则、文档实时同步操作清单、开发决策必须互联网搜索 | TPM / Chief Architect |
-| v1.5.0 | 2026-08-04 | 新增铁律九~十四：Rust 生态优先、最前沿技术追踪、GitHub 发布同步、Session 上下文全自动管理、Tailwind 样式规范、SOLID 原则（详见 `.catpaw/rules/iron-rules.md`） | TPM / Chief Architect |
+| v1.5.0 | 2026-08-04 | 新增铁律九~十四：Rust 生态优先、最前沿技术追踪、GitHub 发布同步、Session 上下文全自动管理、Tailwind 样式规范、SOLID 原则 | TPM / Chief Architect |
 | v1.6.0 | 2026-08-08 | 新增铁律十五：Spec-driven Development 规格驱动开发（先写规格 REQ+AC+TC 再写代码，测试从 AC 派生） | TPM / Chief Architect |
+| v1.7.0 | 2026-08-08 | 铁律规则统一整合到 `.catpaw/rules/system-constraints.md`，删除 `.catpaw/rules/iron-rules.md`，本节改为速查表+项目特定补充 | TPM / Chief Architect |
+| v1.8.0 | 2026-08-08 | 铁律扩展至 20 条：新增铁律十六~二十（AI 代码审查 / 结构化日志 / LLM 安全 / 错误弹性 / Agent 行为规范），增强铁律二/五/七。来源：vibe-coding-ai-rules / SoloDawn / OWASP / agent-best-practices 等业界最新实践 | TPM / Chief Architect |
+| v1.9.0 | 2026-08-08 | 铁律扩展至 21 条：3 轮深度调研后新增铁律二十一 RAG 安全防护，增强铁律二/五/六/十七/十八。来源：OWASP GenAI LLM Top 10 2026 / cargo-miri / OpenSSF Scorecard / cargo-fuzz | TPM / Chief Architect |
+| v2.0.0 | 2026-08-08 | 铁律二新增「Vibe Coding 全自动化测试体系」——分层测试门禁（L0~L4）+ AI Agent 行为规则 + 测试工具链清单（10 工具）。来源：template-agenticide-vibecoding / vibe-coding-ai-rules / cargo-nextest / cargo-mutants / insta / cargo-llvm-cov / wiremock | TPM / Chief Architect |

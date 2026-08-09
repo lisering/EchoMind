@@ -1,7 +1,8 @@
 [package]
 name = "license-issuer"
-version = "1.4.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
+license = "MIT"
 description = "EchoMind License 签发 CLI 工具（REQ-LIC-005）：生成 Ed25519 密钥对 + 签发 License Key"
 
 [dependencies]

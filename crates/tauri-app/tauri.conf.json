@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "EchoMind",
-  "version": "1.4.0",
+  "version": "0.1.0-alpha.1",
   "identifier": "com.echomind.app",
   "build": {
     "frontendDist": "../../ui"
@@ -30,6 +30,9 @@
       "icons/icon.icns",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   }
 }

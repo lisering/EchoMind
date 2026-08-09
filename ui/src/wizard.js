@@ -379,7 +379,7 @@ export function renderPresetCards() {
   for (const [key, p] of Object.entries(PRESETS)) {
     const btn = document.createElement('button');
     const active = key === get('activePreset');
-    btn.className = `rounded-xl border px-4 py-4 text-left transition-colors ${active ? 'border-accent bg-accent/10' : 'border-line bg-panel hover:border-slate-500'}`;
+    btn.className = `rounded-xl border px-4 py-4 text-left transition-colors ${active ? 'border-accent bg-accent/10' : 'border-border-default bg-surface-1 hover:border-slate-500'}`;
     btn.innerHTML = `<div class="text-sm font-medium ${active ? 'text-accent' : ''}">${p.label}</div><div class="mt-1 text-[11px] text-text-quaternary">${t(p.descKey)}</div>`;
     btn.onclick = () => { setState({ activePreset: key }); applyPreset(); renderPresetCards(); };
     box.appendChild(btn);

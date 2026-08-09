@@ -63,12 +63,17 @@ static PASSPORT_REGEX: LazyLock<regex::Regex> =
 /// Luhn 校验算法
 ///
 /// 用于验证银行卡号/信用卡号的有效性。
-/// 注意：仅对 16 位数字（信用卡长度）执行校验，
-/// 17-19 位数字（可能是中国银联借记卡）不遵循 Luhn，跳过校验。
+/// - 16 位：执行完整 Luhn 校验（信用卡标准长度）
+/// - 13-15 / 17-19 位：银联借记卡等不遵循 Luhn，执行基本合理性检查
+///   （首位非零，排除电话号码/身份证号等常见长数字误报）
 #[must_use]
 fn luhn_check(number: &str) -> bool {
     let digits: Vec<u32> = number.chars().filter_map(|c| c.to_digit(10)).collect();
     if digits.len() < 13 || digits.len() > 19 {
+        return false;
+    }
+    // 基本合理性：首位必须非零（真实银行卡号不会以 0 开头）
+    if digits[0] == 0 {
         return false;
     }
     // 仅对 16 位数字执行 Luhn 校验（信用卡标准长度）

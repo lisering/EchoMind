@@ -1,0 +1,29 @@
+# EchoMind 项目级 Cargo 配置
+# 解决 Free/Pro 双 feature 编译产物堆积问题
+
+# ──────────────────────────────────────────────
+# [alias] 项目级命令别名
+# Free 和 Pro 使用独立 target 目录，避免产物交叉堆积
+# ──────────────────────────────────────────────
+[alias]
+# Pro 构建（默认，开发者通常使用 Pro）
+b-pro = "build --features pro"
+br-pro = "build --release --features pro"
+t-pro = "test --features pro"
+r-pro = "run --features pro"
+
+# Free 构建（仅测试 Free 功能时使用）
+b-free = "build"
+br-free = "build --release"
+t-free = "test"
+r-free = "run"
+
+# ──────────────────────────────────────────────
+# [build] 编译优化
+# ──────────────────────────────────────────────
+[build]
+# 使用 split-debuginfo 减少 debug 产物体积（macOS）
+# split-debuginfo 将调试信息拆分为独立 .dwarf 文件，而非内嵌在 .rlib/.a 中
+# 可减少 ~30-40% 的 target 体积
+# 参考: https://blog.rust-lang.org/2021/05/11/edition-2021.html#split-debug-info
+split-debuginfo = "unpacked"

@@ -253,7 +253,7 @@ expect(transition.length).toBeGreaterThan(0);
     await expect(page.locator('#kbModal')).toBeVisible({ timeout: 5000 });
 
     // 搜索关键词
-    const docSearch = page.locator('#docSearchInput, #kbModal input[type="text"], #kbModal input[type="search"]');
+    const docSearch = page.locator('#docSearchInput');
     if (await docSearch.isVisible()) {
       await docSearch.fill('rust');
       await page.waitForTimeout(300);
@@ -274,7 +274,7 @@ expect(transition.length).toBeGreaterThan(0);
     await page.locator('#kbBtn').click();
     await expect(page.locator('#kbModal')).toBeVisible({ timeout: 5000 });
 
-    const docSearch = page.locator('#docSearchInput, #kbModal input[type="text"], #kbModal input[type="search"]');
+    const docSearch = page.locator('#docSearchInput');
     if (await docSearch.isVisible()) {
       await docSearch.fill('nonexistent');
       await page.waitForTimeout(300);

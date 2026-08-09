@@ -3,6 +3,7 @@
 //! rusqlite 为同步 API，全部数据库操作经 `spawn_blocking` 执行，严禁阻塞 async executor。
 
 use std::path::Path;
+use tracing::{error, info, warn};
 
 /// **性能优化（秒出答案）**：内存向量缓存类型。
 ///
@@ -22,10 +23,10 @@ use echomind_core::retrieval_memory::{
     MemoryRecord, QueryType, RetrievalMemoryStore, RetrievalMethod,
 };
 use echomind_models::{
-    ChatMessage, Chunk, CodeSymbol, Conversation, DocStatus, Document, EntityRelation, MemoryEntry,
-    MemorySource, MemoryTier, MessageSearchResult, PendingInput, Proposition, RetrievalResult,
-    ScratchLogEntry, SessionTodo, SummaryNode, SymbolKind, TodoPriority, TodoStatus,
-    TurnActiveVersion, WikiLink,
+    BudgetStats, ChatMessage, Chunk, CodeSymbol, Conversation, DocStatus, Document, EntityRelation,
+    MemoryEntry, MemorySource, MemoryTier, MessageSearchResult, PendingInput, Proposition,
+    RetrievalResult, ScratchLogEntry, SessionTodo, SummaryNode, SymbolKind, TodoPriority,
+    TodoStatus, TurnActiveVersion, WikiLink,
 };
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::OptionalExtension;
@@ -101,7 +102,8 @@ CREATE TABLE IF NOT EXISTS messages (
     reasoning TEXT,
     turn_group TEXT NOT NULL DEFAULT '',
     version INTEGER NOT NULL DEFAULT 1,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    security_tainted INTEGER NOT NULL DEFAULT 0
 );
 
 -- 嵌入缓存表（全尺度性能优化：按内容指纹去重，避免重复 ONNX 推理）
@@ -241,10 +243,28 @@ created_at INTEGER NOT NULL
 --- date: YYYY-MM-DD 格式，用于按日聚合
 --- created_at: Unix 秒级时间戳，用于过期清理（默认 14 天）
 CREATE TABLE IF NOT EXISTS scratch_logs (
-id TEXT PRIMARY KEY,
-date TEXT NOT NULL,
-content TEXT NOT NULL,
-created_at INTEGER NOT NULL
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS idempotency_records (
+    key TEXT PRIMARY KEY,
+    timestamp INTEGER NOT NULL
+);
+
+-- 预算追踪表（QM 借鉴）：
+-- 记录 LLM API 使用情况，用于费用追踪和预算控制。
+-- LLM_COST_PER_MTOK 环境变量控制每百万 token 价格。
+CREATE TABLE IF NOT EXISTS budget_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    principal TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cost_usd REAL NOT NULL,
+    model_name TEXT NOT NULL
 );
 ";
 
@@ -279,6 +299,8 @@ CREATE INDEX IF NOT EXISTS idx_session_todos_conv ON session_todos(conversation_
 CREATE INDEX IF NOT EXISTS idx_session_todos_position ON session_todos(conversation_id, position);
 CREATE INDEX IF NOT EXISTS idx_scratch_logs_date ON scratch_logs(date);
 CREATE INDEX IF NOT EXISTS idx_scratch_logs_created ON scratch_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_budget_records_principal ON budget_records(principal);
+CREATE INDEX IF NOT EXISTS idx_budget_records_timestamp ON budget_records(timestamp);
 ";
 
 /// FTS5 全文索引虚拟表（混合检索关键词通道，REQ-RAG-010）。
@@ -512,7 +534,7 @@ impl SqliteStorage {
             .query_row("SELECT COUNT(*) FROM chunks_fts", [], |row| row.get(0))
             .context("统计 chunks_fts 数量失败")?;
         if chunk_count > 0 && fts_count == 0 {
-            eprintln!("FTS5 回填：chunks 表有 {chunk_count} 条数据但 chunks_fts 为空，执行回填");
+            info!("FTS5 回填：chunks 表有 {chunk_count} 条数据但 chunks_fts 为空，执行回填");
             // Contextual BM25（REQ-PERF-005）：FTS5 索引使用文档名前缀
             conn.execute_batch(
                 "INSERT INTO chunks_fts (chunk_id, doc_id, content)
@@ -539,7 +561,7 @@ impl SqliteStorage {
             .query_row("SELECT COUNT(*) FROM messages_fts", [], |row| row.get(0))
             .context("统计 messages_fts 数量失败")?;
         if msg_count > 0 && fts_count == 0 {
-            eprintln!("FTS5 回填：messages 表有 {msg_count} 条数据但 messages_fts 为空，执行回填");
+            info!("FTS5 回填：messages 表有 {msg_count} 条数据但 messages_fts 为空，执行回填");
             conn.execute_batch(
                 "INSERT INTO messages_fts (message_id, conversation_id, content)
                  SELECT id, conversation_id, content FROM messages;",
@@ -565,9 +587,7 @@ impl SqliteStorage {
         if Self::table_exists(conn, "documents")?
             && !Self::has_column(conn, "documents", "status_reason")?
         {
-            eprintln!(
-                "schema 迁移：documents 表缺少 status_reason 列，执行 ALTER TABLE ADD COLUMN"
-            );
+            info!("schema 迁移：documents 表缺少 status_reason 列，执行 ALTER TABLE ADD COLUMN");
             conn.execute("ALTER TABLE documents ADD COLUMN status_reason TEXT", [])
                 .context("迁移失败：documents 表添加 status_reason 列失败")?;
         }
@@ -576,7 +596,7 @@ impl SqliteStorage {
         // SQLite ALTER TABLE 不支持 DROP COLUMN（3.35.0 前），
         // 使用 CREATE-COPY-DROP-RENAME 模式保留分块数据
         if Self::table_exists(conn, "chunks")? && Self::has_column(conn, "chunks", "session_id")? {
-            eprintln!("schema 迁移：chunks 表含旧版 session_id 列，执行 CREATE-COPY-DROP-RENAME");
+            info!("schema 迁移：chunks 表含旧版 session_id 列，执行 CREATE-COPY-DROP-RENAME");
             conn.execute_batch(
                 "CREATE TABLE chunks_new (
                     id TEXT PRIMARY KEY,
@@ -599,7 +619,7 @@ impl SqliteStorage {
             && !Self::has_column(conn, "embeddings", "vector")?
             && Self::has_column(conn, "embeddings", "embedding")?
         {
-            eprintln!(
+            info!(
                 "schema 迁移：embeddings 表列名不匹配（embedding → vector），执行 CREATE-COPY-DROP-RENAME"
             );
             conn.execute_batch(
@@ -621,9 +641,7 @@ impl SqliteStorage {
         if Self::table_exists(conn, "messages")?
             && !Self::has_column(conn, "messages", "conversation_id")?
         {
-            eprintln!(
-                "schema 迁移：messages 表缺少 conversation_id 列，执行 ALTER TABLE ADD COLUMN"
-            );
+            info!("schema 迁移：messages 表缺少 conversation_id 列，执行 ALTER TABLE ADD COLUMN");
             conn.execute("ALTER TABLE messages ADD COLUMN conversation_id TEXT", [])
                 .context("迁移失败：messages 表添加 conversation_id 列失败")?;
         }
@@ -633,7 +651,7 @@ impl SqliteStorage {
         if Self::table_exists(conn, "messages")?
             && !Self::has_column(conn, "messages", "reasoning")?
         {
-            eprintln!("schema 迁移：messages 表缺少 reasoning 列，执行 ALTER TABLE ADD COLUMN");
+            info!("schema 迁移：messages 表缺少 reasoning 列，执行 ALTER TABLE ADD COLUMN");
             conn.execute("ALTER TABLE messages ADD COLUMN reasoning TEXT", [])
                 .context("迁移失败：messages 表添加 reasoning 列失败")?;
         }
@@ -643,7 +661,7 @@ impl SqliteStorage {
         if Self::table_exists(conn, "messages")?
             && !Self::has_column(conn, "messages", "turn_group")?
         {
-            eprintln!("schema 迁移：messages 表缺少 turn_group 列，执行 ALTER TABLE ADD COLUMN");
+            info!("schema 迁移：messages 表缺少 turn_group 列，执行 ALTER TABLE ADD COLUMN");
             conn.execute(
                 "ALTER TABLE messages ADD COLUMN turn_group TEXT NOT NULL DEFAULT ''",
                 [],
@@ -652,7 +670,7 @@ impl SqliteStorage {
         }
         if Self::table_exists(conn, "messages")? && !Self::has_column(conn, "messages", "version")?
         {
-            eprintln!("schema 迁移：messages 表缺少 version 列，执行 ALTER TABLE ADD COLUMN");
+            info!("schema 迁移：messages 表缺少 version 列，执行 ALTER TABLE ADD COLUMN");
             conn.execute(
                 "ALTER TABLE messages ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
                 [],
@@ -666,14 +684,25 @@ impl SqliteStorage {
         )
         .context("迁移失败：创建 idx_messages_turn 索引失败")?;
 
+        // ── messages 表：security_tainted 列（Q05 安全态势分层）──
+        // ALTER TABLE ADD COLUMN 添加；旧消息 security_tainted = 0（未标记）
+        if Self::table_exists(conn, "messages")?
+            && !Self::has_column(conn, "messages", "security_tainted")?
+        {
+            info!("schema 迁移：messages 表缺少 security_tainted 列，执行 ALTER TABLE ADD COLUMN");
+            conn.execute(
+                "ALTER TABLE messages ADD COLUMN security_tainted INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .context("迁移失败：messages 表添加 security_tainted 列失败")?;
+        }
+
         // ── documents 表：original_path 列在 REQ-SYNC-002 新增 ──
         // ALTER TABLE ADD COLUMN 添加为 nullable；旧文档 original_path = NULL
         if Self::table_exists(conn, "documents")?
             && !Self::has_column(conn, "documents", "original_path")?
         {
-            eprintln!(
-                "schema 迁移：documents 表缺少 original_path 列，执行 ALTER TABLE ADD COLUMN"
-            );
+            info!("schema 迁移：documents 表缺少 original_path 列，执行 ALTER TABLE ADD COLUMN");
             conn.execute("ALTER TABLE documents ADD COLUMN original_path TEXT", [])
                 .context("迁移失败：documents 表添加 original_path 列失败")?;
         }
@@ -682,7 +711,7 @@ impl SqliteStorage {
         // ALTER TABLE ADD COLUMN 添加为 nullable；旧文档 domain = NULL（尚未分类）
         if Self::table_exists(conn, "documents")? && !Self::has_column(conn, "documents", "domain")?
         {
-            eprintln!("schema 迁移：documents 表缺少 domain 列，执行 ALTER TABLE ADD COLUMN");
+            info!("schema 迁移：documents 表缺少 domain 列，执行 ALTER TABLE ADD COLUMN");
             conn.execute("ALTER TABLE documents ADD COLUMN domain TEXT", [])
                 .context("迁移失败：documents 表添加 domain 列失败")?;
         }
@@ -692,7 +721,7 @@ impl SqliteStorage {
         if Self::table_exists(conn, "documents")?
             && !Self::has_column(conn, "documents", "summary")?
         {
-            eprintln!("schema 迁移：documents 表缺少 summary 列，执行 ALTER TABLE ADD COLUMN");
+            info!("schema 迁移：documents 表缺少 summary 列，执行 ALTER TABLE ADD COLUMN");
             conn.execute("ALTER TABLE documents ADD COLUMN summary TEXT", [])
                 .context("迁移失败：documents 表添加 summary 列失败")?;
         }
@@ -700,7 +729,7 @@ impl SqliteStorage {
         // ── documents 表：tags 列在 REQ-ING-022 新增 ──
         // ALTER TABLE ADD COLUMN 添加；旧文档 tags = '[]'（空标签数组）
         if Self::table_exists(conn, "documents")? && !Self::has_column(conn, "documents", "tags")? {
-            eprintln!("schema 迁移：documents 表缺少 tags 列，执行 ALTER TABLE ADD COLUMN");
+            info!("schema 迁移：documents 表缺少 tags 列，执行 ALTER TABLE ADD COLUMN");
             conn.execute(
                 "ALTER TABLE documents ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
                 [],
@@ -712,7 +741,7 @@ impl SqliteStorage {
         // entities 是派生索引表（可从文档重新抽取），schema 不兼容时直接重建。
         if Self::table_exists(conn, "entities")? && !Self::has_column(conn, "entities", "chunk_id")?
         {
-            eprintln!("schema 迁移：entities 表 schema 不兼容（缺少 chunk_id 列），重建表");
+            info!("schema 迁移：entities 表 schema 不兼容（缺少 chunk_id 列），重建表");
             conn.execute("DROP TABLE IF EXISTS entities", [])
                 .context("迁移失败：DROP TABLE entities 失败")?;
             conn.execute_batch(
@@ -731,7 +760,7 @@ impl SqliteStorage {
         if Self::table_exists(conn, "propositions")?
             && !Self::has_column(conn, "propositions", "chunk_id")?
         {
-            eprintln!("schema 迁移：propositions 表 schema 不兼容（缺少 chunk_id 列），重建表");
+            info!("schema 迁移：propositions 表 schema 不兼容（缺少 chunk_id 列），重建表");
             conn.execute("DROP TABLE IF EXISTS propositions", [])
                 .context("迁移失败：DROP TABLE propositions 失败")?;
             conn.execute_batch(
@@ -751,7 +780,7 @@ impl SqliteStorage {
         if Self::table_exists(conn, "summary_nodes")?
             && !Self::has_column(conn, "summary_nodes", "doc_id")?
         {
-            eprintln!("schema 迁移：summary_nodes 表 schema 不兼容（缺少 doc_id 列），重建表");
+            info!("schema 迁移：summary_nodes 表 schema 不兼容（缺少 doc_id 列），重建表");
             conn.execute("DROP TABLE IF EXISTS summary_nodes", [])
                 .context("迁移失败：DROP TABLE summary_nodes 失败")?;
             conn.execute_batch(
@@ -772,7 +801,7 @@ impl SqliteStorage {
 
     /// 安全：表名白名单校验，防止 PRAGMA table_info SQL 注入。
     fn validate_table_name(table: &str) -> anyhow::Result<()> {
-        const KNOWN_TABLES: [&str; 16] = [
+        const KNOWN_TABLES: [&str; 18] = [
             "documents",
             "chunks",
             "embeddings",
@@ -789,6 +818,8 @@ impl SqliteStorage {
             "pending_inputs",
             "session_todos",
             "scratch_logs",
+            "idempotency_records",
+            "budget_records",
         ];
         if !KNOWN_TABLES.contains(&table) {
             bail!("未知表名（不在白名单中）: {table}");
@@ -1129,7 +1160,7 @@ impl SqliteStorage {
         }
 
         // 损坏 → 尝试 WAL checkpoint 恢复
-        eprintln!("数据库完整性检查异常: {result}，尝试 WAL checkpoint 恢复…");
+        warn!("数据库完整性检查异常: {result}，尝试 WAL checkpoint 恢复…");
         let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
 
         // 恢复后重新检查
@@ -1137,13 +1168,13 @@ impl SqliteStorage {
             .query_row("PRAGMA integrity_check", [], |row| row.get(0))
             .context("恢复后重新执行 PRAGMA integrity_check 失败")?;
         if recheck.eq_ignore_ascii_case("ok") {
-            eprintln!("WAL checkpoint 恢复成功，数据库完整性恢复正常");
+            info!("WAL checkpoint 恢复成功，数据库完整性恢复正常");
             return Ok(IntegrityCheckResult::Ok);
         }
 
         // 仍损坏 → 返回错误详情
         let detail = format!("{} → {}", result, recheck);
-        eprintln!("数据库完整性恢复失败: {detail}");
+        error!("数据库完整性恢复失败: {detail}");
         Ok(IntegrityCheckResult::Corrupted(detail))
     }
 
@@ -1162,19 +1193,19 @@ impl SqliteStorage {
                 return Ok(IntegrityCheckResult::Ok);
             }
 
-            eprintln!("数据库完整性检查异常: {result}，尝试 WAL checkpoint 恢复…");
+            warn!("数据库完整性检查异常: {result}，尝试 WAL checkpoint 恢复…");
             let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
 
             let recheck: String = conn
                 .query_row("PRAGMA integrity_check", [], |row| row.get(0))
                 .context("恢复后重新执行 PRAGMA integrity_check 失败")?;
             if recheck.eq_ignore_ascii_case("ok") {
-                eprintln!("WAL checkpoint 恢复成功，数据库完整性恢复正常");
+                info!("WAL checkpoint 恢复成功，数据库完整性恢复正常");
                 return Ok(IntegrityCheckResult::Ok);
             }
 
             let detail = format!("{} → {}", result, recheck);
-            eprintln!("数据库完整性恢复失败: {detail}");
+            error!("数据库完整性恢复失败: {detail}");
             Ok(IntegrityCheckResult::Corrupted(detail))
         })
         .await
@@ -1660,7 +1691,7 @@ Ok(())
             match self.decrypt(&encoded) {
                 Ok(value) => results.push((key, value)),
                 Err(e) => {
-                    eprintln!("设置项 {key} 解密失败，跳过: {e}");
+                    warn!("设置项 {key} 解密失败，跳过: {e}");
                 }
             }
         }
@@ -1827,7 +1858,7 @@ Ok(())
             let version = message.version.unwrap_or(1);
             let conn = pool.get().context("获取数据库连接失败")?;
             conn.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, sources, reasoning, turn_group, version, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT INTO messages (id, conversation_id, role, content, sources, reasoning, turn_group, version, created_at, security_tainted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     uuid::Uuid::new_v4().to_string(),
                     conversation_id,
@@ -1838,6 +1869,7 @@ Ok(())
                     turn_group,
                     version,
                     chrono::Utc::now().timestamp(),
+                    0, // security_tainted 默认 0（未标记）
                 ],
             )
             .context("写入消息失败")?;
@@ -4067,6 +4099,66 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
     }
 
     // ------------------------------------------------------------------
+    // 幂等性存储支持（Q07 幂等性存储）
+    // ------------------------------------------------------------------
+
+    /// 记录幂等性操作（Q07）。
+    async fn record_idempotency(&self, key: &str, timestamp: i64) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let key = key.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "INSERT OR REPLACE INTO idempotency_records (key, timestamp) VALUES (?1, ?2)",
+                params![key, timestamp],
+            )
+            .context("写入 idempotency_records 失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// 列出所有幂等性记录（Q07）。
+    async fn list_idempotency_records(&self) -> anyhow::Result<Vec<(String, i64)>> {
+        let pool = self.pool.clone();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let mut stmt = conn
+                .prepare("SELECT key, timestamp FROM idempotency_records ORDER BY timestamp DESC")
+                .context("准备 idempotency_records 查询失败")?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let key: String = row.get(0)?;
+                    let timestamp: i64 = row.get(1)?;
+                    Ok((key, timestamp))
+                })
+                .context("查询 idempotency_records 失败")?;
+            let mut records = Vec::new();
+            for row in rows {
+                records.push(row?);
+            }
+            Ok(records)
+        })
+        .await
+    }
+
+    /// 清理过期的幂等性记录（Q07）。
+    async fn cleanup_expired_idempotency(&self, before_timestamp: i64) -> anyhow::Result<usize> {
+        let pool = self.pool.clone();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let count = conn
+                .execute(
+                    "DELETE FROM idempotency_records WHERE timestamp < ?1",
+                    params![before_timestamp],
+                )
+                .context("清理过期 idempotency_records 失败")?;
+            Ok(count)
+        })
+        .await
+    }
+
+    // ------------------------------------------------------------------
     // Session Todo 持久化（B08 会话待办持久化）
     // ------------------------------------------------------------------
 
@@ -4173,6 +4265,122 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
             Ok(())
         })
         .await
+    }
+
+    // --- Security-Tainted 条目标记（Q05）---
+
+    async fn set_entry_security_tainted(
+        &self,
+        message_id: &str,
+        tainted: bool,
+    ) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let message_id = message_id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "UPDATE messages SET security_tainted = ?1 WHERE id = ?2",
+                params![if tainted { 1 } else { 0 }, &message_id],
+            )
+            .context("设置 security_tainted 标记失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn get_entry_security_tainted(&self, message_id: &str) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let message_id = message_id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let tainted: i64 = conn
+                .query_row(
+                    "SELECT security_tainted FROM messages WHERE id = ?1",
+                    params![&message_id],
+                    |row| row.get(0),
+                )
+                .context("查询 security_tainted 标记失败")?;
+            Ok(tainted != 0)
+        })
+        .await
+    }
+
+    async fn record_budget_usage(
+        &self,
+        principal: &str,
+        input_tokens: usize,
+        output_tokens: usize,
+        cost_usd: f64,
+        model_name: &str,
+    ) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let principal = principal.to_string();
+        let model_name = model_name.to_string();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "INSERT INTO budget_records (principal, timestamp, input_tokens, output_tokens, cost_usd, model_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![principal, now, input_tokens as i64, output_tokens as i64, cost_usd, model_name],
+            )
+            .context("记录预算使用失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn get_budget_stats(&self, principal: &str) -> anyhow::Result<BudgetStats> {
+        let pool = self.pool.clone();
+        let principal = principal.to_string();
+
+        // Get daily limit from settings table
+        let daily_limit = self
+            .get_setting("budget.daily_limit_usd")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0);
+
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+
+            // Calculate total spending in the last 24 hours
+            let day_ago = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64 - 86400;
+
+            let spent_today: f64 = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(cost_usd), 0.0) FROM budget_records WHERE principal = ?1 AND timestamp > ?2",
+                    params![principal, day_ago],
+                    |row| row.get(0),
+                )
+                .context("查询预算统计失败")?;
+
+            let remaining = if daily_limit > 0.0 {
+                (daily_limit - spent_today).max(0.0)
+            } else {
+                f64::INFINITY
+            };
+
+            Ok(BudgetStats {
+                daily_limit,
+                spent_today,
+                remaining,
+            })
+        })
+        .await
+    }
+
+    async fn set_budget_limit(&self, principal: &str, daily_limit_usd: f64) -> anyhow::Result<()> {
+        let key = format!("budget.daily_limit_usd.{}", principal);
+        self.set_setting(&key, &daily_limit_usd.to_string()).await
     }
 }
 

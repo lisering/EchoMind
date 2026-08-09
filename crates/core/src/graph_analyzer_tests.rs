@@ -190,14 +190,24 @@ fn tc_graph_analysis_007_community_disconnected() {
 
 /// TC-GRAPH-ANALYSIS-008：社区检测——Label Propagation 收敛后稳定。
 ///
-/// 图：A -- B -- C -- D -- A（环形图）
-/// 期望：多次调用结果中社区数量一致（收敛后稳定）
+/// 图：两个三角形通过一条边连接（A-B-C 三角 + D-E-F 三角 + C-D 桥接边）
+/// 期望：多次调用结果中社区结构一致（两个社区，每社区 3 个节点）
 ///
 /// 注意：HashMap 迭代顺序非确定，导致标签分配可能不同，
 /// 但社区结构（社区数量、每社区节点数）应一致。
+/// 使用有明确社区结构的图（非环形图），避免 Label Propagation
+/// 在对称图上的非确定性收敛问题。
 #[test]
 fn tc_graph_analysis_008_community_convergence() {
-    let adj = build_adjacency(&[("A", "B"), ("B", "C"), ("C", "D"), ("D", "A")]);
+    let adj = build_adjacency(&[
+        ("A", "B"),
+        ("B", "C"),
+        ("A", "C"),
+        ("D", "E"),
+        ("E", "F"),
+        ("D", "F"),
+        ("C", "D"),
+    ]);
 
     let communities1 = GraphAnalyzer::detect_communities(&adj);
     let communities2 = GraphAnalyzer::detect_communities(&adj);

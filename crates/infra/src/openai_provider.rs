@@ -193,7 +193,6 @@ impl LLMProvider for OpenAIProvider {
         messages.push(serde_json::json!({"role": "user", "content": query}));
         self.send_stream_request(messages).await
     }
-
     /// 分段式流式对话（Prompt Caching 优化）。
     ///
     /// 将静态前缀和动态上下文分别作为两条独立的 `system` 消息发送：
@@ -237,6 +236,50 @@ impl LLMProvider for OpenAIProvider {
         messages.push(serde_json::json!({"role": "system", "content": dynamic_context}));
         messages.push(serde_json::json!({"role": "user", "content": query}));
         self.send_stream_request(messages).await
+    }
+
+    // Q10 辅助模型方法（借鉴 QM HarnessModelUtilities）
+
+    /// 生成对话标题（借鉴 QM generateTitle）。
+    ///
+    /// 调用 LLM 非流式接口，根据对话转录生成 3-10 字简短标题。
+    /// 复用 `complete()` 方法发送非流式请求。
+    /// 失败时返回 `Err`，调用方降级为 `derive_title()` 字符串截取。
+    async fn generate_title(&self, transcript: &str) -> anyhow::Result<Option<String>> {
+        const TITLE_SYSTEM_PROMPT: &str = "你是一个标题生成助手。请根据以下对话内容生成一个简短的标题（不超过 10 个字），只输出标题文本，不要加引号或标点。";
+        let title = self.complete(TITLE_SYSTEM_PROMPT, transcript).await?;
+        let title = title.trim();
+        if title.is_empty() {
+            return Ok(None);
+        }
+        // 截断超长标题（防 LLM 返回整段文本）
+        let truncated: String = title.chars().take(30).collect();
+        Ok(Some(truncated))
+    }
+
+    /// 单次推理（借鉴 QM oneShot）。
+    ///
+    /// 非流式单轮完成，复用 `complete()` 方法。
+    /// 用于记忆提取、安全筛查、摘要生成等辅助任务。
+    async fn one_shot(&self, system: &str, prompt: &str) -> anyhow::Result<Option<String>> {
+        let result = self.complete(system, prompt).await?;
+        if result.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(result))
+    }
+
+    /// 判断器（借鉴 QM judge）。
+    ///
+    /// 用于安全筛查、质量评估等需要 LLM 做判断的场景。
+    /// 返回判断结果文本（如 "yes"/"no"/"safe"/"unsafe"）。
+    async fn judge(&self, system: &str, prompt: &str) -> anyhow::Result<Option<String>> {
+        let verdict = self.complete(system, prompt).await?;
+        let verdict = verdict.trim().to_string();
+        if verdict.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(verdict))
     }
 }
 

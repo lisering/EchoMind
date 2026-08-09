@@ -17,13 +17,15 @@
 // TC-DEDUP-005: 空知识库错误 → 显示具体原因而非「未知错误」
 
 import { test, expect } from '@playwright/test';
-import { setupPage, importDocs, sendMessage, waitForStreamDone } from './helpers.mjs';
+import { setupPage, importDocs, sendMessage, waitForStreamDone, waitForToastsClear } from './helpers.mjs';
 
 test.describe('聊天错误双重 toast 消除', () => {
   test.beforeEach(async ({ page }) => {
     await setupPage(page);
     // 导入文档（chat 前置条件）
     await importDocs(page, ['/mock/test.md']);
+    // 等待导入 toast 消失，避免干扰错误 toast 计数
+    await waitForToastsClear(page);
   });
 
   test('TC-DEDUP-001 LLM 错误只显示一个 toast', async ({ page }) => {

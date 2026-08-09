@@ -154,30 +154,30 @@ test.describe('TC-DS-001~012 设计系统形式化验收', () => {
   });
 
   /**
-   * TC-DS-010: #inputBar padding 含 12px
-   * 对应 AC-2: #inputBar padding-left/right = 16px, padding-top/bottom = 12px
-   * #inputBar has px-4 py-3 → padding: 12px 16px
+   * TC-DS-010: #inputBar padding 含 10px
+   * 对应 AC-2: #inputBar padding-left/right = 16px, padding-top/bottom = 10px
+   * #inputBar has px-4 py-2.5 → padding: 10px 16px
    */
-  test('TC-DS-010 #inputBar padding 含 12px', async ({ page }) => {
+  test('TC-DS-010 #inputBar padding 含 10px', async ({ page }) => {
     const padding = await page.evaluate(() => {
       const el = document.getElementById('inputBar');
       return el ? getComputedStyle(el).padding : '';
     });
     expect(padding).toMatch(/\d+/);
-    // py-3 = 12px top/bottom
-    expect(padding).toContain('12px');
+    // py-2.5 = 10px top/bottom
+    expect(padding).toContain('10px');
   });
 
   /**
-   * TC-DS-011: #plusBtn width = 36px
-   * 对应 AC: #plusBtn ghost 变体 width = 36px（w-9）
+   * TC-DS-011: #plusBtn width = 32px
+   * 对应 AC: #plusBtn ghost 变体 width = 32px（w-8）
    */
-  test('TC-DS-011 #plusBtn width = 36px', async ({ page }) => {
+  test('TC-DS-011 #plusBtn width = 32px', async ({ page }) => {
     const width = await page.evaluate(() => {
       const el = document.getElementById('plusBtn');
       return el ? getComputedStyle(el).width : '';
     });
-    expect(width).toBe('36px');
+    expect(width).toBe('32px');
   });
 
   // === REQ-DS-001 色板体系 + REQ-DS-005 交互态 ===

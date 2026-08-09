@@ -136,7 +136,18 @@ const SOURCE_HUGGINGFACE: DownloadSource = DownloadSource {
 ///
 /// 通过环境变量 `LC_ALL` / `LC_MESSAGES` / `LANG` 判断（macOS/Linux），
 /// macOS 额外读取 `defaults read -g AppleLocale` 作为回退。
+///
+/// 结果通过 `LazyLock` 缓存：首次调用后不再重复执行子进程检测。
 fn is_chinese_locale() -> bool {
+    *IS_CHINESE_LOCALE
+}
+
+/// 中文环境检测的缓存结果（LazyLock 保证线程安全的延迟初始化，仅执行一次）。
+static IS_CHINESE_LOCALE: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(detect_chinese_locale);
+
+/// 实际的中文环境检测逻辑（仅由 LazyLock 调用一次）。
+fn detect_chinese_locale() -> bool {
     // Unix 环境变量检测
     for var in &["LC_ALL", "LC_MESSAGES", "LANG"] {
         if let Ok(val) = std::env::var(var)
@@ -160,17 +171,52 @@ fn is_chinese_locale() -> bool {
     false
 }
 
-/// 根据系统语言返回下载源优先级顺序。
+/// HuggingFace 连通性探测结果缓存。
 ///
-/// - 中文系统：ModelScope（魔搭）优先，境内 CDN 速度快
-/// - 其他系统：HuggingFace 优先，国际源稳定
+/// 首次模型下载时，用 3 秒超时的 HEAD 请求探测 huggingface.co 是否可达。
+/// - 可达：用户在海外或有 VPN，HuggingFace 优先（国际源对非中文模型更全）
+/// - 不可达：用户在中国大陆无 VPN，魔搭优先（境内 CDN 速度 16-38 MB/s）
+///
+/// 这样即使外国人到中国出差（系统语言为英文），也能自动切换到魔搭源。
+static HF_REACHABLE: std::sync::LazyLock<bool> = std::sync::LazyLock::new(probe_huggingface);
+
+/// 探测 HuggingFace 是否可达（3 秒超时 HEAD 请求）。
+fn probe_huggingface() -> bool {
+    let client = match reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    // 用一个小文件探测，HEAD 请求可能被 CDN 拒绝，改用 GET + 立即丢弃
+    let url = "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/config.json";
+    client
+        .get(url)
+        .send()
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+/// 根据系统语言和网络探测返回下载源优先级顺序。
+///
+/// 判定逻辑：
+/// 1. 中文系统 → 魔搭优先（境内 CDN）
+/// 2. 非中文系统 + HuggingFace 可达 → HuggingFace 优先（国际源）
+/// 3. 非中文系统 + HuggingFace 不可达 → 魔搭优先（外国人在中国出差等场景）
 ///
 /// 无论哪种顺序，hf-mirror 始终作为中间回退源。
 fn get_download_sources() -> Vec<&'static DownloadSource> {
     if is_chinese_locale() {
+        // 中文系统：魔搭优先
         vec![&SOURCE_MODELSCOPE, &SOURCE_HF_MIRROR, &SOURCE_HUGGINGFACE]
-    } else {
+    } else if *HF_REACHABLE {
+        // 非中文系统但 HuggingFace 可达：HF 优先
         vec![&SOURCE_HUGGINGFACE, &SOURCE_HF_MIRROR, &SOURCE_MODELSCOPE]
+    } else {
+        // 非中文系统且 HuggingFace 不可达：魔搭优先（外国人在中国）
+        vec![&SOURCE_MODELSCOPE, &SOURCE_HF_MIRROR, &SOURCE_HUGGINGFACE]
     }
 }
 
@@ -452,7 +498,7 @@ impl LocalEmbedder {
         progress: &Option<DownloadProgressFn>,
     ) -> anyhow::Result<()> {
         let client = reqwest::blocking::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(5))
             .build()
             .context("创建模型下载客户端失败")?;
 

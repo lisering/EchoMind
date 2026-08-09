@@ -145,9 +145,13 @@ ${links}`;
 
 /**
  * 替换 HTML 中指定标记区域的块内容。
+ *
+ * 标记恢复逻辑：如果标记注释在 HTML 中不存在（被之前的错误构建消耗），
+ * 则自动在正确位置（CSS→</head> 前，JS→</body> 前）注入新的标记块。
+ *
  * @param {string} html - 原始 HTML
  * @param {string} marker - 标记注释的前缀
- * @param {string} newBlock - 替换后的完整块
+ * @param {string} newBlock - 替换后的完整块（含标记注释）
  * @param {string} blockType - 块类型 'css' 或 'js'
  * @returns {string} 替换后的 HTML
  */
@@ -155,23 +159,32 @@ function replaceBlock(html, marker, newBlock, blockType) {
   const markerEscaped = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   if (blockType === 'css') {
+    // 非贪婪匹配：匹配从 CSS_MARKER 到第一个 </head>
+    // 原因：JS bundle 内的 PDF 导出模板字符串含有 </head>，
+    // 贪婪匹配会跨越 HTML body 到 JS 字符串中的 </head>，吞掉整个 body。
     const regex = new RegExp(
       '[ \\t]*' + markerEscaped + '[\\s\\S]*?(?=\\n[ \\t]*</head>)'
     );
     if (regex.test(html)) {
       return html.replace(regex, newBlock);
     }
+    // 标记缺失：在 </head> 前注入
+    console.warn(`⚠ 未找到 CSS 标记区域，将在 </head> 前自动注入`);
+    return html.replace(/(\n[ \t]*<\/head>)/, '\n' + newBlock + '$1');
   } else {
+    // 贪婪匹配：确保匹配到文件末尾真正的 </body>，而非 JS bundle 内部字符串中的 </body>
+    // 原因：export.js buildPrintHtml 模板字面量中的 </body> 会被懒惰匹配误命中，
+    // 造成 esbuild bundle 每次构建被重复追加（文件从 ~12K 行膨胀到 126K 行）
     const regex = new RegExp(
-      '[ \\t]*' + markerEscaped + '[\\s\\S]*?(?=\\n[ \\t]*</body>)'
+      '[ \\t]*' + markerEscaped + '[\\s\\S]*(?=\\n[ \\t]*</body>)'
     );
     if (regex.test(html)) {
       return html.replace(regex, newBlock);
     }
+    // 标记缺失：在 </body> 前注入
+    console.warn(`⚠ 未找到 JS 标记区域，将在 </body> 前自动注入`);
+    return html.replace(/(\n[ \t]*<\/body>)/, '\n' + newBlock + '\n$1');
   }
-
-  console.warn(`⚠ 未找到标记区域: ${marker}`);
-  return html;
 }
 
 // ============================================================

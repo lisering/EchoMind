@@ -656,3 +656,46 @@ pub async fn set_token_budget_config_inner(
         .map_err(|e| format!("{e:#}"))?;
     Ok(())
 }
+
+// ============================================================================
+// Q08: Budget Tracking (QM 借鉴 — LLM API 费用控制和速率限制)
+// ============================================================================
+
+/// 获取预算统计（QM 借鉴）。
+#[tauri::command]
+pub async fn get_budget_stats(
+    state: State<'_, AppState>,
+) -> Result<echomind_models::BudgetStats, String> {
+    get_budget_stats_inner(state.inner()).await
+}
+
+/// 预算统计读取逻辑（命令与集成测试复用）。
+pub async fn get_budget_stats_inner(
+    state: &AppState,
+) -> Result<echomind_models::BudgetStats, String> {
+    let principal = "default_user"; // 当前使用固定主体，后续可扩展用户系统
+    state
+        .storage
+        .get_budget_stats(principal)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 设置预算限制（QM 借鉴）。
+#[tauri::command]
+pub async fn set_budget_limit(
+    daily_limit_usd: f64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    set_budget_limit_inner(daily_limit_usd, state.inner()).await
+}
+
+/// 预算限制设置逻辑（命令与集成测试复用）。
+pub async fn set_budget_limit_inner(daily_limit_usd: f64, state: &AppState) -> Result<(), String> {
+    let principal = "default_user"; // 当前使用固定主体，后续可扩展用户系统
+    state
+        .storage
+        .set_budget_limit(principal, daily_limit_usd)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}

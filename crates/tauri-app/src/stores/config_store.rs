@@ -7,6 +7,12 @@ use echomind_core::Storage;
 use echomind_infra::sqlite_storage::SqliteStorage;
 use echomind_models::{LlmConfig, LlmMode};
 
+/// Alpha 阶段全功能免费标志。
+///
+/// 早期版本功能不稳定、bug 多，所有 Pro 功能暂时免费开放。
+/// 后期稳定后设为 `false` 即可恢复 Pro 门控，无需其他代码变更。
+pub const ALPHA_ALL_FEATURES_FREE: bool = true;
+
 /// 配置管理 Store（BYOK 配置 + Pro 授权 + LLM 模式）。
 ///
 /// # 职责
@@ -62,13 +68,39 @@ impl ConfigStore {
     }
 
     /// 从 settings 表恢复 Pro 授权状态。
+    ///
+    /// Alpha 阶段：`ALPHA_ALL_FEATURES_FREE = true` 时自动激活 Pro，
+    /// 所有 Pro 功能免费开放（后期稳定后改为 false 恢复门控）。
+    ///
+    /// 开发模式优化：debug 构建 + pro feature 编译时，自动激活 Pro，
+    /// 免去开发时手动激活 license 的步骤。release 构建仍需 license key。
+    #[allow(unreachable_code)] // alpha/debug+pro 时 cfg 块总 return true，false 不可达
     async fn load_is_pro(storage: &SqliteStorage) -> bool {
-        storage
+        // Alpha 阶段：全功能免费，自动激活 Pro
+        if ALPHA_ALL_FEATURES_FREE {
+            tracing::info!("Alpha 阶段：全功能免费开放，自动激活 Pro");
+            let _ = storage.set_setting("license.is_pro", "true").await;
+            return true;
+        }
+        // 先检查 settings 表中是否已激活
+        let stored = storage
             .get_setting("license.is_pro")
             .await
             .ok()
             .flatten()
-            .is_some_and(|v| v == "true")
+            .is_some_and(|v| v == "true");
+        if stored {
+            return true;
+        }
+        // 开发模式自动激活：debug 构建 + pro feature
+        #[cfg(all(debug_assertions, feature = "pro"))]
+        {
+            tracing::info!("Dev mode: auto-activating Pro (debug + pro feature)");
+            // 持久化到 settings 表，确保后续逻辑一致
+            let _ = storage.set_setting("license.is_pro", "true").await;
+            return true;
+        }
+        false
     }
 
     /// 从 settings 表恢复 LLM 推理模式。

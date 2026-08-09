@@ -1,6 +1,6 @@
 # EchoMind (灵犀) — Agent Guide
 
-> **⚠️ 铁律规则**：请先阅读 `.catpaw/rules/iron-rules.md`（代理设置仅限开发调研、软件本身禁止代理、TDD 驱动、代码注释、真实数据测试、生产级代码质量、最新版本依赖、文档实时同步、开发决策互联网搜索、Rust 生态优先、GitHub 发布同步、Tailwind 样式规范、SOLID 原则、Spec-driven Development 规格驱动开发）。
+> **⚠️ 铁律规则**：请先阅读 `.catpaw/rules/system-constraints.md`（代理设置仅限开发调研、软件本身禁止代理、TDD 驱动+模糊测试、代码注释、真实数据测试、生产级代码质量+Miri UB 检测+forbid unsafe、最新版本依赖+供应链安全工具链、文档实时同步+文档治理、开发决策互联网搜索、Rust 生态优先、GitHub 发布同步、Tailwind 样式规范、SOLID 原则、Spec-driven Development 规格驱动开发、AI 生成代码审查、结构化日志与可观测性+axe-core、LLM 应用安全防护+致命三要素+Rule of Two、错误处理与弹性设计、AI Agent 行为规范、RAG 安全防护+向量嵌入弱点）。
 >
 > **📋 需求规格**：所有功能需求定义在 `docs/SRS_v1.0.md` 中，是开发、测试、验收的唯一依据。
 >

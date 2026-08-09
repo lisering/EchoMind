@@ -29,6 +29,8 @@ use echomind_models::LlmMode;
 use tokio_util::sync::CancellationToken;
 // S70: TraceStore 的 RwLock
 use tokio::sync::RwLock;
+// Q05: SecurityPosture 原子运行时态
+use echomind_core::security::SecurityPosture;
 
 // Pro 模块导入
 #[cfg(feature = "pro")]
@@ -108,6 +110,32 @@ pub struct AppState {
     /// Soft 阈值触发时 `try_acquire_background_compaction()` 插入；
     /// 压缩完成后 `release_background_compaction()` 移除。
     pub compaction_pending: Arc<tokio::sync::Mutex<HashSet<String>>>,
+    /// 安全态势级别（Q05 借鉴 QM SecurityPosture）。
+    ///
+    /// 三层安全态势（Dangerous / Auto / Strict）控制内容筛查和工具审批。
+    /// 默认 Auto。持久化在 settings 表 `security.posture` 键。
+    /// 使用 AtomicU8 存储（0=Dangerous, 1=Auto, 2=Strict）实现无锁读。
+    pub security_posture: Arc<std::sync::atomic::AtomicU8>,
+    /// Shadow 安全筛查统计收集器（Q06 借鉴 QM security-screen.ts）。
+    ///
+    /// 收集 shadow 筛查的 agree/disagree 统计，用于验证筛查效果后切换阻断模式。
+    pub shadow_screen_collector: Arc<echomind_core::security::ShadowScreenCollector>,
+    /// 预算追踪器（Q08 借鉴 QM BudgetTracker）。
+    ///
+    /// LLM API 费用控制和速率限制，防止过度消耗。
+    pub budget_tracker: Arc<echomind_core::budget::BudgetTracker>,
+    /// 按 key 序列化并发操作的队列（Q09 借鉴 QM createKeyedQueue）。
+    ///
+    /// 同 conversation_id 的 persist_exchange 操作串行执行，
+    /// 消除 SQLite 并发写入竞态（消息顺序错乱、标题覆盖等）。
+    /// 不同 conversation_id 的操作并行执行，不影响跨会话性能。
+    pub persist_queue: echomind_core::concurrency::KeyedQueue<String>,
+    /// LLM 后端路由器（Q11 借鉴 QM HarnessRouter）。
+    ///
+    /// 按 conversation_id 追踪上次使用的模式，支持运行时动态切换 LLM 后端
+    ///（Remote / Local）。切换时通过 `RouterVerdict::ModeChanged` 通知
+    /// 调用方重置会话状态（KV cache 等）。
+    pub llm_router: echomind_core::llm_router::LlmRouter,
     /// 日志系统 WorkerGuard（保持非阻塞写入器后台线程存活，REQ-OBS-001）
     pub _log_guard: Option<LocalLogger>,
 }
@@ -300,6 +328,40 @@ impl AppState {
             }
         };
 
+        // 初始化安全态势（Q05 借鉴 QM SecurityPosture）：默认 Auto
+        let security_posture_val = storage
+            .get_setting("security.posture")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| SecurityPosture::parse_str(&v))
+            .unwrap_or_default();
+        let security_posture = Arc::new(std::sync::atomic::AtomicU8::new(
+            security_posture_val.as_u8(),
+        ));
+
+        // 初始化 LLM 后端路由器（Q11 借鉴 QM HarnessRouter）
+        // 根据是否 Pro 选择可用模式集合，并根据当前 llm_mode 设置 fallback
+        let is_pro_val = *config_store.is_pro.read().await;
+        let llm_mode_val = *config_store.llm_mode.read().await;
+        let local_model_val = storage
+            .get_setting("llm.local_model")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let llm_router_init = if is_pro_val {
+            echomind_core::llm_router::LlmRouter::new_pro_default()
+        } else {
+            echomind_core::llm_router::LlmRouter::new_free_default()
+        };
+        llm_router_init
+            .set_fallback(echomind_core::llm_router::LlmChoice::new(
+                llm_mode_val,
+                local_model_val,
+            ))
+            .await;
+
         Ok(Self {
             storage,
             data_dir,
@@ -328,6 +390,11 @@ impl AppState {
                 echomind_core::memory_store::BurstBuffer::new(),
             )),
             compaction_pending: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
+            security_posture,
+            shadow_screen_collector: Arc::new(echomind_core::security::ShadowScreenCollector::new()),
+            budget_tracker: Arc::new(echomind_core::budget::BudgetTracker::new(0.0)), // Default: no limit
+            persist_queue: echomind_core::concurrency::KeyedQueue::new(),
+            llm_router: llm_router_init,
             _log_guard: log_guard,
         })
     }
@@ -559,6 +626,22 @@ impl AppState {
     /// 调用方负责按需创建。每个自定义模型存储在子目录 `{name}/` 中。
     pub fn custom_model_dir(&self) -> PathBuf {
         self.data_dir.join("custom_models")
+    }
+
+    // ---- 安全态势管理（Q05 借鉴 QM SecurityPosture）----
+
+    /// 获取当前安全态势（无锁读，AtomicU8 → SecurityPosture）。
+    pub fn get_security_posture(&self) -> SecurityPosture {
+        SecurityPosture::from_u8(
+            self.security_posture
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    /// 设置安全态势（无锁写，SecurityPosture → AtomicU8）。
+    pub fn set_security_posture_value(&self, posture: SecurityPosture) {
+        self.security_posture
+            .store(posture.as_u8(), std::sync::atomic::Ordering::Relaxed);
     }
 }
 

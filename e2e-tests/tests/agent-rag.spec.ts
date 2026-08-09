@@ -99,7 +99,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
 
     await page.locator('#queryInput').fill('多步查询');
     await page.locator('#sendBtn').click();
-    await waitForStreamDone(page, 15000);
+    await expect(page.locator('#sendBtn')).not.toHaveClass(/stop-mode/, { timeout: 15000 });
 
     // 验证收到了 agent_step 事件
     const steps = await page.evaluate(() => window.__agentSteps || []);
@@ -132,7 +132,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
 
     await page.locator('#queryInput').fill('流式测试');
     await page.locator('#sendBtn').click();
-    await waitForStreamDone(page, 15000);
+    await expect(page.locator('#sendBtn')).not.toHaveClass(/stop-mode/, { timeout: 15000 });
 
     // 应收到 token 事件
     const received = await page.evaluate(() => window.__tokenReceived);
@@ -159,7 +159,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
     // 发送复杂查询
     await page.locator('#queryInput').fill('非常复杂的查询需要多步推理');
     await page.locator('#sendBtn').click();
-    await waitForStreamDone(page, 30000);
+    await expect(page.locator('#sendBtn')).not.toHaveClass(/stop-mode/, { timeout: 30000 });
 
     // 应最终完成（不会无限循环）
     await expect(page.locator('#sendBtn')).toBeVisible({ timeout: 5000 });
@@ -192,7 +192,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
 
     await page.locator('#queryInput').fill('解析测试');
     await page.locator('#sendBtn').click();
-    await waitForStreamDone(page, 15000);
+    await expect(page.locator('#sendBtn')).not.toHaveClass(/stop-mode/, { timeout: 15000 });
 
     // 应优雅降级，不崩溃
     await expect(page.locator('#app')).toBeVisible();
@@ -241,7 +241,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
 
     await page.locator('#queryInput').fill('来源聚合测试');
     await page.locator('#sendBtn').click();
-    await waitForStreamDone(page, 15000);
+    await expect(page.locator('#sendBtn')).not.toHaveClass(/stop-mode/, { timeout: 15000 });
 
     // 引用来源区应存在
     const sources = page.locator('#chatArea .sources, #chatArea [class*="rounded-full"]');
@@ -259,7 +259,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
     // 标准 RAG 应正常工作
     await page.locator('#queryInput').fill('标准 RAG 查询');
     await page.locator('#sendBtn').click();
-    await waitForStreamDone(page, 15000);
+    await expect(page.locator('#sendBtn')).not.toHaveClass(/stop-mode/, { timeout: 15000 });
 
     // 应正常完成
     await expect(page.locator('#sendBtn')).toBeVisible();

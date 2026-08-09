@@ -22,7 +22,7 @@ use echomind_models::{ChatMessage, Chunk, DocStatus, Document, RetrievalResult};
 use futures::stream::BoxStream;
 
 use crate::auto_dream::{DreamCancelFlag, DreamEngine, DreamResult, DreamSeverity, SuggestionType};
-use crate::{Embedder, LLMProvider, Storage};
+use crate::{Embedder, LLMProvider, Storage, idempotency::IdempotencyStore};
 
 // ================== Mock 实现 ==================
 
@@ -256,7 +256,7 @@ async fn tc_dream_001_empty_kb_returns_empty() {
     let storage = MockStorage::new();
     let embedder = MockEmbedder::new();
     let llm = no_contradiction_llm();
-    let engine = DreamEngine::new(embedder, storage, llm);
+    let engine = DreamEngine::new(embedder, storage, llm, IdempotencyStore::new());
 
     let result = engine.dream(no_cancel()).await.unwrap();
 
@@ -273,7 +273,12 @@ async fn tc_dream_002_exact_duplicate_detection() {
     let storage = MockStorage::new()
         .with_doc(doc_a, chunks_a)
         .with_doc(doc_b, chunks_b);
-    let engine = DreamEngine::new(MockEmbedder::new(), storage, no_contradiction_llm());
+    let engine = DreamEngine::new(
+        MockEmbedder::new(),
+        storage,
+        no_contradiction_llm(),
+        IdempotencyStore::new(),
+    );
 
     let result = engine.dream(no_cancel()).await.unwrap();
 
@@ -297,7 +302,12 @@ async fn tc_dream_003_near_duplicate_detection() {
     let storage = MockStorage::new()
         .with_doc(doc_a, chunks_a)
         .with_doc(doc_b, chunks_b);
-    let engine = DreamEngine::new(MockEmbedder::new(), storage, no_contradiction_llm());
+    let engine = DreamEngine::new(
+        MockEmbedder::new(),
+        storage,
+        no_contradiction_llm(),
+        IdempotencyStore::new(),
+    );
 
     let result = engine.dream(no_cancel()).await.unwrap();
 
@@ -324,7 +334,12 @@ async fn tc_dream_004_distinct_docs_not_flagged() {
     let storage = MockStorage::new()
         .with_doc(doc_a, chunks_a)
         .with_doc(doc_b, chunks_b);
-    let engine = DreamEngine::new(MockEmbedder::new(), storage, no_contradiction_llm());
+    let engine = DreamEngine::new(
+        MockEmbedder::new(),
+        storage,
+        no_contradiction_llm(),
+        IdempotencyStore::new(),
+    );
 
     let result = engine.dream(no_cancel()).await.unwrap();
 
@@ -345,7 +360,12 @@ async fn tc_dream_005_cross_doc_contradiction_detected() {
     let storage = MockStorage::new()
         .with_doc(doc_a, chunks_a)
         .with_doc(doc_b, chunks_b);
-    let engine = DreamEngine::new(MockEmbedder::new(), storage, contradiction_llm());
+    let engine = DreamEngine::new(
+        MockEmbedder::new(),
+        storage,
+        contradiction_llm(),
+        IdempotencyStore::new(),
+    );
 
     let result = engine.dream(no_cancel()).await.unwrap();
 
@@ -371,7 +391,12 @@ async fn tc_dream_006_no_contradiction_when_consistent() {
     let storage = MockStorage::new()
         .with_doc(doc_a, chunks_a)
         .with_doc(doc_b, chunks_b);
-    let engine = DreamEngine::new(MockEmbedder::new(), storage, no_contradiction_llm());
+    let engine = DreamEngine::new(
+        MockEmbedder::new(),
+        storage,
+        no_contradiction_llm(),
+        IdempotencyStore::new(),
+    );
 
     let result = engine.dream(no_cancel()).await.unwrap();
 
@@ -391,7 +416,12 @@ async fn tc_dream_007_unclassified_docs_suggestion() {
     let storage = MockStorage::new()
         .with_doc(doc_a, chunks_a)
         .with_doc(doc_b, chunks_b);
-    let engine = DreamEngine::new(MockEmbedder::new(), storage, no_contradiction_llm());
+    let engine = DreamEngine::new(
+        MockEmbedder::new(),
+        storage,
+        no_contradiction_llm(),
+        IdempotencyStore::new(),
+    );
 
     let result = engine.dream(no_cancel()).await.unwrap();
 
@@ -414,7 +444,12 @@ async fn tc_dream_008_cancellation_returns_partial() {
     let storage = MockStorage::new()
         .with_doc(doc_a, chunks_a)
         .with_doc(doc_b, chunks_b);
-    let engine = DreamEngine::new(MockEmbedder::new(), storage, no_contradiction_llm());
+    let engine = DreamEngine::new(
+        MockEmbedder::new(),
+        storage,
+        no_contradiction_llm(),
+        IdempotencyStore::new(),
+    );
 
     let cancel = Arc::new(AtomicBool::new(true)); // 立即取消
     let result = engine.dream(cancel).await.unwrap();
@@ -462,7 +497,12 @@ async fn tc_dream_009_result_serde_roundtrip() {
 async fn tc_dream_010_single_doc_no_dup_or_contra() {
     let (doc, chunks) = make_doc("only.md", "unique-hash", &["唯一文档内容"]);
     let storage = MockStorage::new().with_doc(doc, chunks);
-    let engine = DreamEngine::new(MockEmbedder::new(), storage, contradiction_llm());
+    let engine = DreamEngine::new(
+        MockEmbedder::new(),
+        storage,
+        contradiction_llm(),
+        IdempotencyStore::new(),
+    );
 
     let result = engine.dream(no_cancel()).await.unwrap();
 

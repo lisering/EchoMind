@@ -1,180 +1,497 @@
 /**
- * EchoMind 语音输入模块 — SpeechRecognition 麦克风转写（REQ-RAG-034）。
+ * EchoMind 语音输入模块 — 桌面应用录音 + 静音检测 + OpenAI Whisper API 转写（REQ-RAG-034）。
  *
- * 基于 Web Speech API（SpeechRecognition / webkitSpeechRecognition），
- * 浏览器原生支持，零新增依赖。语言跟随当前 UI 语言（zh-CN / en-US）。
- * 不支持 Web Speech API 的 WebView 自动隐藏入口。
+ * ## 实现方案
  *
- * 职责：
- * 1. 检测 Web Speech API 支持并初始化 recognition 实例
- * 2. 麦克风按钮点击：启动/停止语音识别
- * 3. 实时转写结果填入 #queryInput
- * 4. 录音中脉冲动画状态管理
- * 5. 错误处理（权限拒绝等）
+ * 桌面应用使用 `navigator.mediaDevices.getUserMedia` + `MediaRecorder` 录制音频，
+ * 通过 Web Audio API 的 `AnalyserNode` 实时检测音频电平并可视化，
+ * 说话结束后静音 2 秒自动停止录音，
+ * 通过 Tauri IPC 发送到 Rust 侧调用 OpenAI 兼容 Whisper API 转写为文本。
+ *
+ * ## 状态机
+ *
+ * ```
+ * IDLE → REQUESTING_PERMISSION → RECORDING → TRANSCRIBING → DONE → IDLE
+ *                                ↑                                    │
+ *                                └────── RETRY ←─── (失败时) ─────────┘
+ * ```
+ *
+ * ## 数据流
+ *
+ * ```
+ * 用户点击 #micBtn
+ *   → getUserMedia({ audio: true })        // 请求麦克风权限
+ *   → MediaRecorder.start()                 // 开始录音
+ *   → AnalyserNode 实时检测音频电平 → 可视化
+ *   → 用户说话 → 标记 hasSpeechStarted → 显示录音计时器
+ *   → 用户停止说话 → 静音 2s → 自动停止录音
+ *   → MediaRecorder.stop()
+ *   → 收集 audio chunks → Blob → ArrayBuffer
+ *   → invoke('transcribe_audio', { audioData, mimeType })
+ *   → Rust: POST {base_url}/v1/audio/transcriptions (multipart)
+ *   → 返回转写文本 → 填入 #queryInput
+ * ```
  */
 
 import { $ } from './utils.js';
 import { toast, toastError } from './toast.js';
 import { t, getLocale } from './i18n.js';
 
-/** 当前 SpeechRecognition 实例（null 表示未初始化或不可用）。 */
-let _recognition = null;
+// ============================================================
+// 状态变量
+// ============================================================
 
-/** 是否正在录音。 */
-let _isRecording = false;
+/** @enum {string} 录音状态 */
+const RecordingState = {
+  IDLE: 'idle',
+  REQUESTING: 'requesting',
+  RECORDING: 'recording',
+  TRANSCRIBING: 'transcribing',
+};
 
-/**
- * 获取当前语音识别语言代码。
- * 跟随 UI 语言：zh-CN → zh-CN，其他 → en-US。
- * @returns {string} BCP 47 语言标签
- */
-function getRecognitionLang() {
-  const locale = getLocale();
-  return locale === 'zh-CN' ? 'zh-CN' : 'en-US';
-}
+let _state = RecordingState.IDLE;
+let _mediaRecorder = null;
+let _audioChunks = [];
+let _mediaStream = null;
+let _autoStopTimer = null;
+let _mimeType = 'audio/webm';
 
-/**
- * 初始化语音输入：检测 Web Speech API 支持，绑定麦克风按钮事件。
- * 在 main.js boot() 中调用。
- */
+// 静音检测相关
+let _audioContext = null;
+let _analyser = null;
+let _silenceCheckTimer = null;
+let _hasSpeechStarted = false;
+let _silenceStartTime = null;
+
+// 录音计时器
+let _recordingTimer = null;
+let _recordingStartTime = 0;
+
+// 音频电平可视化
+/** @type {Element[]} */
+let _levelBars = [];
+let _levelAnimTimer = null;
+
+// 常量
+const AUTO_STOP_MS = 60000;         // 最大录音时长 60s
+const SILENCE_CHECK_INTERVAL = 200;  // 静音检测间隔 ms
+const SILENCE_THRESHOLD = 0.01;      // 静音阈值（RMS < 此值视为静音）
+const SILENCE_DURATION_MS = 2000;    // 说话后静音多久自动停止
+const INITIAL_TIMEOUT_MS = 8000;     // 等待用户开始说话的最长时间
+const NUM_LEVEL_BARS = 5;            // 音频电平条数量
+
+// ============================================================
+// 初始化
+// ============================================================
+
 export function initVoiceInput() {
   const micBtn = $('micBtn');
   if (!micBtn) return;
 
-  // 检测 Web Speech API 支持
-  const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognitionClass) {
-    // 不支持：隐藏麦克风按钮（优雅降级，AC-4）
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     micBtn.style.display = 'none';
     return;
   }
 
-  // 创建 recognition 实例
-  try {
-    _recognition = new SpeechRecognitionClass();
-  } catch (e) {
+  if (typeof MediaRecorder === 'undefined') {
     micBtn.style.display = 'none';
     return;
   }
 
-  _recognition.lang = getRecognitionLang();
-  _recognition.continuous = false;
-  _recognition.interimResults = true;
-  _recognition.maxAlternatives = 1;
+  const candidates = ['audio/webm', 'audio/ogg', 'audio/mp4'];
+  _mimeType = candidates.find((type) => MediaRecorder.isTypeSupported(type)) || 'audio/webm';
 
-  _recognition.onresult = (event) => {
-    const input = $('queryInput');
-    if (!input) return;
-    let transcript = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const result = event.results[i];
-      if (result && result[0]) {
-        transcript += result[0].transcript;
-      }
-    }
-    if (transcript) {
-      input.value = transcript;
-      // 触发 input 事件，让 slash command / doc mention 检测生效
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  };
-
-  _recognition.onerror = (event) => {
-    const error = event.error || '';
-    if (error === 'not-allowed' || error === 'service-not-allowed') {
-      toastError(t('voice.permission_denied'));
-    } else if (error === 'no-speech') {
-      // 无语音输入，静默处理
-    } else if (error === 'audio-capture') {
-      toastError(t('voice.permission_denied'));
-    } else {
-      toast(t('voice.not_supported'), 'warning');
-    }
-  };
-
-  _recognition.onend = () => {
-    _isRecording = false;
-    updateMicButtonState();
-  };
-
-  _recognition.onstart = () => {
-    _isRecording = true;
-    // 录音开始时更新语言（用户可能切换了 UI 语言）
-    _recognition.lang = getRecognitionLang();
-    updateMicButtonState();
-  };
-
-  // 绑定点击事件
   micBtn.addEventListener('click', toggleRecording);
 }
 
-/**
- * 切换录音状态：未录音 → 启动，录音中 → 停止。
- */
-function toggleRecording() {
-  if (!_recognition) return;
-  if (_isRecording) {
-    try {
-      _recognition.stop();
-    } catch (_) {
-      // 忽略 stop 异常
+// ============================================================
+// 录音控制
+// ============================================================
+
+async function toggleRecording() {
+  if (_state === RecordingState.IDLE) {
+    await startRecording();
+  } else if (_state === RecordingState.RECORDING) {
+    stopRecording();
+  }
+  // TRANSCRIBING 状态忽略点击
+}
+
+async function startRecording() {
+  _setState(RecordingState.REQUESTING);
+
+  try {
+    _mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+  } catch (err) {
+    _setState(RecordingState.IDLE);
+    const name = err?.name || '';
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      toastError(t('voice.permission_denied'));
+    } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      toastError(t('voice.no_microphone'));
+    } else {
+      toastError(t('voice.start_failed'));
     }
-    _isRecording = false;
-    updateMicButtonState();
-  } else {
+    return;
+  }
+
+  // 创建 MediaRecorder
+  try {
+    _mediaRecorder = new MediaRecorder(_mediaStream, {
+      mimeType: _mimeType,
+      audioBitsPerSecond: 128000, // 128kbps 足够语音识别
+    });
+  } catch {
     try {
-      _recognition.start();
-    } catch (e) {
-      // start 可能抛 InvalidStateError（已 started），静默忽略
+      _mediaRecorder = new MediaRecorder(_mediaStream);
+      _mimeType = _mediaRecorder.mimeType || 'audio/webm';
+    } catch {
+      _setState(RecordingState.IDLE);
+      cleanupStream();
+      toastError(t('voice.start_failed'));
+      return;
     }
+  }
+
+  _audioChunks = [];
+
+  _mediaRecorder.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0) {
+      _audioChunks.push(event.data);
+    }
+  };
+
+  _mediaRecorder.onstop = async () => {
+    const blob = new Blob(_audioChunks, { type: _mimeType });
+    _audioChunks = [];
+    cleanupStream();
+    stopSilenceDetection();
+    stopRecordingTimer();
+
+    if (blob.size < 10) {
+      _setState(RecordingState.IDLE);
+      toast(t('voice.no_speech_detected'), 'warning');
+      return;
+    }
+
+    _setState(RecordingState.TRANSCRIBING);
+
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const audioData = Array.from(new Uint8Array(arrayBuffer));
+
+      const { invoke } = await import('./ipc.js');
+      const text = await invoke('transcribe_audio', {
+        audioData,
+        mimeType: _mimeType,
+      });
+
+      const input = $('queryInput');
+      if (input && text) {
+        // 追加模式：如果输入框已有文本，在末尾追加
+        const existing = input.value.trim();
+        if (existing) {
+          input.value = existing + ' ' + text;
+        } else {
+          input.value = text;
+        }
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+        // 移动光标到末尾
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+    } catch (err) {
+      const msg = String(err?.message || err || '');
+      if (msg.includes('VALIDATION')) {
+        toastError(t('voice.no_api_config'));
+      } else if (msg.includes('空文本') || msg.includes('空语音')) {
+        toast(t('voice.no_speech_detected'), 'warning');
+      } else if (msg.includes('超时')) {
+        toastError(t('voice.timeout'));
+      } else if (msg.includes('无法连接')) {
+        toastError(t('voice.connection_failed'));
+      } else {
+        toastError(t('voice.transcribe_failed'));
+      }
+    } finally {
+      _setState(RecordingState.IDLE);
+    }
+  };
+
+  _mediaRecorder.onerror = () => {
+    cleanupStream();
+    stopSilenceDetection();
+    stopRecordingTimer();
+    _setState(RecordingState.IDLE);
+    toastError(t('voice.start_failed'));
+  };
+
+  // 开始录音
+  _mediaRecorder.start();
+  _hasSpeechStarted = false;
+  _silenceStartTime = null;
+  _setState(RecordingState.RECORDING);
+
+  // 启动静音检测 + 计时器 + 可视化
+  startSilenceDetection();
+  startRecordingTimer();
+  showRecordingOverlay();
+
+  // 最大录音时长兜底
+  clearAutoStopTimer();
+  _autoStopTimer = setTimeout(() => {
+    stopRecording();
+  }, AUTO_STOP_MS);
+}
+
+export function stopRecording() {
+  clearAutoStopTimer();
+  stopSilenceDetection();
+  stopRecordingTimer();
+  hideRecordingOverlay();
+  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+    try {
+      _mediaRecorder.stop();
+    } catch { /* ignore */ }
+  }
+  // 不立即设置 IDLE — onstop 回调会处理状态转换（TRANSCRIBING → IDLE）
+  // 仅更新按钮状态（变为非录音态）
+  const micBtn = $('micBtn');
+  if (micBtn) {
+    micBtn.classList.remove('recording');
   }
 }
 
-/**
- * 更新麦克风按钮的视觉状态（录音中 / 空闲）。
- */
+// ============================================================
+// 状态管理
+// ============================================================
+
+function _setState(newState) {
+  _state = newState;
+  updateMicButtonState();
+  updateRecordingOverlay();
+}
+
+// ============================================================
+// 静音检测（Web Audio API AnalyserNode）
+// ============================================================
+
+function startSilenceDetection() {
+  try {
+    _audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = _audioContext.createMediaStreamSource(_mediaStream);
+    _analyser = _audioContext.createAnalyser();
+    _analyser.fftSize = 512;
+    _analyser.smoothingTimeConstant = 0.5;
+    source.connect(_analyser);
+  } catch {
+    // AudioContext 不可用，静音检测降级：不自动停止，依赖手动点击或 60s 超时
+    return;
+  }
+
+  const buffer = new Uint8Array(_analyser.fftSize);
+  let initialWaitStart = Date.now();
+
+  _silenceCheckTimer = setInterval(() => {
+    if (!_analyser || _state !== RecordingState.RECORDING) {
+      stopSilenceDetection();
+      return;
+    }
+
+    _analyser.getByteTimeDomainData(buffer);
+
+    // 计算 RMS（均方根）音量
+    let sum = 0;
+    for (let i = 0; i < buffer.length; i++) {
+      const v = (buffer[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / buffer.length);
+
+    // 更新音频电平可视化
+    updateLevelBars(rms);
+
+    if (rms > SILENCE_THRESHOLD) {
+      // 检测到语音
+      _hasSpeechStarted = true;
+      _silenceStartTime = null;
+    } else {
+      // 静音
+      if (_hasSpeechStarted) {
+        // 说话后进入静音
+        if (_silenceStartTime === null) {
+          _silenceStartTime = Date.now();
+        } else if (Date.now() - _silenceStartTime > SILENCE_DURATION_MS) {
+          // 静音超过 2s，自动停止
+          stopRecording();
+        }
+      } else {
+        // 还没开始说话
+        if (Date.now() - initialWaitStart > INITIAL_TIMEOUT_MS) {
+          // 等待 8s 仍未说话，自动停止（避免无限录音）
+          stopRecording();
+        }
+      }
+    }
+  }, SILENCE_CHECK_INTERVAL);
+}
+
+function stopSilenceDetection() {
+  if (_silenceCheckTimer !== null) {
+    clearInterval(_silenceCheckTimer);
+    _silenceCheckTimer = null;
+  }
+  if (_audioContext) {
+    try { _audioContext.close(); } catch { /* ignore */ }
+    _audioContext = null;
+  }
+  _analyser = null;
+  _hasSpeechStarted = false;
+  _silenceStartTime = null;
+}
+
+// ============================================================
+// 录音计时器
+// ============================================================
+
+function startRecordingTimer() {
+  _recordingStartTime = Date.now();
+  _recordingTimer = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - _recordingStartTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    const display = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+    const timerEl = document.getElementById('recordingTimer');
+    if (timerEl) {
+      timerEl.textContent = display;
+    }
+
+    // 接近最大时长时变色警告
+    if (elapsed >= 50) {
+      const overlay = document.getElementById('recordingOverlay');
+      if (overlay) overlay.classList.add('recording-warning');
+    }
+  }, 1000);
+}
+
+function stopRecordingTimer() {
+  if (_recordingTimer !== null) {
+    clearInterval(_recordingTimer);
+    _recordingTimer = null;
+  }
+}
+
+// ============================================================
+// 录音遮罩 + 音频电平可视化
+// ============================================================
+
+function showRecordingOverlay() {
+  let overlay = document.getElementById('recordingOverlay');
+  if (!overlay) return; // E2E mock 环境可能没有
+
+  overlay.classList.remove('hidden');
+  overlay.classList.remove('recording-warning');
+
+  // 初始化电平条
+  _levelBars = Array.from(overlay.querySelectorAll('.level-bar'));
+}
+
+function hideRecordingOverlay() {
+  const overlay = document.getElementById('recordingOverlay');
+  if (overlay) {
+    overlay.classList.add('hidden');
+    overlay.classList.remove('recording-warning');
+  }
+  // 重置电平条
+  _levelBars = [];
+}
+
+function updateRecordingOverlay() {
+  const overlay = document.getElementById('recordingOverlay');
+  if (!overlay) return;
+
+  if (_state === RecordingState.RECORDING) {
+    overlay.classList.remove('hidden');
+  } else if (_state === RecordingState.TRANSCRIBING) {
+    overlay.classList.add('hidden');
+  }
+}
+
+function updateLevelBars(rms) {
+  if (!_levelBars || _levelBars.length === 0) return;
+
+  // 将 RMS (0~0.5 典型范围) 映射到 0~NUM_LEVEL_BARS
+  const normalized = Math.min(rms / 0.15, 1.0);
+  const activeBars = Math.round(normalized * NUM_LEVEL_BARS);
+
+  _levelBars.forEach((bar, i) => {
+    if (i < activeBars) {
+      bar.classList.add('active');
+    } else {
+      bar.classList.remove('active');
+    }
+  });
+}
+
+// ============================================================
+// 辅助函数
+// ============================================================
+
+function cleanupStream() {
+  if (_mediaStream) {
+    _mediaStream.getTracks().forEach((track) => track.stop());
+    _mediaStream = null;
+  }
+  _mediaRecorder = null;
+}
+
+function clearAutoStopTimer() {
+  if (_autoStopTimer !== null) {
+    clearTimeout(_autoStopTimer);
+    _autoStopTimer = null;
+  }
+}
+
 function updateMicButtonState() {
   const micBtn = $('micBtn');
   if (!micBtn) return;
-  if (_isRecording) {
+
+  if (_state === RecordingState.RECORDING) {
     micBtn.classList.add('recording');
+    micBtn.classList.remove('transcribing');
     micBtn.title = t('voice.stop_recording');
     micBtn.setAttribute('aria-label', t('voice.stop_recording'));
-  } else {
+  } else if (_state === RecordingState.TRANSCRIBING) {
     micBtn.classList.remove('recording');
+    micBtn.classList.add('transcribing');
+    micBtn.title = t('voice.transcribing');
+    micBtn.setAttribute('aria-label', t('voice.transcribing'));
+  } else if (_state === RecordingState.REQUESTING) {
+    micBtn.classList.add('transcribing');
+    micBtn.title = t('voice.requesting_permission');
+    micBtn.setAttribute('aria-label', t('voice.requesting_permission'));
+  } else {
+    micBtn.classList.remove('recording', 'transcribing');
     micBtn.title = t('voice.start_recording');
     micBtn.setAttribute('aria-label', t('voice.start_recording'));
   }
 }
 
-/**
- * 停止录音（供外部调用，如发送消息时自动停止）。
- */
-export function stopRecording() {
-  if (_isRecording && _recognition) {
-    try {
-      _recognition.stop();
-    } catch (_) {
-      // 忽略
-    }
-    _isRecording = false;
-    updateMicButtonState();
-  }
-}
+// ============================================================
+// TTS 朗读（语音合成）— 与录音无关，保持原有实现
+// ============================================================
 
-/**
- * 停止所有 TTS 朗读（供新对话/页面卸载时调用）。
- * 委托给 tts 模块的 cleanup 函数。
- */
 export function stopAllTTS() {
   if (typeof window.speechSynthesis !== 'undefined' && window.speechSynthesis) {
-    try {
-      window.speechSynthesis.cancel();
-    } catch (_) {
-      // 忽略
-    }
+    try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
   }
-  // 重置所有 TTS 按钮状态
   document.querySelectorAll('.tts-btn.speaking').forEach((btn) => {
     btn.classList.remove('speaking');
     btn.title = t('voice.listen');
@@ -186,30 +503,17 @@ export function stopAllTTS() {
   });
 }
 
-/**
- * 获取 TTS 语速设置（从 localStorage 读取）。
- * @returns {number} 语速（0.5~2.0，默认 1.0）
- */
 export function getVoiceRate() {
   try {
     const rate = parseFloat(localStorage.getItem('voice.rate') || '1.0');
     if (isNaN(rate) || rate < 0.5 || rate > 2.0) return 1.0;
     return rate;
-  } catch (_) {
+  } catch {
     return 1.0;
   }
 }
 
-/**
- * 为指定 AI 消息块创建 TTS 朗读按钮。
- * 在 chat-render.js showMsgActions() 中调用。
- *
- * @param {HTMLElement} blockEl - AI 消息块根元素
- * @param {string} rawMarkdown - 原始 Markdown 文本
- * @returns {HTMLElement|null} 朗读按钮元素（不支持 TTS 时返回 null）
- */
 export function createTtsButton(blockEl, rawMarkdown) {
-  // 检测 speechSynthesis 支持
   if (typeof window.speechSynthesis === 'undefined' || !window.speechSynthesis) {
     return null;
   }
@@ -222,13 +526,8 @@ export function createTtsButton(blockEl, rawMarkdown) {
 
   btn.onclick = () => {
     if (btn.classList.contains('speaking')) {
-      // 朗读中：停止
       if (window.speechSynthesis) {
-        try {
-          window.speechSynthesis.cancel();
-        } catch (_) {
-          // 忽略
-        }
+        try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
       }
       btn.classList.remove('speaking');
       btn.title = t('voice.listen');
@@ -238,7 +537,6 @@ export function createTtsButton(blockEl, rawMarkdown) {
         svg.innerHTML = '<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>';
       }
     } else {
-      // 开始朗读
       const mdEl = blockEl.querySelector('.md');
       let plainText;
       if (mdEl) {
@@ -251,15 +549,9 @@ export function createTtsButton(blockEl, rawMarkdown) {
       plainText = plainText.trim();
       if (!plainText) return;
 
-      // 停止其他正在进行的朗读
       if (window.speechSynthesis) {
-        try {
-          window.speechSynthesis.cancel();
-        } catch (_) {
-          // 忽略
-        }
+        try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
       }
-      // 重置其他按钮状态
       document.querySelectorAll('.tts-btn.speaking').forEach((b) => {
         b.classList.remove('speaking');
         b.title = t('voice.listen');
@@ -271,7 +563,7 @@ export function createTtsButton(blockEl, rawMarkdown) {
       });
 
       const utterance = new SpeechSynthesisUtterance(plainText);
-      utterance.lang = getLocale() === 'zh-CN' ? 'zh-CN' : 'en-US';
+      utterance.lang = getLocale() === 'zh-CN' ? 'zh-CN' : getLocale() === 'ja' ? 'ja-JP' : 'en-US';
       utterance.rate = getVoiceRate();
 
       utterance.onend = () => {

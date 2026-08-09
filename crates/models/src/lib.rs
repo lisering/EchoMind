@@ -446,6 +446,8 @@ impl SymbolKind {
     }
 
     /// 从字符串解析（避免与 `FromStr` trait 冲突，clippy `should_implement_trait`）。
+    ///
+    /// 未知字符串回退为 `Function` 并输出 stderr 警告，避免静默吞掉数据损坏。
     pub fn parse_str(s: &str) -> Self {
         match s {
             "function" => SymbolKind::Function,
@@ -456,7 +458,10 @@ impl SymbolKind {
             "enum" => SymbolKind::Enum,
             "constant" => SymbolKind::Constant,
             "module" => SymbolKind::Module,
-            _ => SymbolKind::Function,
+            _ => {
+                eprintln!("[WARN] SymbolKind::parse_str: 未知符号类型 '{s}'，回退为 Function");
+                SymbolKind::Function
+            }
         }
     }
 }
@@ -910,7 +915,7 @@ pub struct SettingsPayload {
 ///
 /// - `Remote`：BYOK 远程 API（现有行为，OpenAI 兼容 SSE 流式）
 /// - `Local`：本地推理（mistral.rs，GGUF 模型，零网络请求）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum LlmMode {
     /// 远程 API（BYOK 模式）
     #[default]
@@ -1499,6 +1504,33 @@ pub struct CacheSettingsPayload {
     pub privacy_mode: bool,
 }
 
+/// 预算使用统计（QM 借鉴）。
+///
+/// 记录主体的 LLM API 使用情况和费用统计。
+/// 在滑动窗口（24 小时）内的 token 使用量和费用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetStats {
+    /// 每日预算限制（USD，0 表示不限制）
+    pub daily_limit: f64,
+    /// 今日已花费金额（USD）
+    pub spent_today: f64,
+    /// 剩余可用金额（USD，daily_limit <= 0 时为无穷大）
+    pub remaining: f64,
+}
+
+/// 速率限制统计。
+///
+/// 记录主体在滑动窗口内的请求频率统计。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitStats {
+    /// 窗口内允许的最大请求数
+    pub max_per_window: u32,
+    /// 当前窗口内已发出的请求数
+    pub current_count: u32,
+    /// 滑动窗口时长（秒）
+    pub window_seconds: u64,
+}
+
 impl Default for CacheSettingsPayload {
     fn default() -> Self {
         Self {
@@ -2069,13 +2101,12 @@ impl ScratchLogEntry {
     /// # 参数
     /// - `content`: 日志内容文本
     pub fn new(content: String) -> Self {
-        let now = chrono::Utc::now().timestamp();
-        let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let now = chrono::Utc::now();
         Self {
             id: uuid::Uuid::new_v4().to_string(),
-            date,
+            date: now.format("%Y-%m-%d").to_string(),
             content,
-            created_at: now,
+            created_at: now.timestamp(),
         }
     }
 
@@ -2226,8 +2257,9 @@ impl PromptTemplate {
 
     /// 验证模板名称是否合法（仅小写字母/数字/下划线，1-32 字符）。
     pub fn is_valid_name(name: &str) -> bool {
+        let char_count = name.chars().count();
         !name.is_empty()
-            && name.len() <= 32
+            && char_count <= 32
             && name
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')

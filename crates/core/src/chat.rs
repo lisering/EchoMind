@@ -10,6 +10,7 @@
 //! `ChatEngine::chat()` 调用 `LLMProvider::chat_stream_segmented()` 传递两段。
 
 use std::sync::Arc;
+use tracing::warn;
 
 use echomind_models::{ChatMessage, RetrievalResult, TokenUsage};
 use futures::StreamExt;
@@ -170,8 +171,8 @@ impl<R: Retriever, L: LLMProvider> ChatEngine<R, L> {
         if let Some(ref web_provider) = self.web_search_provider
             && web_search::should_search(&sources, DEFAULT_SEARCH_THRESHOLD)
         {
-            eprintln!(
-                "[WEB] 本地检索 top-1 score 低于阈值 {:.1}，触发网页搜索",
+            warn!(
+                "本地检索 top-1 score 低于阈值 {:.1}，触发网页搜索",
                 DEFAULT_SEARCH_THRESHOLD
             );
             sources = web_search::search_and_fuse(web_provider, query, sources, top_k).await;
@@ -206,8 +207,8 @@ impl<R: Retriever, L: LLMProvider> ChatEngine<R, L> {
         let gate_score = if let Some(ref gate) = self.gate_config {
             let score = crate::quality_gate::evaluate(&sources, gate);
             if !score.passed {
-                eprintln!(
-                    "[GATE] 检索质量偏低: weighted={:.3} coverage={:.3} diversity={:.3} variance={:.3}",
+                warn!(
+                    "检索质量偏低: weighted={:.3} coverage={:.3} diversity={:.3} variance={:.3}",
                     score.weighted, score.coverage, score.diversity, score.score_variance
                 );
             }
@@ -229,7 +230,7 @@ impl<R: Retriever, L: LLMProvider> ChatEngine<R, L> {
                     }
                     Err(e) => {
                         // 压缩失败优雅降级：保留原始内容
-                        eprintln!("[PERF] Prompt 压缩失败，保留原文: {e:#}");
+                        warn!("Prompt 压缩失败，保留原文: {e:#}");
                     }
                 }
             }

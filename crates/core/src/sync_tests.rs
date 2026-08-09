@@ -562,3 +562,47 @@ async fn tc_sync_010c_recursive_subdirectory() {
     });
     assert!(has_nested, "应包含子目录中的文件");
 }
+
+/// TC-SYNC-011: 幂等性防护——同一文件夹短时间内重复同步会被跳过。
+///
+/// 验证 IdempotencyStore 防止重复同步的效果。
+#[tokio::test]
+async fn tc_sync_011_idempotency_protection() {
+    let dir = TempDir::new().unwrap();
+    let watch_dir = dir.path().join("watch");
+    std::fs::create_dir_all(&watch_dir).unwrap();
+
+    std::fs::write(watch_dir.join("test.md"), b"Test content\n").unwrap();
+
+    let storage = MockStorage::default();
+    let data_dir = dir.path().join("data");
+    let service = SyncService::new(storage.clone(), data_dir);
+
+    // 第一次同步
+    let result1 = service
+        .sync_folder(&watch_dir.to_string_lossy(), true, None)
+        .await
+        .unwrap();
+
+    assert_eq!(result1.added, 1, "首次同步应导入 1 个文件");
+    assert_eq!(storage.doc_count().await, 1);
+
+    // 立即进行第二次同步（应被幂等性防护跳过）
+    let result2 = service
+        .sync_folder(&watch_dir.to_string_lossy(), true, None)
+        .await
+        .unwrap();
+
+    // 第二次同步应被跳过
+    assert_eq!(result2.added, 0, "重复同步应跳过新增");
+    assert_eq!(result2.updated, 0, "重复同步应跳过更新");
+    assert_eq!(result2.deleted, 0, "重复同步应跳过删除");
+    // 注意：由于实际同步发生了（有文件被跳过），skipped 可能不为0
+    assert!(
+        !result2.errors.is_empty() || result2.skipped > 0,
+        "重复同步应有跳过行为"
+    );
+
+    // 知识库文档数量不应变化
+    assert_eq!(storage.doc_count().await, 1, "重复同步不应改变文档数量");
+}

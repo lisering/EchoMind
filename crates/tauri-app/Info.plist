@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>EchoMind 需要访问麦克风以提供语音输入功能。您的语音数据不会被上传或存储。</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>EchoMind 需要语音识别权限以将您的语音转换为文字。</string>
+</dict>
+</plist>

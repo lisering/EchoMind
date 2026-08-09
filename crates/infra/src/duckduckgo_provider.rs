@@ -146,9 +146,13 @@ impl Default for DuckDuckGoProvider {
     fn default() -> Self {
         Self::new().unwrap_or_else(|e| {
             eprintln!("[WEB] DuckDuckGo provider 初始化失败: {e:#}");
-            // 降级：返回一个使用默认 reqwest 客户端的实例
+            // 降级：返回一个使用基本 reqwest 客户端的实例。
+            // 铁律一：即使降级也必须 .no_proxy() 确保直连。
             Self {
-                client: reqwest::Client::new(),
+                client: reqwest::Client::builder()
+                    .no_proxy()
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new()),
             }
         })
     }

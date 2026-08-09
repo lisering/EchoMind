@@ -33,6 +33,7 @@
 //! 数据出口由用户控制。与 chat 命令使用相同的 base_url / api_key / model。
 
 use std::time::Duration;
+use tracing::warn;
 
 use echomind_core::QueryRewriter;
 
@@ -101,21 +102,21 @@ impl QueryRewriter for HydeRewriter {
             match result {
                 // 超时：返回原始查询（优雅降级）
                 Err(_) => {
-                    eprintln!("HyDE 改写超时（{HYDE_TIMEOUT_SECS}s），使用原始查询");
+                    warn!("HyDE 改写超时（{HYDE_TIMEOUT_SECS}s），使用原始查询");
                     Ok(query.to_string())
                 }
                 // LLM 调用成功
                 Ok(Ok(content)) => {
                     let trimmed = content.trim();
                     if trimmed.is_empty() {
-                        eprintln!("HyDE 改写返回空内容，使用原始查询");
+                        warn!("HyDE 改写返回空内容，使用原始查询");
                         return Ok(query.to_string());
                     }
                     Ok(trimmed.to_string())
                 }
                 // LLM 调用失败：返回原始查询（优雅降级）
                 Ok(Err(e)) => {
-                    eprintln!("HyDE 改写失败，使用原始查询: {e:#}");
+                    warn!("HyDE 改写失败，使用原始查询: {e:#}");
                     Ok(query.to_string())
                 }
             }

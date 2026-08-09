@@ -1,118 +1,183 @@
-# EchoMind Q04 衔接提示词
+# EchoMind 下一步衔接提示词
 
-> **复制下面 ```` ```text ```` 代码块中的全部内容作为下个 session 的第一条消息即可。**
+> **复制下方 `~~~` 代码块中的全部内容作为下个 session 的第一条消息即可。只需复制一次。**
 
-```text
-你正在继续 EchoMind（灵犀）项目的开发。这是 QM 借鉴原子计划的第 4 个 Session。
+~~~
+你正在继续 EchoMind（灵犀）项目的开发。上一个 session 完成了 CatPaw IDE 配置治理（System Prompt 改为 EchoMind 专属、三套 commands 目录 33 文件、索引 & Docs 官方文档清单 50 条）。
 
 ## 项目背景
 
-EchoMind 是 Rust + Tauri v2 桌面 RAG 知识库应用。六边形架构 8 crate workspace（models / prompt / compact / core / infra / tauri-app / context / license-issuer）。前端 vanilla JS ES modules（50 文件），esbuild 打包。详见 AGENTS.md / CLAUDE.md。
+EchoMind 是 Rust + Tauri v2 桌面 RAG 知识库应用。面向有隐私需求的个人用户，隐私优先、本地运行、BYOK（Bring Your Own Key）。
 
-## 已完成 Session 汇总
+- **架构**: 六边形（端口与适配器），8 crate workspace
+  - `crates/models` — 领域契约（Document, Chunk, ChatMessage, MemoryRecord 等）
+  - `crates/prompt` — 提示词构建（SegmentedPrompt, RAG/Agent prompt, Cache policy）
+  - `crates/compact` — 上下文压缩引擎（LLM 历史摘要替代截断, TokenEstimator, heal_dangling_calls）
+  - `crates/context` — 系统上下文注册表（纪元管理, 持久化基线, ContextEpochManager）
+  - `crates/core` — 端口 Trait + 业务逻辑（ChatEngine, ImportService, AgentEngine, SecurityManager, MemoryStore, LlmRouter 等）
+  - `crates/infra` — 适配器（SqliteStorage, LocalEmbedder, OpenAIProvider, HNSW, LocalLlmEngine mistral.rs, OCR, VLM, SymbolEngine, WasmExecutor）
+  - `crates/tauri-app` — Tauri 外壳，162 个 IPC 命令（模块化拆分到 commands/ 目录 14 个子模块，8889 行）
+  - `crates/license-issuer` — Ed25519 License 签发 CLI（私有，不公开到 GitHub）
+- **前端**: 单文件 SPA（`ui/index.html`，126K 行），vanilla JS ES modules（50 个源文件），esbuild 打包 IIFE，Tailwind CSS JIT，无框架无 CDN
+- **许可证**: BUSL-1.1（商业源码许可证，允许个人非商业使用，2030-01-01 转 Apache 2.0）
+- **版本**: v1.4.0（全部 8 crate + tauri.conf.json）
+- **Rust Edition**: 2024（≥1.85，原生 async fn in trait，无 #[async_trait] 宏）
 
-### Q01 Scratch-Promote 两层记忆 + Consolidation 引擎（已完成）
-- `crates/models/src/lib.rs`：新增 `MemoryConsolidationAction` 枚举（Update/Delete/Add）+ `ScratchLogEntry` 结构体 + `ScratchConsolidationResult`
-- `crates/core/src/lib.rs`：Storage trait 新增 4 个 scratch 方法（默认空操作）
-- `crates/infra/src/sqlite_storage.rs`：新增 `scratch_logs` 表 + KNOWN_TABLES 16→17 + 4 方法实现
-- `crates/core/src/memory_store.rs`：新增 `write_scratch()` + `consolidate_scratch<L>()` + `apply_consolidation_actions()` + `parse_consolidation_output()` + `MEMORY_CONSOLIDATION_PROMPT` 常量
-- `crates/core/src/memory_store_tests.rs`：7 TDD 测试 TC-SCRATCH-001~007
-- `crates/core/src/auto_dream.rs`：DreamEngine Phase 5 `consolidate_scratch_layer()`
-- `crates/tauri-app/src/commands/features.rs`：2 IPC 命令（trigger_memory_consolidation / get_scratch_logs）
+## 当前测试基线
 
-### Q02 Burst Buffer 延迟捕获 + Provenance 标记（已完成）
-- `crates/models/src/lib.rs`：新增 `ProvenanceTag` 结构体（conversation_id/message_seq/captured_at/source_label）+ `new()` / `with_timestamp()` / `said_in_suffix()` 方法 + 4 单元测试 TC-MODEL-PROV-001~004
-- `crates/core/src/memory_store.rs`：新增 `BurstTurn` 结构体 + `BurstBuffer` 结构体（pending/quiet_ms/max_turns/last_activity）+ `new()` / `with_config()` / `push()` / `should_flush()` / `pending_count()` / `is_empty()` / `drain()` / `flush()` 方法 + `flush_burst_turns()` 独立函数（聚合多轮 → LLM 提取 → scratch 写入 + provenance 后缀）
-- `crates/core/src/memory_store_tests.rs`：10 TDD 测试 TC-BURST-001~010
-- `crates/tauri-app/src/state.rs`：AppState 新增 `memory_burst_buffer: Arc<Mutex<BurstBuffer>>` 字段
-- `crates/tauri-app/src/commands/features.rs`：3 IPC 命令（push_burst_turn / flush_memory_burst_buffer / get_burst_buffer_status）
-- `crates/tauri-app/src/lib.rs`：注册 3 命令（164→167）
-- `e2e-tests/tests/bridge/tauri-stub.js`：3 mock + burstBuffer state
+- Rust Free: 822+ passed, 0 failed, 24 ignored (`cargo test`)
+- Rust Pro: 1094 passed, 0 failed, 44 ignored (`cargo test --features pro`)
+- Clippy Free+Pro: 零警告 (`cargo clippy --all-targets -- -D warnings`)
+- cargo fmt: 通过
+- TypeScript: 0 errors (`npx tsc --noEmit`)
+- esbuild: 12451 行 (`node scripts/build-ui.mjs`)
+- Vitest: 407 passed, 27 files (`cd e2e-tests && npm run test:unit`)
+- E2E 桥接: 955 passed, 9 skipped (`cd e2e-tests && npm run test:bridge`)
+- 测试文件: 68 个 `*_tests.rs` 文件（core 44 + infra 22 + compact 1 + context 1）
+- IPC 命令数: 162（14 个功能域子模块）
+- ADR 数: 13
 
-### Q03 双阈值压缩 + 后台异步压缩（已完成）
-- `crates/models/src/lib.rs`：新增 `CompactionKind` 枚举（Background/Synchronous）+ `as_str()` 方法 + `CompactionInfo` 新增 `compaction_kind: Option<CompactionKind>` 字段（`#[serde(default)]` 向后兼容）
-- `crates/compact/src/lib.rs`：新增 `CompactionTrigger` 枚举（None/Background/Synchronous，`#[derive(Default)]`）+ `DualThresholdConfig` 结构体（soft_threshold/hard_threshold/max_entries/max_tokens，默认 0.7/0.9/50/8192）+ `from_settings()` 方法 + `estimate_history_tokens()` 粗估函数 + `check_compaction_needed()` 方法（双阈值判断：entry_ratio vs token_ratio 取 max）+ `try_acquire_background_compaction()` / `release_background_compaction()` 去重函数 + `run_background_compaction()` 错误吞咽执行函数 + `serde` 依赖新增
-- `crates/compact/src/compact_tests.rs`：新增 12 TDD 测试 TC-COMPACT-DUAL-001~012（注册 `#[cfg(test)] mod compact_tests;`）
-- `crates/tauri-app/src/state.rs`：AppState 新增 `compaction_pending: Arc<Mutex<HashSet<String>>>` 字段
-- `crates/tauri-app/src/commands/chat.rs`：`chat_inner` 集成双阈值逻辑（Soft → spawn 后台 / Hard → 同步 / None → 跳过）
+## 铁律要点（详见 .catpaw/rules/system-constraints.md v3.3）
 
-当前测试基线：compact 41 passed + 1 ignored / core 540 passed + 12 doc tests / models 40 / clippy Free 零警告 / fmt 通过 / 167 IPC 命令 / 8 crate workspace。
+1. **TDD 驱动**（铁律二）: Red → Green → Refactor，禁空断言
+2. **零 unwrap/expect/panic**（铁律五）: workspace clippy deny lint 全覆盖（unwrap_used/expect_used/panic/unreachable/todo/unimplemented 全 deny）
+3. **Edition 2024**（铁律三）: 原生 async fn in trait，禁用 async-trait 宏，`#![allow(async_fn_in_trait)]` 是有意的豁免
+4. **文档同步**（铁律七）: 代码变更必须同步更新 docs/api/ 对应文档 + docs/SOFTWARE_ASSET.md
+5. **最新版本依赖**（铁律六）: 开发前 cargo update --dry-run + npm outdated
+6. **GitHub 同步**（铁律十一）: 修改源代码后必须运行 ./sync-to-github.sh（双仓库工作流，开发仓库 → 发布仓库 EchoMind/EchoMind/）
+7. **Session 管理**（铁律十二）: 会话开始读 CURRENT_STATE.md，会话结束更新 CURRENT_STATE.md + LOG.md + 生成衔接提示词
+8. **Spec-driven**（铁律十五）: 先写规格再写代码（SRS REQ + AC + TC），测试从 AC 派生
+9. **Vibe Coding 测试门禁**（铁律二十）: L0 fmt/clippy → L1 nextest → L2 llvm-cov → L3 mutants/miri → L4 E2E
+10. **网络代理**（铁律一）: 开发调研可设代理 `export https_proxy=http://127.0.0.1:7890`；软件运行时禁止代理（所有 reqwest::Client::builder() 必须加 .no_proxy()）
 
-## 本 Session 目标：Q04 Token 级预算 + Entry Token 缓存 + Dangling Call 修复
+## 已完成版本
 
-借鉴 QM `harness/context-compaction.ts` 的 Token 级预算管理和 Entry Token 缓存，提升压缩精度。同时引入 Dangling Call 修复（Agent 模式下 tool_call 被中断时自动补全 tool_result）。
+- v1.0.0: 核心功能（RAG 检索 + 文档导入 + 流式对话 + 安全加密 + 本地 LLM Phase 1-3 + Agent RAG + 极致性能优化 S1-S10）
+- v1.1.0: .docx 导入 / .html 导入 / 浅色主题 / 语音输入+TTS / 网页搜索
+- v1.2.0: PDF 导出 / .pptx 导入 / .epub 导入 / 自定义 ONNX 嵌入模型（Pro）
+- v1.3.0: 知识图谱导出 / 文档摘要 / 快捷指令模板 / Wiki 双向链接 / 对话分支树
+- v1.4.0: Excel/CSV 导入 / 对话全文搜索 / Contextual Retrieval / 文档标签 / commands.rs 模块化
 
-### QM 对比
-- QM `harness/context-compaction.ts`：`estimateEntryTokens()` 带 LRU 缓存（50k 条），`recentEntryCountWithinBudget()` 从末尾向前保留尽可能多的消息
-- QM `harness/tape-fold.ts`：`healDanglingCalls()` — 未配对的 tool_call 自动添加 `[interrupted]` 占位 result
-- EchoMind 现状：`CompactionEngine` 使用 `bpe()` 逐条计算 token，无缓存；无 dangling call 修复
+## 已完成的借鉴计划
 
-### 当前代码现状（关键 API）
+### QM 借鉴（Q01-Q11，全部 ✅）
+- Q01: Scratch-Promote 两层记忆 + Consolidation 引擎
+- Q02: 记忆摘要注入上下文
+- Q03-Q04: Token 级预算 + Entry Token 缓存 + Dangling Call 修复
+- Q05-Q06: 安全态势分层 + Shadow 安全筛查
+- Q07-Q09: 后台压缩 Sweeper + 幂等性存储 + KeyedQueue 并发
+- Q10-Q11: LLMProvider Trait 扩展（generate_title/one_shot/judge）+ LlmRouter 路由
 
-**CompactionEngine**（`crates/compact/src/lib.rs`）：
-- `check_compaction_needed()` — Q03 新增的双阈值检查（使用 `estimate_history_tokens()` 粗估）
-- `compact()` / `compact_with_config()` — 同步压缩，使用 `bpe()` 逐条计算 token
-- `try_acquire_background_compaction()` / `release_background_compaction()` / `run_background_compaction()` — Q03 新增的后台压缩去重 + 执行
+### OpenCode 借鉴（B01-B14，全部 ✅）
+- B01-B02: System Context Registry + Context Epoch + Durable Baseline
+- B03-B04: 结构化压缩模板 + Prompt Caching 自动放置
+- B05-B06: Durable Prompt Admission + Session Run Coordinator
+- B07-B08: Tool Output Bounding + Ask SDK
+- B09: Skill 系统发现
+- B10-B14: 多协议 LLM 适配 + Permission 细粒度控制 + Snapshot/Plugin/Effect 评估
 
-**token_budget 模块**（`crates/compact/src/token_budget.rs`）：
-- `estimate_tokens(text)` / `estimate_messages_tokens(messages)` — 使用 `bpe()` 计算 token（无缓存）
-- `find_compaction_boundary(messages, recent_budget)` — 从末尾向前保留消息
-- `IncrementalCompactor` — 增量压缩管理器
+### 跨 Phase 整合（S67+S68+S71，全部 ✅）
+- S67: Burst Buffer 用 Q10 one_shot 替代非流式 LLM 调用
+- S68: 后台压缩用 Q07 Sweeper 统一管理
+- S71: Shadow 筛查用 Q10 judge 方法做安全判断
 
-**CompactionInfo**（`crates/models/src/lib.rs`）：
-- `compacted_count` / `total_tokens` / `compacted_tokens` / `token_limit` / `compaction_kind: Option<CompactionKind>`
+## 本 session 完成的工作
 
-### 改动文件
-1. `crates/compact/src/lib.rs` — 新增 `TokenEstimator` 带 LRU 缓存 + `heal_dangling_calls()` 函数
-2. `crates/compact/src/compact_tests.rs` — TDD 测试
+1. **system-constraints.md v3.2 → v3.3**: 标题改为「EchoMind（灵犀）系统约束」，新增项目概要/技术栈/Crate 结构/依赖方向铁律
+2. **三套 commands 目录**: `.catpaw/commands/` + `.claude/commands/` + `.cursor/commands/`，各 11 个命令文件（build/test/check/session-start/session-end/feature/e2e/doc-sync/github-sync/new-ipc/new-req）
+3. **system-prompt.md**: CatPaw Settings → Prompt & Rules → System Prompt 的 EchoMind 专属内容（项目核心/Crate 结构/关键约束/验证命令/必读文档优先级）
+4. **docs-index.md**: CatPaw Settings → 索引 & Docs → Docs 的 50 条官方文档清单（P0 必加 8 条 + P1 Rust 生态 14 条 + P1 Tauri 2 条 + P1 数据库&加密 8 条 + P1 文档解析&ML 8 条 + P1 其他 2 条 + P2 前端工具链 4 条 + P2 前端库 6 条 + P2 Pro 6 条），全部为官方域名
 
-### 核心实现设计
-```rust
-use std::collections::HashMap;
-use tokio::sync::RwLock;
+## Git 状态
 
-/// Token 估算器（借鉴 QM estimateEntryTokens 的 LRU 缓存）
-pub struct TokenEstimator {
-    cache: Arc<RwLock<HashMap<u64, usize>>>,
-    max_cache_size: usize,
-}
+- **分支**: main
+- **未提交变更**: 101 个文件（80 modified + 21 untracked）
+- **关键 untracked**: `.catpaw/commands/`（33 命令文件）、`.claude/`、`.cursor/`、`crates/core/src/{budget,concurrency,idempotency,llm_router,security}_tests.rs`、`ui/locales/ja.json`
+- **发布仓库**: `EchoMind/EchoMind/`（通过 `./sync-to-github.sh` 同步，GitHub: lisering/EchoMind）
 
-impl TokenEstimator {
-    pub fn new(max_cache: usize) -> Self { ... }
-    pub async fn estimate(&self, content: &str) -> usize { ... }
-}
+## 验证命令速查
 
-/// 修复悬空的 tool_call（借鉴 QM healDanglingCalls）
-pub fn heal_dangling_calls(history: &mut Vec<ChatMessage>) { ... }
+```bash
+cargo build                           # Free 编译
+cargo build --release --features pro  # Pro Release 编译（~4min）
+cargo test                            # Free 测试 (822+ passed)
+cargo test --features pro             # Pro 测试 (1094 passed)
+cargo test -p <crate>                 # 单 crate 测试
+cargo test <name>                     # 聚焦测试
+cargo clippy --all-targets -- -D warnings          # Free Clippy
+cargo clippy --all-targets --features pro -- -D warnings  # Pro Clippy（~6m39s）
+cargo fmt --check                     # 格式检查
+npx tsc --noEmit                      # TypeScript 类型检查
+node scripts/build-ui.mjs             # 前端 esbuild 打包
+cd e2e-tests && npm run test:bridge   # E2E 桥接测试 (955 passed)
+cd e2e-tests && npm run test:unit     # Vitest 前端测试 (407 passed)
+./sync-to-github.sh                   # GitHub 发布同步
 ```
 
-### TDD 测试（tc_token_cache_001~003 + tc_heal_dangling_001~003）
-- `tc_token_cache_001`：相同内容第二次估算命中缓存
-- `tc_token_cache_002`：缓存满时 LRU 驱逐最旧条目
-- `tc_token_cache_003`：`recent_entry_count_within_budget` 正确从末尾保留
-- `tc_heal_dangling_001`：单个未配对 tool_call 被修复
-- `tc_heal_dangling_002`：多个未配对 tool_call 全部修复
-- `tc_heal_dangling_003`：已配对的 tool_call 不受影响
+## 关键文件索引
 
-### 验收标准
-- cargo test 全部通过（Free + Pro）
-- cargo clippy --all-targets -- -D warnings 零警告
-- cargo fmt --check 通过
-- TokenEstimator 带 LRU 缓存，避免重复 BPE 编码
-- heal_dangling_calls 修复未配对的 tool_call
+| 文件 | 用途 |
+|---|---|
+| `docs/sessions/CURRENT_STATE.md` | 项目状态快照（新 session 第一必读） |
+| `.catpaw/rules/system-constraints.md` | 铁律规则 v3.3（21 条） |
+| `.catpaw/rules/system-prompt.md` | CatPaw System Prompt 内容 |
+| `.catpaw/rules/docs-index.md` | CatPaw 索引 & Docs 官方文档清单（50 条） |
+| `docs/SRS_v1.0.md` | 需求规格唯一依据（REQ-<域>-<序号> 格式） |
+| `docs/api/ipc-commands.md` | IPC 命令签名（162 条） |
+| `docs/api/code-contracts.md` | Trait 签名 + 数据模型 |
+| `docs/api/database-schema.md` | 数据库表结构 |
+| `docs/api/settings-reference.md` | 设置键 + Tauri 事件 |
+| `docs/api/frontend-modules.md` | 前端模块函数清单（50 个模块） |
+| `docs/SOFTWARE_ASSET.md` | 软件资产全景文档（1100+ 行） |
+| `docs/architecture/QM_BORROW_ATOMIC_PLAN.md` | QM 借鉴计划（Q01-Q11 全部 ✅） |
+| `docs/architecture/OPENCODE_BORROW_ATOMIC_PLAN.md` | OpenCode 借鉴计划（B01-B14 全部 ✅） |
+| `AGENTS.md` | AI Agent 指南（架构 + 数据流 + Key files） |
+| `CLAUDE.md` | Claude Code 指南 |
+| `PROJECT_RULES.md` | 项目宪法（三体系规则） |
+| `docs/architecture/adr/` | 13 个架构决策记录 |
+| `sync-to-github.sh` | GitHub 发布同步脚本 |
 
-### 关键约束
-1. **铁律**：TDD 先写红灯测试再实现；零 unwrap/expect/panic（workspace deny lint，测试模块可加 `#![allow(clippy::unwrap_used)]`）
-2. **compact crate** 在 `crates/compact/src/lib.rs`，已有 `check_compaction_needed()` + `DualThresholdConfig` + 后台压缩函数
-3. **token_budget 模块** 在 `crates/compact/src/token_budget.rs`，有 `estimate_tokens()` / `estimate_messages_tokens()` / `find_compaction_boundary()`
-4. **ChatMessage** 在 `crates/models/src/lib.rs`，有 `role` / `content` / `sources` / `reasoning` / `turn_group` / `version` 字段
-5. **Edition 2024** native async fn in trait，无 async-trait macro
-6. **文档同步**：修改后运行 `./sync-to-github.sh --commit` 同步到发布仓库
-7. **SRS changelog**：在 `docs/SRS_v1.0.md` 末尾添加 v7.5.0 changelog 条目
-8. **NEXT_SESSION_PROMPT.md**：完成后更新 `docs/sessions/NEXT_SESSION_PROMPT.md` 为 Q05 衔接提示词
+## 下一步可选方向（请选择其一开始，并说明理由）
 
-### 原子计划文档
-完整计划详见 `docs/architecture/QM_BORROW_ATOMIC_PLAN.md`，Q04 部分约在 271-310 行。后续 Q05（安全态势分层 + Security-Tainted 条目）约在 322-388 行。
+### 方向 1: v1.5 新功能规划与开发
+- MCP 协议支持（待 Rust SDK 成熟，需互联网搜索调研）
+- Late Chunking（需长上下文嵌入模型）
+- RAG 评估指标（RAGAS 风格，faithfulness/relevance/recall）
+- 多窗口支持（多知识库并行）
+- 对话分支管理增强
+- 多模态文档处理增强（图片/图表 OCR 提取优化）
+流程：ROI 评估 → 原子计划文档 → SRS REQ 定义 → TDD 开发
 
-请开始实施 Q04。
-```
+### 方向 2: Git 状态清理与提交
+- 当前 101 个未提交文件（80 modified + 21 untracked）
+- 需要 git add + commit 将 QM 借鉴 Q01-Q11 + OpenCode 借鉴 B01-B14 + 跨 Phase 整合 + CatPaw 配置治理 的全部成果提交
+- 运行 ./sync-to-github.sh 同步到发布仓库
+
+### 方向 3: E2E 测试质量提升
+- 修复 pre-existing E2E 失败用例（navigation-advanced 2 failed + error-handling 2 failed）
+- 补充 QM 借鉴功能的 E2E 测试覆盖（qm-borrow-features.spec.ts 已存在但可能不完整）
+- 混沌测试覆盖率提升
+- CI 集成 E2E 测试到 GitHub Actions
+
+### 方向 4: 架构优化与技术债清理
+- 编译速度优化（crate 分割、增量编译优化）
+- Pro 功能审计（确保所有 Pro 门控正确）
+- 文档全面同步（SRS/PROJECT_RULES 更新到最新状态）
+- 依赖版本更新（cargo update + npm outdated）
+- 新增日文 i18n（ui/locales/ja.json 已存在但可能不完整）
+
+### 方向 5: 生产就绪加固
+- 日志系统增强（结构化日志 + OpenTelemetry）
+- 错误恢复机制完善
+- 数据迁移工具（版本升级时 SQLite schema 迁移脚本）
+- 性能基准自动化（CI 集成 benchmark 回归检测）
+- 安全审计（渗透测试、PII 脱敏验证、SQLCipher 验证）
+
+### 方向 6: 商业化准备
+- License 购买流程（支付集成、License Key 发放自动化）
+- 用户文档/帮助系统
+- 官网建设
+- App Store / Microsoft Store 上架准备
+
+请根据项目优先级选择下一步工作方向，并说明理由。先读取 `docs/sessions/CURRENT_STATE.md` 获取完整项目状态。
+~~~

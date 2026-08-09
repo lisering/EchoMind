@@ -36,7 +36,7 @@ Session N+1
 2. `docs/SOFTWARE_ASSET.md` — 软件资产全景（架构、代码、数据流）
 3. `docs/architecture/XXX_ATOMIC_PLAN.md` — 本 Session 章节（第 X-Y 行）
 4. `crates/xxx/src/xxx.rs` — 已完成的参考代码
-5. `.catpaw/rules/iron-rules.md` — 铁律规则
+5. `.catpaw/rules/system-constraints.md` — 铁律规则
 6. 【其他必读文件】
 
 ## 精确变更清单
@@ -123,7 +123,7 @@ Session 10
 1. `docs/sessions/CURRENT_STATE.md` — 项目当前状态
 2. `docs/SOFTWARE_ASSET.md` — 软件资产全景
 3. `docs/architecture/EXTREME_PERFORMANCE_ATOMIC_PLAN.md` — S10 章节
-4. `.catpaw/rules/iron-rules.md` — 铁律规则
+4. `.catpaw/rules/system-constraints.md` — 铁律规则
 
 ## 精确变更清单
 | 文件 | 变更类型 | 内容 |

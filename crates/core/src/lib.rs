@@ -15,6 +15,8 @@ pub mod agent;
 pub mod audit;
 /// 后台空闲整理引擎：重复文档检测、跨文档矛盾发现、整理建议生成。
 pub mod auto_dream;
+/// 预算追踪和速率限制（QM 借鉴）：LLM API 费用控制和请求限流。
+pub mod budget;
 /// 语义缓存金字塔（REQ-PERF-001）：L0 精确 + L1 语义 + L3 检索结果三级缓存。
 pub mod cache;
 pub mod chat;
@@ -23,6 +25,8 @@ pub mod chat;
 /// 借鉴 CodeForge 多语言执行器：Agent 在回答代码相关问题时可执行代码片段验证结果。
 /// 端口定义在 core，真实实现在 infra（`WasmExecutor`，Pro 门控）。
 pub mod code_executor;
+/// 并发控制模块（Q09 借鉴 QM createKeyedQueue）：按 key 序列化异步操作，消除 SQLite 并发写入竞态。
+pub mod concurrency;
 /// 多代理协调引擎（REQ-RAG-025）：Research→Synthesis→Implementation→Verification 四阶段。
 pub mod coordinator;
 /// 领域画像自动分类（REQ-VEC-013）：16 领域嵌入质心分类。
@@ -45,11 +49,16 @@ pub mod graph_retriever;
 pub mod hooks;
 /// 混合检索器：向量 + 关键词 RRF 融合（REQ-RAG-010）。
 pub mod hybrid_retriever;
+/// 幂等性存储 + 统一周期任务抽象：防重复操作（文件同步/AutoDream）+ 后台任务管理。
+pub mod idempotency;
 pub mod import;
 pub mod license;
 /// 多协议 LLM 适配（B10 LLM Protocol Types，REQ-ARCH-012）：
 /// LLM 协议类型枚举 + 协议感知 Provider trait。
 pub mod llm_protocol;
+/// LLM 后端路由器（Q11 借鉴 QM HarnessRouter）：
+/// 按对话或用户偏好动态切换 LLM 后端，切换时通知重置会话状态。
+pub mod llm_router;
 pub mod loader;
 /// 持久化记忆系统（REQ-RAG-032）：借鉴 IfAI 三层记忆 Wing/Hall/Room + Bamboo-agent 上下文压缩。
 ///
@@ -1114,6 +1123,29 @@ pub trait Storage: Send + Sync {
         Ok(0)
     }
 
+    // --- 幂等性存储支持 ---
+
+    /// 记录幂等性操作（key + 时间戳）。
+    ///
+    /// 默认空操作；生产适配器应覆盖为 SQL INSERT。
+    async fn record_idempotency(&self, _key: &str, _timestamp: i64) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 列出所有幂等性记录。
+    ///
+    /// 默认空操作；生产适配器应覆盖为 SQL SELECT。
+    async fn list_idempotency_records(&self) -> anyhow::Result<Vec<(String, i64)>> {
+        Ok(Vec::new())
+    }
+
+    /// 清理过期的幂等性记录。
+    ///
+    /// 默认空操作；生产适配器应覆盖为 SQL DELETE。
+    async fn cleanup_expired_idempotency(&self, _before_timestamp: i64) -> anyhow::Result<usize> {
+        Ok(0)
+    }
+
     // --- Session Todo 持久化（REQ-RAG-044）---
 
     /// 创建 Todo 项，持久化到 `session_todos` 表。
@@ -1148,6 +1180,76 @@ pub trait Storage: Send + Sync {
     ///
     /// 默认空操作；生产适配器应覆盖为 SQL DELETE WHERE conversation_id = ?。
     async fn delete_session_todos(&self, _conversation_id: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    // --- Security-Tainted 条目标记（Q05 借鉴 QM securityTainted）---
+
+    /// 标记指定消息条目为 security-tainted（安全污染）。
+    ///
+    /// 被标记的条目在上下文构建时默认过滤（不发送给 LLM），
+    /// 除非调用方显式请求 `include_security_tainted = true`。
+    ///
+    /// 默认空操作；生产适配器应覆盖为 SQL UPDATE。
+    async fn set_entry_security_tainted(
+        &self,
+        _message_id: &str,
+        _tainted: bool,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 查询指定消息条目的 security-tainted 标记。
+    ///
+    /// 返回 `true` 表示该条目被标记为安全污染。
+    /// 默认实现返回 `false`（未标记）；生产适配器应覆盖为 SQL SELECT。
+    async fn get_entry_security_tainted(&self, _message_id: &str) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+
+    // ------------------------------------------------------------------
+    // 预算追踪（QM 借鉴）
+    // ------------------------------------------------------------------
+
+    /// 记录预算使用（用于 LLM API 费用追踪）。
+    ///
+    /// 在 chat_inner 调用 LLM 后记录 token 使用量和成本。
+    /// 默认实现为空操作；生产适配器应覆盖为 SQL INSERT。
+    async fn record_budget_usage(
+        &self,
+        _principal: &str,
+        _input_tokens: usize,
+        _output_tokens: usize,
+        _cost_usd: f64,
+        _model_name: &str,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 查询指定主体的预算使用统计。
+    ///
+    /// 返回该主体在滑动窗口内的使用情况和成本统计。
+    /// 默认实现返回空统计；生产适配器应覆盖为 SQL 聚合查询。
+    async fn get_budget_stats(
+        &self,
+        _principal: &str,
+    ) -> anyhow::Result<echomind_models::BudgetStats> {
+        Ok(echomind_models::BudgetStats {
+            daily_limit: 0.0,
+            spent_today: 0.0,
+            remaining: f64::INFINITY,
+        })
+    }
+
+    /// 设置预算每日限制。
+    ///
+    /// 更新指定主体的每日预算上限（USD）。
+    /// 默认实现为空操作；生产适配器应覆盖为 SQL UPDATE 或 INSERT OR REPLACE。
+    async fn set_budget_limit(
+        &self,
+        _principal: &str,
+        _daily_limit_usd: f64,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -1188,6 +1290,74 @@ pub trait LLMProvider: Send + Sync {
     ) -> anyhow::Result<BoxStream<'static, anyhow::Result<String>>> {
         let combined = format!("{static_prefix}\n\n{dynamic_context}");
         self.chat_stream(&combined, history, query).await
+    }
+
+    // -----------------------------------------------------------------------
+    // Q10 辅助模型方法（借鉴 QM HarnessModelUtilities）
+    //
+    // 以下方法均有默认实现（返回 None），现有 LLMProvider 实现者无需修改。
+    // 各后端可按需覆盖以提供优化实现。
+    // -----------------------------------------------------------------------
+
+    /// 生成对话标题（借鉴 QM generateTitle）。
+    ///
+    /// 输入对话转录文本（用户首条消息 + 助手回复摘要），返回简短标题。
+    /// 默认返回 `Ok(None)`，由调用方降级为 `derive_title()` 字符串截取。
+    ///
+    /// # 参数
+    /// - `transcript`：对话转录文本（通常是首条用户消息 + 助手回复的前若干句）
+    ///
+    /// # 返回
+    /// - `Ok(Some(title))`：成功生成标题
+    /// - `Ok(None)`：此 Provider 不支持标题生成，调用方应降级
+    /// - `Err(...)`：网络/API 错误，调用方应降级
+    async fn generate_title(&self, _transcript: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+
+    /// 单次推理（借鉴 QM oneShot）。
+    ///
+    /// 非流式单轮完成，用于记忆提取、安全筛查、摘要生成等辅助任务。
+    /// 与 `chat_stream` 不同，此方法等待完整响应后返回，不逐 token 推送。
+    ///
+    /// # 参数
+    /// - `system`：系统提示词
+    /// - `prompt`：用户输入
+    ///
+    /// # 返回
+    /// - `Ok(Some(text))`：成功生成完整响应
+    /// - `Ok(None)`：此 Provider 不支持单次推理
+    /// - `Err(...)`：网络/API 错误
+    async fn one_shot(&self, _system: &str, _prompt: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+
+    /// 判断器（借鉴 QM judge）。
+    ///
+    /// 用于安全筛查、质量评估、内容审核等需要 LLM 做判断的场景。
+    /// 返回判断结果文本（如 "yes"/"no"/"safe"/"unsafe"），由调用方解析。
+    ///
+    /// # 参数
+    /// - `system`：系统提示词（如 "你是安全审查员"）
+    /// - `prompt`：待判断的内容
+    ///
+    /// # 返回
+    /// - `Ok(Some(verdict))`：成功返回裁决
+    /// - `Ok(None)`：此 Provider 不支持判断
+    /// - `Err(...)`：网络/API 错误
+    async fn judge(&self, _system: &str, _prompt: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+
+    /// 上下文 token 预算（借鉴 QM contextTokenBudget）。
+    ///
+    /// 返回此模型的最大上下文长度（token 数）。用于压缩引擎计算可用预算。
+    ///
+    /// # 返回
+    /// - `Some(n)`：已知模型上限
+    /// - `None`：未知上限，调用方应使用保守默认值
+    fn context_token_budget(&self) -> Option<usize> {
+        None
     }
 }
 
@@ -1834,6 +2004,8 @@ mod auto_dream_tests;
 #[cfg(test)]
 mod benchmark_tests;
 #[cfg(test)]
+pub mod budget_tests;
+#[cfg(test)]
 mod cache_tests;
 #[cfg(test)]
 mod chat_tests;
@@ -1860,9 +2032,15 @@ mod hooks_tests;
 #[cfg(test)]
 mod hybrid_retriever_tests;
 #[cfg(test)]
+mod idempotency_tests;
+#[cfg(test)]
 mod import_tests;
 #[cfg(test)]
 mod license_tests;
+#[cfg(test)]
+mod llm_aux_tests;
+#[cfg(test)]
+mod llm_router_tests;
 #[cfg(test)]
 mod loader_tests;
 #[cfg(test)]
@@ -1881,6 +2059,8 @@ mod quality_gate_tests;
 mod retrieval_memory_tests;
 #[cfg(test)]
 mod retriever_tests;
+#[cfg(test)]
+mod security_tests;
 #[cfg(test)]
 mod speculative_rag_tests;
 #[cfg(test)]

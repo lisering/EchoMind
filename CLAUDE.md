@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **⚠️ 铁律规则**：请先阅读 `.catpaw/rules/iron-rules.md`（代理设置仅限开发调研、软件本身禁止代理、TDD 驱动、代码注释、真实数据测试、生产级代码质量、最新版本依赖、文档实时同步、开发决策互联网搜索、Rust 生态优先、GitHub 发布同步、Tailwind 样式规范、SOLID 原则、Spec-driven Development 规格驱动开发）——本项目为绝对强制规则，每次新会话必须遵守。
+> **⚠️ 铁律规则**：请先阅读 `.catpaw/rules/system-constraints.md`（代理设置仅限开发调研、软件本身禁止代理、TDD 驱动+模糊测试、代码注释、真实数据测试、生产级代码质量+Miri UB 检测+forbid unsafe、最新版本依赖+供应链安全工具链、文档实时同步+文档治理、开发决策互联网搜索、Rust 生态优先、GitHub 发布同步、Tailwind 样式规范、SOLID 原则、Spec-driven Development 规格驱动开发、AI 生成代码审查、结构化日志与可观测性+axe-core、LLM 应用安全防护+致命三要素+Rule of Two、错误处理与弹性设计、AI Agent 行为规范、RAG 安全防护+向量嵌入弱点）——本项目为绝对强制规则，每次新会话必须遵守。
 >
 > **📋 需求规格**：所有功能需求定义在 `docs/SRS_v1.0.md` 中（格式 `REQ-<域>-<序号>`，每条 AC 由 `TC-*` / `E2E-*` 测试验证），是开发、测试、验收的唯一依据。改动功能时必须同步更新对应 REQ 状态。
 >
@@ -475,7 +475,7 @@ openGraphViewer → get_graph_data() → D3 forceSimulation
 - `types/dom-ext.d.ts` / `types/tauri.d.ts` / `types/vendor.d.ts` — 全局类型声明（DOM 扩展 / Tauri IPC / 第三方库）
 - `docs/SRS_v1.0.md` — 需求规格唯一依据（3736 行，v2.3.0）
 - `docs/api/` — 接口契约文档（ipc-commands / code-contracts / database-schema / settings-reference / frontend-modules）
-- `.catpaw/rules/iron-rules.md` — 铁律规则（强制）
+- `.catpaw/rules/system-constraints.md` — 铁律规则（强制）
 
 ## Key quirks
 
@@ -520,7 +520,7 @@ openGraphViewer → get_graph_data() → D3 forceSimulation
 | 功能实现/补齐 | `docs/SRS_v1.0.md` 对应 REQ 状态（同一 PR 内） |
 | 新增架构决策 | `docs/architecture/adr/` 新建 ADR（同一 PR 内） |
 
-AI Agent 开发前必读文档优先级：`PROJECT_RULES.md` → `docs/api/code-contracts.md` → `docs/api/ipc-commands.md` → `docs/api/database-schema.md` → `AGENTS.md` → `.catpaw/rules/iron-rules.md`。
+AI Agent 开发前必读文档优先级：`PROJECT_RULES.md` → `.catpaw/rules/system-constraints.md` → `docs/api/code-contracts.md` → `docs/api/ipc-commands.md` → `docs/api/database-schema.md` → `AGENTS.md`。
 
 ## GitHub 发布同步（铁律十一）
 

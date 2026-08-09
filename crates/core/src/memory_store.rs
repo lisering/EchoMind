@@ -143,9 +143,12 @@ impl<S: Storage> MemoryStore<S> {
              只提取有长期价值的信息，忽略寒暄和临时性问题。\n\
              最多提取 5 条。仅输出提取结果，不要其他解释。";
 
-        // 调用 LLM（非流式，收集全部 token）
-        let stream = llm.chat_stream(system_prompt, &[], &dialog_text).await?;
-        let raw = collect_stream(stream).await?;
+        // 调用 LLM（优先 one_shot，降级 chat_stream + collect_stream）
+        let raw = match llm_complete(llm, system_prompt, &dialog_text).await {
+            Ok(Some(text)) => text,
+            Ok(None) => return Ok(Vec::new()),
+            Err(_) => return Ok(Vec::new()),
+        };
 
         // 逐行解析 → 创建 Wing 层 MemoryEntry
         let mut entries = Vec::new();
@@ -504,8 +507,11 @@ impl<S: Storage> MemoryStore<S> {
         numbered_list: &str,
     ) -> anyhow::Result<String> {
         let system_prompt = MEMORY_CONSOLIDATION_PROMPT;
-        let stream = llm.chat_stream(system_prompt, &[], numbered_list).await?;
-        collect_stream(stream).await
+        match llm_complete(llm, system_prompt, numbered_list).await {
+            Ok(Some(text)) => Ok(text),
+            Ok(None) => Err(anyhow::anyhow!("LLM 返回空结果")),
+            Err(e) => Err(e),
+        }
     }
 
     /// 应用整合动作到长期记忆（内部方法）。
@@ -658,6 +664,48 @@ async fn collect_stream(
         result.push_str(&token?);
     }
     Ok(result)
+}
+
+/// 非流式 LLM 调用：优先使用 `one_shot`，降级为 `chat_stream + collect_stream`。
+///
+/// 跨 Phase 依赖整合（S67）：Burst Buffer / Consolidation / Extract 全部
+/// 非流式 LLM 调用统一走此函数。Q10 新增的 `one_shot()` 语义更精确
+/// （非流式单轮完成），优先使用；Provider 未覆盖 `one_shot` 时
+/// （返回 `Ok(None)`）或出错时降级为 `chat_stream + collect_stream`。
+///
+/// # 返回
+/// - `Ok(Some(text))`：成功获取 LLM 响应
+/// - `Ok(None)`：两条路径均返回空
+/// - `Err(...)`：两条路径均失败
+async fn llm_complete<L: LLMProvider>(
+    llm: &L,
+    system_prompt: &str,
+    user_prompt: &str,
+) -> anyhow::Result<Option<String>> {
+    // 优先尝试 one_shot（Q10 辅助方法）
+    match llm.one_shot(system_prompt, user_prompt).await {
+        Ok(Some(text)) => Ok(Some(text)),
+        Ok(None) => {
+            // Provider 未覆盖 one_shot，降级为 chat_stream + collect_stream
+            let stream = llm.chat_stream(system_prompt, &[], user_prompt).await?;
+            let text = collect_stream(stream).await?;
+            if text.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(text))
+            }
+        }
+        Err(_) => {
+            // one_shot 出错，降级为 chat_stream + collect_stream
+            let stream = llm.chat_stream(system_prompt, &[], user_prompt).await?;
+            let text = collect_stream(stream).await?;
+            if text.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(text))
+            }
+        }
+    }
 }
 
 /// 解析 LLM 输出的单行记忆提取结果。
@@ -868,11 +916,9 @@ pub async fn flush_burst_turns<S: Storage, L: LLMProvider>(
          只提取有长期价值的信息，忽略寒暄和临时性问题。\n\
          最多提取 10 条。仅输出提取结果，不要其他解释。";
 
-    let raw = match llm.chat_stream(system_prompt, &[], &dialog_text).await {
-        Ok(stream) => match collect_stream(stream).await {
-            Ok(text) => text,
-            Err(_) => return Ok(0),
-        },
+    let raw = match llm_complete(llm, system_prompt, &dialog_text).await {
+        Ok(Some(text)) => text,
+        Ok(None) => return Ok(0),
         Err(_) => return Ok(0),
     };
 

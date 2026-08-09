@@ -56,11 +56,11 @@ export function updateProStatus() {
   if (get('isPro')) {
     el.textContent = t('sidebar.pro_badge_pro');
     badge.className = 'inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium bg-accent/15 text-accent border border-accent/20';
-    badge.querySelector('svg').innerHTML = '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>';
+    badge.querySelector('.badge-icon').textContent = '⭐';
   } else {
     el.textContent = t('sidebar.pro_badge_free');
     badge.className = 'inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium bg-surface-3 text-text-tertiary border border-border-default';
-    badge.querySelector('svg').innerHTML = '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>';
+    badge.querySelector('.badge-icon').textContent = '🔒';
   }
 }
 

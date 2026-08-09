@@ -28,7 +28,7 @@ yanked = "deny"
 # ─────────────────────────────────────────────────────────────────────
 [licenses]
 version = 2
-# 允许的许可证列表（MIT 项目兼容的所有常见许可证）
+# 允许的许可证列表（BSL-1.1 项目兼容的所有常见许可证）
 allow = [
     "MIT",
     "Apache-2.0",
@@ -45,9 +45,13 @@ allow = [
     "BSL-1.0",
     "0BSD",
     "Unlicense",
+    # EchoMind 自身许可证（Alpha 阶段：MIT；稳定后切换回 BUSL-1.1）
+    "MIT",
     # 以下为传递依赖需要的许可证
     "NCSA",
     "CDLA-Permissive-2.0",
+    # bzip2 库许可证（BSD-like）
+    "bzip2-1.0.6",
 ]
 confidence-threshold = 0.8
 exceptions = []

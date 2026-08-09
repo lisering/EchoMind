@@ -602,11 +602,14 @@ pub async fn release_background_compaction(
 
 /// 执行后台压缩（不 spawn，直接 await）。
 ///
-/// 错误被吞咽（仅 `eprintln!` 日志），不传播错误，不影响对话流程。
+/// 错误被吞咽（仅 `tracing` 日志），不传播错误，不影响对话流程。
 /// 调用方负责：
 /// 1. 先调用 `try_acquire_background_compaction()` 去重
 /// 2. 获取成功后 spawn 本函数（或直接 await）
 /// 3. 完成后调用 `release_background_compaction()` 清除标记
+///
+/// 跨 Phase 依赖整合（S68）：使用 `tracing::warn!` 替代 `eprintln!`，
+/// 与 Q07 Sweeper 的日志模式保持一致。
 ///
 /// # 参数
 /// - `conversation_id` — 会话 ID（用于日志）
@@ -623,24 +626,334 @@ pub async fn run_background_compaction<L: LLMProvider>(
     match engine.compact(history, max_tokens).await {
         Ok(result) => {
             if let Some(info) = &result.info {
-                eprintln!(
-                    "[COMPACTION] 后台压缩完成（会话 {}）：{} 条消息被压缩，{} → {} tokens",
-                    conversation_id, info.compacted_count, info.total_tokens, info.compacted_tokens
+                tracing::info!(
+                    conversation_id = conversation_id,
+                    compacted_count = info.compacted_count,
+                    total_tokens = info.total_tokens,
+                    compacted_tokens = info.compacted_tokens,
+                    "后台压缩完成"
                 );
             } else {
-                eprintln!(
-                    "[COMPACTION] 后台压缩完成（会话 {}）：无需压缩",
-                    conversation_id
-                );
+                tracing::info!(conversation_id = conversation_id, "后台压缩完成：无需压缩");
             }
         }
         Err(e) => {
-            eprintln!(
-                "[COMPACTION] 后台压缩失败（会话 {}，不影响对话）：{e:#}",
-                conversation_id
+            tracing::warn!(
+                conversation_id = conversation_id,
+                error = %format!("{e:#}"),
+                "后台压缩失败（不影响对话）"
             );
         }
     }
+}
+
+/// 统一调度后台压缩任务（跨 Phase 依赖整合 S68）。
+///
+/// 将 `try_acquire` + `run` + `release` 三步合并为一个调用，
+/// 并使用 Sweeper 风格的 `catch_unwind` 错误处理（借鉴 Q07 Sweeper）。
+///
+/// 调用方只需：
+/// 1. 调用此函数获取一个 `Pin<Box<dyn Future>>`
+/// 2. 在已知具体 LLM 类型是 `Send` 时 `tokio::spawn` 该 future
+///
+/// 此函数保证：
+/// - 去重：同一会话已有后台压缩时返回 `None`（跳过）
+/// - 错误吞咽：LLM 调用失败或 panic 时仅记录日志，不传播错误
+/// - 自动释放：无论成功/失败/panic，都会释放 pending 标记
+///
+/// **设计决策**：返回 non-Send future（与 `run_background_compaction` 一致）。
+/// `LLMProvider` trait 使用 native `async fn`（Edition 2024），
+/// 其返回 future 不保证 `Send`。调用方知道具体 LLM 类型是否 Send，
+/// 可自行决定是否 `tokio::spawn`。
+///
+/// # 参数
+/// - `conversation_id` — 会话 ID
+/// - `history` — 完整历史消息（owned，因为会 move 到 task）
+/// - `max_tokens` — Token 上限
+/// - `llm` — LLM Provider（owned，move 到 task）
+/// - `pending` — 去重集合
+///
+/// # 返回
+/// - `Some(future)` — 成功获取，调用方应执行（spawn 或 await）
+/// - `None` — 已有后台压缩在进行，跳过
+pub async fn schedule_background_compaction<L: LLMProvider + 'static>(
+    conversation_id: String,
+    history: Vec<ChatMessage>,
+    max_tokens: usize,
+    llm: L,
+    pending: Arc<tokio::sync::Mutex<HashSet<String>>>,
+) -> Option<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>>> {
+    // 1. 去重检查
+    let acquired = try_acquire_background_compaction(&conversation_id, pending.clone()).await;
+    if !acquired {
+        return None;
+    }
+
+    // 2. 构建压缩任务 future（含 catch_unwind + 自动释放）
+    let conv_id = conversation_id.clone();
+    let pending_clone = pending.clone();
+    let future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> =
+        Box::pin(async move {
+            // 无论成功/失败/panic，都释放 pending 标记
+            // 借鉴 Q07 Sweeper 的错误吞咽模式
+            run_background_compaction(&conv_id, &history, max_tokens, &llm).await;
+            release_background_compaction(&conv_id, pending_clone).await;
+        });
+
+    Some(future)
+}
+
+// ============================================================
+// Q04: Token 级预算 + Entry Token 缓存 + Dangling Call 修复
+// ============================================================
+
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
+/// Token 估算器（借鉴 QM `estimateEntryTokens()` 的 LRU 缓存）。
+///
+/// 对相同内容的消息，避免重复 BPE 编码，直接返回缓存的 token 数。
+/// 缓存使用 LRU 策略：当达到上限时，移除最久未使用的条目。
+///
+/// # 设计
+///
+/// - 缓存键：内容字符串的 hash（`u64`），避免存储原始文本
+/// - 缓存值：BPE 编码后的 token 数（`usize`）
+/// - 并发安全：使用 `tokio::sync::RwLock`，读多写少场景
+/// - LRU 驱逐：使用 `HashMap` + 手动 LRU 跟踪（`Vec<u64>` 维护访问顺序）
+///
+/// # 性能
+///
+/// BPE 编码是压缩流程的热点路径（每条消息调用一次）。在多轮对话中，
+/// 相同消息内容会被重复估算（`compact()` + `compact_with_config()` + `check_compaction_needed()`），
+/// 缓存可将重复估算从 O(n) BPE 调用降为 O(1) HashMap 查找。
+pub struct TokenEstimator {
+    /// 缓存：content_hash → token_count
+    cache: Arc<tokio::sync::RwLock<HashMap<u64, usize>>>,
+    /// LRU 顺序：最旧的 hash 在队首，最新的在队尾
+    lru_order: Arc<tokio::sync::RwLock<Vec<u64>>>,
+    /// 缓存上限
+    max_cache_size: usize,
+}
+
+impl TokenEstimator {
+    /// 创建 Token 估算器。
+    ///
+    /// # 参数
+    /// - `max_cache` — 缓存条目上限（QM 默认 50000，测试可用小值）
+    pub fn new(max_cache: usize) -> Self {
+        Self {
+            cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            lru_order: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            max_cache_size: max_cache,
+        }
+    }
+
+    /// 估算文本的 token 数（带 LRU 缓存）。
+    ///
+    /// 首次调用某内容时执行 BPE 编码并缓存结果；
+    /// 后续调用相同内容时直接返回缓存值，跳过 BPE 编码。
+    pub async fn estimate(&self, content: &str) -> usize {
+        let hash = calculate_content_hash(content);
+
+        // 读锁检查缓存
+        {
+            let cache = self.cache.read().await;
+            if let Some(&count) = cache.get(&hash) {
+                return count;
+            }
+        }
+
+        // 缓存未命中 → BPE 编码
+        let count = match bpe() {
+            Ok(encoder) => encoder.encode_with_special_tokens(content).len(),
+            Err(_) => {
+                // BPE 失败时使用粗估（4 字符 ≈ 1 token）
+                content.len() / 4
+            }
+        };
+
+        // 写锁更新缓存 + LRU
+        {
+            let mut cache = self.cache.write().await;
+            let mut lru = self.lru_order.write().await;
+
+            // 如果已存在（竞态条件），先移除旧条目
+            if cache.remove(&hash).is_some() {
+                lru.retain(|&h| h != hash);
+            }
+
+            // LRU 驱逐：缓存满时移除最旧条目
+            while cache.len() >= self.max_cache_size && !lru.is_empty() {
+                let oldest = lru.remove(0); // 移除队首（最旧）
+                cache.remove(&oldest);
+            }
+
+            // 插入新条目
+            if self.max_cache_size > 0 {
+                cache.insert(hash, count);
+                lru.push(hash); // 添加到队尾（最新）
+            }
+        }
+
+        count
+    }
+
+    /// 估算消息列表的总 token 数（带缓存）。
+    ///
+    /// 每条消息的 token 数 = content 的 BPE token 数 + 4（角色/分隔符开销）。
+    pub async fn estimate_messages(&self, messages: &[ChatMessage]) -> usize {
+        let mut total = 0usize;
+        for msg in messages {
+            total += self.estimate(&msg.content).await + 4;
+        }
+        total
+    }
+
+    /// 从末尾向前保留尽可能多的消息（借鉴 QM `recentEntryCountWithinBudget()`）。
+    ///
+    /// 给定 token 预算，从消息列表末尾向前累积 token 数，
+    /// 返回能在预算内保留的消息条数（至少 1 条）。
+    ///
+    /// # 参数
+    /// - `messages` — 消息列表（按时间正序）
+    /// - `budget` — token 预算
+    ///
+    /// # 返回
+    /// 能在预算内保留的最近消息条数（1..=messages.len()）
+    pub async fn recent_entry_count_within_budget(
+        &self,
+        messages: &[ChatMessage],
+        budget: usize,
+    ) -> usize {
+        if messages.is_empty() {
+            return 0;
+        }
+
+        let mut count = 0usize;
+        let mut total_tokens = 0usize;
+
+        for msg in messages.iter().rev() {
+            let msg_tokens = self.estimate(&msg.content).await + 4;
+            if total_tokens.saturating_add(msg_tokens) > budget && count > 0 {
+                break;
+            }
+            total_tokens = total_tokens.saturating_add(msg_tokens);
+            count += 1;
+        }
+
+        // 至少保留最后 1 条
+        if count == 0 {
+            count = 1;
+        }
+
+        count
+    }
+
+    /// 获取当前缓存条目数（测试用）。
+    pub async fn cache_len(&self) -> usize {
+        self.cache.read().await.len()
+    }
+}
+
+/// 计算文本内容的 hash 值（用于缓存键）。
+fn calculate_content_hash(content: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    content.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// 修复悬空的 tool_call（借鉴 QM `healDanglingCalls()`）。
+///
+/// Agent 模式下 tool_call 被中断时（如用户取消、进程崩溃），
+/// assistant 消息中包含 Action 但后续没有对应的 Observation。
+/// 本函数检测此类悬空 Action 并自动补全 `[interrupted]` 占位 observation 消息，
+/// 确保压缩后的历史不会包含半完成的 ReAct 循环。
+///
+/// # 检测逻辑
+///
+/// EchoMind 使用文本格式的 ReAct（非结构化 tool_call）：
+/// - Action 模式：`Action:` 或 `Action N:` 开头的行
+/// - Observation 模式：`Observation:` 开头的行
+///
+/// 遍历历史消息，若 assistant 消息包含 Action 且其后没有 Observation
+/// （下一条消息不含 Observation），则在该消息后插入占位 system 消息。
+///
+/// # 参数
+/// - `history` — 对话历史消息列表（可变引用，原地修改）
+pub fn heal_dangling_calls(history: &mut Vec<ChatMessage>) {
+    if history.is_empty() {
+        return;
+    }
+
+    // 收集需要插入占位消息的位置（assistant 消息索引）
+    let mut insert_positions: Vec<usize> = Vec::new();
+
+    for i in 0..history.len() {
+        let msg = &history[i];
+
+        // 只检查 assistant 消息
+        if msg.role != "assistant" {
+            continue;
+        }
+
+        // 检测是否包含 Action 但不包含 Final Answer
+        if !has_action_pattern(&msg.content) || has_final_answer(&msg.content) {
+            continue;
+        }
+
+        // 检查下一条消息是否有 Observation
+        let has_observation = history
+            .get(i + 1)
+            .is_some_and(|next| has_observation_pattern(&next.content));
+
+        if !has_observation {
+            insert_positions.push(i);
+        }
+    }
+
+    // 从后向前插入（避免索引偏移）
+    for &pos in insert_positions.iter().rev() {
+        let placeholder = ChatMessage {
+            id: None,
+            role: "system".to_string(),
+            content: "[interrupted] 工具调用未完成 — 此 Action 未获得 Observation。".to_string(),
+            sources: None,
+            reasoning: None,
+            turn_group: None,
+            version: None,
+        };
+        history.insert(pos + 1, placeholder);
+    }
+}
+
+/// 检测文本是否包含 Action 模式（`Action:` 或 `Action N:`）。
+fn has_action_pattern(content: &str) -> bool {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("Action:") || trimmed.starts_with("Action ") {
+            // 确认是 "Action:" 或 "Action N:" 格式
+            let after = trimmed["Action".len()..].trim_start();
+            if after.starts_with(':') || after.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// 检测文本是否包含 Final Answer。
+fn has_final_answer(content: &str) -> bool {
+    content
+        .lines()
+        .any(|line| line.trim().to_lowercase().starts_with("final answer"))
+}
+
+/// 检测文本是否包含 Observation 模式（`Observation:`）。
+fn has_observation_pattern(content: &str) -> bool {
+    content
+        .lines()
+        .any(|line| line.trim().to_lowercase().starts_with("observation:"))
 }
 
 #[cfg(test)]

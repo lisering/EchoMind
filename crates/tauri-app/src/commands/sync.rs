@@ -83,7 +83,7 @@ pub async fn add_watched_folder_inner<R: Runtime>(
 
             let svc = echomind_core::sync::SyncService::new(storage, data_dir);
             if let Err(e) = svc.sync_folder(&folder, pro, Some(progress)).await {
-                eprintln!("文件监听同步失败: {e:#}");
+                warn!("文件监听同步失败: {e:#}");
             }
         });
         Ok(())
@@ -184,7 +184,7 @@ pub async fn get_watched_folders_inner(
 async fn load_watched_folders(storage: &SqliteStorage) -> Vec<WatchedFolderEntry> {
     match storage.get_setting("sync.watched_folders").await {
         Ok(Some(json)) => serde_json::from_str(&json).unwrap_or_else(|e| {
-            eprintln!("解析监听文件夹 JSON 失败: {e}");
+            warn!("解析监听文件夹 JSON 失败: {e}");
             Vec::new()
         }),
         _ => Vec::new(),

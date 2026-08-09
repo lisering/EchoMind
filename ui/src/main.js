@@ -519,7 +519,7 @@ async function loadDocuments() {
       const tagInput = document.createElement('input');
       tagInput.type = 'text';
       tagInput.placeholder = t('knowledge_base.tag_input_placeholder');
-      tagInput.className = 'flex-1 px-1.5 py-0.5 rounded text-[10px] bg-surface-3 border border-line text-text-primary placeholder-text-quaternary focus:outline-none focus:border-accent';
+      tagInput.className = 'flex-1 px-1.5 py-0.5 rounded text-[10px] bg-surface-3 border border-border-default text-text-primary placeholder-text-quaternary focus:outline-none focus:border-accent';
       tagInput.onkeydown = async (ev) => {
         if (ev.key === 'Enter' && tagInput.value.trim()) {
           ev.preventDefault();
@@ -769,32 +769,38 @@ restoreSidebarState();
   // 初始化下载管理器（事件监听 + 崩溃恢复检查，REQ-LLM-004 v2）
   initDownloadManager();
 
-  // 初始化知识图谱可视化（REQ-RAG-027 前端图谱可视化）
-  initGraphResize();
+  // 延迟初始化非关键面板（性能优化：不阻塞首屏渲染）
+  // 图谱/代码执行/AutoDream/符号搜索/工作流面板仅在用户交互时需要
+  const _deferInit = (fn) => {
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(fn, { timeout: 2000 });
+    } else {
+      setTimeout(fn, 100);
+    }
+  };
+
+  // 按钮点击处理立即绑定（面板打开时会懒初始化）
   if ($('graphBtn')) {
     $('graphBtn').onclick = () => openGraphViewer();
   }
-
-  // 初始化代码执行沙箱（REQ-RAG-032，Pro feature）
-  initCodeExecutor();
-
-  // 初始化 AutoDream 面板（S34-S43 知识库整理）
-  initDreamPanel();
   if ($('dreamBtn')) {
     $('dreamBtn').onclick = () => openDreamPanel();
   }
-
-  // 初始化符号搜索面板（S34-S43 代码感知 RAG）
-  initSymbolSearch();
   if ($('symbolBtn')) {
     $('symbolBtn').onclick = () => openSymbolSearch();
   }
-
-  // 初始化工作流面板（S34-S43 DAG 工作流引擎）
-  initWorkflowPanel();
   if ($('workflowBtn')) {
     $('workflowBtn').onclick = () => openWorkflowPanel();
   }
+
+  // 延迟初始化面板内部组件（不阻塞首屏）
+  _deferInit(() => {
+    initGraphResize();
+    initCodeExecutor();
+    initDreamPanel();
+    initSymbolSearch();
+    initWorkflowPanel();
+  });
 
   // 对话分支树按钮（REQ-RAG-039）
   if ($('branchTreeBtn')) {

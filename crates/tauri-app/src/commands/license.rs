@@ -17,6 +17,11 @@ pub async fn activate_pro_inner(license_key: &str, state: &AppState) -> Result<b
                 .await
                 .map_err(|e| format!("{e:#}"))?;
             *state.is_pro().write().await = true;
+            // Q11：Pro 激活后，Local 模式可用
+            let mut modes = std::collections::HashSet::new();
+            modes.insert(echomind_models::LlmMode::Remote);
+            modes.insert(echomind_models::LlmMode::Local);
+            state.llm_router.set_available_modes(modes).await;
             Ok(true)
         }
         Err(e) => Err(format!("License 激活失败: {e:#}")),
@@ -50,5 +55,9 @@ pub async fn deactivate_pro_inner(state: &AppState) -> Result<(), String> {
         .await
         .map_err(|e| format!("{e:#}"))?;
     *state.is_pro().write().await = false;
+    // Q11：Pro 停用后，Local 模式不可用
+    let mut modes = std::collections::HashSet::new();
+    modes.insert(echomind_models::LlmMode::Remote);
+    state.llm_router.set_available_modes(modes).await;
     Ok(())
 }

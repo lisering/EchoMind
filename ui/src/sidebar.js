@@ -665,6 +665,14 @@ export function initSidebar() {
   if ($('kbImport')) {
     $('kbImport').onclick = () => { closeKbModal(); $('plusBtn').click(); };
   }
+  // 背景点击关闭（REQ-NAV-002 AC-3：点击遮罩区域关闭弹框）
+  if ($('kbModal')) {
+    $('kbModal').addEventListener('click', (e) => {
+      if (e.target === $('kbModal')) {
+        closeKbModal();
+      }
+    });
+  }
 
   // 文档搜索 + 状态筛选 + 格式筛选（REQ-ING-007）
   if ($('docSearchInput')) {

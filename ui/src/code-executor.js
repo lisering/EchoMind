@@ -45,9 +45,9 @@ export function openCodeExecutorPanel() {
   _panel.dataset.role = 'code-executor-overlay';
 
   _panel.innerHTML = `
-    <div class="bg-surface-1 border border-line rounded-2xl shadow-2xl w-full max-w-3xl mx-4 flex flex-col max-h-[85vh]" data-role="code-executor-panel">
+    <div class="bg-surface-1 border border-border-default rounded-2xl shadow-2xl w-full max-w-3xl mx-4 flex flex-col max-h-[85vh]" data-role="code-executor-panel">
       <!-- 头部 -->
-      <div class="flex items-center justify-between px-6 py-4 border-b border-line">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-border-default">
         <h2 class="text-lg font-medium text-text-primary" data-role="ce-title">${t('code_executor.title')}</h2>
         <button class="text-text-tertiary hover:text-text-primary transition-colors p-1 rounded-lg" data-role="ce-close" aria-label="Close">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -59,7 +59,7 @@ export function openCodeExecutorPanel() {
         <!-- 语言选择 -->
         <div class="flex items-center gap-3">
           <label class="text-sm text-text-secondary shrink-0" data-role="ce-lang-label">${t('code_executor.language')}</label>
-          <select class="bg-surface-2 border border-line rounded-lg px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent" data-role="ce-language">
+          <select class="bg-surface-2 border border-border-default rounded-lg px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent" data-role="ce-language">
             <option value="python">${t('code_executor.python')}</option>
             <option value="javascript">${t('code_executor.javascript')}</option>
           </select>
@@ -68,7 +68,7 @@ export function openCodeExecutorPanel() {
         <!-- 代码编辑区 -->
         <div>
           <textarea
-            class="w-full bg-surface-2 border border-line rounded-lg px-4 py-3 text-sm text-text-primary font-mono resize-none focus:outline-none focus:ring-2 focus:ring-accent"
+            class="w-full bg-surface-2 border border-border-default rounded-lg px-4 py-3 text-sm text-text-primary font-mono resize-none focus:outline-none focus:ring-2 focus:ring-accent"
             rows="8"
             placeholder="${t('code_executor.code_placeholder')}"
             data-role="code-input"
@@ -83,7 +83,7 @@ export function openCodeExecutorPanel() {
             ${t('code_executor.stdin_label')}
           </summary>
           <textarea
-            class="w-full mt-2 bg-surface-2 border border-line rounded-lg px-4 py-3 text-sm text-text-primary font-mono resize-none focus:outline-none focus:ring-2 focus:ring-accent"
+            class="w-full mt-2 bg-surface-2 border border-border-default rounded-lg px-4 py-3 text-sm text-text-primary font-mono resize-none focus:outline-none focus:ring-2 focus:ring-accent"
             rows="3"
             placeholder="${t('code_executor.stdin_placeholder')}"
             data-role="ce-stdin"
@@ -103,19 +103,19 @@ export function openCodeExecutorPanel() {
           <!-- stdout -->
           <div class="mb-3">
             <div class="text-xs text-text-tertiary mb-1">${t('code_executor.stdout')}</div>
-            <pre class="bg-surface-0 border border-line rounded-lg p-3 text-xs text-text-primary font-mono overflow-x-auto max-h-40 overflow-y-auto" data-role="ce-stdout"></pre>
+            <pre class="bg-surface-0 border border-border-default rounded-lg p-3 text-xs text-text-primary font-mono overflow-x-auto max-h-40 overflow-y-auto" data-role="ce-stdout"></pre>
           </div>
 
           <!-- stderr -->
           <div>
             <div class="text-xs text-text-tertiary mb-1">${t('code_executor.stderr')}</div>
-            <pre class="bg-surface-0 border border-line rounded-lg p-3 text-xs text-red-400 font-mono overflow-x-auto max-h-40 overflow-y-auto" data-role="ce-stderr"></pre>
+            <pre class="bg-surface-0 border border-border-default rounded-lg p-3 text-xs text-red-400 font-mono overflow-x-auto max-h-40 overflow-y-auto" data-role="ce-stderr"></pre>
           </div>
         </div>
       </div>
 
       <!-- 底部按钮 -->
-      <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-line">
+      <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-default">
         <button class="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors rounded-lg" data-role="ce-cancel">${t('code_executor.run') === 'Run' ? 'Close' : '关闭'}</button>
         <button class="px-5 py-2 text-sm font-medium text-white bg-accent hover:bg-accent/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-role="ce-run">
           ${t('code_executor.run')}

@@ -1292,3 +1292,235 @@ async fn tc_burst_010_with_config() {
     );
     assert!(buf.should_flush(), "5 轮达到 max_turns=5 应 flush");
 }
+
+// ============================================================
+// 跨 Phase 依赖整合测试（S67: Burst Buffer 用 Q10 one_shot 替代非流式 LLM 调用）
+// ============================================================
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Mock LLM 覆盖 `one_shot`：返回预设文本，记录 `one_shot` 被调用、`chat_stream` 未被调用。
+struct OneShotMock {
+    output: String,
+    one_shot_called: AtomicBool,
+    chat_stream_called: AtomicBool,
+}
+
+impl OneShotMock {
+    fn new(output: &str) -> Self {
+        Self {
+            output: output.to_string(),
+            one_shot_called: AtomicBool::new(false),
+            chat_stream_called: AtomicBool::new(false),
+        }
+    }
+}
+
+impl LLMProvider for OneShotMock {
+    async fn chat_stream(
+        &self,
+        _system_prompt: &str,
+        _history: &[ChatMessage],
+        _query: &str,
+    ) -> Result<BoxStream<'static, Result<String>>> {
+        self.chat_stream_called.store(true, Ordering::SeqCst);
+        let output = self.output.clone();
+        Ok(futures::stream::once(async move { Ok(output) }).boxed())
+    }
+
+    async fn one_shot(&self, _system: &str, _prompt: &str) -> Result<Option<String>> {
+        self.one_shot_called.store(true, Ordering::SeqCst);
+        Ok(Some(self.output.clone()))
+    }
+}
+
+/// TC-BURST-011：one_shot 优先路径 — Provider 覆盖 one_shot 时，chat_stream 不被调用。
+#[tokio::test]
+async fn tc_burst_011_one_shot_preferred_over_chat_stream() {
+    let storage = MockStorage::new();
+    let store = MemoryStore::new(storage);
+    let llm =
+        OneShotMock::new("[user_statement] 用户是数据科学家\n[assistant_info] 讨论了 RAG 架构");
+
+    let mut buf = BurstBuffer::new();
+    buf.push(
+        "我是数据科学家".to_string(),
+        "了解，您专注于数据科学领域。".to_string(),
+        make_provenance("conv-one-shot", 1),
+    );
+
+    let count = buf.flush(&store, &llm).await.unwrap();
+
+    assert_eq!(count, 2, "应提取 2 条记忆");
+    assert!(
+        llm.one_shot_called.load(Ordering::SeqCst),
+        "one_shot 应被调用"
+    );
+    assert!(
+        !llm.chat_stream_called.load(Ordering::SeqCst),
+        "chat_stream 不应被调用（one_shot 优先）"
+    );
+
+    // 验证 scratch 中有条目
+    let logs = store.storage.get_scratch_logs(None).await.unwrap();
+    assert_eq!(logs.len(), 2, "scratch_logs 应有 2 条");
+}
+
+/// Mock LLM：one_shot 返回 Err，chat_stream 正常工作。
+struct FallbackMock {
+    output: String,
+    one_shot_called: AtomicBool,
+    chat_stream_called: AtomicBool,
+}
+
+impl FallbackMock {
+    fn new(output: &str) -> Self {
+        Self {
+            output: output.to_string(),
+            one_shot_called: AtomicBool::new(false),
+            chat_stream_called: AtomicBool::new(false),
+        }
+    }
+}
+
+impl LLMProvider for FallbackMock {
+    async fn chat_stream(
+        &self,
+        _system_prompt: &str,
+        _history: &[ChatMessage],
+        _query: &str,
+    ) -> Result<BoxStream<'static, Result<String>>> {
+        self.chat_stream_called.store(true, Ordering::SeqCst);
+        let output = self.output.clone();
+        Ok(futures::stream::once(async move { Ok(output) }).boxed())
+    }
+
+    async fn one_shot(&self, _system: &str, _prompt: &str) -> Result<Option<String>> {
+        self.one_shot_called.store(true, Ordering::SeqCst);
+        Err(anyhow::anyhow!("one_shot 不支持"))
+    }
+}
+
+/// TC-BURST-012：one_shot 出错时降级为 chat_stream + collect_stream。
+#[tokio::test]
+async fn tc_burst_012_fallback_to_chat_stream_on_one_shot_err() {
+    let storage = MockStorage::new();
+    let store = MemoryStore::new(storage);
+    let llm = FallbackMock::new("[user_statement] 用户偏好 Python");
+
+    let mut buf = BurstBuffer::new();
+    buf.push(
+        "我喜欢用 Python".to_string(),
+        "Python 是一门优秀的编程语言。".to_string(),
+        make_provenance("conv-fallback", 1),
+    );
+
+    let count = buf.flush(&store, &llm).await.unwrap();
+
+    assert_eq!(count, 1, "应提取 1 条记忆（经 chat_stream 降级路径）");
+    assert!(
+        llm.one_shot_called.load(Ordering::SeqCst),
+        "one_shot 应被尝试调用"
+    );
+    assert!(
+        llm.chat_stream_called.load(Ordering::SeqCst),
+        "chat_stream 应被调用（降级路径）"
+    );
+}
+
+/// TC-BURST-013：Provider 未覆盖 one_shot（返回 Ok(None)）时降级为 chat_stream。
+///
+/// `MockLlm`（现有 mock）只实现 `chat_stream`，不覆盖 `one_shot`，
+/// 因此 `one_shot` 默认返回 `Ok(None)`，自动降级。
+#[tokio::test]
+async fn tc_burst_013_fallback_when_one_shot_returns_none() {
+    let storage = MockStorage::new();
+    let store = MemoryStore::new(storage);
+    // MockLlm 不覆盖 one_shot → 默认返回 Ok(None) → 降级为 chat_stream
+    let llm = MockLlm::new("[user_statement] 用户是律师\n[assistant_info] 讨论了合同法");
+
+    let mut buf = BurstBuffer::new();
+    buf.push(
+        "我是律师".to_string(),
+        "了解，您是法律专业人士。".to_string(),
+        make_provenance("conv-none", 1),
+    );
+
+    let count = buf.flush(&store, &llm).await.unwrap();
+
+    // 降级路径应正常工作
+    assert_eq!(count, 2, "降级路径应提取 2 条记忆");
+
+    // 验证 scratch 中有条目
+    let logs = store.storage.get_scratch_logs(None).await.unwrap();
+    assert_eq!(logs.len(), 2, "scratch_logs 应有 2 条");
+}
+
+/// TC-BURST-014：extract_from_conversation 也使用 one_shot 优先路径。
+#[tokio::test]
+async fn tc_burst_014_extract_uses_one_shot() {
+    let storage = MockStorage::new();
+    let store = MemoryStore::new(storage);
+    let llm = OneShotMock::new("[user_statement] 用户偏好简洁回答");
+
+    let messages = vec![
+        ChatMessage {
+            id: None,
+            role: "user".to_string(),
+            content: "请简洁回答".to_string(),
+            sources: None,
+            reasoning: None,
+            turn_group: None,
+            version: Some(1),
+        },
+        ChatMessage {
+            id: None,
+            role: "assistant".to_string(),
+            content: "好的。".to_string(),
+            sources: None,
+            reasoning: None,
+            turn_group: None,
+            version: Some(1),
+        },
+    ];
+
+    let entries = store
+        .extract_from_conversation(&messages, &llm)
+        .await
+        .unwrap();
+
+    assert_eq!(entries.len(), 1, "应提取 1 条记忆");
+    assert!(
+        llm.one_shot_called.load(Ordering::SeqCst),
+        "extract_from_conversation 应使用 one_shot"
+    );
+    assert!(
+        !llm.chat_stream_called.load(Ordering::SeqCst),
+        "chat_stream 不应被调用"
+    );
+}
+
+/// TC-BURST-015：consolidate_scratch 也使用 one_shot 优先路径。
+#[tokio::test]
+async fn tc_burst_015_consolidate_uses_one_shot() {
+    let storage = MockStorage::new();
+    let store = MemoryStore::new(storage);
+
+    // 写入 scratch 日志
+    store.write_scratch("事实 A").await.unwrap();
+    store.write_scratch("事实 B").await.unwrap();
+
+    let llm = OneShotMock::new("NONE");
+
+    let result = store.consolidate_scratch(&llm, 14).await.unwrap();
+
+    assert_eq!(result.actions.len(), 0, "NONE → 0 个动作");
+    assert!(
+        llm.one_shot_called.load(Ordering::SeqCst),
+        "consolidate_scratch 应使用 one_shot"
+    );
+    assert!(
+        !llm.chat_stream_called.load(Ordering::SeqCst),
+        "chat_stream 不应被调用"
+    );
+}

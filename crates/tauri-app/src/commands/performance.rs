@@ -591,14 +591,14 @@ pub async fn rebuild_contextual_embeddings_inner<R: Runtime>(
                 );
             }
             Err(err) => {
-                eprintln!("上下文嵌入重建失败（doc_id={}）: {err}", doc.id);
+                warn!("上下文嵌入重建失败（doc_id={}）: {err}", doc.id);
             }
         }
     }
 
     // 清空查询缓存（嵌入向量已变更，旧缓存答案可能引用过期的向量）
     if let Err(e) = state.cache.clear_all().await {
-        eprintln!("[PERF] 重建嵌入后清空查询缓存失败: {e:#}");
+        warn!("重建嵌入后清空查询缓存失败: {e:#}");
     }
     state.step_cache.clear();
 

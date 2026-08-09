@@ -244,21 +244,52 @@ async fn tc_ing_003_free_tier_quota_blocked() {
     assert_eq!(storage.len().await, 50, "被拦截的文件不得入库");
 }
 
-/// TC-ING-004 付费门：免费版导入 PDF 必须返回 Err；Pro 版允许入库（REQ-ING-002-AC-1/AC-2）。
+/// TC-ING-004 付费门：免费版导入 Pro 门控格式必须返回 Err；Pro 版允许入库（REQ-LIC-002）。
+///
+/// Pro 门控格式：pdf / docx / pptx / epub / xlsx / csv（专业文档场景）。
 #[tokio::test]
-async fn tc_ing_004_pdf_blocked_for_free_tier() {
+async fn tc_ing_004_pro_gated_formats_blocked_for_free_tier() {
     let dir = TempDir::new().unwrap();
-    let pdf = write_file(&dir, "paper.pdf", b"%PDF-1.7 fake-bytes");
-    let service = ImportService::new(MockStorage::default(), dir.path().join("data"));
 
-    let free_result = service.import_one(&pdf, false).await;
-    assert!(free_result.is_err(), "免费版导入 PDF 必须被拦截");
+    for (i, ext) in ["pdf", "docx", "pptx", "epub", "xlsx", "csv"]
+        .iter()
+        .enumerate()
+    {
+        // 每个文件使用不同内容，避免 MD5 去重影响测试
+        let content = format!("fake-content-{i}");
+        let fname = format!("test.{ext}");
+        let path = write_file(&dir, &fname, content.as_bytes());
+        let service = ImportService::new(MockStorage::default(), dir.path().join("data"));
+        let free_result = service.import_one(&path, false).await;
+        assert!(free_result.is_err(), "免费版导入 .{ext} 必须被拦截");
+        let pro_result = service.import_one(&path, true).await.unwrap();
+        assert!(
+            matches!(pro_result, ImportOutcome::Imported(_)),
+            "Pro 版导入 .{ext} 必须放行入库"
+        );
+    }
+}
 
-    let pro_result = service.import_one(&pdf, true).await.unwrap();
-    assert!(
-        matches!(pro_result, ImportOutcome::Imported(_)),
-        "Pro 版导入 PDF 必须放行入库"
-    );
+/// TC-ING-004b 免费格式放行：免费版导入 md/txt/代码/HTML 不受 Pro 门控限制（REQ-LIC-002）。
+#[tokio::test]
+async fn tc_ing_004b_free_formats_allowed_for_free_tier() {
+    let dir = TempDir::new().unwrap();
+
+    for (i, ext) in ["md", "txt", "rs", "ts", "tsx", "py", "go", "html", "htm"]
+        .iter()
+        .enumerate()
+    {
+        let content = format!("free-content-{i}");
+        let fname = format!("test.{ext}");
+        let path = write_file(&dir, &fname, content.as_bytes());
+        let service = ImportService::new(MockStorage::default(), dir.path().join("data"));
+        let result = service.import_one(&path, false).await;
+        assert!(
+            result.is_ok(),
+            "免费版导入 .{ext} 必须放行，实际: {:?}",
+            result.err()
+        );
+    }
 }
 
 /// TC-ING-001 补充：路径遍历攻击必须被拒绝（安全官审查项，防 `../`）。

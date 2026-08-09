@@ -121,28 +121,33 @@ pub async fn import_files_inner<R: Runtime>(
                     Ok(()) => match embed_document_chunks(app, state, &doc.id, &name).await {
                         Ok(count) => {
                             emit_status(app, "done", format!("索引完成：{name}（{count} 向量）"));
+                            // **性能优化**：embedder 统一获取一次，复用于领域分类和 proposition 嵌入。
+                            // 原实现分别调用 state.embedder().await 两次（各触发 OnceCell 竞争），
+                            // 现统一获取一次后 clone 到各 spawn 任务。
+                            let shared_embedder = state.embedder().await.ok();
+
                             // REQ-VEC-013：后台异步执行领域分类（不阻塞导入完成事件）
                             let storage = state.storage.clone();
                             let doc_id = doc.id.clone();
-                            let embedder_clone = state.embedder().await.ok();
+                            let embedder_clone = shared_embedder.clone();
                             tokio::spawn(async move {
                                 if let Some(emb) = embedder_clone
                                     && let Err(e) =
                                         classify_and_update_domain(&storage, &emb, &doc_id).await
                                 {
-                                    eprintln!("领域分类失败（doc_id={doc_id}）: {e:#}");
+                                    warn!("领域分类失败（doc_id={doc_id}）: {e:#}");
                                 }
                             });
                             // REQ-PERF-007：后台异步嵌入 proposition（不阻塞导入完成事件）
                             let prop_storage = state.storage.clone();
                             let prop_doc_id = doc.id.clone();
-                            let prop_embedder = state.embedder().await.ok();
+                            let prop_embedder = shared_embedder.clone();
                             tokio::spawn(async move {
                                 if let Some(emb) = prop_embedder
                                     && let Err(e) =
                                         embed_propositions(&prop_storage, &emb, &prop_doc_id).await
                                 {
-                                    eprintln!("Proposition 嵌入失败（doc_id={prop_doc_id}）: {e}");
+                                    warn!("Proposition 嵌入失败（doc_id={prop_doc_id}）: {e}");
                                 }
                             });
                             // REQ-ING-019：后台异步生成文档摘要（不阻塞导入完成事件）
@@ -162,7 +167,7 @@ pub async fn import_files_inner<R: Runtime>(
                                     )
                                     .await
                                 {
-                                    eprintln!("文档摘要生成失败（doc_id={sum_doc_id}）: {e:#}");
+                                    warn!("文档摘要生成失败（doc_id={sum_doc_id}）: {e:#}");
                                 }
                             });
                         }
@@ -209,7 +214,7 @@ pub async fn import_files_inner<R: Runtime>(
     // **性能/一致性**：知识库已变更 → 清空查询缓存，防止缓存答案引用已删除/过期的文档
     if !imported.is_empty() {
         if let Err(e) = state.cache.clear_all().await {
-            eprintln!("[PERF] 导入后清空查询缓存失败: {e:#}");
+            warn!("导入后清空查询缓存失败: {e:#}");
         }
         // P2-1 StepCache：知识库变更 → 清空步骤级缓存（检索结果可能引用旧文档）
         state.step_cache.clear();
@@ -276,9 +281,7 @@ async fn index_pdf_multimodal<R: Runtime>(
         }
         _ => {
             // 降级：多模态引擎不可用，回退到纯文本索引
-            eprintln!(
-                "多模态引擎初始化失败（renderer={renderer_ok}, ocr={ocr_ok}），降级为纯文本索引"
-            );
+            warn!("多模态引擎初始化失败（renderer={renderer_ok}, ocr={ocr_ok}），降级为纯文本索引");
             emit_status(app, "indexing", format!("正在索引（纯文本）：{name}"));
             service
                 .index_document(doc)

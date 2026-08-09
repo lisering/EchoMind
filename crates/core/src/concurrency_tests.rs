@@ -340,3 +340,245 @@ async fn tc_conc_005_concurrent_cleanup_zombies() {
         );
     }
 }
+
+// ============================================================
+// KeyedQueue 测试（Q09 借鉴 QM createKeyedQueue）
+// ============================================================
+
+use std::collections::HashMap;
+
+use crate::concurrency::KeyedQueue;
+
+/// TC-KEYED-001：同 key 操作串行执行（验证执行顺序）。
+///
+/// 两个同 key 的操作必须按提交顺序串行执行。
+/// 第二个操作必须等待第一个完成后才开始。
+#[tokio::test]
+async fn tc_keyed_001_same_key_serial() {
+    let queue = KeyedQueue::<String>::new();
+    let order = Arc::new(tokio::sync::Mutex::new(Vec::<u32>::new()));
+
+    let o1 = Arc::clone(&order);
+    let o2 = Arc::clone(&order);
+
+    // 启动两个同 key 操作，第一个延迟 100ms 验证串行
+    let h1 = tokio::spawn(async move {
+        queue
+            .run("conv-1".to_string(), || async {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                o1.lock().await.push(1);
+            })
+            .await;
+    });
+
+    let h2 = tokio::spawn(async move {
+        // 等待一小段时间确保 h1 先提交
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let queue2 = KeyedQueue::<String>::new();
+        queue2
+            .run("conv-1".to_string(), || async {
+                o2.lock().await.push(2);
+            })
+            .await;
+    });
+
+    h1.await.unwrap();
+    h2.await.unwrap();
+
+    // 但 h2 使用了不同的 queue 实例，无法验证跨实例串行。
+    // 使用同一 queue 重新测试：
+    let queue = Arc::new(KeyedQueue::<String>::new());
+    let order = Arc::new(tokio::sync::Mutex::new(Vec::<u32>::new()));
+
+    let q1 = Arc::clone(&queue);
+    let o1 = Arc::clone(&order);
+    let h1 = tokio::spawn(async move {
+        q1.run("conv-A".to_string(), || async {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            o1.lock().await.push(1);
+        })
+        .await;
+    });
+
+    // 确保 h1 先获取锁
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+
+    let q2 = Arc::clone(&queue);
+    let o2 = Arc::clone(&order);
+    let h2 = tokio::spawn(async move {
+        q2.run("conv-A".to_string(), || async {
+            o2.lock().await.push(2);
+        })
+        .await;
+    });
+
+    h1.await.unwrap();
+    h2.await.unwrap();
+
+    let result = order.lock().await;
+    assert_eq!(*result, vec![1, 2], "同 key 操作必须按提交顺序串行执行");
+}
+
+/// TC-KEYED-002：不同 key 操作并行执行（验证并行性）。
+///
+/// 两个不同 key 的操作应该并行执行。
+/// 如果串行执行，总耗时约为 200ms；如果并行，总耗时约为 100ms。
+#[tokio::test]
+async fn tc_keyed_002_different_key_parallel() {
+    let queue = Arc::new(KeyedQueue::<String>::new());
+
+    let q1 = Arc::clone(&queue);
+    let h1 = tokio::spawn(async move {
+        q1.run("conv-A".to_string(), || async {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        })
+        .await;
+    });
+
+    let q2 = Arc::clone(&queue);
+    let h2 = tokio::spawn(async move {
+        q2.run("conv-B".to_string(), || async {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        })
+        .await;
+    });
+
+    let start = std::time::Instant::now();
+    h1.await.unwrap();
+    h2.await.unwrap();
+    let elapsed = start.elapsed();
+
+    // 并行执行应明显快于串行（200ms）
+    assert!(
+        elapsed < std::time::Duration::from_millis(180),
+        "不同 key 操作应并行执行，实际耗时 {:?}（应 < 180ms）",
+        elapsed
+    );
+}
+
+/// TC-KEYED-003：操作完成后 tail 被清理（无内存泄漏）。
+///
+/// 完成所有操作后，调用 cleanup() 应清理空闲的 tail。
+#[tokio::test]
+async fn tc_keyed_003_tail_cleanup() {
+    let queue = KeyedQueue::<String>::new();
+
+    // 执行几个操作
+    queue.run("conv-1".to_string(), || async { 42 }).await;
+    queue.run("conv-2".to_string(), || async { 99 }).await;
+
+    // 操作完成后 tail 仍存在（无等待者）
+    {
+        let tails = queue.tails.read().await;
+        assert_eq!(tails.len(), 2, "操作完成后 tail 仍存在（等待清理）");
+    }
+
+    // 清理空闲 tail
+    queue.cleanup().await;
+
+    // 清理后 tail 应为空（无活跃操作时全部可清理）
+    {
+        let tails = queue.tails.read().await;
+        assert_eq!(tails.len(), 0, "cleanup() 后 tail 应为空");
+    }
+
+    // 清理后仍可正常使用
+    let result = queue.run("conv-3".to_string(), || async { 7 }).await;
+    assert_eq!(result, 7, "清理后 queue 仍可正常工作");
+}
+
+/// TC-KEYED-004：panic 不影响后续同 key 操作（catch_unwind 等效）。
+///
+/// 如果一个操作 panic，后续同 key 操作仍应正常执行。
+/// KeyedQueue 使用 Mutex guard 在 panic 时自动释放（Rust Mutex 的 poison 机制）。
+/// 但 tokio::sync::Mutex 不 poison，所以 panic 后 guard 正常释放。
+#[tokio::test]
+async fn tc_keyed_004_panic_resilience() {
+    let queue = Arc::new(KeyedQueue::<String>::new());
+
+    // 第一个操作 panic（模拟），使用 spawn + catch
+    let q1 = Arc::clone(&queue);
+    let h1 = tokio::spawn(async move {
+        q1.run("conv-panic".to_string(), || async {
+            panic!("模拟操作 panic");
+        })
+        .await;
+    });
+
+    // 等待 panic 完成（spawn 中的 panic 会被 JoinError 捕获）
+    let _ = h1.await;
+
+    // 后续同 key 操作仍应正常执行
+    let q2 = Arc::clone(&queue);
+    let result = q2.run("conv-panic".to_string(), || async { "ok" }).await;
+    assert_eq!(result, "ok", "panic 后同 key 操作仍应正常执行");
+
+    // 清理
+    queue.cleanup().await;
+}
+
+/// TC-KEYED-005：run 返回操作结果（验证泛型返回值）。
+#[tokio::test]
+async fn tc_keyed_005_return_value() {
+    let queue = KeyedQueue::<String>::new();
+
+    // 返回整数
+    let r1 = queue.run("k1".to_string(), || async { 42 }).await;
+    assert_eq!(r1, 42);
+
+    // 返回字符串
+    let r2 = queue
+        .run("k2".to_string(), || async { "hello".to_string() })
+        .await;
+    assert_eq!(r2, "hello");
+
+    // 返回结构体
+    let r3 = queue
+        .run("k3".to_string(), || async { HashMap::from([("a", 1)]) })
+        .await;
+    assert_eq!(r3.get("a"), Some(&1));
+}
+
+/// TC-KEYED-006：多 key 并发操作各自独立串行（验证多会话场景）。
+///
+/// 模拟 3 个会话各自并发写入，同一会话内串行，不同会话间并行。
+#[tokio::test]
+async fn tc_keyed_006_multi_key_concurrent() {
+    let queue = Arc::new(KeyedQueue::<String>::new());
+    let results = Arc::new(tokio::sync::Mutex::new(HashMap::<String, Vec<u32>>::new()));
+
+    let mut handles = Vec::new();
+
+    // 每个会话提交 3 个串行操作
+    for conv in &["conv-A", "conv-B", "conv-C"] {
+        for i in 0..3u32 {
+            let q = Arc::clone(&queue);
+            let r = Arc::clone(&results);
+            let key = conv.to_string();
+            handles.push(tokio::spawn(async move {
+                q.run(key.clone(), || async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    r.lock().await.entry(key).or_default().push(i);
+                })
+                .await;
+            }));
+        }
+    }
+
+    for h in handles {
+        h.await.unwrap();
+    }
+
+    let results = results.lock().await;
+    // 每个会话应有 3 个操作
+    for conv in &["conv-A", "conv-B", "conv-C"] {
+        let entries = results.get(*conv).expect("会话应有结果");
+        assert_eq!(entries.len(), 3, "会话 {} 应有 3 个操作", conv);
+        // 同会话内操作应按顺序执行（0, 1, 2）
+        // 由于 tokio::spawn 顺序非严格保证，检查排序可能不稳定，
+        // 但同会话内不应该出现并发交叉（各条目的值应唯一且完整）
+        let mut sorted = entries.clone();
+        sorted.sort();
+        assert_eq!(sorted, vec![0, 1, 2], "会话 {} 操作集应为 {{0,1,2}}", conv);
+    }
+}

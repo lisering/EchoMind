@@ -35,7 +35,7 @@ docs/sessions/
 
 - 遇到需要追溯的设计决策，查 `archive/` 或 `docs/architecture/adr/`
 - 遇到需要确认接口契约，查 `docs/api/` 或 `docs/SOFTWARE_ASSET.md`
-- 遇到需要确认铁律规则，查 `.catpaw/rules/iron-rules.md`
+- 遇到需要确认铁律规则，查 `.catpaw/rules/system-constraints.md`
 
 ### 场景 3: 会话结束
 
@@ -67,7 +67,7 @@ docs/sessions/
 | `docs/SRS_v1.0.md` | 需求规格，本目录的待办任务引用其 REQ ID |
 | `docs/api/` | 接口契约文档，本目录引用其内容 |
 | `docs/architecture/adr/` | 架构决策记录，本目录引用其 ADR 编号 |
-| `.catpaw/rules/iron-rules.md` | 铁律规则，所有 session 必须遵守 |
+| `.catpaw/rules/system-constraints.md` | 铁律规则，所有 session 必须遵守 |
 | `AGENTS.md` / `CLAUDE.md` | AI Agent 指南，本目录是其补充 |
 
 ---
@@ -99,7 +99,7 @@ docs/sessions/
 
 ## 铁律十二（跨 Session 衔接）
 
-> 完整定义见 `.catpaw/rules/iron-rules.md` 铁律十二。
+> 完整定义见 `.catpaw/rules/system-constraints.md` 铁律十二。
 
 **未完成的功能必须在 Session 结束时按 `HANDOFF_TEMPLATE.md` 模板产出衔接提示词。**
 

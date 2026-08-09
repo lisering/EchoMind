@@ -80,7 +80,7 @@ pub(crate) fn emit_agent_step<R: Runtime>(app: &AppHandle<R>, step: &AgentStepIn
         iteration: step.iteration,
     };
     if let Err(err) = app.emit("agent_step", payload) {
-        eprintln!("agent_step 事件发射失败: {err}");
+        warn!("agent_step 事件发射失败: {err}");
     }
 }
 
@@ -95,6 +95,6 @@ pub(crate) fn emit_coordinator_phase<R: Runtime>(app: &AppHandle<R>, phase: &Coo
         "sub_query_count": phase.sub_query_count,
     });
     if let Err(err) = app.emit("coordinator_phase", payload) {
-        eprintln!("coordinator_phase 事件发射失败: {err}");
+        warn!("coordinator_phase 事件发射失败: {err}");
     }
 }

@@ -166,12 +166,14 @@ interface SpeechRecognitionConstructor {
   new (): SpeechRecognitionInstance;
 }
 
-/** 扩展 Window，添加 Web Speech API 可选属性 + PDF 导出属性 */
+/** 扩展 Window，添加 Web Speech API 可选属性 + PDF 导出属性 + Webkit AudioContext */
 interface Window {
   SpeechRecognition?: SpeechRecognitionConstructor;
   webkitSpeechRecognition?: SpeechRecognitionConstructor;
   speechSynthesis?: SpeechSynthesis;
   SpeechSynthesisUtterance?: { new (text?: string): SpeechSynthesisUtterance };
+  /** Webkit AudioContext 别名（旧版 Safari / WKWebView 兼容） */
+  webkitAudioContext?: typeof AudioContext;
   /** PDF 导出 mock 计数器（E2E 测试用，REQ-EXP-005） */
   __printMockCalled?: number;
   /** PDF 导出最近打印 HTML（E2E 测试用，REQ-EXP-005） */

@@ -2114,6 +2114,44 @@ pointer-events: none;
 }
 
 /* ============================================================
+ * 录音遮罩 + 音频电平可视化（REQ-RAG-034 增强）
+ * ============================================================ */
+
+/* 录音指示红点脉冲动画 */
+@keyframes recordingPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.recording-pulse {
+  animation: recordingPulse 1.2s ease-in-out infinite;
+}
+
+/* 音频电平条激活态 */
+.level-bar.active {
+  background-color: var(--accent, #38BDF8);
+}
+
+/* 录音遮罩警告态（接近最大时长） */
+#recordingOverlay.recording-warning .recording-pulse {
+  background-color: #EF4444;
+}
+
+#recordingOverlay.recording-warning #recordingTimer {
+  color: #EF4444;
+}
+
+/* 减弱动画偏好：禁用电平条过渡 */
+@media (prefers-reduced-motion: reduce) {
+  .recording-pulse {
+    animation: none;
+  }
+  .level-bar {
+    transition: none;
+  }
+}
+
+/* ============================================================
  * 对话分支树面板（REQ-RAG-039）
  * ============================================================ */
 
@@ -2273,4 +2311,69 @@ pointer-events: none;
 
 .conversation-tree-node.active > .conversation-tree-children {
   border-left-color: rgba(var(--accent-rgb, 56, 189, 248), 0.3);
+}
+
+/* ============================================================
+ * 响应式布局（REQ-UI-012：窄窗口适配）
+ *
+ * 桌面应用窗口缩小时保持核心功能可用：
+ * - < 768px：侧栏自动折叠，聊天区全宽
+ * - < 600px：减小 padding/font-size，隐藏非关键按钮
+ * ============================================================ */
+
+/* 中等窄窗口：侧栏默认折叠，手动展开时覆盖 */
+@media (max-width: 768px) {
+  #sidebar {
+    width: 240px;
+  }
+  #sidebar:not(.sidebar-collapsed) ~ main {
+    padding-left: 0;
+  }
+  /* 侧栏展开时使用绝对定位浮层（不挤压主区域） */
+  #sidebar:not(.sidebar-collapsed) {
+    z-index: 40;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+  /* 设置面板全宽 */
+  #settingsPanel {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+  /* 知识库弹框全宽 */
+  #kbModal > div {
+    max-width: 95% !important;
+  }
+}
+
+/* 极窄窗口：优化空间利用率 */
+@media (max-width: 600px) {
+  #topBar {
+    padding-left: 78px;
+    gap: 4px;
+  }
+  #topBar .topbar-btn {
+    width: 28px;
+    height: 28px;
+  }
+  /* 聊天输入区减小 padding */
+  #inputArea {
+    padding: 8px 12px;
+  }
+  #queryInput {
+    font-size: 13px;
+  }
+  /* 消息区域减小 padding */
+  #chatArea {
+    padding: 12px 8px;
+  }
+  /* 设置面板内减小间距 */
+  #settingsPanel .setting-item {
+    padding: 8px 12px;
+  }
+  /* 搜索弹框全宽 */
+  #searchPopup {
+    width: calc(100% - 24px) !important;
+    left: 12px !important;
+    right: 12px !important;
+  }
 }

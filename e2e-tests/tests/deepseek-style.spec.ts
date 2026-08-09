@@ -69,7 +69,8 @@ test.describe('DeepSeek 风格 UI 对齐', () => {
   test('TC-DS-015 AI 消息底部包含 .ai-disclaimer 元素', async ({ page }) => {
     await importDocs(page, ['/mock/deepseek-test.md']);
     await sendMessage(page, '测试问题');
-    await waitForStreamDone(page);
+    // 等待流式完成（stop-mode 被移除表示完成）
+    await expect(page.locator('#sendBtn')).not.toHaveClass(/stop-mode/, { timeout: 15000 });
 
     const disclaimer = page.locator('.msg-assistant .ai-disclaimer').first();
     await expect(disclaimer).toBeVisible();

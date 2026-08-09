@@ -35,6 +35,7 @@
 //   同步: add_watched_folder / remove_watched_folder / get_watched_folders
 //   可观测性: get_log_level / set_log_level / export_logs / export_diagnostics / open_data_dir
 //   Token: get_conversation_cost / set_token_budget
+//   Budget: get_budget_stats / set_budget_limit
 //   安全: get_security_status / set_auto_lock_config / lock_app / unlock_app / record_activity /
 //         detect_pii / redact_pii / set_panic_wipe_password / clear_panic_wipe_password /
 //         is_panic_wipe_enabled / set_clipboard_config / get_audit_logs / clear_audit_logs /
@@ -62,6 +63,81 @@
 // - 文件夹同步进度事件（REQ-SYNC-002）
 // - 本地 LLM 模型加载进度事件（REQ-LLM-003）
 (() => {
+  // ============================================================
+  // 语音输入测试模式标志
+  // voice-input.js 使用 getUserMedia + MediaRecorder + IPC 方案，
+  // E2E 测试需要 mock 这三个组件。
+  // ============================================================
+  window.__voiceMockEnabled = true;
+
+  // ============================================================
+  // MediaRecorder Mock（REQ-RAG-034 桌面方案）
+  // Playwright headless 浏览器无真实麦克风，mock getUserMedia + MediaRecorder
+  // 使 E2E 测试可以验证完整录音 → 转写数据流。
+  // ============================================================
+  if (!navigator.mediaDevices) {
+    navigator.mediaDevices = {};
+  }
+  navigator.mediaDevices.getUserMedia = function () {
+    return Promise.resolve({
+      getTracks: function () {
+        return [{ stop: function () {} }];
+      },
+    });
+  };
+
+  window.MediaRecorder = function MockMediaRecorder(stream, options) {
+    this.state = 'inactive';
+    this.mimeType = (options && options.mimeType) || 'audio/webm';
+    this.ondataavailable = null;
+    this.onstop = null;
+    this.onerror = null;
+    this.start = function () {
+      this.state = 'recording';
+      // 同步触发 ondataavailable，确保 stop 时数据已就绪
+      if (this.ondataavailable) {
+        this.ondataavailable({
+          data: new Blob(['mock-audio-data-mock-audio-data-mock-audio-data'], { type: this.mimeType }),
+        });
+      }
+    };
+    this.stop = function () {
+      this.state = 'inactive';
+      var self = this;
+      setTimeout(function () {
+        if (self.onstop) self.onstop();
+      }, 10);
+    };
+  };
+  window.MediaRecorder.isTypeSupported = function (type) {
+    return type === 'audio/webm' || type === 'audio/ogg';
+  };
+
+  // ============================================================
+  // AudioContext Mock（静音检测需要）
+  // Playwright headless 无真实音频输入，mock AnalyserNode 返回静音数据
+  // ============================================================
+  window.AudioContext = function MockAudioContext() {
+    this.state = 'running';
+    this.close = function () { return Promise.resolve(); };
+    this.createMediaStreamSource = function () {
+      return { connect: function () {} };
+    };
+    this.createAnalyser = function () {
+      return {
+        fftSize: 512,
+        smoothingTimeConstant: 0.5,
+        getByteTimeDomainData: function (buffer) {
+          // 返回静音数据（128 = 静默），让静音检测在测试中快速触发
+          for (var i = 0; i < buffer.length; i++) {
+            buffer[i] = 128;
+          }
+        },
+      };
+    };
+  };
+  window.webkitAudioContext = window.AudioContext;
+
   // ============================================================
   // Web Speech API Mock（REQ-RAG-034 / REQ-RAG-035）
   // Playwright headless 浏览器不支持真实麦克风/扬声器，
@@ -180,7 +256,7 @@
 
 const state = {
 configured: window.__TEST_OPTS?.configured || false,
-isPro: false,
+isPro: true, // Alpha 阶段：全功能免费开放
 docs: [],
 /** 文件路径 → 内容哈希（去重用） */
 hashIndex: {},
@@ -214,6 +290,10 @@ embedderStatus: window.__TEST_OPTS?.embedderStatus || 'ready',
 embedderDownloadFail: window.__TEST_OPTS?.embedderDownloadFail || false,
 /** 侧栏折叠状态持久化（REQ-NAV-001） */
 sidebarCollapsed: false,
+/** 安全态势级别（Q05 借鉴 QM SecurityPosture） */
+securityPosture: 'auto',
+/** Shadow 安全筛查统计（Q06 借鉴 QM security-screen.ts） */
+shadowScreenStats: { total: 0, agree: 0, disagree: 0, unavailable: 0 },
 /** 知识图谱关系数据（REQ-RAG-027 前端图谱可视化测试用） */
 graphRelations: [
   { id: 'rel-1', subject: 'Rust', relation_type: 'defined_as', object: 'systems programming language', chunk_id: 'chunk-1', confidence: 1.0 },
@@ -617,10 +697,12 @@ contextualRetrieval: true,
             throw `不支持的格式：.${ext}，当前支持 .md / .txt / .pdf / .docx / .html / .pptx / .epub / .xlsx / .csv`;
           }
 
-          // PDF 付费门
-          if (ext === 'pdf' && !state.isPro) {
-            throw 'PRO_REQUIRED: PDF 导入为 Pro 版功能，请升级后重试';
-          }
+// Pro 门控格式付费门（REQ-LIC-002）
+// Alpha 阶段：全功能免费，跳过 Pro 门控
+const PRO_GATED = ['pdf', 'docx', 'pptx', 'epub', 'xlsx', 'csv'];
+if (!state.isPro && PRO_GATED.includes(ext)) {
+throw `PRO_REQUIRED: .${ext} 导入为 Pro 版功能，请升级后重试`;
+}
 
           // 配额检查
           if (!state.isPro && state.docs.length >= FREE_LIMIT) {
@@ -1394,8 +1476,34 @@ conv.title = userQuery.slice(0, 24);
       }
 
       // ============================================================
-      // 前端 securityApi 兼容命令（ipc.js 中使用的命令名别名）
+      // 安全态势分层（Q05 借鉴 QM SecurityPosture）
       // ============================================================
+      case 'set_security_posture': {
+        const posture = args.posture;
+        if (!['dangerous', 'auto', 'strict'].includes(posture)) {
+          throw new Error(`无效的安全态势值: ${posture}`);
+        }
+        state.securityPosture = posture;
+        return null;
+      }
+
+case 'get_security_posture': {
+return state.securityPosture || 'auto';
+}
+
+// Shadow 安全筛查统计（Q06 借鉴 QM security-screen.ts）
+case 'get_security_screen_stats': {
+return state.shadowScreenStats || { total: 0, agree: 0, disagree: 0, unavailable: 0 };
+}
+
+case 'reset_security_screen_stats': {
+state.shadowScreenStats = { total: 0, agree: 0, disagree: 0, unavailable: 0 };
+return null;
+}
+
+// ============================================================
+// 前端 securityApi 兼容命令（ipc.js 中使用的命令名别名）
+// ============================================================
       case 'encrypt_database': {
         const pwd = args.password;
         if (!pwd || pwd.length < 8) {
@@ -2013,6 +2121,43 @@ created_at: m.created_at || 0,
       }
 
       // ============================================================
+      // 语音转写（REQ-RAG-034 桌面方案：getUserMedia + MediaRecorder + Whisper API）
+      // ============================================================
+case 'transcribe_audio': {
+// mock：返回预设的转写文本
+return '测试语音输入';
+}
+
+case 'get_stt_config': {
+return {
+  stt_api_key_masked: window.__mock?.sttConfig?.apiKeyMasked || '',
+  stt_base_url: window.__mock?.sttConfig?.baseUrl || '',
+  stt_model: window.__mock?.sttConfig?.model || 'whisper-1',
+  stt_language: window.__mock?.sttConfig?.language || 'zh',
+  has_custom_config: !!(window.__mock?.sttConfig?.baseUrl)
+};
+}
+
+case 'set_stt_config': {
+if (!window.__mock) window.__mock = {};
+if (!window.__mock.sttConfig) window.__mock.sttConfig = {};
+if (args.sttApiKey !== null && args.sttApiKey !== undefined) {
+  const key = args.sttApiKey;
+  window.__mock.sttConfig.apiKeyMasked = key ? '****' + key.slice(-4) : '';
+}
+if (args.sttBaseUrl !== null && args.sttBaseUrl !== undefined) {
+  window.__mock.sttConfig.baseUrl = args.sttBaseUrl;
+}
+if (args.sttModel !== null && args.sttModel !== undefined) {
+  window.__mock.sttConfig.model = args.sttModel;
+}
+if (args.sttLanguage !== null && args.sttLanguage !== undefined) {
+  window.__mock.sttConfig.language = args.sttLanguage;
+}
+return null;
+}
+
+      // ============================================================
       // 代码符号引擎（REQ-RAG-031）
       // ============================================================
       case 'search_symbols': {
@@ -2354,13 +2499,28 @@ created_at: m.created_at || 0,
         };
       }
 
-      case 'set_token_budget':
-        state.tokenBudget = args.budget || 0;
-        return null;
+case 'set_token_budget':
+    state.tokenBudget = args.budget || 0;
+    return null;
 
-      // ============================================================
-      // 下载管理（REQ-LLM-004 v2）
-      // ============================================================
+// ============================================================
+// Q08: 预算追踪（QM 借鉴 — LLM API 费用控制和速率限制）
+// ============================================================
+
+case 'get_budget_stats':
+    return {
+        daily_limit: state.budgetDailyLimit || 0,
+        spent_today: state.budgetSpentToday || 0.0,
+        remaining: state.budgetDailyLimit > 0 ? Math.max(0, state.budgetDailyLimit - (state.budgetSpentToday || 0)) : Infinity
+    };
+
+case 'set_budget_limit':
+    state.budgetDailyLimit = args.daily_limit_usd || 0;
+    return null;
+
+// ============================================================
+// 下载管理（REQ-LLM-004 v2）
+// ============================================================
       case 'pause_download':
         state.downloadStatuses[args.filename] = { status: 'paused', downloaded: 0, total: 0 };
         return null;
@@ -2731,6 +2891,7 @@ state.coordinatorEnabled = false;
       state.pendingInputs = [];
   state.sessionTodos = [];
   state.burstBuffer = [];
+  state.shadowScreenStats = { total: 0, agree: 0, disagree: 0, unavailable: 0 };
     },
   };
 })();

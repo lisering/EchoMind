@@ -1,0 +1,175 @@
+
+Running 30 tests using 5 workers
+
+  ✓   1 tests/agent-rag.spec.ts:31:3 › E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022） › E2E-AGENT-001 Agentic 模式——默认关闭 (7.4s)
+  ✓   5 tests/agent-rag.spec.ts:37:3 › E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022） › E2E-AGENT-002 Agentic 模式——启用后持久化 (5.2s)
+  ✓   4 tests/agent-rag.spec.ts:58:3 › E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022） › E2E-AGENT-003 Agentic 模式——agent_step 事件推送 (11.6s)
+  ✓   3 tests/agent-rag.spec.ts:85:3 › E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022） › E2E-AGENT-004 Agentic 模式——多步检索 Thought/Action/Observation (12.1s)
+  ✓   2 tests/agent-rag.spec.ts:119:3 › E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022） › E2E-AGENT-005 Agentic 模式——最终答案以 chat_token 流式输出 (12.2s)
+  ✓   7 tests/agent-rag.spec.ts:175:3 › E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022） › E2E-AGENT-007 Agentic 模式——解析失败降级为标准 RAG (5.4s)
+  ✓   6 tests/agent-rag.spec.ts:144:3 › E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022） › E2E-AGENT-006 Agentic 模式——最大迭代次数限制 (9.1s)
+  ✓   8 tests/agent-rag.spec.ts:211:3 › E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022） › E2E-AGENT-008 Agentic 模式——取消保留已生成内容 (5.1s)
+  ✓  11 tests/audit.spec.ts:21:3 › E2E-AUDIT-001~005 文档一致性审计 UI › E2E-AUDIT-001 Pro 版 Indexed 文档显示审计按钮 (4.2s)
+  ✓   9 tests/agent-rag.spec.ts:253:3 › E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022） › E2E-AGENT-010 Agentic 模式——标准 RAG 共存 (8.8s)
+  ✓  13 tests/audit.spec.ts:47:3 › E2E-AUDIT-001~005 文档一致性审计 UI › E2E-AUDIT-002 审计阶段事件驱动思考指示器文案 (3.8s)
+  ✓  10 tests/agent-rag.spec.ts:237:3 › E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022） › E2E-AGENT-009 Agentic 模式——引用来源聚合 (8.9s)
+  ✓  14 tests/audit.spec.ts:61:3 › E2E-AUDIT-001~005 文档一致性审计 UI › E2E-AUDIT-003 审计报告流式渲染为 Markdown (7.5s)
+  ✘  12 tests/audit.spec.ts:29:3 › E2E-AUDIT-001~005 文档一致性审计 UI › E2E-AUDIT-001b 免费版不显示审计按钮 (10.8s)
+  ✓  17 tests/audit.spec.ts:125:3 › E2E-AUDIT-001~005 文档一致性审计 UI › E2E-AUDIT-006 审计中尝试发送消息被阻止 (6.4s)
+  ✓  15 tests/audit.spec.ts:105:3 › E2E-AUDIT-001~005 文档一致性审计 UI › E2E-AUDIT-005 审计取消 — stopBtn 调用 abort_audit (8.3s)
+  ✓  18 tests/deepseek-style.spec.ts:27:3 › DeepSeek 风格 UI 对齐 › TC-DS-013 用户消息纯文本右对齐（无气泡背景/边框） (4.8s)
+  ✓  16 tests/audit.spec.ts:82:3 › E2E-AUDIT-001~005 文档一致性审计 UI › E2E-AUDIT-004 审计报告含矛盾清单表格 (9.2s)
+  ✓  22 tests/deepseek-style.spec.ts:132:3 › DeepSeek 风格 UI 对齐 › TC-DS-018 输入框旁显示 toggle 按钮 (2.6s)
+  ✓  20 tests/deepseek-style.spec.ts:83:3 › DeepSeek 风格 UI 对齐 › TC-DS-016 思维链面板可折叠 (4.1s)
+  ✓  21 tests/deepseek-style.spec.ts:106:3 › DeepSeek 风格 UI 对齐 › TC-DS-017 搜索来源可折叠 (3.7s)
+  ✓  19 tests/deepseek-style.spec.ts:69:3 › DeepSeek 风格 UI 对齐 › TC-DS-015 AI 消息底部包含 .ai-disclaimer 元素 (7.5s)
+  ✓  24 tests/deepseek-style.spec.ts:142:3 › DeepSeek 风格 UI 对齐 › TC-DS-019 新对话按钮旁显示 ⌘ J 提示 (2.8s)
+  ✓  23 tests/deepseek-style.spec.ts:54:3 › DeepSeek 风格 UI 对齐 › TC-DS-014 AI 消息无背景色（透明） (4.2s)
+  ✓  26 tests/dream-panel.spec.ts:31:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-001: Dream 面板打开 (11.7s)
+  ✓  25 tests/deepseek-style.spec.ts:150:3 › DeepSeek 风格 UI 对齐 › TC-DS-020 ⌘ J 快捷键触发新对话 (13.2s)
+  ✓  28 tests/dream-panel.spec.ts:64:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-003: 建议列表按 severity 分组 (12.0s)
+  ✘  30 tests/dream-panel.spec.ts:98:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-005: 历史建议查看 (20.6s)
+  ✘  27 tests/dream-panel.spec.ts:47:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-002: 触发 dream 分析 + 进度条 (33.7s)
+  ✘  29 tests/dream-panel.spec.ts:82:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-004: 中止 dream (1.0m)
+
+
+  1) tests/audit.spec.ts:29:3 › E2E-AUDIT-001~005 文档一致性审计 UI › E2E-AUDIT-001b 免费版不显示审计按钮 ───────────
+
+    Error: expect(locator).toBeHidden() failed
+
+    Locator:  locator('#docList [data-doc-name="audit-doc.md"]').locator('button[title="审计文档一致性"]')
+    Expected: hidden
+    Received: visible
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toBeHidden" with timeout 5000ms
+      - waiting for locator('#docList [data-doc-name="audit-doc.md"]').locator('button[title="审计文档一致性"]')
+        11 × locator resolved to <button title="审计文档一致性" data-action="audit" class="invisible group-hover:visible text-text-quaternary hover:text-accent px-1">🔍</button>
+           - unexpected value "visible"
+
+
+      42 |     // 审计按钮应隐藏（display: none）
+      43 |     const auditBtn = docItem.locator('button[title="审计文档一致性"]');
+    > 44 |     await expect(auditBtn).toBeHidden();
+         |                            ^
+      45 |   });
+      46 |
+      47 |   test('E2E-AUDIT-002 审计阶段事件驱动思考指示器文案', async ({ page }) => {
+        at /Users/john/freesoft/EchoMind/e2e-tests/tests/audit.spec.ts:44:28
+
+    Error Context: test-results/audit-E2E-AUDIT-001-005-文档一致性审计-UI-E2E-AUDIT-001b-免费版不显示审计按钮/error-context.md
+
+  2) tests/dream-panel.spec.ts:47:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-002: 触发 dream 分析 + 进度条 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('#dreamProgress')
+    Expected: visible
+    Error: strict mode violation: locator('#dreamProgress') resolved to 28 elements:
+        1) <div class="" id="dreamProgress">…</div> aka locator('div').filter({ hasText: '知识库整理 AutoDream 自动扫描重复文档、矛盾信息和整理建议 开始分析 中止 正在扫描文档…' }).locator('#dreamProgress')
+        2) <div class="hidden" id="dreamProgress">…</div> aka locator('#dreamProgress').nth(1)
+        3) <div class="hidden" id="dreamProgress">…</div> aka locator('#dreamProgress').nth(2)
+        4) <div class="hidden" id="dreamProgress">…</div> aka locator('#dreamProgress').nth(3)
+        5) <div class="hidden" id="dreamProgress">…</div> aka locator('#dreamProgress').nth(4)
+        6) <div class="hidden" id="dreamProgress">…</div> aka locator('#dreamProgress').nth(5)
+        7) <div class="hidden" id="dreamProgress">…</div> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > #dreamProgress').first()
+        8) <div class="hidden" id="dreamProgress">…</div> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > #dreamProgress').first()
+        9) <div class="hidden" id="dreamProgress">…</div> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > #dreamProgress').first()
+        10) <div class="hidden" id="dreamProgress">…</div> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > #dreamProgress').first()
+        ...
+
+    Call log:
+      - Expect "toBeVisible" with timeout 3000ms
+      - waiting for locator('#dreamProgress')
+
+
+      53 |
+      54 |     // 验证进度条出现
+    > 55 |     await expect(page.locator('#dreamProgress')).toBeVisible({ timeout: 3000 });
+         |                                                  ^
+      56 |
+      57 |     // 验证进度条有进度值
+      58 |     await page.waitForTimeout(500);
+        at /Users/john/freesoft/EchoMind/e2e-tests/tests/dream-panel.spec.ts:55:50
+
+    Error Context: test-results/dream-panel-AutoDream-知识库整-e61f9-REAM-UI-002-触发-dream-分析-进度条/error-context.md
+
+  3) tests/dream-panel.spec.ts:82:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-004: 中止 dream ──
+
+    Test timeout of 60000ms exceeded.
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('#dreamAbortBtn')
+    Expected: visible
+    Error: strict mode violation: locator('#dreamAbortBtn') resolved to 28 elements:
+        1) <button id="dreamAbortBtn" data-i18n="dream.abort" class="px-4 py-2 rounded-lg border border-red-400/40 text-red-300 text-sm hover:bg-red-500/10 transition-colors">中止</button> aka getByRole('button', { name: '中止' })
+        2) <button id="dreamAbortBtn" data-i18n="dream.abort" class="hidden px-4 py-2 rounded-lg border border-red-400/40 text-red-300 text-sm hover:bg-red-500/10 transition-colors">中止</button> aka getByText('中止').nth(1)
+        3) <button id="dreamAbortBtn" data-i18n="dream.abort" class="hidden px-4 py-2 rounded-lg border border-red-400/40 text-red-300 text-sm hover:bg-red-500/10 transition-colors">中止</button> aka getByText('中止').nth(2)
+        4) <button id="dreamAbortBtn" data-i18n="dream.abort" class="hidden px-4 py-2 rounded-lg border border-red-400/40 text-red-300 text-sm hover:bg-red-500/10 transition-colors">中止</button> aka getByText('中止').nth(3)
+        5) <button id="dreamAbortBtn" data-i18n="dream.abort" class="hidden px-4 py-2 rounded-lg border border-red-400/40 text-red-300 text-sm hover:bg-red-500/10 transition-colors">中止</button> aka getByText('中止').nth(4)
+        6) <button id="dreamAbortBtn" data-i18n="dream.abort" class="hidden px-4 py-2 rounded-lg border border-red-400/40 text-red-300 text-sm hover:bg-red-500/10 transition-colors"></button> aka locator('#dreamAbortBtn').nth(5)
+        7) <button id="dreamAbortBtn" data-i18n="dream.abort" class="hidden px-4 py-2 rounded-lg border border-red-400/40 text-red-300 text-sm hover:bg-red-500/10 transition-colors"></button> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > .flex > #dreamAbortBtn').first()
+        8) <button id="dreamAbortBtn" data-i18n="dream.abort" class="hidden px-4 py-2 rounded-lg border border-red-400/40 text-red-300 text-sm hover:bg-red-500/10 transition-colors"></button> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > .flex > #dreamAbortBtn').first()
+        9) <button id="dreamAbortBtn" data-i18n="dream.abort" class="hidden px-4 py-2 rounded-lg border border-red-400/40 text-red-300 text-sm hover:bg-red-500/10 transition-colors"></button> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > .flex > #dreamAbortBtn').first()
+        10) <button id="dreamAbortBtn" data-i18n="dream.abort" class="hidden px-4 py-2 rounded-lg border border-red-400/40 text-red-300 text-sm hover:bg-red-500/10 transition-colors"></button> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > .flex > #dreamAbortBtn').first()
+        ...
+
+    Call log:
+      - Expect "toBeVisible" with timeout 3000ms
+      - waiting for locator('#dreamAbortBtn')
+
+
+      86 |     // 触发 dream
+      87 |     await clickById(page, 'dreamTriggerBtn');
+    > 88 |     await expect(page.locator('#dreamAbortBtn')).toBeVisible({ timeout: 3000 });
+         |                                                  ^
+      89 |
+      90 |     // 点击中止
+      91 |     await clickById(page, 'dreamAbortBtn');
+        at /Users/john/freesoft/EchoMind/e2e-tests/tests/dream-panel.spec.ts:88:50
+
+    Error Context: test-results/dream-panel-AutoDream-知识库整-ef81b-UI-TC-DREAM-UI-004-中止-dream/error-context.md
+
+  4) tests/dream-panel.spec.ts:98:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-005: 历史建议查看 ────
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('#dreamSuggestions')
+    Expected: visible
+    Error: strict mode violation: locator('#dreamSuggestions') resolved to 28 elements:
+        1) <div class="space-y-3" id="dreamSuggestions">…</div> aka getByText('高 检测到矛盾信息 关于 PDF 支持的描述存在矛盾 guide.mdfaq.md 中 发现重复文档 doc-a.md 和 doc-b.md 内容高度相似（')
+        2) <div class="space-y-3" id="dreamSuggestions"></div> aka locator('#dreamSuggestions').nth(1)
+        3) <div class="space-y-3" id="dreamSuggestions"></div> aka locator('#dreamSuggestions').nth(2)
+        4) <div class="space-y-3" id="dreamSuggestions"></div> aka locator('#dreamSuggestions').nth(3)
+        5) <div class="space-y-3" id="dreamSuggestions"></div> aka locator('#dreamSuggestions').nth(4)
+        6) <div class="space-y-3" id="dreamSuggestions"></div> aka locator('#dreamSuggestions').nth(5)
+        7) <div class="space-y-3" id="dreamSuggestions"></div> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > #dreamSuggestions').first()
+        8) <div class="space-y-3" id="dreamSuggestions"></div> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > #dreamSuggestions').first()
+        9) <div class="space-y-3" id="dreamSuggestions"></div> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > #dreamSuggestions').first()
+        10) <div class="space-y-3" id="dreamSuggestions"></div> aka locator('path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > circle > path > rect > circle > path > path > path > rect > path > path > div:nth-child(35) > #dreamContent > #dreamSuggestions').first()
+        ...
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for locator('#dreamSuggestions')
+
+
+      112 |     // 验证建议列表已加载
+      113 |     const suggestionsContainer = page.locator('#dreamSuggestions');
+    > 114 |     await expect(suggestionsContainer).toBeVisible();
+          |                                        ^
+      115 |     const content = await suggestionsContainer.textContent();
+      116 |     expect(content.length).toBeGreaterThan(0);
+      117 |   });
+        at /Users/john/freesoft/EchoMind/e2e-tests/tests/dream-panel.spec.ts:114:40
+
+    Error Context: test-results/dream-panel-AutoDream-知识库整-fd97c-M-UI-TC-DREAM-UI-005-历史建议查看/error-context.md
+
+  4 failed
+    tests/audit.spec.ts:29:3 › E2E-AUDIT-001~005 文档一致性审计 UI › E2E-AUDIT-001b 免费版不显示审计按钮 ────────────
+    tests/dream-panel.spec.ts:47:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-002: 触发 dream 分析 + 进度条 
+    tests/dream-panel.spec.ts:82:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-004: 中止 dream ───
+    tests/dream-panel.spec.ts:98:3 › AutoDream 知识库整理面板 (TC-DREAM-UI) › TC-DREAM-UI-005: 历史建议查看 ─────
+  26 passed (1.7m)

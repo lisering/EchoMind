@@ -1,5 +1,7 @@
 //! chat 域 IPC 命令子模块（从 commands.rs 拆分，纯重构）。
 use super::*;
+use echomind_core::LLMProvider;
+use echomind_core::budget::estimate_cost_usd;
 
 /// 流式对话。事件序列：`chat_sources?` → `chat_token*` → `chat_done`；
 /// 失败先推 `chat_error` 再返回 Err；中断时推「已中断」+ `chat_done` 并照常落库。
@@ -136,10 +138,7 @@ pub async fn chat_inner<R: Runtime>(
         .await
         .map_err(|e| prefix_error(ERR_EMBED, &format!("向量化引擎不可用: {e:#}")))?;
     let embedder = embedder.clone();
-    eprintln!(
-        "[PERF] chat_inner embedder ready: {}ms",
-        t0.elapsed().as_millis()
-    );
+    debug!("chat_inner embedder ready: {}ms", t0.elapsed().as_millis());
 
     // 兜底：会话不存在时幂等创建（正常流程前端先 create_conversation）
     let conversation = Conversation::with_id(
@@ -304,7 +303,7 @@ pub async fn chat_inner<R: Runtime>(
                     r.set_reranker(Some(Arc::new(reranker.clone())));
                 }
                 Err(e) => {
-                    eprintln!("[PERF] 重排序引擎不可用，降级为无重排检索: {e:#}");
+                    warn!("重排序引擎不可用，降级为无重排检索: {e:#}");
                 }
             }
         }
@@ -317,13 +316,23 @@ pub async fn chat_inner<R: Runtime>(
                 llm_config.model.clone(),
             ) {
                 Ok(rewriter) => r.set_rewriter(Some(Arc::new(rewriter))),
-                Err(e) => eprintln!("HyDE 改写器初始化失败，跳过查询改写: {e:#}"),
+                Err(e) => warn!("HyDE 改写器初始化失败，跳过查询改写: {e:#}"),
             }
         }
         r
     };
-    // REQ-LLM-003：根据 llm_mode 选择 Remote 或 Local provider
-    let llm_mode = state.get_llm_mode().await;
+    // Q11：使用 LlmRouter 路由到正确的后端（借鉴 QM HarnessRouter）
+    // Router 根据 fallback（由 set_llm_mode 更新）和 per-conversation last_mode 决策
+    let (llm_choice, router_verdict) = state
+        .llm_router
+        .resolve(conversation_id, None)
+        .await
+        .map_err(|e| prefix_error(ERR_LLM, &format!("{e:#}")))?;
+    let llm_mode = llm_choice.mode;
+    // 模式变更时记录日志（调用方可据此重置 KV cache 等会话状态）
+    if router_verdict == echomind_core::llm_router::RouterVerdict::ModeChanged {
+        info!("会话 {conversation_id} LLM 后端切换 → {llm_mode:?}");
+    }
     let usage_handle: Option<std::sync::Arc<tokio::sync::Mutex<Option<TokenUsage>>>>;
     let provider: LlmProvider = if llm_mode == LlmMode::Local {
         #[cfg(feature = "pro")]
@@ -438,7 +447,7 @@ pub async fn chat_inner<R: Runtime>(
                             )
                             .await;
                         } else {
-                            eprintln!("[COMPACTION] 后台压缩：本地 LLM 引擎不可用，跳过");
+                            warn!("后台压缩：本地 LLM 引擎不可用，跳过");
                         }
                         echomind_compact::release_background_compaction(&bg_conv_id, bg_pending)
                             .await;
@@ -467,7 +476,7 @@ pub async fn chat_inner<R: Runtime>(
                             .await;
                         }
                         Err(e) => {
-                            eprintln!("[COMPACTION] 后台压缩 provider 创建失败: {e:#}");
+                            warn!("后台压缩 provider 创建失败: {e:#}");
                         }
                     }
                     echomind_compact::release_background_compaction(&bg_conv_id, bg_pending).await;
@@ -519,7 +528,7 @@ pub async fn chat_inner<R: Runtime>(
                     info: None,
                 }
             };
-            eprintln!("[PERF] L3 检索结果缓存命中，跳过检索");
+            debug!("L3 检索结果缓存命中，跳过检索");
             (cr, Some(cached_sources))
         } else {
             // 未命中：并行 compaction + 检索（使用预计算嵌入），完成后写 L3 缓存
@@ -558,8 +567,8 @@ pub async fn chat_inner<R: Runtime>(
                     echomind_core::graph_retriever::GraphRetriever::new(state.storage.clone());
                 match graph_retriever.expand(query, DEFAULT_TOP_K).await {
                     Ok(graph_results) if !graph_results.is_empty() => {
-                        eprintln!(
-                            "[GRAPH] 图扩展返回 {} 个关联 chunk，合并到检索结果",
+                        debug!(
+                            "图扩展返回 {} 个关联 chunk，合并到检索结果",
                             graph_results.len()
                         );
                         // 合并图扩展结果到标准检索结果：
@@ -592,10 +601,10 @@ pub async fn chat_inner<R: Runtime>(
                         rr.truncate(DEFAULT_TOP_K * 2);
                     }
                     Ok(_) => {
-                        eprintln!("[GRAPH] 图扩展无结果，保持标准检索结果");
+                        debug!("图扩展无结果，保持标准检索结果");
                     }
                     Err(e) => {
-                        eprintln!("[GRAPH] 图扩展失败，降级为标准检索: {e:#}");
+                        warn!("图扩展失败，降级为标准检索: {e:#}");
                     }
                 }
             }
@@ -606,7 +615,7 @@ pub async fn chat_inner<R: Runtime>(
                 && let Ok(json) = serde_json::to_string(&rr)
                 && let Err(e) = state.cache.insert_retrieval(query, emb, &json).await
             {
-                eprintln!("[PERF] 写入检索结果缓存失败: {e:#}");
+                warn!("写入检索结果缓存失败: {e:#}");
             }
             (cr, Some(rr))
         }
@@ -799,8 +808,8 @@ pub async fn chat_inner<R: Runtime>(
                 .retrieve(query, DEFAULT_TOP_K)
                 .await
                 .map_err(|e| classify_llm_error(&format!("{e:#}")))?;
-            eprintln!(
-                "[PERF] chat_inner speculative retrieval: {}ms",
+            debug!(
+                "chat_inner speculative retrieval: {}ms",
                 t_retrieve.elapsed().as_millis()
             );
 
@@ -850,8 +859,8 @@ pub async fn chat_inner<R: Runtime>(
                 );
 
                 emit_chat_phase(app, "generating", "Speculative RAG 生成中…");
-                eprintln!(
-                    "[PERF] chat_inner speculative total pre-LLM: {}ms",
+                debug!(
+                    "chat_inner speculative total pre-LLM: {}ms",
                     t0.elapsed().as_millis()
                 );
                 let spec_outcome = spec_engine
@@ -866,20 +875,20 @@ pub async fn chat_inner<R: Runtime>(
                         stream,
                         ..
                     } => {
-                        eprintln!("[PERF] chat_inner speculative: draft accepted");
+                        debug!("chat_inner speculative: draft accepted");
                         stream
                     }
                     echomind_core::speculative_rag::SpeculativeOutcome::DraftCorrected {
                         stream,
                         ..
                     } => {
-                        eprintln!("[PERF] chat_inner speculative: draft corrected");
+                        debug!("chat_inner speculative: draft corrected");
                         stream
                     }
                     echomind_core::speculative_rag::SpeculativeOutcome::FallbackDirect {
                         stream,
                     } => {
-                        eprintln!("[PERF] chat_inner speculative: fallback to direct");
+                        debug!("chat_inner speculative: fallback to direct");
                         stream
                     }
                 };
@@ -896,9 +905,7 @@ pub async fn chat_inner<R: Runtime>(
                 let compressor: Arc<dyn echomind_core::PromptCompressor> =
                     Arc::new(echomind_core::prompt_compressor::RuleBasedCompressor::new());
                 engine = engine.with_compressor(compressor, compression_ratio);
-                eprintln!(
-                    "[PERF] chat_inner prompt compression enabled (ratio={compression_ratio})"
-                );
+                debug!("chat_inner prompt compression enabled (ratio={compression_ratio})");
             }
 
             // REQ-PERF-010：渐进式上下文注入（初始注入 top-2 → 检测"不确定"→ 追加）
@@ -907,14 +914,14 @@ pub async fn chat_inner<R: Runtime>(
                 .is_some_and(|&v| v == "true");
             if progressive_enabled {
                 engine = engine.with_progressive(2);
-                eprintln!("[PERF] chat_inner progressive injection enabled (initial=2)");
+                debug!("chat_inner progressive injection enabled (initial=2)");
             }
 
             // REQ-RAG-028：质量门控（检索后评估结果质量，低质量时记录告警）
             if quality_gate_enabled {
                 engine =
                     engine.with_quality_gate(echomind_core::quality_gate::GateConfig::default());
-                eprintln!("[GATE] chat_inner quality gate enabled (threshold=0.6)");
+                debug!("chat_inner quality gate enabled (threshold=0.6)");
             }
 
             // REQ-RAG-032：持久化记忆注入（检索相关跨会话记忆，注入到 system prompt）
@@ -925,7 +932,7 @@ pub async fn chat_inner<R: Runtime>(
                 let memory_store =
                     echomind_core::memory_store::MemoryStore::new(state.storage.clone());
                 engine = engine.with_memory(std::sync::Arc::new(memory_store));
-                eprintln!("[MEM] chat_inner memory injection enabled");
+                debug!("chat_inner memory injection enabled");
             }
 
             // 标准 RAG：检索已与上下文压缩并行完成（见 compaction 处），
@@ -959,14 +966,14 @@ pub async fn chat_inner<R: Runtime>(
                             DEFAULT_TOP_K,
                         )
                         .await;
-                        eprintln!(
-                            "[WEB] chat_inner web search fused, {} results after fusion",
+                        debug!(
+                            "chat_inner web search fused, {} results after fusion",
                             fused.len()
                         );
                         fused
                     }
                     Err(e) => {
-                        eprintln!("[WEB] DuckDuckGo provider 初始化失败，跳过网页搜索: {e:#}");
+                        warn!("DuckDuckGo provider 初始化失败，跳过网页搜索: {e:#}");
                         prefetched
                     }
                 }
@@ -978,8 +985,8 @@ pub async fn chat_inner<R: Runtime>(
                 .chat_with_sources(compacted_history, query, prefetched)
                 .await
                 .map_err(|e| classify_llm_error(&format!("{e:#}")))?;
-            eprintln!(
-                "[PERF] chat_inner retrieval (embed+search+expand): {}ms",
+            debug!(
+                "chat_inner retrieval (embed+search+expand): {}ms",
                 t_retrieve.elapsed().as_millis()
             );
 
@@ -992,15 +999,15 @@ pub async fn chat_inner<R: Runtime>(
                 } => {
                     emit_chat_sources(app, &sources);
                     if let Some(info) = &progressive_info {
-                        eprintln!(
-                            "[PERF] chat_inner progressive: injected {}/{} sources, can_expand={}",
+                        debug!(
+                            "chat_inner progressive: injected {}/{} sources, can_expand={}",
                             info.injected_count, info.total_sources, info.can_expand
                         );
                     }
                     // 阶段 3：LLM 生成回答（首个 token 到达前的连接与推理延迟）
                     emit_chat_phase(app, "generating", "正在生成回答…");
-                    eprintln!(
-                        "[PERF] chat_inner total pre-LLM: {}ms (from start)",
+                    debug!(
+                        "chat_inner total pre-LLM: {}ms (from start)",
                         t0.elapsed().as_millis()
                     );
                     (Some(sources), stream)
@@ -1031,7 +1038,7 @@ pub async fn chat_inner<R: Runtime>(
                     .record_retrieval(query, method, &results)
                     .await
             {
-                eprintln!("[PERF] retrieval memory record failed: {e:#}");
+                warn!("retrieval memory record failed: {e:#}");
             }
         }
 
@@ -1104,8 +1111,8 @@ pub async fn forward_stream<R: Runtime>(
                 }
                 Some(Ok(token)) => {
                     if !first_token_logged {
-                        eprintln!(
-                            "[PERF] forward_stream first token: {}ms (from forward_stream start)",
+                        debug!(
+                            "forward_stream first token: {}ms (from forward_stream start)",
                             t_first_token.elapsed().as_millis()
                         );
                         first_token_logged = true;
@@ -1143,11 +1150,49 @@ pub async fn forward_stream<R: Runtime>(
 
 /// 一轮问答落库（REQ-RAG-006）：首轮自动提取标题；空回答（秒中断）跳过 assistant 记录。
 ///
+/// 使用 KeyedQueue 按 conversation_id 序列化（Q09 借鉴 QM createKeyedQueue），
+/// 消除同一会话并发 persist_exchange 调用的 SQLite 写入竞态。
+///
 /// # 参数
 /// - `reasoning`: 助手消息的推理思考过程（reasoning_content，推理模型才有），
 ///   落库持久化，历史消息加载时可重现思考过程（P2-1 之后的修复）。
 #[allow(clippy::too_many_arguments)]
 pub async fn persist_exchange(
+    state: &AppState,
+    conversation_id: &str,
+    query: &str,
+    answer: &str,
+    sources: Option<Vec<RetrievalResult>>,
+    reasoning: Option<String>,
+    turn_group: Option<&str>,
+    version: Option<i32>,
+) -> Result<(), String> {
+    // 按 conversation_id 序列化：同一会话的 persist_exchange 串行执行，
+    // 不同会话并行执行，不影响跨会话性能。
+    let key = conversation_id.to_string();
+    state
+        .persist_queue
+        .run(key, || async {
+            persist_exchange_inner(
+                state,
+                conversation_id,
+                query,
+                answer,
+                sources,
+                reasoning,
+                turn_group,
+                version,
+            )
+            .await
+        })
+        .await
+}
+
+/// persist_exchange 的内部实现（无序列化，直接写入 SQLite）。
+///
+/// 由 `persist_exchange` 通过 KeyedQueue 调用，确保同会话串行。
+#[allow(clippy::too_many_arguments)]
+async fn persist_exchange_inner(
     state: &AppState,
     conversation_id: &str,
     query: &str,
@@ -1165,11 +1210,55 @@ pub async fn persist_exchange(
         .await
         .map_err(|e| prefix_error(ERR_STORAGE, &format!("{e:#}")))?;
     if msg_count == 0 {
+        // 立即设置 derive_title 作为初始标题（快速，无 LLM 调用）
         state
             .storage
             .update_conversation_title(conversation_id, &derive_title(query))
             .await
             .map_err(|e| prefix_error(ERR_STORAGE, &format!("{e:#}")))?;
+
+        // Q10：LLM 辅助标题生成（借鉴 QM generateTitle）
+        // 仅在 Remote (OpenAI) 模式下尝试，避免本地模型额外加载开销
+        // 10 秒超时，失败/超时/None 均静默降级为 derive_title
+        let llm_mode = state.get_llm_mode().await;
+        if llm_mode == LlmMode::Remote {
+            let llm_config = state.llm_config().read().await.clone();
+            if let Some(config) = llm_config
+                && let Ok(provider) = OpenAIProvider::new(
+                    config.api_key.clone(),
+                    config.base_url.clone(),
+                    config.model.clone(),
+                )
+            {
+                // 截断 answer 防止超长转录消耗过多 token
+                let answer_excerpt: String = answer.chars().take(200).collect();
+                let transcript = format!("用户: {query}\n助手: {answer_excerpt}");
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    provider.generate_title(&transcript),
+                )
+                .await
+                {
+                    Ok(Ok(Some(title))) if !title.is_empty() => {
+                        if let Err(e) = state
+                            .storage
+                            .update_conversation_title(conversation_id, &title)
+                            .await
+                        {
+                            warn!("LLM 标题更新失败，保留 derive_title: {e:#}");
+                        }
+                    }
+                    // None / 空标题 / 不支持：保留 derive_title
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => {
+                        warn!("LLM 标题生成失败，保留 derive_title: {e:#}");
+                    }
+                    Err(_) => {
+                        warn!("LLM 标题生成超时（10s），保留 derive_title");
+                    }
+                }
+            }
+        }
     }
 
     // 当 turn_group 为 Some 时，用户消息已由 edit_user_message IPC 保存，
@@ -1319,29 +1408,92 @@ pub async fn record_token_usage_inner(state: &AppState, usage: &Option<TokenUsag
         .set_setting("usage.total_prompt_tokens", &new_prompt.to_string())
         .await
     {
-        eprintln!("记录 token 用量失败(prompt): {e:#}");
+        warn!("记录 token 用量失败(prompt): {e:#}");
     }
     if let Err(e) = state
         .storage
         .set_setting("usage.total_completion_tokens", &new_completion.to_string())
         .await
     {
-        eprintln!("记录 token 用量失败(completion): {e:#}");
+        warn!("记录 token 用量失败(completion): {e:#}");
     }
     if let Err(e) = state
         .storage
         .set_setting("usage.total_tokens", &new_total.to_string())
         .await
     {
-        eprintln!("记录 token 用量失败(total): {e:#}");
+        warn!("记录 token 用量失败(total): {e:#}");
     }
     if let Err(e) = state
         .storage
         .set_setting("usage.exchange_count", &new_exchange.to_string())
         .await
     {
-        eprintln!("记录 token 用量失败(exchange): {e:#}");
+        warn!("记录 token 用量失败(exchange): {e:#}");
     }
+
+    // Q08: 记录预算使用情况（QM 借鉴）
+    if let Err(e) = record_budget_usage_inner(state, usage).await {
+        eprintln!("记录预算使用失败: {e:#}");
+    }
+}
+
+/// Q08: 记录预算使用情况（QM 借鉴）。
+///
+/// 在 token 使用记录后调用，计算 LLM API 费用并更新预算追踪器。
+async fn record_budget_usage_inner(state: &AppState, usage: &TokenUsage) -> Result<(), String> {
+    // 获取 LLM 配置（模型名称用于记录）
+    let llm_config = state.llm_config().read().await.clone();
+    let Some(config) = llm_config else {
+        return Err("未配置 LLM".to_string());
+    };
+
+    // 获取价格配置（环境变量优先，默认值兜底）
+    let usd_per_mtok = std::env::var("LLM_COST_PER_MTOK")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(5.0); // 默认 $5.0/MTok
+
+    // 估算成本（使用 QM 的成本估算方法）
+    let input_cost = estimate_cost_usd(usage.prompt_tokens as usize, usd_per_mtok);
+    let output_cost = estimate_cost_usd(usage.completion_tokens as usize, usd_per_mtok);
+    let total_cost = input_cost + output_cost;
+
+    // 检查预算限制
+    let principal = "default_user";
+    match state.budget_tracker.check(principal).await {
+        echomind_core::budget::BudgetCheck::Denied { spent, limit } => {
+            eprintln!(
+                "超出预算限制：已使用 {:.4} USD，限制 {:.4} USD",
+                spent, limit
+            );
+            return Err(format!(
+                "超出预算限制：已使用 {:.4} USD，限制 {:.4} USD",
+                spent, limit
+            ));
+        }
+        echomind_core::budget::BudgetCheck::Allowed => {
+            // 预算检查通过，记录使用
+        }
+    }
+
+    // 记录到数据库
+    state
+        .storage
+        .record_budget_usage(
+            principal,
+            usage.prompt_tokens as usize,
+            usage.completion_tokens as usize,
+            total_cost,
+            &config.model,
+        )
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 更新内存中的预算追踪器
+    state.budget_tracker.record(principal, total_cost).await;
+
+    Ok(())
 }
 
 /// 获取累计对话成本（token 用量统计）。

@@ -21,7 +21,7 @@
 // ============================================================
 
 /** 支持的语言列表 */
-export const SUPPORTED_LOCALES = ['en', 'zh-CN'];
+export const SUPPORTED_LOCALES = ['en', 'zh-CN', 'ja'];
 
 /** 默认语言（当无法检测系统语言时） */
 export const DEFAULT_LOCALE = 'en';
@@ -147,10 +147,11 @@ export function getLocale() {
  * @returns {string} 检测到的语言代码
  */
 export function detectLocale() {
-  // 1. 检查 navigator.language
-  const navLang = navigator.language || navigator.languages?.[0] || '';
-  if (navLang.toLowerCase().startsWith('zh')) return 'zh-CN';
-  return DEFAULT_LOCALE;
+// 1. 检查 navigator.language
+const navLang = navigator.language || navigator.languages?.[0] || '';
+if (navLang.toLowerCase().startsWith('zh')) return 'zh-CN';
+if (navLang.toLowerCase().startsWith('ja')) return 'ja';
+return DEFAULT_LOCALE;
 }
 
 /**

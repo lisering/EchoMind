@@ -45,7 +45,7 @@ pub async fn delete_document_inner(id: &str, state: &AppState) -> Result<(), Str
     if let Some(path) = file_path.as_ref()
         && let Err(err) = tokio::fs::remove_file(path).await
     {
-        eprintln!("文档副本清理失败（可忽略）: {path}: {err}");
+        warn!("文档副本清理失败（可忽略）: {path}: {err}");
     }
 
     // **性能/一致性**：删除文档 → 按文档名精确失效相关缓存条目
@@ -56,7 +56,7 @@ pub async fn delete_document_inner(id: &str, state: &AppState) -> Result<(), Str
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         if let Err(e) = state.cache.invalidate_by_doc(&doc_name).await {
-            eprintln!("[PERF] 删除文档后失效缓存失败: {e:#}");
+            warn!("删除文档后失效缓存失败: {e:#}");
         }
     }
     // P2-1 StepCache：删除文档 → 清空步骤级缓存（检索结果可能引用被删文档）

@@ -55,14 +55,14 @@ test.describe('1. 视觉设计系统原子级验证', () => {
     expect(color).toBe('rgb(12, 17, 22)');
   });
 
-  test('1.6 发送按钮圆角 20px (rounded-xl)', async ({ page }) => {
+  test('1.6 发送按钮圆角 16px (rounded-lg)', async ({ page }) => {
     const radius = await page.evaluate(() => getComputedStyle(document.getElementById('sendBtn')).borderRadius);
-    expect(radius).toBe('20px');
+    expect(radius).toBe('16px');
   });
 
-  test('1.7 发送按钮高度 36px (h-9)', async ({ page }) => {
+  test('1.7 发送按钮高度 32px (h-8)', async ({ page }) => {
     const height = await page.evaluate(() => getComputedStyle(document.getElementById('sendBtn')).height);
-    expect(height).toBe('36px');
+    expect(height).toBe('32px');
   });
 
   test('1.8 停止按钮背景色半透明红色', async ({ page }) => {
@@ -92,7 +92,7 @@ test.describe('1. 视觉设计系统原子级验证', () => {
     expect(color).toContain('252');
   });
 
-  test('1.10 停止按钮圆角 20px', async ({ page }) => {
+  test('1.10 停止按钮圆角 16px', async ({ page }) => {
     await page.locator('#kbBtn').click();
     await expect(page.locator('#kbModal')).toBeVisible({ timeout: 3000 });
     await page.evaluate(() => { window.__TAURI__.core.invoke('import_files', { paths: ['/mock/test.md'] }); });
@@ -101,7 +101,7 @@ test.describe('1. 视觉设计系统原子级验证', () => {
     await sendMessage(page, 'test');
     await page.locator('#sendBtn.stop-mode').waitFor({ state: 'visible', timeout: 5000 });
     const radius = await page.evaluate(() => getComputedStyle(document.getElementById('sendBtn')).borderRadius);
-    expect(radius).toBe('20px');
+    expect(radius).toBe('16px');
   });
 
   test('1.11 输入框区域圆角 24px (rounded-2xl)', async ({ page }) => {
@@ -109,32 +109,32 @@ test.describe('1. 视觉设计系统原子级验证', () => {
     expect(radius).toBe('24px');
   });
 
-  test('1.12 聊天区域 padding 24px (px-6 py-6)', async ({ page }) => {
+  test('1.12 聊天区域 padding px-5 py-3 (20px/12px)', async ({ page }) => {
     const padding = await page.evaluate(() => {
       const cs = getComputedStyle(document.getElementById('chatArea'));
       return { top: cs.paddingTop, right: cs.paddingRight, bottom: cs.paddingBottom, left: cs.paddingLeft };
     });
-    expect(padding.top).toBe('24px');
-    expect(padding.right).toBe('24px');
-    expect(padding.bottom).toBe('24px');
-    expect(padding.left).toBe('24px');
+    expect(padding.top).toBe('12px');
+    expect(padding.right).toBe('20px');
+    expect(padding.bottom).toBe('12px');
+    expect(padding.left).toBe('20px');
   });
 
-  test('1.13 输入栏 padding 左右 16px / 上下 12px', async ({ page }) => {
+  test('1.13 输入栏 padding 左右 16px / 上下 10px (py-2.5)', async ({ page }) => {
     const padding = await page.evaluate(() => {
       const cs = getComputedStyle(document.getElementById('inputBar'));
       return { top: cs.paddingTop, right: cs.paddingRight, bottom: cs.paddingBottom, left: cs.paddingLeft };
     });
-    expect(padding.top).toBe('12px');
+    expect(padding.top).toBe('10px');
     expect(padding.right).toBe('16px');
-    expect(padding.bottom).toBe('12px');
+    expect(padding.bottom).toBe('10px');
     expect(padding.left).toBe('16px');
   });
 
-  test('1.14 fade-in 动画时长 250ms ease-out', async ({ page }) => {
+  test('1.14 animate-fade-in 动画时长 250ms ease-out', async ({ page }) => {
     const animDuration = await page.evaluate(() => {
       const el = document.createElement('div');
-      el.className = 'fade-in';
+      el.className = 'animate-fade-in';
       document.body.appendChild(el);
       const cs = getComputedStyle(el);
       const duration = cs.animationDuration;
@@ -198,7 +198,7 @@ test.describe('1. 视觉设计系统原子级验证', () => {
 
   test('1.22 空状态引导图标 ◈ (菱形)', async ({ page }) => {
     const text = await page.evaluate(() => {
-      const el = document.querySelector('#chatArea .text-5xl');
+      const el = document.querySelector('#chatArea .empty-state-logo');
       return el ? el.textContent : null;
     });
     expect(text).toBe('◈');

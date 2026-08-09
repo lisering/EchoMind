@@ -212,6 +212,12 @@ pub fn run() {
             commands::get_audit_logs,
             commands::clear_audit_logs,
             commands::check_password_strength,
+            // 安全态势分层（Q05 借鉴 QM SecurityPosture）
+            commands::set_security_posture,
+            commands::get_security_posture,
+            // Shadow 安全筛查模式（Q06 借鉴 QM security-screen.ts）
+            commands::get_security_screen_stats,
+            commands::reset_security_screen_stats,
             // 可观测性 IPC 命令（REQ-OBS-001 / REQ-OBS-002）
             commands::get_log_level,
             commands::set_log_level,
@@ -295,6 +301,10 @@ pub fn run() {
             commands::push_burst_turn,
             commands::flush_memory_burst_buffer,
             commands::get_burst_buffer_status,
+            // 语音转写（REQ-RAG-034 桌面应用方案：getUserMedia + MediaRecorder + OpenAI Whisper API）
+            commands::transcribe_audio,
+            commands::get_stt_config,
+            commands::set_stt_config,
             // 网页搜索集成（REQ-RAG-036：本地检索不足时搜索互联网）
             commands::set_web_search_enabled,
             commands::web_search,
@@ -333,6 +343,9 @@ pub fn run() {
             commands::get_session_todos,
             commands::delete_session_todo,
             commands::delete_session_todos,
+            // Q08: 预算追踪（QM 借鉴 — LLM API 费用控制和速率限制）
+            commands::get_budget_stats,
+            commands::set_budget_limit,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

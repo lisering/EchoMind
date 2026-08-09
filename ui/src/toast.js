@@ -40,8 +40,8 @@ export function toast(message, kind = 'info') {
       ? 'border-accent/50 text-accent'
       : kind === 'warning'
         ? 'border-amber-400/40 text-amber-300'
-        : 'border-line text-slate-300';
-  el.className = `bg-panel border ${color} rounded-xl px-4 py-3 text-sm shadow-lg animate-fade-in`;
+        : 'border-border-default text-slate-300';
+  el.className = `bg-surface-1 border ${color} rounded-xl px-4 py-3 text-sm shadow-lg animate-fade-in`;
   el.setAttribute('role', 'alert');
   el.textContent = message;
   $('toasts').appendChild(el);

@@ -22,6 +22,9 @@ use crate::vlm_prompt::VLM_TIERED_PROMPT;
 
 /// 免费版文件数上限（REQ-LIC-001）
 pub const FREE_TIER_MAX_FILES: usize = 50;
+/// Pro 门控格式：免费版仅支持个人知识管理格式（md/txt/代码/HTML），
+/// 专业文档格式（PDF/DOCX/PPTX/EPUB/XLSX/CSV）需 Pro 许可证（REQ-LIC-002）。
+pub const PRO_GATED_EXTENSIONS: [&str; 6] = ["pdf", "docx", "pptx", "epub", "xlsx", "csv"];
 /// 格式白名单（REQ-ING-002 + REQ-RAG-031 代码文件支持 + REQ-ING-016 .html + REQ-ING-017 .pptx + REQ-ING-018 .epub 支持）
 pub const ALLOWED_EXTENSIONS: [&str; 15] = [
     "md", "txt", "pdf", "rs", "ts", "tsx", "py", "go", "docx", "html", "htm", "pptx", "epub",
@@ -168,13 +171,16 @@ impl<S: Storage> ImportService<S> {
         Ok(format!("{:x}", hasher.finalize()))
     }
 
-    /// 免费版限制检查：PDF 付费门（REQ-ING-002-AC-1）与配额（REQ-LIC-001-AC-1）。
+    /// 免费版限制检查：专业格式付费门（REQ-LIC-002）与配额（REQ-LIC-001-AC-1）。
+    ///
+    /// Pro 门控格式：pdf / docx / pptx / epub / xlsx / csv（专业文档场景）。
+    /// 免费格式：md / txt / rs / ts / tsx / py / go / html / htm（个人知识管理）。
     async fn check_free_tier_limits(&self, is_pro: bool, ext: &str) -> anyhow::Result<()> {
         if is_pro {
             return Ok(());
         }
-        if ext == "pdf" {
-            bail!("{ERR_PRO_REQUIRED}: PDF 导入为 Pro 版功能，请升级后重试");
+        if PRO_GATED_EXTENSIONS.contains(&ext) {
+            bail!("{ERR_PRO_REQUIRED}: .{ext} 导入为 Pro 版功能，请升级后重试");
         }
         let count = self.storage.count_documents().await?;
         if count >= self.max_free_files {

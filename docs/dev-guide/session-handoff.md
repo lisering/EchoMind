@@ -31,7 +31,7 @@
 
 ### 铁律当时版本（10 条）
 
-完整定义见 `.catpaw/rules/iron-rules.md`（现已扩展至 12 条）。
+完整定义见 `.catpaw/rules/system-constraints.md`（现已扩展至 15 条）。
 
 | 铁律 | 内容 |
 |------|------|

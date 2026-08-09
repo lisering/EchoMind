@@ -133,7 +133,7 @@ export function enterEditMode(blockEl, originalContent, onResend, onAttach) {
   // 发送按钮 — 主操作（accent 底 + ink 文字），未修改时禁用
   const resendBtn = document.createElement('button');
   resendBtn.className =
-    'msg-edit-btn msg-edit-resend px-3 py-1.5 rounded-md text-sm bg-accent text-ink font-medium hover:opacity-90 transition-opacity duration-fast disabled:opacity-30 disabled:cursor-not-allowed';
+    'msg-edit-btn msg-edit-resend px-3 py-1.5 rounded-md text-sm bg-accent text-ink font-medium hover:opacity-90 transition-opacity duration-fast disabled:opacity-40 disabled:cursor-not-allowed';
   resendBtn.title = t('chat.edit_resend') || '发送';
   resendBtn.setAttribute('aria-label', t('chat.edit_resend') || '发送');
   resendBtn.textContent = t('chat.edit_resend') || '发送';

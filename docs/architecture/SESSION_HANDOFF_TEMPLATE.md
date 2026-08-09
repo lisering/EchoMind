@@ -28,7 +28,7 @@ Session N+1
 ## 必读文档（按优先级）
 1. `docs/architecture/XXX_ATOMIC_PLAN.md` — 本 Session 章节（第 X-Y 行）
 2. `crates/xxx/src/xxx.rs` — 已完成的参考代码
-3. `.catpaw/rules/iron-rules.md` — 铁律规则
+3. `.catpaw/rules/system-constraints.md` — 铁律规则
 4. 【其他必读文件】
 
 ## 精确变更清单

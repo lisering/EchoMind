@@ -149,3 +149,55 @@ pub async fn check_password_strength(password: String) -> Result<serde_json::Val
         "suggestions": suggestions,
     }))
 }
+
+// ============================================================================
+// 安全态势分层（Q05 借鉴 QM SecurityPosture）
+// ============================================================================
+
+/// 设置安全态势级别（Q05）。
+///
+/// 将态势持久化到 settings 表 `security.posture` 键，
+/// 并更新运行时 AtomicU8 状态（无锁读）。
+#[tauri::command]
+pub async fn set_security_posture(
+    posture: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let parsed = echomind_core::security::SecurityPosture::parse_str(&posture)
+        .ok_or_else(|| format!("无效的安全态势值: {posture}（支持: dangerous / auto / strict）"))?;
+    state
+        .storage
+        .set_setting("security.posture", parsed.as_str())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state.set_security_posture_value(parsed);
+    Ok(())
+}
+
+/// 获取安全态势级别（Q05）。
+#[tauri::command]
+pub async fn get_security_posture(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.get_security_posture().as_str().to_string())
+}
+
+// ============================================================================
+// Shadow 安全筛查模式（Q06 借鉴 QM security-screen.ts）
+// ============================================================================
+
+/// 获取 shadow 安全筛查统计（Q06）。
+///
+/// 返回 shadow 筛查的 agree/disagree/unavailable 统计快照，
+/// 用于验证筛查效果后决定是否切换为阻断模式。
+#[tauri::command]
+pub async fn get_security_screen_stats(
+    state: State<'_, AppState>,
+) -> Result<echomind_core::security::ShadowScreenStats, String> {
+    Ok(state.shadow_screen_collector.stats().await)
+}
+
+/// 重置 shadow 安全筛查统计（Q06）。
+#[tauri::command]
+pub async fn reset_security_screen_stats(state: State<'_, AppState>) -> Result<(), String> {
+    state.shadow_screen_collector.reset().await;
+    Ok(())
+}

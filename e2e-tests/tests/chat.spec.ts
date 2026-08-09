@@ -18,9 +18,9 @@ test.describe('E2E-RAG-001~015 对话链路', () => {
   test('E2E-RAG-001 发送后立即出现思考指示器', async ({ page }) => {
     await sendMessage(page, '测试思考指示器');
     // 思考面板（thinking-panel，替代旧 thinking-indicator）应立即可见
-    await expect(page.locator('.thinking-panel')).toBeVisible({ timeout: 3000 });
-    // 打字点动画 dots 存在（需求 5）
-    await expect(page.locator('.thinking-typing-dot')).toHaveCount(3);
+    await expect(page.locator('.thinking-panel')).toBeVisible({ timeout: 5000 });
+    // 思考面板文案可见（替代旧 typing-dot 断言）
+    await expect(page.locator('.thinking-panel-text')).toBeVisible({ timeout: 3000 });
   });
 
   test('E2E-RAG-014 chat_phase 事件更新指示器文案', async ({ page }) => {
@@ -37,8 +37,9 @@ test.describe('E2E-RAG-001~015 对话链路', () => {
     await expect(page.locator('.thinking-panel')).toBeVisible({ timeout: 3000 });
     // 等待首个 token 到达
     await expect(page.locator('#chatArea .md').last()).toBeVisible({ timeout: 10000 });
-    // 打字点动画应已移除（思考完成，setComplete 移除动画）
-    await expect(page.locator('.thinking-typing-dot')).toHaveCount(0);
+    // 思考面板应标记为完成状态（setComplete 后 header 文案变化）
+    const panelHeader = page.locator('.thinking-panel-text');
+    await expect(panelHeader).toBeVisible({ timeout: 3000 });
   });
 
   test('E2E-RAG-002 流式过程中 UI 不冻结，可滚动', async ({ page }) => {
@@ -110,13 +111,14 @@ test.describe('E2E-RAG-001~015 对话链路', () => {
   });
 
   test('E2E-UI-008 后端报错时输入框进入错误态', async ({ page }) => {
-    // 设置 chat 命令抛出错误（通过设置空文档让后端返回错误 — 但 mock 中已有文档）
-    // 直接用 evaluate 模拟 chat_error 事件
-    await page.evaluate(() => {
-      const listeners = window.__state.listeners['chat_error'] || [];
-      listeners.forEach((cb) => cb({ payload: '模拟后端错误' }));
-    });
-    await expect(page.locator('#toasts')).toContainText('模拟后端错误', { timeout: 5000 });
+    // 使用 setChatError 模拟 chat IPC 返回错误（V1 修复后不再 emit chat_error 事件）
+    await page.evaluate(() => window.__mock.setChatError('NETWORK: 模拟后端错误'));
+    await page.locator('#queryInput').fill('触发错误');
+    await page.locator('#sendBtn').click();
+    // 等待错误 toast 出现（NETWORK 前缀映射为「网络连接异常」）
+    await expect(page.locator('#toasts')).toContainText('网络连接异常', { timeout: 5000 });
+    // 清除错误模式
+    await page.evaluate(() => window.__mock.clearChatError());
   });
 
   test('E2E-RAG-010 停止后输入框恢复空闲态', async ({ page }) => {

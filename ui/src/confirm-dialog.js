@@ -132,8 +132,8 @@ export function showConfirmDialog(opts = {}) {
 
     // 确认按钮样式（danger 变体）
     const confirmBtnClass = danger
-      ? 'flex-1 bg-red-500/15 text-red-300 border border-red-400/40 rounded-xl px-4 py-3 text-sm hover:bg-red-500/25 transition-colors disabled:opacity-30'
-      : 'flex-1 bg-accent/15 text-accent border border-accent/30 rounded-xl px-4 py-3 text-sm hover:bg-accent/25 transition-colors disabled:opacity-30';
+      ? 'flex-1 bg-red-500/15 text-red-300 border border-red-400/40 rounded-xl px-4 py-3 text-sm hover:bg-red-500/25 transition-colors disabled:opacity-40'
+      : 'flex-1 bg-accent/15 text-accent border border-accent/30 rounded-xl px-4 py-3 text-sm hover:bg-accent/25 transition-colors disabled:opacity-40';
 
     // 内部容器
     const container = document.createElement('div');

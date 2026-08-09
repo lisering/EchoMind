@@ -196,6 +196,22 @@ pub async fn set_llm_mode_inner(mode: String, state: &AppState) -> Result<(), St
         .set_llm_mode(llm_mode)
         .await
         .map_err(|e| format!("{e:#}"))?;
+
+    // Q11：同步更新 LlmRouter 的 fallback（下次 chat_inner 调用时路由生效）
+    let local_model = state
+        .storage
+        .get_setting("llm.local_model")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .unwrap_or_default();
+    state
+        .llm_router
+        .set_fallback(echomind_core::llm_router::LlmChoice::new(
+            llm_mode,
+            local_model,
+        ))
+        .await;
+
     // S14：切换到 local 模式后后台预热（不阻塞模式切换返回）。
     // 若用户未选择模型或模型文件不存在，local_llm() 返回 Err，预热静默跳过。
     #[cfg(feature = "pro")]

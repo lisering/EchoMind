@@ -115,7 +115,7 @@ fn emit_audit_phase<R: Runtime>(app: &AppHandle<R>, phase: &str, message: &str) 
         message: message.to_string(),
     };
     if let Err(err) = app.emit("audit_phase", payload) {
-        eprintln!("audit_phase 事件发射失败: {err}");
+        warn!("audit_phase 事件发射失败: {err}");
     }
 }
 

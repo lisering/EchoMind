@@ -43,23 +43,74 @@ struct DownloadSource {
     branch: &'static str,
 }
 
-const DOWNLOAD_SOURCES: &[DownloadSource] = &[
-    DownloadSource {
-        name: "HuggingFace",
-        base: "https://huggingface.co",
-        branch: "main",
-    },
-    DownloadSource {
-        name: "ModelScope",
-        base: "https://modelscope.cn/models",
-        branch: "master",
-    },
-    DownloadSource {
-        name: "hf-mirror",
-        base: "https://hf-mirror.com",
-        branch: "main",
-    },
-];
+/// 所有可用下载源（顺序由 `get_download_sources` 动态决定）
+const SOURCE_MODELSCOPE: DownloadSource = DownloadSource {
+    name: "ModelScope",
+    base: "https://modelscope.cn/models",
+    branch: "master",
+};
+const SOURCE_HF_MIRROR: DownloadSource = DownloadSource {
+    name: "hf-mirror",
+    base: "https://hf-mirror.com",
+    branch: "main",
+};
+const SOURCE_HUGGINGFACE: DownloadSource = DownloadSource {
+    name: "HuggingFace",
+    base: "https://huggingface.co",
+    branch: "main",
+};
+
+/// 检测系统是否为中文环境（与 LocalEmbedder 一致）。
+fn is_chinese_locale() -> bool {
+    for var in &["LC_ALL", "LC_MESSAGES", "LANG"] {
+        if let Ok(val) = std::env::var(var)
+            && val.to_lowercase().starts_with("zh")
+        {
+            return true;
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("defaults")
+            .args(["read", "-g", "AppleLocale"])
+            .output()
+            && let Ok(s) = String::from_utf8(output.stdout)
+            && s.trim().to_lowercase().starts_with("zh")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// HuggingFace 连通性探测结果缓存（与 LocalEmbedder 一致）。
+static HF_REACHABLE: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
+    let client = match reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let url = "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main/config.json";
+    client
+        .get(url)
+        .send()
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+});
+
+/// 根据系统语言和网络探测返回下载源优先级顺序（与 LocalEmbedder 一致）。
+fn get_download_sources() -> Vec<&'static DownloadSource> {
+    if is_chinese_locale() {
+        vec![&SOURCE_MODELSCOPE, &SOURCE_HF_MIRROR, &SOURCE_HUGGINGFACE]
+    } else if *HF_REACHABLE {
+        vec![&SOURCE_HUGGINGFACE, &SOURCE_HF_MIRROR, &SOURCE_MODELSCOPE]
+    } else {
+        vec![&SOURCE_MODELSCOPE, &SOURCE_HF_MIRROR, &SOURCE_HUGGINGFACE]
+    }
+}
 
 /// 校验已下载文件是否完好（与 LocalEmbedder 一致的完整性校验）。
 fn is_reranker_file_valid(path: &Path, local_name: &str) -> bool {
@@ -173,7 +224,8 @@ impl LocalReranker {
                     .with_context(|| format!("创建重排序模型目录失败: {}", parent.display()))?;
             }
 
-            let mut order: Vec<usize> = (0..DOWNLOAD_SOURCES.len()).collect();
+            let sources = get_download_sources();
+            let mut order: Vec<usize> = (0..sources.len()).collect();
             if let Some(pref) = prefer_source {
                 order.sort_by_key(|&i| if i == pref { 0 } else { 1 + i });
             }
@@ -182,7 +234,7 @@ impl LocalReranker {
             let mut downloaded = false;
 
             for &idx in &order {
-                let src = &DOWNLOAD_SOURCES[idx];
+                let src = sources[idx];
                 let url = format!(
                     "{}/{RERANKER_REPO}/resolve/{}/{}",
                     src.base, src.branch, repo_path

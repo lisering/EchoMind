@@ -17,7 +17,7 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
-use crate::{Embedder, LLMProvider, Storage};
+use crate::{Embedder, LLMProvider, Storage, idempotency::IdempotencyStore};
 use echomind_models::MemoryTier;
 
 // ================== 数据结构 ==================
@@ -105,15 +105,17 @@ pub struct DreamEngine<E: Embedder, S: Storage, L: LLMProvider> {
     embedder: E,
     storage: S,
     llm: L,
+    idempotency_store: IdempotencyStore,
 }
 
 impl<E: Embedder, S: Storage + Clone, L: LLMProvider> DreamEngine<E, S, L> {
     /// 构造 Dream 引擎。
-    pub fn new(embedder: E, storage: S, llm: L) -> Self {
+    pub fn new(embedder: E, storage: S, llm: L, idempotency_store: IdempotencyStore) -> Self {
         Self {
             embedder,
             storage,
             llm,
+            idempotency_store,
         }
     }
 
@@ -126,6 +128,28 @@ impl<E: Embedder, S: Storage + Clone, L: LLMProvider> DreamEngine<E, S, L> {
     /// `DreamResult`，包含全部建议列表。
     /// 如果被取消，返回已完成的部分结果。
     pub async fn dream(&self, cancel: DreamCancelFlag) -> anyhow::Result<DreamResult> {
+        // 使用幂等性存储防止重复执行
+        // 如果已经有执行在进行中或已完成，则跳过这次执行
+        let should_execute = self
+            .idempotency_store
+            .once("auto_dream_full_scan", || {
+                Box::pin(async move {
+                    anyhow::Ok(()) // 实际执行会在主逻辑中进行
+                })
+            })
+            .await;
+
+        if !should_execute {
+            // 已有执行在进行中或已完成，返回空结果
+            return Ok(DreamResult {
+                suggestions: vec![],
+                total_documents: 0,
+                total_suggestions: 0,
+                elapsed_ms: 0,
+            });
+        }
+
+        // 执行实际的 Dream 分析
         let start = Instant::now();
         let mut suggestions = Vec::new();
 

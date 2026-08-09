@@ -316,14 +316,16 @@ export function buildPrintHtml(title, contentBlocks, options = {}) {
     </div>`;
   }).join('');
 
+  // 注意：</head> </body> </html> 使用转义斜杠，避免 build-ui.mjs 正则误匹配
+  // JavaScript 中 <\/body> === </body>（运行时值相同），但源码不包含字面量 </body>
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(title)}</title>
-  <style>${css}</style>
-</head>
+  <style>${css}<\/style>
+<\/head>
 <body>
   <div class="print-header">
     <h1>${escapeHtml(title)}</h1>
@@ -331,8 +333,8 @@ export function buildPrintHtml(title, contentBlocks, options = {}) {
   </div>
   ${blocksHtml}
   <div class="print-footer">${escapeHtml(t('export_pdf.footer'))}</div>
-</body>
-</html>`;
+<\/body>
+<\/html>`;
 }
 
 // ============================================================

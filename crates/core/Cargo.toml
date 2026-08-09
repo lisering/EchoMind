@@ -1,7 +1,8 @@
 [package]
 name = "echomind-core"
-version = "1.4.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
+license = "MIT"
 description = "EchoMind 六边形架构核心层：端口 Trait 与领域逻辑，禁止依赖任何具体实现"
 
 [features]
@@ -20,7 +21,7 @@ pulldown-cmark = { version = "0.13", default-features = false }
 tiktoken-rs = "0.12"
 md-5 = "0.10"
 # 纯计算解析库（REQ-PDF-001），与 pulldown-cmark 同类经架构评审准入 core
-lopdf = "0.34"
+lopdf = "0.42"
 # .docx 文件读取与解析（REQ-ING-015），纯 Rust 实现，无 C 依赖
 docx-rs = { version = "0.4", default-features = false }
 # .html 文件读取与解析（REQ-ING-016），纯 Rust HTML → 纯文本转换

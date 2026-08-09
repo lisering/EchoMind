@@ -290,7 +290,8 @@ test.describe('E2E-ERR 错误处理与降级策略（REQ-ERR-001~005）', () => 
     await expect(page.locator('#toasts')).toContainText('query too long', { timeout: 5000 });
 
     // 验证 toast 为 warning 样式（amber 色）
-    const toastEl = page.locator('#toasts > div').first();
+    // 注意：导入文档时可能产生 info toast，需定位包含 'query too long' 的那个 toast
+    const toastEl = page.locator('#toasts > div').filter({ hasText: 'query too long' });
     const className = await toastEl.getAttribute('class');
     expect(className).toContain('amber');
 

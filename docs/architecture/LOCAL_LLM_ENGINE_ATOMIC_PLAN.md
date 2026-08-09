@@ -223,7 +223,7 @@ cargo fmt --check -p echomind-models
 ## 必读文档
 1. `docs/architecture/LOCAL_LLM_ENGINE_ATOMIC_PLAN.md` — 本规划文档（Session 2 章节）
 2. `docs/architecture/LOCAL_LLM_ENGINE_PLAN.md` — 总体规划
-3. `.catpaw/rules/iron-rules.md` — 铁律规则
+3. `.catpaw/rules/system-constraints.md` — 铁律规则
 4. `crates/models/src/lib.rs` — 已完成的数据模型
 
 ## TDD 纪律

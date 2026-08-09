@@ -1,7 +1,8 @@
 [package]
 name = "echomind-context"
-version = "1.4.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
+license = "MIT"
 description = "System Context Registry — 增量上下文管理（OpenCode 借鉴 B01）"
 
 [dependencies]

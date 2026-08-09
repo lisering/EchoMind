@@ -391,7 +391,7 @@ cargo test --features pro
 
 ## 必读文档（按优先级）
 1. `docs/architecture/LOCAL_LLM_ENGINE_PHASE2_ATOMIC_PLAN.md` — 本规划文档（Session 9 章节）
-2. `.catpaw/rules/iron-rules.md` — 铁律规则
+2. `.catpaw/rules/system-constraints.md` — 铁律规则
 3. `crates/infra/src/local_llm.rs` — 当前 LocalLlmEngine 实现（S8 已升级到 v0.9.0）
 4. `crates/infra/Cargo.toml` — 当前依赖配置
 

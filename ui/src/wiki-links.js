@@ -146,7 +146,7 @@ export async function renderBacklinksPanel(docName, container) {
 
   container.innerHTML = `
     <div class="wiki-backlinks-panel">
-      <div class="wiki-panel-header text-text-secondary text-xs font-medium uppercase tracking-wide px-3 py-2 border-b border-line">
+      <div class="wiki-panel-header text-text-secondary text-xs font-medium uppercase tracking-wide px-3 py-2 border-b border-border-default">
         ${t('wiki.backlinks')} (${links.length})
       </div>
       <div class="wiki-panel-body">${html}</div>
@@ -180,7 +180,7 @@ export async function renderForwardLinksPanel(docId, container) {
 
   container.innerHTML = `
     <div class="wiki-forward-links-panel">
-      <div class="wiki-panel-header text-text-secondary text-xs font-medium uppercase tracking-wide px-3 py-2 border-b border-line">
+      <div class="wiki-panel-header text-text-secondary text-xs font-medium uppercase tracking-wide px-3 py-2 border-b border-border-default">
         ${t('wiki.forward_links')} (${links.length})
       </div>
       <div class="wiki-panel-body">${html}</div>

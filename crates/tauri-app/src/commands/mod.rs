@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use md5::{Digest, Md5};
+use tracing::{debug, info, warn};
 
 use echomind_compact::CompactionEngine;
 use echomind_core::DomainClassifier as _;
@@ -163,6 +164,40 @@ impl echomind_core::LLMProvider for LlmProvider {
             }
         }
     }
+
+    // Q10 辅助模型方法转发（借鉴 QM HarnessModelUtilities）
+
+    async fn generate_title(&self, transcript: &str) -> anyhow::Result<Option<String>> {
+        match self {
+            LlmProvider::Remote(p) => p.generate_title(transcript).await,
+            #[cfg(feature = "pro")]
+            LlmProvider::Local(e) => e.generate_title(transcript).await,
+        }
+    }
+
+    async fn one_shot(&self, system: &str, prompt: &str) -> anyhow::Result<Option<String>> {
+        match self {
+            LlmProvider::Remote(p) => p.one_shot(system, prompt).await,
+            #[cfg(feature = "pro")]
+            LlmProvider::Local(e) => e.one_shot(system, prompt).await,
+        }
+    }
+
+    async fn judge(&self, system: &str, prompt: &str) -> anyhow::Result<Option<String>> {
+        match self {
+            LlmProvider::Remote(p) => p.judge(system, prompt).await,
+            #[cfg(feature = "pro")]
+            LlmProvider::Local(e) => e.judge(system, prompt).await,
+        }
+    }
+
+    fn context_token_budget(&self) -> Option<usize> {
+        match self {
+            LlmProvider::Remote(p) => p.context_token_budget(),
+            #[cfg(feature = "pro")]
+            LlmProvider::Local(e) => e.context_token_budget(),
+        }
+    }
 }
 
 impl LlmProvider {
@@ -218,7 +253,7 @@ fn spawn_reasoning_forwarder<R: Runtime>(
             let mut rx = rx;
             while let Some(text) = rx.recv().await {
                 if let Err(e) = app.emit("chat_reasoning", text.clone()) {
-                    eprintln!("chat_reasoning 事件发射失败: {e}");
+                    warn!("chat_reasoning 事件发射失败: {e}");
                 }
                 // 落库累积：同步追加（unbounded channel 无背压，stream 结束即已全部入队）
                 if let Some(c) = &collector
@@ -285,7 +320,7 @@ fn emit_status_with_phase<R: Runtime>(
         sub_phase: sub_phase.map(|s| s.to_string()),
     };
     if let Err(err) = app.emit("doc-status-changed", payload) {
-        eprintln!("doc-status-changed 事件发射失败: {err}");
+        warn!("doc-status-changed 事件发射失败: {err}");
     }
 }
 
@@ -304,31 +339,31 @@ fn emit_import_progress<R: Runtime>(
         cancelled,
     };
     if let Err(err) = app.emit("import-progress", payload) {
-        eprintln!("import-progress 事件发射失败: {err}");
+        warn!("import-progress 事件发射失败: {err}");
     }
 }
 
 fn emit_chat_token<R: Runtime>(app: &AppHandle<R>, token: String) {
     if let Err(err) = app.emit("chat_token", token) {
-        eprintln!("chat_token 事件发射失败: {err}");
+        warn!("chat_token 事件发射失败: {err}");
     }
 }
 
 fn emit_chat_sources<R: Runtime>(app: &AppHandle<R>, sources: &[RetrievalResult]) {
     if let Err(err) = app.emit("chat_sources", sources.to_vec()) {
-        eprintln!("chat_sources 事件发射失败: {err}");
+        warn!("chat_sources 事件发射失败: {err}");
     }
 }
 
 fn emit_chat_error<R: Runtime>(app: &AppHandle<R>, message: String) {
     if let Err(err) = app.emit("chat_error", message) {
-        eprintln!("chat_error 事件发射失败: {err}");
+        warn!("chat_error 事件发射失败: {err}");
     }
 }
 
 fn emit_chat_done<R: Runtime>(app: &AppHandle<R>, usage: Option<TokenUsage>) {
     if let Err(err) = app.emit("chat_done", usage) {
-        eprintln!("chat_done 事件发射失败: {err}");
+        warn!("chat_done 事件发射失败: {err}");
     }
 }
 
@@ -366,7 +401,7 @@ async fn write_query_cache(
         .insert_exact(&qhash, query, answer, &sources_json, Some(conversation_id))
         .await
     {
-        eprintln!("[PERF] 写入精确缓存失败: {e:#}");
+        warn!("写入精确缓存失败: {e:#}");
     }
     // 语义缓存需要查询嵌入（embedder 已就绪）
     if let Ok(emb) = state.embedder().await
@@ -376,7 +411,7 @@ async fn write_query_cache(
             .insert_semantic(query, &vec, answer, &sources_json, Some(conversation_id))
             .await
     {
-        eprintln!("[PERF] 写入语义缓存失败: {e:#}");
+        warn!("写入语义缓存失败: {e:#}");
     }
 }
 
@@ -387,7 +422,7 @@ fn emit_chat_phase<R: Runtime>(app: &AppHandle<R>, phase: &str, message: &str) {
         message: message.to_string(),
     };
     if let Err(err) = app.emit("chat_phase", payload) {
-        eprintln!("chat_phase 事件发射失败: {err}");
+        warn!("chat_phase 事件发射失败: {err}");
     }
 }
 

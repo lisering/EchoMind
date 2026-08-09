@@ -517,7 +517,7 @@ async function loadCustomModels() {
     container.innerHTML = models
       .map(
         (m) => `
-      <div class="flex items-center justify-between gap-2 py-2 px-3 rounded-lg bg-surface-2 border border-line" data-custom-model="${m.name}">
+      <div class="flex items-center justify-between gap-2 py-2 px-3 rounded-lg bg-surface-2 border border-border-default" data-custom-model="${m.name}">
         <div class="flex-1 min-w-0">
           <span class="text-text-primary text-sm font-medium truncate">${m.name}</span>
           ${m.is_valid ? '' : `<span class="ml-2 text-xs text-warning">${t('settings.custom_model_invalid')}</span>`}
@@ -1067,6 +1067,67 @@ function initVoiceSettings() {
       localStorage.setItem('voice.rate', String(rate));
     } catch (_) {
       // localStorage 不可用时静默忽略
+    }
+  };
+
+  // STT 配置初始化
+  initSttConfig();
+}
+
+/**
+ * 初始化 STT（语音转写）配置面板。
+ * 从后端读取当前配置（voice.stt_api_key / voice.stt_base_url / voice.stt_model /
+ * voice.stt_language），提供编辑界面，保存时调用 set_stt_config IPC。
+ */
+async function initSttConfig() {
+  const section = $('sttConfigSection');
+  if (!section) return;
+
+  const apiKeyInput = $('sttApiKeyInput');
+  const baseUrlInput = $('sttBaseUrlInput');
+  const modelInput = $('sttModelInput');
+  const langSelect = $('sttLanguageSelect');
+  const saveBtn = $('sttSaveBtn');
+
+  if (!apiKeyInput || !baseUrlInput || !modelInput || !saveBtn) return;
+
+  // 从后端加载当前配置
+  try {
+    const { invoke } = await import('./ipc.js');
+    const config = await invoke('get_stt_config');
+
+    apiKeyInput.placeholder = config.stt_api_key_masked || t('voice.stt_api_key');
+    baseUrlInput.value = config.stt_base_url || '';
+    modelInput.value = config.stt_model || 'whisper-1';
+    if (langSelect) langSelect.value = config.stt_language || 'zh';
+  } catch {
+    // 后端不可用时静默降级
+  }
+
+  saveBtn.onclick = async () => {
+    try {
+      const { invoke } = await import('./ipc.js');
+      const apiKey = apiKeyInput.value.trim();
+      const baseUrl = baseUrlInput.value.trim();
+      const model = modelInput.value.trim();
+      const lang = langSelect ? langSelect.value : undefined;
+
+      await invoke('set_stt_config', {
+        sttApiKey: apiKey || null,
+        sttBaseUrl: baseUrl || null,
+        sttModel: model || null,
+        sttLanguage: lang || null,
+      });
+
+      // 清空 API Key 输入框（安全）
+      apiKeyInput.value = '';
+      apiKeyInput.placeholder = '****';
+
+      const { toast } = await import('./toast.js');
+      toast(t('voice.stt_saved'), 'success');
+    } catch (err) {
+      const { toastError } = await import('./toast.js');
+      toastError(String(err?.message || err || 'Save failed'));
     }
   };
 }

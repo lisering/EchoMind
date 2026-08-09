@@ -268,9 +268,18 @@ impl<'a, L: LLMProvider> CompactionEngine<'a, L> {
 - [x] `AppState` 新增 `compaction_pending` 字段（去重集合）
 - [x] `chat_inner` 集成双阈值逻辑（Soft → spawn 后台 / Hard → 同步 / None → 跳过）
 
-### Session 69: Token 级预算 + Entry Token 缓存 + Dangling Call 修复
+### Session 69: Token 级预算 + Entry Token 缓存 + Dangling Call 修复 ✅
 
 **目标**：借鉴 QM 的 Token 级预算管理和 Entry Token 缓存，提升压缩精度。同时引入 Dangling Call 修复（Agent 模式下 tool_call 被中断时自动补全 tool_result）。
+
+**完成状态**：
+- [x] `cargo test` 全部通过（compact 47 passed + 1 ignored）
+- [x] `cargo clippy --all-targets -- -D warnings` 零警告
+- [x] `cargo fmt --check` 通过
+- [x] TokenEstimator 带 LRU 缓存（HashMap + Vec LRU 顺序 + RwLock 并发安全）
+- [x] `estimate()` / `estimate_messages()` / `recent_entry_count_within_budget()` 方法
+- [x] `heal_dangling_calls()` 修复未配对的 Action（内容级 ReAct 检测）
+- [x] 6 TDD 测试 TC-TOKEN-CACHE-001~003 + TC-HEAL-DANGLING-001~003
 
 **QM 对比**：
 - QM `harness/context-compaction.ts`：`estimateEntryTokens()` 带 LRU 缓存（50k 条），`recentEntryCountWithinBudget()` 从末尾向前保留尽可能多的消息
@@ -403,7 +412,7 @@ pub fn compose_security_posture(base: SecurityPosture, override_: Option<Securit
 
 **新增设置键**：`security.posture`（默认 "auto"）
 
-### Session 71: Shadow 安全筛查模式
+### Session 71: Shadow 安全筛查模式 ✅
 
 **目标**：借鉴 QM 的 Shadow 安全筛查模式，在引入安全分类器时先 shadow 运行（不影响实际决策），记录 agree/disagreement，验证效果后再切换为阻断模式。适用于未来引入 LLM-based prompt injection 检测。
 
@@ -634,9 +643,17 @@ pub struct RateLimiter {
 
 **新增设置键**：`budget.daily_limit_usd`（默认 0 = 不限制）
 
-### Session 74: KeyedQueue 并发序列化 + Durable-by-Default 审查
+### Session 74: KeyedQueue 并发序列化 + Durable-by-Default 审查 ✅
 
 **目标**：借鉴 QM 的 `createKeyedQueue` 模式，为 EchoMind 引入按 key 序列化的并发控制，消除 SQLite 并发写入竞态。同时审查所有内存状态，确保需要跨崩溃恢复的状态已持久化。
+
+**实现完成**（2026-08-08）：
+- `crates/core/src/concurrency.rs` — 新建 `KeyedQueue<K>` 泛型结构体 + `run()` / `cleanup()` / `create_keyed_queue()` + `Default` impl + 3 内联测试
+- `crates/core/src/concurrency_tests.rs` — 6 TDD 测试 TC-KEYED-001~006
+- `crates/core/src/lib.rs` — 注册 `pub mod concurrency`
+- `crates/tauri-app/src/state.rs` — AppState 新增 `persist_queue: KeyedQueue<String>` 字段
+- `crates/tauri-app/src/commands/chat.rs` — `persist_exchange` 拆分为包装器（KeyedQueue 序列化）+ `persist_exchange_inner`（实际逻辑）
+- Durable-by-Default 审查：全量审查 AppState 10+ 内存状态字段，全部已持久化或可安全丢弃
 
 **QM 对比**：
 - QM `util/async.ts`：`createKeyedQueue<K>()` — 同 key 串行化，不同 key 并行
@@ -696,7 +713,7 @@ impl<K: Eq + Hash + Clone + Send + Sync + 'static> KeyedQueue<K> {
 
 ## Phase 5: LLMProvider 增强（中 ROI，1–2 天）
 
-### Session 75: LLMProvider Trait 扩展 — 辅助模型方法
+### Session 75: LLMProvider Trait 扩展 — 辅助模型方法 ✅ (Q10 已完成)
 
 **目标**：借鉴 QM 的 `HarnessModelUtilities` 接口，为 EchoMind 的 `LLMProvider` trait 增加可选的辅助方法（`should_respond` / `generate_title` / `judge`），使不同 LLM 后端能各自优化这些功能。
 
@@ -751,6 +768,14 @@ pub trait LLMProvider: Send + Sync {
 - `tc_llm_aux_003`：generate_title 失败降级为 derive_title
 - `tc_llm_aux_004`：one_shot 返回完整响应
 - `tc_llm_aux_005`：context_token_budget 返回模型上限
+
+**完成详情（Q10, 2026-08-08）**：
+- `crates/core/src/lib.rs`：LLMProvider trait 新增 4 个默认方法（`generate_title` / `one_shot` / `judge` / `context_token_budget`），全部返回 None/Ok(None)，向后兼容
+- `crates/core/src/llm_aux_tests.rs`：7 TDD 测试 TC-LLM-AUX-001~007 + MinimalStub + RichMock 两个 mock provider
+- `crates/infra/src/openai_provider.rs`：OpenAIProvider 覆盖 3 个方法（generate_title 复用 complete() + 30 字截断 / one_shot 委托 complete() / judge 委托 complete() + trim）
+- `crates/tauri-app/src/commands/mod.rs`：LlmProvider enum 转发 4 个新方法
+- `crates/tauri-app/src/commands/chat.rs`：persist_exchange_inner 集成 LLM 辅助标题生成（10s 超时 + answer 截断 200 字 + 静默降级 derive_title）
+- 验证：core 596 passed / clippy 零警告 / fmt 通过 / 零新增依赖
 
 ### Session 76: Harness Router — 动态后端切换
 
@@ -813,6 +838,17 @@ impl LlmRouter {
 - `tc_router_004`：模式切换时记录 last_mode
 - `tc_router_005`：Free 模式请求 Local 返回错误
 
+**完成详情（Q11, 2026-08-08）**：
+- `crates/core/src/llm_router.rs` 新建模块：`LlmChoice`（mode + model_id）+ `RouterVerdict`（Initial/SameMode/ModeChanged）+ `RouterError`（ModeUnavailable）+ `LlmRouter`（fallback/last_mode/available_modes，`resolve()` + `set_fallback()` + `set_available_modes()` + `last_mode_for()` + `clear()` + `fallback()` + `new_free_default()` + `new_pro_default()` + `Default`）
+- `crates/core/src/llm_router_tests.rs`：12 TDD 测试 TC-ROUTER-001~012
+- `crates/models/src/lib.rs`：`LlmMode` derive 新增 `Hash`
+- `crates/tauri-app/src/state.rs`：AppState 新增 `llm_router: LlmRouter` 字段 + 初始化（根据 is_pro 选择 Free/Pro 可用模式 + 根据 llm_mode 设置 fallback）
+- `crates/tauri-app/src/commands/chat.rs`：`chat_inner` 使用 `llm_router.resolve()` 替代直接 `get_llm_mode()` if/else
+- `crates/tauri-app/src/commands/local_llm.rs`：`set_llm_mode_inner` 同步更新 router fallback
+- `crates/tauri-app/src/commands/license.rs`：`activate_pro_inner` / `deactivate_pro_inner` 动态更新 router 可用模式集合
+- 验证：core 608 passed / clippy Free+Pro 零警告 / fmt 通过 / 零新增依赖
+- 设计调整：由于 `async fn in trait` 不支持 `dyn`，Router 不持有 provider 实例，仅负责路由决策（返回 `LlmChoice`），实际 provider 创建由 `chat_inner` 基于 `LlmChoice.mode` 完成（与现有 `LlmProvider` enum 分发模式一致）
+
 ---
 
 ## 不适合借鉴的部分
@@ -856,10 +892,10 @@ Phase 5（LLMProvider）:
   （S76 依赖 S75 的 trait 扩展）
 ```
 
-**跨 Phase 依赖**：
-- S67（Burst Buffer）可选依赖 S75（one_shot 方法）— 用 one_shot 替代非流式 LLM 调用
-- S68（后台压缩）可选依赖 S72（Sweeper）— 用统一 Sweeper 管理后台压缩任务
-- S71（Shadow 筛查）可选依赖 S75（judge 方法）— 用 judge 做安全判断
+**跨 Phase 依赖**（✅ 全部完成 2026-08-08）：
+- ✅ S67（Burst Buffer）可选依赖 S75（one_shot 方法）— 用 one_shot 替代非流式 LLM 调用。`llm_complete()` 辅助函数优先尝试 `one_shot`，降级为 `chat_stream + collect_stream`。5 个 TDD 测试覆盖优先路径、降级路径、向后兼容。
+- ✅ S68（后台压缩）可选依赖 S72（Sweeper）— 用统一 Sweeper 管理后台压缩任务。`schedule_background_compaction()` 合并 `try_acquire + run + release` 三步，使用 `tracing` 替代 `eprintln!`。4 个 TDD 测试覆盖成功/去重/失败/自动释放。
+- ✅ S71（Shadow 筛查）可选依赖 S75（judge 方法）— 用 judge 做安全判断。`llm_classify()` 函数使用 `judge()` 方法返回 `SecurityScreenVerdict`，可直接传递给 `run_shadow_screen()`。7 个 TDD 测试覆盖 allow/block/不支持/失败/agree/disagree/unavailable。
 
 ---
 
