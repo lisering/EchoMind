@@ -50,7 +50,7 @@ describe('Toast — toast.js', () => {
     it('info 类型样式', () => {
       toast('信息', 'info');
       const el = document.querySelector('#toasts > div');
-      expect(el.className).toContain('border-line');
+      expect(el.className).toContain('border-border-default');
       expect(el.className).toContain('text-slate-300');
     });
 

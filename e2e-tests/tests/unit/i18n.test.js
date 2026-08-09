@@ -90,8 +90,14 @@ describe('I18n — i18n.js', () => {
     });
 
     it('其他语言返回默认 en', () => {
-      vi.stubGlobal('navigator', { language: 'ja-JP' });
+      // ja 已加入 SUPPORTED_LOCALES，使用真正不支持的语言测试
+      vi.stubGlobal('navigator', { language: 'fr-FR' });
       expect(detectLocale()).toBe('en');
+    });
+
+    it('日语系统返回 ja', () => {
+      vi.stubGlobal('navigator', { language: 'ja-JP' });
+      expect(detectLocale()).toBe('ja');
     });
 
     it('无 navigator.language 时返回默认 en', () => {
