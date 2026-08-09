@@ -9312,8 +9312,17 @@
         var _audioChunks = [];
         var _mediaStream = null;
         var _autoStopTimer = null;
-        var AUTO1_STOP_MS = 6e4;
         var _mimeType = "audio/webm";
+        var _audioContext = null;
+        var _analyser = null;
+        var _silenceCheckTimer = null;
+        var _hasSpeechStarted = false;
+        var _silenceStartTime = null;
+        var AUTO_STOP_MS = 6e4;
+        var SILENCE_CHECK_INTERVAL = 200;
+        var SILENCE_THRESHOLD = 0.01;
+        var SILENCE_DURATION_MS = 2e3;
+        var INITIAL_TIMEOUT_MS = 8e3;
         function initVoiceInput() {
           const micBtn = $("micBtn");
           if (!micBtn) return;
@@ -9372,6 +9381,7 @@
             const blob = new Blob(_audioChunks, { type: _mimeType });
             _audioChunks = [];
             cleanupStream();
+            stopSilenceDetection();
             if (blob.size < 10) {
               updateMicButtonState();
               return;
@@ -9405,28 +9415,31 @@
                 toastError(t("voice.transcribe_failed"));
               }
             } finally {
-              if (micBtn) {
-                micBtn.classList.remove("transcribing");
-              }
+              if (micBtn) micBtn.classList.remove("transcribing");
               updateMicButtonState();
             }
           };
-          _mediaRecorder.onerror = (event) => {
+          _mediaRecorder.onerror = () => {
             cleanupStream();
+            stopSilenceDetection();
             _isRecording = false;
             updateMicButtonState();
             toastError(t("voice.start_failed"));
           };
           _mediaRecorder.start();
           _isRecording = true;
+          _hasSpeechStarted = false;
+          _silenceStartTime = null;
           updateMicButtonState();
+          startSilenceDetection();
           clearAutoStopTimer();
           _autoStopTimer = setTimeout(() => {
             stopRecording();
-          }, AUTO1_STOP_MS);
+          }, AUTO_STOP_MS);
         }
         function stopRecording() {
           clearAutoStopTimer();
+          stopSilenceDetection();
           if (_isRecording && _mediaRecorder && _mediaRecorder.state !== "inactive") {
             try {
               _mediaRecorder.stop();
@@ -9435,6 +9448,65 @@
           }
           _isRecording = false;
           updateMicButtonState();
+        }
+        function startSilenceDetection() {
+          try {
+            _audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = _audioContext.createMediaStreamSource(_mediaStream);
+            _analyser = _audioContext.createAnalyser();
+            _analyser.fftSize = 512;
+            _analyser.smoothingTimeConstant = 0.5;
+            source.connect(_analyser);
+          } catch (err) {
+            return;
+          }
+          const buffer = new Uint8Array(_analyser.fftSize);
+          let initialWaitStart = Date.now();
+          _silenceCheckTimer = setInterval(() => {
+            if (!_analyser || !_isRecording) {
+              stopSilenceDetection();
+              return;
+            }
+            _analyser.getByteTimeDomainData(buffer);
+            let sum = 0;
+            for (let i = 0; i < buffer.length; i++) {
+              const v = (buffer[i] - 128) / 128;
+              sum += v * v;
+            }
+            const rms = Math.sqrt(sum / buffer.length);
+            if (rms > SILENCE_THRESHOLD) {
+              _hasSpeechStarted = true;
+              _silenceStartTime = null;
+            } else {
+              if (_hasSpeechStarted) {
+                if (_silenceStartTime === null) {
+                  _silenceStartTime = Date.now();
+                } else if (Date.now() - _silenceStartTime > SILENCE_DURATION_MS) {
+                  stopRecording();
+                }
+              } else {
+                if (Date.now() - initialWaitStart > INITIAL_TIMEOUT_MS) {
+                  stopRecording();
+                }
+              }
+            }
+          }, SILENCE_CHECK_INTERVAL);
+        }
+        function stopSilenceDetection() {
+          if (_silenceCheckTimer !== null) {
+            clearInterval(_silenceCheckTimer);
+            _silenceCheckTimer = null;
+          }
+          if (_audioContext) {
+            try {
+              _audioContext.close();
+            } catch (_) {
+            }
+            _audioContext = null;
+          }
+          _analyser = null;
+          _hasSpeechStarted = false;
+          _silenceStartTime = null;
         }
         function cleanupStream() {
           if (_mediaStream) {
