@@ -200,7 +200,12 @@
     "branch_prev": "查看之前的分支",
     "branch_next": "查看更新的分支",
     "branch_current_label": "当前对话",
-    "branch_prev_label": "历史分支 {n}"
+    "branch_prev_label": "历史分支 {n}",
+    "queue_placeholder": "输入下一条问题排队发送…",
+    "queue_count_hint": "已有 {count} 条排队中",
+    "llm_not_configured": "请先配置 LLM API 密钥",
+    "security_locked": "数据库已锁定，请先解锁",
+    "locked_placeholder": "数据库已锁定，请先解锁"
   },
   "knowledge_base": {
     "title": "知识库",

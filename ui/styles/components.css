@@ -1524,6 +1524,54 @@ input[type="url"],
 }
 
 /* ============================================================
+ * V5: 排队徽章 + Token 估算样式
+ * ============================================================ */
+
+/* 排队徽章 — 发送按钮右上角数字圆点 */
+.queue-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: var(--accent, #38bdf8);
+  color: var(--surface-0, #0d0d0f);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 9999px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 0 0 2px var(--surface-2, #1c1c1e);
+}
+
+/* Token 估算 — 输入框底部右侧灰色小字 */
+.token-estimate {
+  font-size: 10px;
+  color: var(--text-quaternary);
+  margin-left: auto;
+  padding-right: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 空输入时发送按钮视觉降级 */
+#sendBtn.opacity-40 {
+  opacity: 0.4;
+}
+#sendBtn.cursor-default {
+  cursor: default;
+}
+}
+
+/* ============================================================
  * P1-1: 后续问题建议样式（QA_UI_DESIGN_PROPOSAL §4.5）
  * AC-QA-005：回答完成后显示 2-3 个后续问题建议，可关闭
  * ============================================================ */

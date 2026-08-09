@@ -200,7 +200,12 @@
     "branch_prev": "View previous branch",
     "branch_next": "View newer branch",
     "branch_current_label": "Current conversation",
-    "branch_prev_label": "History branch {n}"
+    "branch_prev_label": "History branch {n}",
+    "queue_placeholder": "Type your next question to queue…",
+    "queue_count_hint": "{count} queued",
+    "llm_not_configured": "Please configure your LLM API key first",
+    "security_locked": "Database is locked. Please unlock first.",
+    "locked_placeholder": "Database locked — unlock to continue"
   },
   "knowledge_base": {
     "title": "Knowledge Base",

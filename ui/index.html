@@ -2243,6 +2243,54 @@
       }
       
       /* ============================================================
+       * V5: 排队徽章 + Token 估算样式
+       * ============================================================ */
+      
+      /* 排队徽章 — 发送按钮右上角数字圆点 */
+      .queue-badge {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        background: var(--accent, #38bdf8);
+        color: var(--surface-0, #0d0d0f);
+        font-size: 9px;
+        font-weight: 700;
+        line-height: 1;
+        border-radius: 9999px;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        z-index: 10;
+        box-shadow: 0 0 0 2px var(--surface-2, #1c1c1e);
+      }
+      
+      /* Token 估算 — 输入框底部右侧灰色小字 */
+      .token-estimate {
+        font-size: 10px;
+        color: var(--text-quaternary);
+        margin-left: auto;
+        padding-right: 4px;
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        pointer-events: none;
+        user-select: none;
+      }
+      
+      /* 空输入时发送按钮视觉降级 */
+      #sendBtn.opacity-40 {
+        opacity: 0.4;
+      }
+      #sendBtn.cursor-default {
+        cursor: default;
+      }
+      }
+      
+      /* ============================================================
        * P1-1: 后续问题建议样式（QA_UI_DESIGN_PROPOSAL §4.5）
        * AC-QA-005：回答完成后显示 2-3 个后续问题建议，可关闭
        * ============================================================ */
@@ -5489,8 +5537,12 @@
           piiDetectionEnabled: false,
           autoLockTimeout: 0,
           // 0 = disabled
-          theme: "dark"
+          theme: "dark",
           // REQ-UI-011：主题模式 dark/light/system
+          llmConfigured: false,
+          // LLM 是否已配置
+          drafts: {}
+          // 会话级草稿（conversationId → 未发送文本）
         };
         var _state = { ...initialState };
         var _subscribers = /* @__PURE__ */ new Map();
@@ -6458,17 +6510,126 @@
         init_utils();
         init_i18n();
         init_toast();
+      
+        // ui/src/queue-send.js
+        init_utils();
+        init_i18n();
+        var _queue = [];
+        function enqueueQuery(query) {
+          if (!query || !query.trim()) return _queue.length;
+          _queue.push(query.trim());
+          updateQueueBadge();
+          updateQueueHint();
+          return _queue.length;
+        }
+        function dequeueQuery() {
+          if (_queue.length === 0) return null;
+          const q = _queue.shift();
+          updateQueueBadge();
+          updateQueueHint();
+          return q;
+        }
+        function getQueueSize() {
+          return _queue.length;
+        }
+        function clearQueue() {
+          _queue = [];
+          updateQueueBadge();
+          updateQueueHint();
+        }
+        function updateQueueBadge() {
+          const sendBtn = $("sendBtn");
+          if (!sendBtn) return;
+          const size = _queue.length;
+          let badge = $("queueBadge");
+          if (size > 0 && get("streaming")) {
+            if (!badge) {
+              badge = document.createElement("span");
+              badge.id = "queueBadge";
+              badge.className = "queue-badge";
+              sendBtn.style.position = "relative";
+              sendBtn.appendChild(badge);
+            }
+            badge.textContent = String(size);
+            badge.setAttribute("aria-label", t("chat.queue_count_hint").replace("{count}", String(size)));
+          } else {
+            if (badge) badge.remove();
+          }
+        }
+        function updateQueueHint() {
+          if (_queue.length > 0 && get("streaming")) {
+            const hint = $("inputHint");
+            if (hint) {
+              hint.textContent = t("chat.queue_count_hint").replace("{count}", String(_queue.length));
+            }
+          }
+        }
+        function updateSendButton() {
+          const sendBtn = $("sendBtn");
+          if (!sendBtn) return;
+          const streaming = get("streaming");
+          const sendIcon = $("sendIcon");
+          const stopIcon = $("stopIcon");
+          if (streaming) {
+            sendBtn.classList.add("stop-mode", "bg-red-500/15", "text-red-300", "border-red-400/40", "hover:bg-red-500/25");
+            sendBtn.classList.remove("bg-accent", "text-ink", "hover:opacity-90", "opacity-40", "cursor-default");
+            sendBtn.disabled = false;
+            sendBtn.classList.remove("opacity-30", "cursor-not-allowed");
+            if (sendIcon) sendIcon.classList.add("hidden");
+            if (stopIcon) stopIcon.classList.remove("hidden");
+            sendBtn.setAttribute("title", t("chat.stop_generation"));
+            sendBtn.setAttribute("aria-label", t("chat.stop_generation"));
+            updateQueueBadge();
+          } else {
+            sendBtn.classList.remove("stop-mode", "bg-red-500/15", "text-red-300", "border-red-400/40", "hover:bg-red-500/25");
+            sendBtn.classList.add("bg-accent", "text-ink", "hover:opacity-90");
+            if (sendIcon) sendIcon.classList.remove("hidden");
+            if (stopIcon) stopIcon.classList.add("hidden");
+            sendBtn.setAttribute("title", t("chat.send"));
+            sendBtn.setAttribute("aria-label", t("chat.send"));
+            updateQueueBadge();
+            updateInputUI();
+          }
+        }
+        async function processQueue(sendCallback) {
+          if (get("streaming")) return;
+          if (_queue.length === 0) return;
+          const query = dequeueQuery();
+          if (query && typeof sendCallback === "function") {
+            updateSendButton();
+            sendCallback(query);
+          }
+        }
+      
+        // ui/src/guards.js
         function requireDocuments() {
           if (get("docCount") === 0) {
             return { passed: false, reason: "chat.empty_kb_error" };
           }
           return { passed: true };
         }
-        function canSend() {
-          if (get("streaming")) {
-            return { passed: false, reason: "chat.streaming_hint" };
+        function requireLlmConfig() {
+          if (!get("llmConfigured")) {
+            return { passed: false, reason: "chat.llm_not_configured" };
           }
-          return requireDocuments();
+          return { passed: true };
+        }
+        function requireUnlocked() {
+          if (isLocked()) {
+            return { passed: false, reason: "chat.security_locked" };
+          }
+          return { passed: true };
+        }
+        function canSend() {
+          const idle = requireIdle();
+          if (!idle.passed) return idle;
+          const docs = requireDocuments();
+          if (!docs.passed) return docs;
+          const llm = requireLlmConfig();
+          if (!llm.passed) return llm;
+          const unlocked = requireUnlocked();
+          if (!unlocked.passed) return unlocked;
+          return { passed: true };
         }
         function requirePro() {
           if (!get("isPro")) {
@@ -6477,6 +6638,9 @@
           return { passed: true };
         }
         function requireIdle() {
+          if (isLocked()) {
+            return { passed: false, reason: "chat.security_locked" };
+          }
           if (get("streaming")) {
             return { passed: false, reason: "chat.streaming_hint" };
           }
@@ -6494,25 +6658,46 @@
           }
           return true;
         }
-        function syncChatInputState() {
+        function updateInputUI() {
           const docCount = get("docCount");
           const streaming = get("streaming");
+          const queueSize = getQueueSize();
+          const locked = isLocked();
           const input = $("queryInput");
           const sendBtn = $("sendBtn");
           if (!input || !sendBtn) return;
+          if (locked) {
+            input.disabled = true;
+            sendBtn.disabled = true;
+            input.setAttribute("placeholder", t("chat.locked_placeholder") || "\u6570\u636E\u5E93\u5DF2\u9501\u5B9A\uFF0C\u8BF7\u5148\u89E3\u9501");
+            sendBtn.classList.add("opacity-30", "cursor-not-allowed");
+            return;
+          }
+          if (docCount === 0 && !streaming) {
+            input.disabled = true;
+            sendBtn.disabled = true;
+            input.setAttribute("placeholder", t("chat.empty_kb_placeholder"));
+            sendBtn.classList.add("opacity-30", "cursor-not-allowed");
+            return;
+          }
           if (streaming) {
             input.disabled = false;
+            sendBtn.disabled = false;
+            sendBtn.classList.remove("opacity-30", "cursor-not-allowed");
+            input.setAttribute("placeholder", t("chat.queue_placeholder") || "\u8F93\u5165\u4E0B\u4E00\u6761\u95EE\u9898\u6392\u961F\u53D1\u9001\u2026");
+            return;
+          }
+          input.disabled = false;
+          sendBtn.disabled = false;
+          input.setAttribute("placeholder", t("chat.input_placeholder"));
+          sendBtn.classList.remove("opacity-30", "cursor-not-allowed");
+          const inputEmpty = !input.value.trim();
+          if (inputEmpty) {
+            sendBtn.classList.add("opacity-40", "cursor-default");
+            sendBtn.classList.remove("hover:opacity-90");
           } else {
-            const shouldDisable = docCount === 0;
-            input.disabled = shouldDisable;
-            sendBtn.disabled = shouldDisable;
-            if (shouldDisable) {
-              input.setAttribute("placeholder", t("chat.empty_kb_placeholder"));
-              sendBtn.classList.add("opacity-30", "cursor-not-allowed");
-            } else {
-              input.setAttribute("placeholder", t("chat.input_placeholder"));
-              sendBtn.classList.remove("opacity-30", "cursor-not-allowed");
-            }
+            sendBtn.classList.remove("opacity-40", "cursor-default");
+            sendBtn.classList.add("hover:opacity-90");
           }
         }
       
@@ -7411,46 +7596,117 @@
           }
         }
       
-        // ui/src/queue-send.js
-        init_i18n();
-        var _queue = [];
-        function enqueueQuery(query) {
-          if (!query || !query.trim()) return _queue.length;
-          _queue.push(query.trim());
-          return _queue.length;
-        }
-        function dequeueQuery() {
-          if (_queue.length === 0) return null;
-          return _queue.shift();
-        }
-        function updateSendButton() {
-          const sendBtn = document.getElementById("sendBtn");
-          if (!sendBtn) return;
-          const streaming = get("streaming");
-          const sendIcon = document.getElementById("sendIcon");
-          const stopIcon = document.getElementById("stopIcon");
-          if (streaming) {
-            sendBtn.classList.add("stop-mode", "bg-red-500/15", "text-red-300", "border-red-400/40", "hover:bg-red-500/25");
-            sendBtn.classList.remove("bg-accent", "text-ink", "hover:opacity-90");
-            sendBtn.disabled = false;
-            if (sendIcon) sendIcon.classList.add("hidden");
-            if (stopIcon) stopIcon.classList.remove("hidden");
-            sendBtn.setAttribute("title", t("chat.stop_generation"));
-          } else {
-            sendBtn.classList.remove("stop-mode", "bg-red-500/15", "text-red-300", "border-red-400/40", "hover:bg-red-500/25");
-            sendBtn.classList.add("bg-accent", "text-ink", "hover:opacity-90");
-            if (sendIcon) sendIcon.classList.remove("hidden");
-            if (stopIcon) stopIcon.classList.add("hidden");
-            sendBtn.setAttribute("title", t("chat.send"));
+        // ui/src/input-history.js
+        init_utils();
+        var _histories = /* @__PURE__ */ new Map();
+        var MAX_HISTORY = 50;
+        var _navIndex = null;
+        var _savedInput = "";
+        function recordInput(query) {
+          if (!query || !query.trim()) return;
+          const convId = get("currentConversationId");
+          if (!convId) return;
+          if (!_histories.has(convId)) {
+            _histories.set(convId, []);
+          }
+          const history = _histories.get(convId);
+          if (history.length > 0 && history[history.length - 1] === query.trim()) return;
+          history.push(query.trim());
+          if (history.length > MAX_HISTORY) {
+            history.shift();
           }
         }
-        async function processQueue(sendCallback) {
-          if (get("streaming")) return;
-          if (_queue.length === 0) return;
-          const query = dequeueQuery();
-          if (query && typeof sendCallback === "function") {
-            updateSendButton();
-            sendCallback(query);
+        function navigateHistoryUp() {
+          const convId = get("currentConversationId");
+          if (!convId) return null;
+          const history = _histories.get(convId);
+          if (!history || history.length === 0) return null;
+          const input = $("queryInput");
+          if (!input) return null;
+          if (_navIndex === null) {
+            _savedInput = input.value;
+            _navIndex = history.length - 1;
+          } else if (_navIndex > 0) {
+            _navIndex--;
+          } else {
+            return null;
+          }
+          return history[_navIndex];
+        }
+        function navigateHistoryDown() {
+          const convId = get("currentConversationId");
+          if (!convId) return null;
+          const history = _histories.get(convId);
+          if (!history || history.length === 0) return null;
+          if (_navIndex === null) return null;
+          const input = $("queryInput");
+          if (!input) return null;
+          if (_navIndex < history.length - 1) {
+            _navIndex++;
+            return history[_navIndex];
+          } else {
+            resetHistoryNav();
+            return _savedInput;
+          }
+        }
+        function resetHistoryNav() {
+          _navIndex = null;
+          _savedInput = "";
+        }
+        function saveDraft() {
+          const input = $("queryInput");
+          if (!input) return;
+          const convId = get("currentConversationId");
+          if (!convId) return;
+          const text = input.value;
+          const drafts = { ...get("drafts") };
+          if (text.trim()) {
+            drafts[convId] = text;
+          } else {
+            delete drafts[convId];
+          }
+          setState({ drafts });
+        }
+        function restoreDraft() {
+          const input = $("queryInput");
+          if (!input) return;
+          const convId = get("currentConversationId");
+          if (!convId) return;
+          const drafts = get("drafts");
+          const text = drafts[convId] || "";
+          input.value = text;
+          input.style.height = "auto";
+          input.style.height = Math.min(Math.max(input.scrollHeight, 48), 160) + "px";
+        }
+        var _tokenEstEl = null;
+        function estimateTokens(text) {
+          if (!text || !text.trim()) return 0;
+          const cjkCount = (text.match(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]/g) || []).length;
+          const otherCount = text.length - cjkCount;
+          return Math.ceil(cjkCount / 1.5 + otherCount / 4);
+        }
+        function updateTokenEstimate() {
+          const input = $("queryInput");
+          if (!input) return;
+          const text = input.value;
+          const tokens = estimateTokens(text);
+          if (!_tokenEstEl) {
+            const inputBar = $("inputBar");
+            if (!inputBar) return;
+            _tokenEstEl = document.createElement("span");
+            _tokenEstEl.className = "token-estimate";
+            _tokenEstEl.setAttribute("aria-hidden", "true");
+            const toolbar = inputBar.querySelector(".flex.items-center.justify-between");
+            if (toolbar) {
+              toolbar.appendChild(_tokenEstEl);
+            }
+          }
+          if (tokens > 0) {
+            _tokenEstEl.textContent = `~${tokens} tokens`;
+            _tokenEstEl.style.opacity = "1";
+          } else {
+            _tokenEstEl.textContent = "";
+            _tokenEstEl.style.opacity = "0";
           }
         }
       
@@ -8453,19 +8709,23 @@
         function setInputState(state, hint = "") {
           const isStreaming = state === "streaming";
           setState({ streaming: isStreaming });
-          const docCount = get("docCount");
-          const shouldDisable = isStreaming || docCount === 0;
-          $("queryInput").disabled = shouldDisable;
-          if (isStreaming) {
-            updateSendButton();
-          } else {
-            $("sendBtn").disabled = shouldDisable;
-            updateSendButton();
+          setInputHint(hint);
+          updateSendButton();
+          updateInputUI();
+          if (!isStreaming) {
+            const docCount = get("docCount");
+            if (docCount > 0 && !requireUnlocked_guard()) {
+              $("queryInput").focus();
+            }
           }
-          $("sendBtn").classList.toggle("opacity-30", shouldDisable && !isStreaming);
-          $("sendBtn").classList.toggle("cursor-not-allowed", shouldDisable && !isStreaming);
-          $("inputHint").textContent = hint;
-          if (!isStreaming && docCount > 0) $("queryInput").focus();
+        }
+        function requireUnlocked_guard() {
+          return get("securityState") === "locked";
+        }
+        function setInputHint(text) {
+          const hint = $("inputHint");
+          if (!hint) return;
+          hint.textContent = text || "";
         }
         function finalizeStream(ok) {
           const assistantEl = get("currentAssistantEl");
@@ -8553,8 +8813,11 @@
               return;
             }
             if (!runGuard(canSend())) return;
+            recordInput(query);
+            saveDraft();
             input.value = "";
             input.style.height = "48px";
+            resetHistoryNav();
             const slashResult = processSlashCommand(query);
             if (slashResult.matched) {
               query = slashResult.text;
@@ -8573,6 +8836,7 @@
             currentRawMarkdown: "",
             lastSources: null
           });
+          updateInputUI();
           const assistantEl = appendBlock("assistant");
           assistantEl.dataset.query = query;
           const userBlocks = document.querySelectorAll(".msg-user");
@@ -17129,7 +17393,7 @@
         init_ipc();
         init_utils();
         function updateChatInputState() {
-          syncChatInputState();
+          updateInputUI();
         }
         async function newChat() {
           if (get("streaming")) {
@@ -17137,9 +17401,16 @@
             await new Promise((r) => setTimeout(r, 100));
           }
           stopAllTTS();
-          if (get("isNewConversation")) return;
+          saveDraft();
+          clearQueue();
+          if (get("isNewConversation")) {
+            restoreDraft();
+            updateInputUI();
+            return;
+          }
           const id = crypto.randomUUID();
           setState({ currentConversationId: id, history: [], isNewConversation: true });
+          resetHistoryNav();
           resetChatArea(t("chat.placeholder_title"), t("chat.placeholder_desc"));
           resetFeedbackTracking();
           await loadConversations();
@@ -17150,6 +17421,8 @@
             await onStop();
             await new Promise((r) => setTimeout(r, 100));
           }
+          saveDraft();
+          clearQueue();
           const messages = await invoke("get_messages", { conversationId: id });
           const turns = buildTurnTree(messages);
           setTurnTree(turns);
@@ -17242,6 +17515,9 @@
             }
           }
           setState({ currentAssistantEl: null, currentRawMarkdown: "" });
+          resetHistoryNav();
+          restoreDraft();
+          updateInputUI();
           scrollToBottom();
           await loadConversations();
         }
@@ -17750,9 +18026,47 @@
           const MAX_INPUT_HEIGHT = 160;
           const queryInputEl = $("queryInput");
           queryInputEl.addEventListener("keydown", (e) => {
+            const slashPanel = document.querySelector(".slash-command-panel");
+            const docMentionPopup = document.querySelector(".doc-mention-popup");
+            const hasPopup = slashPanel || docMentionPopup;
             if (e.key === "Enter" && !e.shiftKey) {
+              if (hasPopup) return;
               e.preventDefault();
+              if (!e.target.value.trim()) return;
               send();
+            } else if (e.key === "ArrowUp" && !hasPopup) {
+              const cursorAtFirstLine = e.target.selectionStart === 0 || e.target.value.substring(0, e.target.selectionStart).indexOf("\n") === -1;
+              if (cursorAtFirstLine) {
+                const histText = navigateHistoryUp();
+                if (histText !== null) {
+                  e.preventDefault();
+                  e.target.value = histText;
+                  e.target.style.height = "auto";
+                  e.target.style.height = Math.min(Math.max(e.target.scrollHeight, MIN_INPUT_HEIGHT), MAX_INPUT_HEIGHT) + "px";
+                  updateTokenEstimate();
+                  updateInputUI();
+                  const len = e.target.value.length;
+                  e.target.setSelectionRange(len, len);
+                }
+              }
+            } else if (e.key === "ArrowDown" && !hasPopup) {
+              const afterCursor = e.target.value.substring(e.target.selectionEnd);
+              const cursorAtLastLine = afterCursor.indexOf("\n") === -1;
+              if (cursorAtLastLine) {
+                const histText = navigateHistoryDown();
+                if (histText !== null) {
+                  e.preventDefault();
+                  e.target.value = histText;
+                  e.target.style.height = "auto";
+                  e.target.style.height = Math.min(Math.max(e.target.scrollHeight, MIN_INPUT_HEIGHT), MAX_INPUT_HEIGHT) + "px";
+                  updateTokenEstimate();
+                  updateInputUI();
+                  const len = e.target.value.length;
+                  e.target.setSelectionRange(len, len);
+                }
+              }
+            } else if (e.key === "Escape") {
+              resetHistoryNav();
             }
           });
           queryInputEl.addEventListener("input", (e) => {
@@ -17763,6 +18077,14 @@
             ta.style.height = newHeight + "px";
             void ta.offsetHeight;
             ta.style.transition = "";
+            if (!get("streaming")) {
+              updateInputUI();
+            }
+            updateTokenEstimate();
+          });
+          queryInputEl.addEventListener("blur", () => {
+            saveDraft();
+            resetHistoryNav();
           });
           initKeyboardShortcuts({
             onNewChat: () => newChat(),
