@@ -12202,7 +12202,7 @@
             btn.disabled = false;
             btn.textContent = t("wizard.validate_and_continue");
           }
-          setState({ currentModel: model, currentLlmMode: "remote" });
+          setState({ currentModel: model, currentLlmMode: "remote", llmConfigured: true });
           updateModelPill();
           toast(t("wizard.llm_configured"), "success");
           showWizardStep(3);
@@ -18552,6 +18552,7 @@
                 vlmEnabled: settings.vlm_enabled,
                 currentModel: settings.model || "",
                 currentLlmMode: settings.llm_mode || "remote",
+                llmConfigured: true,
                 // 方案4：初始化功能toggle状态
                 hybridEnabled: settings.hybrid_search || false,
                 agentEnabled: settings.agent_enabled || false,
