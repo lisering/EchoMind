@@ -9039,7 +9039,7 @@
           }
         }
         function initChatEventListeners(callbacks) {
-          const { onChatDone, onDocStatusChanged, onImportProgress, onEmbeddingProgress, onModelDownload } = callbacks;
+          const { onChatDone, onDocStatusChanged, onImportProgress, onEmbeddingProgress, onModelDownload, onIndexingPhase } = callbacks;
           const chatArea = $("chatArea");
           if (chatArea) {
             initScrollLock(chatArea);
@@ -9164,8 +9164,11 @@
           });
           listen("doc-status-changed", (e) => {
             const p = e.payload;
-            if (p.status === "error") {
+            if (p.status === "indexing") {
+              onIndexingPhase?.(p);
+            } else if (p.status === "error") {
               toastError(p.message);
+            } else if (p.status === "done") {
             } else {
               toast(p.message, "info");
             }
@@ -18119,9 +18122,20 @@
               $("importProgressBar").style.width = `${percent}%`;
               $("importProgressText").textContent = t("import.progress_importing", { done: p.completed, total: p.total, file: p.current_file });
             },
+            onIndexingPhase: (p) => {
+              const bar = $("importProgressBar");
+              if (bar) {
+                bar.classList.add("progress-indeterminate");
+                bar.style.width = "8%";
+              }
+              $("importProgressText").textContent = p.message || "\u6B63\u5728\u7D22\u5F15\u2026";
+            },
             onEmbeddingProgress: (p) => {
-              const percent = p.total > 0 ? Math.round(p.embedded / p.total * 100) : 0;
-              $("importProgressBar").style.width = `${percent}%`;
+              const bar = $("importProgressBar");
+              if (bar) bar.classList.remove("progress-indeterminate");
+              const rawPercent = p.total > 0 ? Math.round(p.embedded / p.total * 100) : 0;
+              const percent = 30 + Math.round(rawPercent * 0.7);
+              bar.style.width = `${percent}%`;
               $("importProgressText").textContent = t("import.progress_vectorizing", { done: p.embedded, total: p.total, doc: p.doc_name });
             },
             onModelDownload: (p) => {

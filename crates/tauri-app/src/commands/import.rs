@@ -73,6 +73,13 @@ pub async fn import_files_inner<R: Runtime>(
 
         // 发射进度事件（当前文件信息）
         emit_import_progress(app, idx, total, &name, false);
+        // 子阶段：正在读取文件
+        emit_status_with_phase(
+            app,
+            "indexing",
+            format!("正在读取：{name}"),
+            Some("reading"),
+        );
 
         match service.import_one(raw_path, is_pro).await {
             Ok(ImportOutcome::Imported(doc)) => {
@@ -100,7 +107,12 @@ pub async fn import_files_inner<R: Runtime>(
                                 .await
                                 .map_err(|e| format!("{e:#}"))
                         } else {
-                            emit_status(app, "indexing", format!("正在索引：{name}"));
+                            emit_status_with_phase(
+                                app,
+                                "indexing",
+                                format!("正在分块索引：{name}"),
+                                Some("splitting"),
+                            );
                             service
                                 .index_document(&doc)
                                 .await
@@ -109,7 +121,12 @@ pub async fn import_files_inner<R: Runtime>(
                     }
                     #[cfg(not(feature = "pro"))]
                     {
-                        emit_status(app, "indexing", format!("正在索引：{name}"));
+                        emit_status_with_phase(
+                            app,
+                            "indexing",
+                            format!("正在分块索引：{name}"),
+                            Some("splitting"),
+                        );
                         service
                             .index_document(&doc)
                             .await
@@ -118,77 +135,99 @@ pub async fn import_files_inner<R: Runtime>(
                 };
 
                 match index_result {
-                    Ok(()) => match embed_document_chunks(app, state, &doc.id, &name).await {
-                        Ok(count) => {
-                            emit_status(app, "done", format!("索引完成：{name}（{count} 向量）"));
-                            // **性能优化**：embedder 统一获取一次，复用于领域分类和 proposition 嵌入。
-                            // 原实现分别调用 state.embedder().await 两次（各触发 OnceCell 竞争），
-                            // 现统一获取一次后 clone 到各 spawn 任务。
-                            let shared_embedder = state.embedder().await.ok();
+                    Ok(()) => {
+                        // 子阶段：正在加载向量化引擎（首次加载 ONNX 模型可能耗时数秒）
+                        emit_status_with_phase(
+                            app,
+                            "indexing",
+                            "正在加载向量化引擎…".to_string(),
+                            Some("loading_model"),
+                        );
+                        match embed_document_chunks(app, state, &doc.id, &name).await {
+                            Ok(count) => {
+                                emit_status(
+                                    app,
+                                    "done",
+                                    format!("索引完成：{name}（{count} 向量）"),
+                                );
+                                // **性能优化**：embedder 统一获取一次，复用于领域分类和 proposition 嵌入。
+                                // 原实现分别调用 state.embedder().await 两次（各触发 OnceCell 竞争），
+                                // 现统一获取一次后 clone 到各 spawn 任务。
+                                let shared_embedder = state.embedder().await.ok();
 
-                            // REQ-VEC-013：后台异步执行领域分类（不阻塞导入完成事件）
-                            let storage = state.storage.clone();
-                            let doc_id = doc.id.clone();
-                            let embedder_clone = shared_embedder.clone();
-                            tokio::spawn(async move {
-                                if let Some(emb) = embedder_clone
-                                    && let Err(e) =
-                                        classify_and_update_domain(&storage, &emb, &doc_id).await
-                                {
-                                    warn!("领域分类失败（doc_id={doc_id}）: {e:#}");
-                                }
-                            });
-                            // REQ-PERF-007：后台异步嵌入 proposition（不阻塞导入完成事件）
-                            let prop_storage = state.storage.clone();
-                            let prop_doc_id = doc.id.clone();
-                            let prop_embedder = shared_embedder.clone();
-                            tokio::spawn(async move {
-                                if let Some(emb) = prop_embedder
-                                    && let Err(e) =
-                                        embed_propositions(&prop_storage, &emb, &prop_doc_id).await
-                                {
-                                    warn!("Proposition 嵌入失败（doc_id={prop_doc_id}）: {e}");
-                                }
-                            });
-                            // REQ-ING-019：后台异步生成文档摘要（不阻塞导入完成事件）
-                            let sum_storage = state.storage.clone();
-                            let sum_doc_id = doc.id.clone();
-                            let sum_llm_config = state.llm_config().read().await.clone();
-                            tokio::spawn(async move {
-                                if let Some(cfg) = sum_llm_config
-                                    && let Ok(provider) =
-                                        OpenAIProvider::new(cfg.api_key, cfg.base_url, cfg.model)
-                                    && let Ok(chunks) = sum_storage.list_chunks(&sum_doc_id).await
-                                    && let Err(e) = generate_doc_summary_async(
-                                        &sum_storage,
-                                        &sum_doc_id,
-                                        &chunks,
-                                        &provider,
+                                // REQ-VEC-013：后台异步执行领域分类（不阻塞导入完成事件）
+                                let storage = state.storage.clone();
+                                let doc_id = doc.id.clone();
+                                let embedder_clone = shared_embedder.clone();
+                                tokio::spawn(async move {
+                                    if let Some(emb) = embedder_clone
+                                        && let Err(e) =
+                                            classify_and_update_domain(&storage, &emb, &doc_id)
+                                                .await
+                                    {
+                                        warn!("领域分类失败（doc_id={doc_id}）: {e:#}");
+                                    }
+                                });
+                                // REQ-PERF-007：后台异步嵌入 proposition（不阻塞导入完成事件）
+                                let prop_storage = state.storage.clone();
+                                let prop_doc_id = doc.id.clone();
+                                let prop_embedder = shared_embedder.clone();
+                                tokio::spawn(async move {
+                                    if let Some(emb) = prop_embedder
+                                        && let Err(e) =
+                                            embed_propositions(&prop_storage, &emb, &prop_doc_id)
+                                                .await
+                                    {
+                                        warn!("Proposition 嵌入失败（doc_id={prop_doc_id}）: {e}");
+                                    }
+                                });
+                                // REQ-ING-019：后台异步生成文档摘要（不阻塞导入完成事件）
+                                let sum_storage = state.storage.clone();
+                                let sum_doc_id = doc.id.clone();
+                                let sum_llm_config = state.llm_config().read().await.clone();
+                                tokio::spawn(async move {
+                                    if let Some(cfg) = sum_llm_config
+                                        && let Ok(provider) = OpenAIProvider::new(
+                                            cfg.api_key,
+                                            cfg.base_url,
+                                            cfg.model,
+                                        )
+                                        && let Ok(chunks) =
+                                            sum_storage.list_chunks(&sum_doc_id).await
+                                        && let Err(e) = generate_doc_summary_async(
+                                            &sum_storage,
+                                            &sum_doc_id,
+                                            &chunks,
+                                            &provider,
+                                        )
+                                        .await
+                                    {
+                                        warn!("文档摘要生成失败（doc_id={sum_doc_id}）: {e:#}");
+                                    }
+                                });
+                            }
+                            Err(err) => {
+                                let _ = state
+                                    .storage
+                                    .update_doc_status(
+                                        &doc.id,
+                                        DocStatus::Failed(prefix_error(
+                                            ERR_EMBED,
+                                            &format!("向量化失败: {err}"),
+                                        )),
                                     )
-                                    .await
-                                {
-                                    warn!("文档摘要生成失败（doc_id={sum_doc_id}）: {e:#}");
-                                }
-                            });
-                        }
-                        Err(err) => {
-                            let _ = state
-                                .storage
-                                .update_doc_status(
-                                    &doc.id,
-                                    DocStatus::Failed(prefix_error(
+                                    .await;
+                                emit_status(
+                                    app,
+                                    "error",
+                                    prefix_error(
                                         ERR_EMBED,
-                                        &format!("向量化失败: {err}"),
-                                    )),
-                                )
-                                .await;
-                            emit_status(
-                                app,
-                                "error",
-                                prefix_error(ERR_EMBED, &format!("向量化失败：{name}（{err}）")),
-                            );
+                                        &format!("向量化失败：{name}（{err}）"),
+                                    ),
+                                );
+                            }
                         }
-                    },
+                    }
                     Err(err) => emit_status(
                         app,
                         "error",
