@@ -447,7 +447,8 @@
     "template_required": "Name, label and template content are required",
     "template_query_required": "Template content must contain {query} placeholder",
     "template_updated": "Template updated",
-    "template_created": "Template created"
+    "template_created": "Template created",
+    "save": "Save"
   },
   "paywall": {
     "title": "Upgrade to Pro",

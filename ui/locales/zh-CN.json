@@ -447,8 +447,9 @@
     "template_required": "名称、标签和模板内容不能为空",
     "template_query_required": "模板内容必须包含 {query} 占位符",
     "template_updated": "模板已更新",
-    "template_created": "模板已创建"
-  },
+"template_created": "模板已创建",
+"save": "保存"
+},
   "paywall": {
     "title": "升级到 Pro 版",
     "reason_default": "解锁更多功能",
