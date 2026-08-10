@@ -1,13 +1,13 @@
 # IPC 命令契约
 
-> **状态**：活跃 | **最后审阅**：2026-08-01（v9 补充 KV Cache 跨会话复用 5 个命令 + 命令计数校正 75 个；v8 补充 model_load_progress 事件；v7 新增 26 个命令：安全防御 13 + 文件监听 3 + 导出 2 + RAG 增强 4 + 领域分类 1 + i18n 2 + 文件大小 2 + 会话分页 1，新增 agent_step / chat_context_truncated 事件）
+> **状态**：活跃 | **最后审阅**：2026-08-10（v10 全量同步 187 个命令：补充 Q01-Q11/B05-B08/B09-B10/S69-S70 新增 37 个命令 + 安全态势/Shadow 筛查/Scratch 记忆/Burst Buffer/语音转写/网页搜索/文档标签/会话待办/预算追踪/Token 预算/Trace 系统/主题切换/下载管理；v9 补充 KV Cache 跨会话复用 5 个命令；v8 补充 model_load_progress 事件）
 >
 > 本文档定义所有 Tauri IPC 命令的签名、参数、返回值与事件负载。
-> 源码：`crates/tauri-app/src/commands.rs` + `crates/tauri-app/src/lib.rs`。
+> 源码：`crates/tauri-app/src/commands/` + `crates/tauri-app/src/lib.rs`。
 
 ---
 
-## 1. 命令总览（150 个，含 16 个 Pro 门控）
+## 1. 命令总览（187 个，含 12 个编译时 Pro 门控）
 
 | 分类 | 命令 | 参数 | 返回值 |
 |---|---|---|---|
@@ -132,8 +132,72 @@
 | 对话分支树 | `get_conversation_tree` | `conversationId: String` | `ConversationTree` |
 | 对话分支树 | `branch_from_message` | `conversationId: String, messageId: String, newContent: String` | `BranchResult { new_version, turn_group }` |
 | 对话搜索 | `search_conversations` | `query: String, limit?: usize` | `Vec<MessageSearchResult>` |
+| 对话分支 | `set_turn_active_version` | `conversation_id: String, turn_group: String, active_version: i32` | `()` |
+| 对话分支 | `get_turn_active_versions` | `conversation_id: String` | `Vec<TurnActiveVersion>` |
 | Contextual Retrieval | `set_contextual_retrieval` | `enabled: bool` | `()` |
 | Contextual Retrieval | `rebuild_contextual_embeddings` | — | `()` |
+| 文档标签 | `add_document_tag` | `doc_id: String, tag: String` | `()` |
+| 文档标签 | `remove_document_tag` | `doc_id: String, tag: String` | `()` |
+| 文档标签 | `list_all_tags` | — | `Vec<String>` |
+| 文档标签 | `filter_documents_by_tag` | `tag: String` | `Vec<Document>` |
+| 文档摘要 | `get_document_summary` | `docId: String` | `String \| null` |
+| 文档摘要 | `regenerate_summary` | `docId: String` | `String` |
+| 主题 | `get_theme` | — | `String` |
+| 主题 | `set_theme` | `theme: String` | `()` |
+| 嵌入器 | `check_embedder_status` | — | `bool` |
+| 下载管理 | `pause_download` | `filename: String` | `()` |
+| 下载管理 | `abort_download` | `filename: String` | `()` |
+| 下载管理 | `get_download_status` | `filename: String` | `DownloadStatus` |
+| 下载管理 | `list_pending_downloads` | — | `Vec<DownloadEntry>` |
+| 下载管理 | `cleanup_partial_downloads` | — | `u64` |
+| 下载管理 | `scan_download_recovery` | — | `Vec<DownloadEntry>` |
+| 安全态势 | `set_security_posture` | `posture: String` | `()` |
+| 安全态势 | `get_security_posture` | — | `String` |
+| Shadow 筛查 | `get_security_screen_stats` | — | `ShadowScreenStats` |
+| Shadow 筛查 | `reset_security_screen_stats` | — | `()` |
+| 记忆整合 | `trigger_memory_consolidation` | — | `JSON` |
+| 记忆整合 | `get_scratch_logs` | `limit?: usize` | `Vec<ScratchLogEntry>` |
+| Burst Buffer | `push_burst_turn` | `conversation_id: String, user_msg: String, assistant_msg: String` | `()` |
+| Burst Buffer | `flush_memory_burst_buffer` | — | `JSON` |
+| Burst Buffer | `get_burst_buffer_status` | — | `JSON` |
+| 语音转写 | `transcribe_audio` | `audio_path: String` | `String` |
+| 语音转写 | `get_stt_config` | — | `JSON` |
+| 语音转写 | `set_stt_config` | `config: JSON` | `()` |
+| 网页搜索 | `set_web_search_enabled` | `enabled: bool` | `()` |
+| 网页搜索 | `web_search` | `query: String` | `Vec<SearchResult>` |
+| AutoDream | `trigger_dream` | — | `()` |
+| AutoDream | `get_dream_suggestions` | — | `Vec<DreamSuggestion>` |
+| AutoDream | `abort_dream` | — | `()` |
+| 图谱分析 | `get_shortest_path` | `from: String, to: String` | `GraphPath` |
+| 图谱分析 | `get_communities` | — | `GraphCommunity` |
+| 图谱分析 | `get_graph_layout` | `mode?: String` | `Vec<String>` |
+| 图谱导出 | `export_graph` | `format: String` | `String` |
+| 工作流 | `save_workflow_template` | `name: String, description: String, nodes_json: String, edges_json: String` | `String` |
+| 工作流 | `run_workflow` | `workflow_id: String, input: String` | `WorkflowResult` |
+| 工作流 | `list_workflows` | — | `Vec<Workflow>` |
+| 工作流 | `delete_workflow` | `workflow_id: String` | `()` |
+| 代码符号 | `search_symbols` | `query: String, limit?: usize` | `Vec<CodeSymbol>` |
+| 代码符号 | `get_symbols_for_chunk` | `chunk_id: String` | `Vec<CodeSymbol>` |
+| 代码符号 (Pro) | `rebuild_symbol_index` | — | `number` |
+| 代码执行 (Pro) | `execute_code_snippet` | `code: String, language: String, stdin?: String` | `ExecutionResult` |
+| Prompt 接纳 | `admit_input` | `conversation_id: String, content: String, delivery: String` | `String` |
+| Prompt 接纳 | `promote_input` | `id: String` | `()` |
+| Prompt 接纳 | `get_pending_inputs` | `conversation_id: String` | `Vec<PendingInput>` |
+| 会话待办 | `add_session_todo` | `conversation_id: String, text: String` | `String` |
+| 会话待办 | `update_todo_status` | `id: String, done: bool` | `()` |
+| 会话待办 | `get_session_todos` | `conversation_id: String` | `Vec<SessionTodo>` |
+| 会话待办 | `delete_session_todo` | `id: String` | `()` |
+| 会话待办 | `delete_session_todos` | `conversation_id: String` | `()` |
+| 预算追踪 | `get_budget_stats` | — | `BudgetStats` |
+| 预算追踪 | `set_budget_limit` | `limit: u64` | `()` |
+| Token 预算 | `get_token_budget_config` | — | `TokenBudgetConfig` |
+| Token 预算 | `set_token_budget_config` | `config: TokenBudgetConfig` | `()` |
+| Trace 系统 | `get_recent_traces` | `limit?: usize` | `Vec<TraceEntry>` |
+| Trace 系统 | `get_trace_detail` | `trace_id: String` | `TraceDetail` |
+| Trace 系统 | `clear_traces` | — | `()` |
+| Trace 系统 | `get_trace_count` | — | `u64` |
+| 用量追踪 | `get_conversation_cost` | `conversation_id: String` | `ConversationCost` |
+| 用量追踪 | `set_token_budget` | `budget: u64` | `()` |
 
 ---
 

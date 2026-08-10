@@ -1,6 +1,6 @@
 # 前端模块参考
 
-> **状态**：活跃 | **最后审阅**：2026-08-09（v2.5 新增 §11 前端架构基础设施模块：zindex / panel-stack / focus-trap / input-keymap / input-history；v2.4 新增 §8 Agentic AI 前端模块；v2.3 新增采样参数函数；v2.2 补充 `handleModelLoadStatus` / `registerModelLoadListener` 函数；v2.1 同步 SRS 原子化重构）
+> **状态**：活跃 | **最后审阅**：2026-08-10（v2.6 全量同步 56 个 JS 模块：新增 queue-send / voice-input / context-menu / context-bar / error-detail / feedback / retrieval-feedback / empty-state / action / scroll-lock / privacy-indicator / followup / doc-mention / conv-nav / caret / regen-carousel / guards / command-palette 模块概要；v2.5 新增 §11 前端架构基础设施模块）
 >
 > 本文档记录 `ui/index.html` 的模块划分与函数职责。
 > 前端为单文件 SPA（vanilla JS + Tailwind CSS 本地构建），**无框架、无 CDN**。
@@ -679,3 +679,80 @@ finalizeStream()
 | `clearDraft(convId)` | 清除指定会话的草稿 |
 | `estimateTokens(text)` | 粗略估算文本的 token 数（CJK ~1.5 char/token，其他 ~4 char/token） |
 | `updateTokenEstimate()` | 更新 token 估算显示（输入框右下角 `~N tokens`） |
+
+---
+
+## 12. 辅助模块概要（56 个 JS 模块全量索引）
+
+以下模块为 `ui/src/` 目录中的全部 JS 模块，按功能域分组：
+
+### 12.1 对话与渲染核心
+
+| 模块文件 | 主要函数 | 说明 |
+|---|---|---|
+| `chat.js` | `send()` / `sendFromEdit()` / `finalizeStream()` | 对话发送与流控制核心 |
+| `chat-render.js` | `renderMarkdown()` / `scheduleRender()` / `renderRichContent()` | 消息 DOM 渲染 + Markdown 消费 + 流式追加 |
+| `markdown.js` | `renderMarkdown()` | marked.js → mermaid → KaTeX → DOMPurify → highlight.js 渲染链 |
+| `thinking-panel.js` | `createThinkingPanel()` | 可折叠思维链（CoT）面板 |
+| `message-edit.js` | `enterEditMode()` / `commitEdit()` / `renderBranchPagination()` | 消息就地编辑 + 版本分页 |
+| `turn-tree.js` | `buildTurnTree()` / `openConversationTreePanel()` | 版本树数据 + 对话分支树面板 |
+| `regen-carousel.js` | `renderRegenCarousel()` | 重新生成轮播器（多版本答案切换） |
+| `followup.js` | `renderFollowups()` | 后续问题建议渲染 |
+| `feedback.js` | `initFeedback()` | 用户反馈（点赞/点踩）UI |
+| `retrieval-feedback.js` | `reportThumbsUp()` / `reportThumbsDown()` / `detectAndReportImplicit()` | 检索反馈信号上报（REQ-PERF-012） |
+
+### 12.2 输入与导航
+
+| 模块文件 | 主要函数 | 说明 |
+|---|---|---|
+| `input-toggles.js` | `createInputToggle()` / `doToggle()` | 输入区快速 Toggle 按钮（hybrid/agent/sub_agent/memory/web_search） |
+| `input-keymap.js` | `createInputKeyHandler()` | 统一输入区 keydown 处理器 |
+| `input-history.js` | `recordInput()` / `navigateHistoryUp()` / `saveDraft()` | 输入历史导航 + 草稿持久化 + Token 估算 |
+| `slash-commands.js` | `getAllCommands()` / `processSlashCommand()` | 斜杠命令系统 + 自定义模板合并 |
+| `command-palette.js` | `openCommandPalette()` / `closeCommandPalette()` | 命令面板（⌘K 快捷键打开） |
+| `queue-send.js` | `admitInput()` / `promoteInput()` / `getPendingInputs()` | Durable Prompt Admission 前端（B05） |
+| `doc-mention.js` | `initDocMention()` / `searchDocs()` | 输入框 @ 文档提及弹框 |
+| `caret.js` | `getCaretPosition()` / `setCaretPosition()` | 光标位置工具（doc-mention 定位用） |
+| `conv-nav.js` | `initConvNav()` | 会话列表导航快捷键 |
+| `voice-input.js` | `startRecording()` / `stopRecording()` | 语音转写输入（REQ-RAG-034，getUserMedia + MediaRecorder） |
+| `guards.js` | `canSend()` / `requireIdle()` / `requirePro()` | 前端守卫函数（发送前条件检查） |
+
+### 12.3 知识库与文档
+
+| 模块文件 | 主要函数 | 说明 |
+|---|---|---|
+| `import.js` | `importPaths()` | 文档导入（拖拽 + 文件选择 + 文件监听） |
+| `empty-state.js` | `showEmptyState()` / `hideEmptyState()` | 空知识库引导界面 |
+| `context-menu.js` | `showContextMenu()` / `hideContextMenu()` | 右键上下文菜单（文档/会话/消息） |
+| `context-bar.js` | `renderContextBar()` | 上下文栏（当前选中文档/标签筛选） |
+
+### 12.4 设置与安全
+
+| 模块文件 | 主要函数 | 说明 |
+|---|---|---|
+| `settings.js` | `openSettings()` / `closeSettings()` / `initSettings()` | 设置面板主逻辑 |
+| `settings-local-llm.js` | `loadLocalModels()` / `downloadLocalModel()` / `loadSamplingParams()` | 本地 LLM 模型选择 + 采样参数 UI |
+| `security.js` | `showEncryptDialog()` / `showLockOverlay()` / `showAuditLogPanel()` | 安全/加密/PII/审计 UI |
+| `privacy-indicator.js` | `updatePrivacyIndicator()` | 隐私指示器（VLM/代理状态可视化） |
+| `paywall.js` | `showPaywall()` / `hidePaywall()` / `activatePro()` | 付费墙与 License 管理 |
+| `wizard.js` | `startWizard()` / `applyPreset()` | 配置向导 |
+
+### 12.5 基础设施
+
+| 模块文件 | 主要函数 | 说明 |
+|---|---|---|
+| `main.js` | `boot()` | 应用启动入口 |
+| `state.js` | `initialState` / `EchoState` | 全局状态管理 |
+| `ipc.js` | `invoke()` 封装 + API 对象 | Tauri IPC 类型安全封装 |
+| `i18n.js` | `t()` / `initI18n()` / `setLocale()` | i18n 国际化 |
+| `toast.js` | `toast()` / `toastSuccess()` / `toastError()` | Toast 通知系统 |
+| `confirm-dialog.js` | `showConfirmDialog()` | 统一确认对话框 |
+| `focus-trap.js` | `createFocusTrap()` | Focus Trap 栈管理（WAI-ARIA Dialog Modal） |
+| `panel-stack.js` | `pushPanel()` / `closeTopPanel()` / `hasOpenPanels()` | 全局面板栈管理器 |
+| `zindex.js` | `Z_INDEX` / `zClass()` | 统一 Z-index 常量表 |
+| `scroll-lock.js` | `lockScroll()` / `unlockScroll()` | 滚动锁定（模态面板打开时） |
+| `action.js` | `ActionRegistry` | Action 前端注册系统（Zed 借鉴） |
+| `keyboard.js` | `initKeyboard()` | 全局快捷键绑定 |
+| `sidebar.js` | `toggleSidebar()` / `openFlyout()` / `initSidebar()` | 侧栏折叠与交互 |
+| `utils.js` | `formatBytes()` / `debounce()` / `throttle()` | 通用工具函数 |
+| `error-detail.js` | `showErrorDetail()` | 错误详情面板（可展开的错误信息） |

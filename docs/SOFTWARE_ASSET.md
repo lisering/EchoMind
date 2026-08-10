@@ -2,7 +2,7 @@
 
 > **本文档是 EchoMind 项目的权威软件资产清单，覆盖全部源代码、架构、数据流、依赖、测试、构建与部署细节。后续迭代开发必须同步更新此文档。**
 >
-> **版本**: v1.4.0 | **更新日期**: 2026-08-08 | **维护者**: EchoMind 团队
+> **版本**: v1.5.0 | **更新日期**: 2026-08-10 | **维护者**: EchoMind 团队
 
 ---
 
@@ -59,7 +59,7 @@ EchoMind（灵犀）是一个 **本地 RAG 知识库桌面应用**，基于 Rust
 ### 1.3 技术栈
 
 - **后端**: Rust Edition 2024 (≥1.85), Tauri v2
-- **前端**: Vanilla JS ES Modules (49 个模块), esbuild 打包 IIFE, TypeScript checkJs 类型检查 (tsconfig.json + types/*.d.ts), Tailwind CSS (本地 JIT), 无框架无 CDN
+- **前端**: Vanilla JS ES Modules (56 个模块), esbuild 打包 IIFE, TypeScript checkJs 类型检查 (tsconfig.json + types/*.d.ts), Tailwind CSS (本地 JIT), 无框架无 CDN
 - **数据库**: SQLite (rusqlite + r2d2 连接池, WAL 模式, FTS5, SQLCipher)
 - **嵌入模型**: fastembed (ONNX Runtime, all-MiniLM-L6-v2 384-dim)
 - **本地 LLM**: mistral.rs v0.9.0 (GGUF 格式, GPU Metal/CUDA 可选)
@@ -704,29 +704,50 @@ opt-level = 3  # ML 依赖以 opt-level 3 编译
 
 ## 14. 数据库 Schema
 
-### 14.1 表结构
+### 14.1 表结构（23 张表）
 
 ```sql
--- 核心表
-CREATE TABLE documents (id, file_path, file_hash, status, status_reason, created_at, original_path, domain);
+-- 核心表（6 张）
+CREATE TABLE documents (id, file_path, file_hash, status, status_reason, created_at, original_path, domain, summary, tags);
 CREATE TABLE chunks (id, doc_id, content, token_count, sequence);  -- ON DELETE CASCADE
 CREATE TABLE embeddings (chunk_id, vector BLOB);  -- ON DELETE CASCADE
 CREATE TABLE settings (key, value);
 CREATE TABLE conversations (id, workspace_id, title, created_at);
-CREATE TABLE messages (id, conversation_id, role, content, sources, created_at);  -- ON DELETE CASCADE
+CREATE TABLE messages (id, conversation_id, role, content, sources, reasoning, turn_group, version, created_at, security_tainted);  -- ON DELETE CASCADE
 
--- 性能优化表
+-- FTS5 虚拟表（2 张）
+CREATE VIRTUAL TABLE chunks_fts USING fts5(content, doc_id UNINDEXED, chunk_id UNINDEXED, tokenize='trigram');
+CREATE VIRTUAL TABLE messages_fts USING fts5(content, conversation_id UNINDEXED, message_id UNINDEXED, tokenize='trigram');
+
+-- 性能优化表（6 张）
 CREATE TABLE embeddings_cache (content_hash, embedding BLOB);  -- 嵌入去重
-CREATE TABLE entities (id, chunk_id, entity_text, entity_type);  -- 实体索引
+CREATE TABLE entities (id, chunk_id, entity_text, entity_type);  -- 实体索引 (REQ-PERF-006)
+CREATE TABLE propositions (id, chunk_id, content, embedding BLOB, sequence);  -- 原子命题 (REQ-PERF-007)
+CREATE TABLE summary_nodes (id, doc_id, level, content, child_ids, embedding BLOB);  -- RAPTOR 摘要树 (REQ-PERF-009)
+CREATE TABLE retrieval_memory (query_type, method, hit_count, miss_count, avg_score);  -- 检索记忆 (REQ-PERF-012)
 CREATE TABLE entity_relations (id, subject, relation_type, object, chunk_id, confidence);  -- 知识图谱边 (REQ-RAG-027)
-CREATE TABLE propositions (id, chunk_id, content, embedding BLOB, sequence);  -- 原子命题
-CREATE TABLE summary_nodes (id, doc_id, level, content, children_ids);  -- RAPTOR 摘要树
-CREATE TABLE retrieval_memory (query_type, method, hit_rate, avg_score, count);  -- 检索记忆
 
--- 审计表
-CREATE TABLE audit_logs (id, action, details, pii_count, timestamp, prev_hash, curr_hash);  -- 哈希链
+-- 代码符号索引（1 张）
+CREATE TABLE code_symbols (id, chunk_id, name, kind, language, start_line, end_line, signature);  -- (REQ-RAG-031, Pro)
 
--- 缓存表（SqliteCache 独立表）
+-- 记忆与 Wiki（2 张）
+CREATE TABLE memory_entries (id, tier, content, source, conversation_id, created_at, last_accessed, access_count, importance);  -- (REQ-RAG-033)
+CREATE TABLE wiki_links (id, source_doc_id, target, chunk_id, created_at);  -- (REQ-ING-020)
+
+-- 对话分支与待办（2 张）
+CREATE TABLE turn_active_versions (conversation_id, turn_group, active_version);  -- (REQ-RAG-039)
+CREATE TABLE pending_inputs (id, conversation_id, content, delivery, created_at, promoted_seq);  -- (B05)
+
+-- QM 借鉴新表（4 张）
+CREATE TABLE session_todos (id, conversation_id, content, status, priority, position, created_at);  -- (B08)
+CREATE TABLE scratch_logs (id, date, content, created_at);  -- (Q01 Scratch-Promote)
+CREATE TABLE idempotency_records (key, timestamp);  -- (Q03 幂等性)
+CREATE TABLE budget_records (id AUTOINCREMENT, principal, timestamp, input_tokens, output_tokens, cost_usd, model_name);  -- (Q08 预算追踪)
+
+-- 审计表（1 张）
+CREATE TABLE audit_log (id, action, details, pii_count, timestamp, prev_hash, curr_hash);  -- 哈希链 (REQ-SEC-015)
+
+-- 缓存表（3 张，SqliteCache 独立表）
 CREATE TABLE exact_cache (query_hash, response, created_at);
 CREATE TABLE semantic_cache (query_hash, query_embedding BLOB, response, created_at);
 CREATE TABLE retrieval_cache (query_hash, query_embedding BLOB, results_json, created_at);
@@ -756,7 +777,7 @@ PRAGMA temp_store = MEMORY;
 
 ## 15. IPC 命令清单
 
-### 15.1 命令分类 (173 个)
+### 15.1 命令分类 (187 个)
 
 | 分类 | 命令数 | 代表命令 |
 |---|---|---|
@@ -852,6 +873,19 @@ PRAGMA temp_store = MEMORY;
 | `security.panic_wipe.enabled` | String | "false" | 紧急销毁开关 |
 | `security.panic_wipe.password_hash` | String | - | 紧急销毁密码哈希 |
 | `security.panic_wipe.salt_hex` | String | - | 紧急销毁 salt |
+| `rag.contextual_retrieval` | String | "true" | Contextual Retrieval 开关 (REQ-RAG-041) |
+| `rag.quality_gate_enabled` | String | "false" | RAG 质量门控开关 |
+| `rag.web_search_enabled` | String | "false" | 网页搜索集成开关 |
+| `rag.sub_agent_enabled` | String | "false" | 子代理舰队开关 |
+| `memory.enabled` | String | "false" | 持久化记忆系统开关 |
+| `security.posture` | String | "auto" | 安全态势分层 (Q05) |
+| `security.auto_lock_enabled` | String | "true" | 自动锁定开关 |
+| `security.lock_on_sleep` | String | "true" | 休眠时自动锁定 |
+| `security.clipboard_clear_enabled` | String | "true" | 剪贴板自动清除开关 |
+| `ui.theme` | String | "dark" | 界面主题模式 |
+| `stt.api_key` | String | - | 语音转写 API Key |
+| `stt.base_url` | String | - | 语音转写 API 端点 |
+| `stt.model` | String | "whisper-1" | 语音转写模型名 |
 | `log.level` | String | "info" | 日志级别 |
 | `license.is_pro` | String | "false" | Pro 授权状态 |
 
@@ -1253,7 +1287,7 @@ v1.2 是 v1.1.0 发布后的第二个功能迭代版本。通过 ROI 评估（�
 | `list_custom_models` | S52 | Pro | 列出自定义模型 |
 | `delete_custom_model` | S52 | Pro | 删除自定义模型 |
 
-> IPC 命令总数：138 → 141（+3 Pro 门控）。
+> IPC 命令总数：187（含 12 个编译时 Pro 门控）。
 
 ### 23.5 ALLOWED_EXTENSIONS 变更
 

@@ -1,6 +1,6 @@
 # 代码契约 — Traits 与数据模型
 
-> **状态**：活跃 | **最后审阅**：2026-07-25（v7.0 同步 SRS v2.1.0 原子化重构：新增 §7 前端原子契约引用 + 错误前缀系统规划）
+> **状态**：活跃 | **最后审阅**：2026-08-10（v8.0 全量同步 QM/OpenCode 借鉴：LLMProvider 4 个辅助方法 + SecurityPosture/SecurityScreener/LlmRouter/KeyedQueue/SessionCoordinator/Skill/Permission/LlmProtocol 新模块 + AppState 新字段）
 >
 > 本文档是 AI Agent 开发的**第一技术参考**（铁律七文档优先级 #2）。
 > 所有签名必须与源码逐字一致。
@@ -114,8 +114,27 @@ pub trait LLMProvider: Send + Sync {
         history: &[ChatMessage],
         query: &str,
     ) -> anyhow::Result<BoxStream<'static, anyhow::Result<String>>>;
+
+    // Q10 辅助方法（默认实现返回 None/Ok(None)，向后兼容）
+    async fn generate_title(&self, _query: &str, _answer: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+    async fn one_shot(&self, _system: &str, _user: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+    async fn judge(&self, _system: &str, _user: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+    fn context_token_budget(&self) -> Option<usize> {
+        None
+    }
 }
 ```
+
+- `generate_title` — LLM 辅助标题生成（Q10 借鉴 QM 辅助模型方法；`OpenAIProvider` 覆盖实现，复用 `complete()` 非流式调用，30 字截断）
+- `one_shot` — 非流式单次调用（Q10；用于 Burst Buffer 记忆提取、安全筛查判断等辅助 LLM 调用）
+- `judge` — 裁决调用（Q10；用于 Shadow 安全筛查模式 S71）
+- `context_token_budget` — 返回模型上下文窗口大小（Q10；用于 Token 预算计算）
 
 ### 1.6 Retriever
 
@@ -419,6 +438,23 @@ pub struct AppState {
     abort_tokens: tokio::sync::Mutex<HashMap<String, CancellationToken>>,
     audit_cancels: tokio::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,  // REQ-AUDIT-005
     file_watchers: tokio::sync::Mutex<HashMap<String, FileWatcherHandle>>,  // REQ-SYNC-003
+    // ── QM/OpenCode 借鉴新增字段 ──
+    llm_router: LlmRouter,  // Q11 LLM 路由器（模式路由 + fallback + available_modes）
+    persist_queue: KeyedQueue<String>,  // Q03 持久化队列（同 conversation_id 串行化写入）
+    security_posture: Arc<AtomicU8>,  // Q05 安全态势（0=Dangerous, 1=Auto, 2=Strict）
+    shadow_screen_collector: Arc<ShadowScreenCollector>,  // Q06 Shadow 安全筛查统计收集器
+    memory_burst_buffer: Arc<Mutex<BurstBuffer>>,  // Q02 延迟批量记忆提取缓冲
+    compaction_pending: Arc<AtomicBool>,  // Q04 后台压缩待处理标志
+    session_coordinator: Arc<SessionCoordinator>,  // B06 会话运行协调器
+    hybrid_search: bool,  // 混合检索开关（settings 表读取）
+    llm_mode: LlmMode,  // 推理模式（Remote/Local）
+    compression_ratio: f32,  // Prompt 压缩比
+    progressive_enabled: bool,  // 渐进式注入开关
+    speculative_enabled: bool,  // Speculative RAG 开关
+    retrieval_memory_enabled: bool,  // 检索记忆开关
+    memory_enabled: bool,  // 持久化记忆开关
+    web_search_enabled: bool,  // 网页搜索开关
+    _log_guard: Option<WorkerGuard>,  // REQ-OBS-001 日志守卫
 }
 ```
 

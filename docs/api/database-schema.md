@@ -1,6 +1,6 @@
 # 数据库 Schema
 
-> **状态**：活跃 | **最后审阅**：2026-07-25（v2 新增 FTS5 虚拟表 + `rag.hybrid_search` 设置键，REQ-RAG-010）
+> **状态**：活跃 | **最后审阅**：2026-08-10（v3 全量同步 23 张表：新增 entities / propositions / summary_nodes / retrieval_memory / turn_active_versions / session_todos / scratch_logs / idempotency_records / budget_records / audit_log / embeddings_cache + messages.security_tainted 列；v2 新增 FTS5 虚拟表）
 >
 > 源码：`crates/infra/src/sqlite_storage.rs`。
 > 数据库文件：`<app_data_dir>/echomind.db`（SQLite + WAL 模式）。
@@ -63,6 +63,7 @@
 | `turn_group` | TEXT | NOT NULL DEFAULT '' | 轮次分组 ID（用户消息编辑版本管理；同一问题的不同编辑版本共享同一个 turn_group；旧消息为空字符串） |
 | `version` | INTEGER | NOT NULL DEFAULT 1 | 轮次内版本号（从 1 递增；用户编辑问题后产生新版本，旧版本保留供分页查看） |
 | `created_at` | INTEGER | NOT NULL | Unix 秒级时间戳 |
+| `security_tainted` | INTEGER | NOT NULL DEFAULT 0 | 安全污染标记（Q05 安全态势分层；0=未标记，1=被安全筛查标记为不可信；上下文构建时过滤被标记的消息） |
 
 **索引**：`idx_messages_conv` (conversation_id)、`idx_messages_turn` (conversation_id, turn_group, version)
 
@@ -234,6 +235,165 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 - `promote_input`：`UPDATE pending_inputs SET promoted_seq = ? WHERE id = ?`
 
 **关联需求**：REQ-RAG-042 Durable Prompt Admission（持久化提示接纳）
+
+---
+
+### 1.13 entities（实体索引，REQ-PERF-006）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | UUID v4 |
+| `chunk_id` | TEXT | NOT NULL, FK → chunks(id) ON DELETE CASCADE | 关联 chunk ID |
+| `entity_text` | TEXT | NOT NULL | 实体文本 |
+| `entity_type` | TEXT | NOT NULL | 实体类型（person / proper_noun / tech_term / identifier / date） |
+
+**索引**：`idx_entities_chunk` (chunk_id)、`idx_entities_text` (entity_text)
+
+- **写入时机**：文档导入时 `ImportService::index_entities()` 通过 `EntityExtractor::extract()` 纯规则 NER 抽取
+- **关联需求**：REQ-PERF-006 实体链接增强（三路 RRF 实体匹配通道）
+
+### 1.14 propositions（Proposition 索引，REQ-PERF-007）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | UUID v4 |
+| `chunk_id` | TEXT | NOT NULL, FK → chunks(id) ON DELETE CASCADE | 关联 chunk ID |
+| `content` | TEXT | NOT NULL | Proposition 文本（自包含的原子事实） |
+| `embedding` | BLOB | | 嵌入向量（f32 字节序列） |
+| `sequence` | INTEGER | NOT NULL | chunk 内顺序号 |
+
+**索引**：`idx_propositions_chunk` (chunk_id)
+
+- **写入时机**：文档导入时 `ImportService::index_propositions()` 通过 `PropositionSplitter` 分割 + 嵌入
+- **关联需求**：REQ-PERF-007 Proposition 级原子分割
+
+### 1.15 summary_nodes（RAPTOR 摘要树，REQ-PERF-009）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | UUID v4 |
+| `doc_id` | TEXT | NOT NULL, FK → documents(id) ON DELETE CASCADE | 关联文档 ID |
+| `level` | INTEGER | NOT NULL | 摘要层级（0=组摘要，1=主题摘要） |
+| `content` | TEXT | NOT NULL | 摘要文本 |
+| `child_ids` | TEXT | NOT NULL | 子节点 ID 列表（JSON 数组） |
+| `embedding` | BLOB | | 嵌入向量 |
+
+**索引**：`idx_summary_nodes_doc` (doc_id)、`idx_summary_nodes_level` (level)
+
+- **写入时机**：`build_summary_tree` IPC 命令触发 `SummaryTreeBuilder` 构建
+- **关联需求**：REQ-PERF-009 RAPTOR 多级摘要树
+
+### 1.16 retrieval_memory（检索记忆，REQ-PERF-012）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `query_type` | TEXT | NOT NULL, PRIMARY KEY (复合) | 查询类型（factual / analytical / code / conversational） |
+| `method` | TEXT | NOT NULL, PRIMARY KEY (复合) | 检索方法（vector_only / hybrid / hybrid_rerank / proposition / colbert） |
+| `hit_count` | INTEGER | DEFAULT 0 | 命中次数（用户反馈正信号） |
+| `miss_count` | INTEGER | DEFAULT 0 | 未命中次数（用户反馈负信号） |
+| `avg_score` | REAL | DEFAULT 0 | 平均检索分数 |
+
+- **写入时机**：`record_retrieval_feedback` IPC 命令记录用户反馈信号
+- **读取时机**：`chat_inner` 启用检索记忆时，选择 hit_rate 最高的方法
+- **关联需求**：REQ-PERF-012 自进化检索记忆
+
+### 1.17 turn_active_versions（轮次活跃版本，分支切换持久化）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `conversation_id` | TEXT | NOT NULL, PRIMARY KEY (复合) | 会话 ID |
+| `turn_group` | TEXT | NOT NULL, PRIMARY KEY (复合) | 轮次分组 ID |
+| `active_version` | INTEGER | NOT NULL | 当前活跃版本号 |
+
+- **写入时机**：`set_turn_active_version` IPC 命令（用户切换分页器版本时）
+- **读取时机**：`get_turn_active_versions` IPC 命令（加载会话时恢复活跃版本）
+- **关联需求**：REQ-RAG-039 对话分支树
+
+### 1.18 session_todos（会话待办，B08）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | UUID v4 |
+| `conversation_id` | TEXT | NOT NULL, FK → conversations(id) ON DELETE CASCADE | 所属会话 ID |
+| `content` | TEXT | NOT NULL | 待办内容 |
+| `status` | TEXT | NOT NULL DEFAULT 'pending' | 状态（pending / in_progress / completed） |
+| `priority` | TEXT | NOT NULL DEFAULT 'medium' | 优先级（low / medium / high） |
+| `position` | INTEGER | NOT NULL | 排序位置（升序） |
+| `created_at` | INTEGER | NOT NULL | 创建时间（Unix 秒级时间戳） |
+
+- **写入时机**：`add_session_todo` / `update_todo_status` / `delete_session_todo` IPC 命令
+- **关联需求**：B08 Session Todo 持久化（OpenCode 借鉴）
+
+### 1.19 scratch_logs（Scratch-Promote 记忆整合，Q01）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | UUID v4 |
+| `date` | TEXT | NOT NULL | 日期（YYYY-MM-DD 格式，用于按日聚合） |
+| `content` | TEXT | NOT NULL | 临时事实内容 |
+| `created_at` | INTEGER | NOT NULL | 创建时间（Unix 秒级时间戳，用于过期清理，默认 14 天） |
+
+- **写入时机**：`push_burst_turn` IPC 命令将对话中的事实写入 scratch 层
+- **清理时机**：`cleanup_expired_scratch_logs()` 清理过期记录（默认 14 天）
+- **整合时机**：`trigger_memory_consolidation` IPC 命令触发 LLM 审查 → promote 到长期记忆层
+- **关联需求**：Q01 Scratch-Promote 两层记忆 + Consolidation 引擎（QM 借鉴）
+
+### 1.20 idempotency_records（幂等性记录）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `key` | TEXT | PRIMARY KEY | 幂等键（如 `chat:{conversation_id}:{query_hash}`） |
+| `timestamp` | INTEGER | NOT NULL | 记录时间（Unix 秒级时间戳） |
+
+- **写入时机**：IPC 命令执行前检查幂等键，执行后写入
+- **清理时机**：过期记录自动清理
+- **关联需求**：Q03 幂等性保证（QM 借鉴）
+
+### 1.21 budget_records（预算追踪，Q08）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
+| `principal` | TEXT | NOT NULL | 调用主体（如 conversation_id） |
+| `timestamp` | INTEGER | NOT NULL | 记录时间（Unix 秒级时间戳） |
+| `input_tokens` | INTEGER | NOT NULL | 输入 token 数 |
+| `output_tokens` | INTEGER | NOT NULL | 输出 token 数 |
+| `cost_usd` | REAL | NOT NULL | 估算费用（USD） |
+| `model_name` | TEXT | NOT NULL | 模型名称 |
+
+- **写入时机**：每次 LLM API 调用后自动记录
+- **读取时机**：`get_budget_stats` / `set_budget_limit` IPC 命令
+- **费用计算**：`LLM_COST_PER_MTOK` 环境变量控制每百万 token 价格
+- **关联需求**：Q08 预算追踪（QM 借鉴 — LLM API 费用控制和速率限制）
+
+### 1.22 audit_log（审计日志，REQ-SEC-015）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | UUID v4 |
+| `action` | TEXT | NOT NULL | 审计动作（如 `pii_detected` / `encrypt_database` / `unlock_database`） |
+| `details` | TEXT | NOT NULL | 审计详情（JSON 字符串） |
+| `pii_count` | INTEGER | NOT NULL DEFAULT 0 | PII 检测计数 |
+| `timestamp` | INTEGER | NOT NULL | Unix 秒级时间戳 |
+| `prev_hash` | TEXT | | 前一条记录的哈希值（哈希链） |
+| `curr_hash` | TEXT | | 当前记录的哈希值（`SHA256(prev_hash || entry_data)`） |
+
+**索引**：`idx_audit_log_timestamp` (timestamp)
+
+- **写入时机**：安全相关操作（PII 检测、加密、解锁、锁定等）自动记录
+- **验证完整性**：`verify_audit_chain()` 重放哈希链检测篡改
+- **关联需求**：REQ-SEC-015 审计日志哈希链
+
+### 1.23 embeddings_cache（嵌入缓存）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `content_hash` | TEXT | PRIMARY KEY | 内容哈希（MD5） |
+| `embedding` | BLOB | NOT NULL | 嵌入向量（f32 字节序列） |
+
+- **写入时机**：`embed_batch` 时缓存已计算过的嵌入
+- **读取时机**：`embed` / `embed_batch` 先查缓存避免重复计算
+- **关联需求**：性能优化（嵌入去重缓存）
 
 ---
 
