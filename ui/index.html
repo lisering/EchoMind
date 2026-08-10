@@ -5312,6 +5312,7 @@
           durableApi: () => durableApi,
           embedModelApi: () => embedModelApi,
           errorLogsApi: () => errorLogsApi,
+          graphApi: () => graphApi,
           importApi: () => importApi,
           invoke: () => invoke,
           kbStatsApi: () => kbStatsApi,
@@ -5353,7 +5354,7 @@
           } catch (_) {
           }
         }
-        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, windowSettingsApi, errorLogsApi, symbolApi, webSearchApi;
+        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, graphApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, windowSettingsApi, errorLogsApi, symbolApi, webSearchApi;
         var init_ipc = __esm({
           "ui/src/ipc.js"() {
             llmApi = {
@@ -5459,7 +5460,17 @@
               /** 获取当前设备类型（CPU/Metal/CUDA，Pro 功能） */
               getDeviceKind: () => invoke("get_local_llm_device_kind"),
               /** 设置嵌入模型（Pro 功能，运行时切换 ONNX 嵌入模型） */
-              setEmbedderModel: (model) => invoke("set_embedder_model", { model })
+              setEmbedderModel: (model) => invoke("set_embedder_model", { model }),
+              /** 设置 PagedAttention 参数（Pro 功能） */
+              setPagedAttn: (enabled, blockSize, gpuMemoryCtx) => invoke("set_paged_attn", { enabled, blockSize, gpuMemoryCtx }),
+              /** 获取 GEMV 内核模式（Pro 功能） */
+              getKernelMode: () => invoke("get_kernel_mode"),
+              /** 设置 GEMV 内核模式（Pro 功能） */
+              setKernelMode: (mode) => invoke("set_kernel_mode", { mode })
+            };
+            graphApi = {
+              /** 获取后端布局算法建议列表（用于持久化用户偏好） */
+              getLayout: () => invoke("get_graph_layout")
             };
             kvCacheApi = {
               /** 保存当前会话的 KV Cache 到磁盘 */
@@ -15612,6 +15623,98 @@
             };
           }
         }
+        async function renderPagedAttnSettings(container) {
+          if (!container) return;
+          const isPro = get("isPro");
+          container.innerHTML = `
+          <div class="flex items-center justify-between py-2 border-t border-border-default" id="pagedAttnSection">
+            <div class="flex flex-col gap-0.5 flex-1">
+              <span data-i18n="settings.paged_attn">PagedAttention</span>
+              <span class="text-xs text-text-tertiary leading-tight" data-i18n="settings.paged_attn_desc">\u5206\u9875\u6CE8\u610F\u529B\u673A\u5236\uFF0C\u964D\u4F4E\u663E\u5B58\u5360\u7528\u4EE5\u652F\u6301\u66F4\u957F\u4E0A\u4E0B\u6587</span>
+            </div>
+            <div class="shrink-0 ml-4 flex items-center gap-2 ${isPro ? "" : "opacity-40 pointer-events-none"}">
+              <button id="pagedAttnToggle" class="relative w-11 h-6 rounded-full transition-colors bg-slate-600" role="switch" aria-checked="false" ${isPro ? "" : "disabled"}>
+                <span class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform"></span>
+              </button>
+              <input type="number" id="pagedAttnBlockSize" class="px-2.5 py-1 text-[13px] border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary"
+                     value="512" min="64" max="8192" step="64" style="width: 90px;" placeholder="512" ${isPro ? "" : "disabled"} title="Block Size"/>
+              <input type="number" id="pagedAttnGpuMem" class="px-2.5 py-1 text-[13px] border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary"
+                     value="512" min="128" max="8192" step="128" style="width: 90px;" placeholder="512" ${isPro ? "" : "disabled"} title="GPU Memory (MB)"/>
+            </div>
+          </div>
+        `;
+          if (!isPro) return;
+          const toggle = $("pagedAttnToggle");
+          if (toggle) {
+            toggle.onclick = async () => {
+              const isEnabled = toggle.getAttribute("aria-checked") === "true";
+              const newEnabled = !isEnabled;
+              const blockSize = parseInt($("pagedAttnBlockSize")?.value || "512", 10);
+              const gpuMem = parseInt($("pagedAttnGpuMem")?.value || "512", 10);
+              try {
+                await localLlmApi.setPagedAttn(newEnabled, blockSize, gpuMem);
+                toggle.setAttribute("aria-checked", String(newEnabled));
+                toggle.classList.toggle("bg-accent", newEnabled);
+                toggle.classList.toggle("bg-slate-600", !newEnabled);
+                toggle.querySelector("span").classList.toggle("translate-x-5", newEnabled);
+                toastSuccess(newEnabled ? t("settings.paged_attn_enabled", "PagedAttention \u5DF2\u542F\u7528") : t("settings.paged_attn_disabled", "PagedAttention \u5DF2\u7981\u7528"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+        }
+        async function renderKernelModeSettings(container) {
+          if (!container) return;
+          const isPro = get("isPro");
+          let currentMode = "mistralrs";
+          try {
+            currentMode = await localLlmApi.getKernelMode();
+          } catch (_) {
+          }
+          const isMistral = currentMode === "mistralrs" || !currentMode;
+          container.innerHTML = `
+          <div class="flex items-center justify-between py-2 border-t border-border-default" id="kernelModeSection">
+            <div class="flex flex-col gap-0.5 flex-1">
+              <span data-i18n="settings.kernel_mode">GEMV Kernel Mode</span>
+              <span class="text-xs text-text-tertiary leading-tight" data-i18n="settings.kernel_mode_desc">\u9009\u62E9\u672C\u5730\u63A8\u7406\u7684 GEMV \u5185\u6838\u5B9E\u73B0</span>
+            </div>
+            <div class="shrink-0 ml-4 flex items-center gap-1.5 ${isPro ? "" : "opacity-40 pointer-events-none"}">
+              <button class="px-3 py-1.5 text-xs rounded-lg border transition-colors ${isMistral ? "bg-accent/15 text-accent border-accent/30" : "border-border-default text-text-tertiary hover:bg-surface-3"}"
+                id="kernelBtnMistral" ${isPro ? "" : "disabled"} data-i18n="settings.kernel_mistral">Mistral.rs</button>
+              <button class="px-3 py-1.5 text-xs rounded-lg border transition-colors ${!isMistral ? "bg-accent/15 text-accent border-accent/30" : "border-border-default text-text-tertiary hover:bg-surface-3"}"
+                id="kernelBtnGemv" ${isPro ? "" : "disabled"} data-i18n="settings.kernel_custom_gemv">Custom GEMV</button>
+            </div>
+          </div>
+        `;
+          if (!isPro) return;
+          const btnMistral = $("kernelBtnMistral");
+          const btnGemv = $("kernelBtnGemv");
+          if (btnMistral) {
+            btnMistral.onclick = async () => {
+              try {
+                await localLlmApi.setKernelMode("mistralrs");
+                btnMistral.className = "px-3 py-1.5 text-xs rounded-lg border transition-colors bg-accent/15 text-accent border-accent/30";
+                btnGemv.className = "px-3 py-1.5 text-xs rounded-lg border transition-colors border-border-default text-text-tertiary hover:bg-surface-3";
+                toastSuccess(t("settings.kernel_mode_switched", "\u5185\u6838\u6A21\u5F0F\u5DF2\u5207\u6362"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+          if (btnGemv) {
+            btnGemv.onclick = async () => {
+              try {
+                await localLlmApi.setKernelMode("custom_gemv");
+                btnGemv.className = "px-3 py-1.5 text-xs rounded-lg border transition-colors bg-accent/15 text-accent border-accent/30";
+                btnMistral.className = "px-3 py-1.5 text-xs rounded-lg border transition-colors border-border-default text-text-tertiary hover:bg-surface-3";
+                toastSuccess(t("settings.kernel_mode_switched", "\u5185\u6838\u6A21\u5F0F\u5DF2\u5207\u6362"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+        }
       
         // ui/src/export.js
         init_state();
@@ -16364,6 +16467,28 @@
             })();
             if (embedderContainer) {
               renderEmbedderModelSettings(embedderContainer);
+            }
+            const pagedAttnContainer = $("pagedAttnContainer") || (() => {
+              if (!insertAfter) return null;
+              const div = document.createElement("div");
+              div.id = "pagedAttnContainer";
+              insertAfter.after(div);
+              insertAfter = div;
+              return div;
+            })();
+            if (pagedAttnContainer) {
+              renderPagedAttnSettings(pagedAttnContainer);
+            }
+            const kernelModeContainer = $("kernelModeContainer") || (() => {
+              if (!insertAfter) return null;
+              const div = document.createElement("div");
+              div.id = "kernelModeContainer";
+              insertAfter.after(div);
+              insertAfter = div;
+              return div;
+            })();
+            if (kernelModeContainer) {
+              renderKernelModeSettings(kernelModeContainer);
             }
             const windowSettingsContainer = $("windowSettingsContainer") || (() => {
               if (!insertAfter) return null;
@@ -18535,6 +18660,10 @@
           if (mode === _currentLayout) return;
           const validModes = ["force", "hierarchical", "radial"];
           if (!validModes.includes(mode)) return;
+          try {
+            await graphApi.getLayout();
+          } catch (_) {
+          }
           const btns = document.querySelectorAll(".graph-layout-btn");
           for (const btn of btns) {
             btn.classList.toggle("graph-layout-active", btn.getAttribute("data-layout") === mode);

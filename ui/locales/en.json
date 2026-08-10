@@ -456,7 +456,16 @@
     "template_query_required": "Template content must contain {query} placeholder",
     "template_updated": "Template updated",
     "template_created": "Template created",
-    "save": "Save"
+    "save": "Save",
+"paged_attn": "PagedAttention",
+"paged_attn_desc": "Paged attention mechanism, reduces VRAM usage for longer context",
+"paged_attn_enabled": "PagedAttention enabled",
+"paged_attn_disabled": "PagedAttention disabled",
+"kernel_mode": "GEMV Kernel Mode",
+"kernel_mode_desc": "Select GEMV kernel implementation for local inference",
+"kernel_mistral": "Mistral.rs",
+"kernel_custom_gemv": "Custom GEMV",
+"kernel_mode_switched": "Kernel mode switched"
   },
   "paywall": {
     "title": "Upgrade to Pro",

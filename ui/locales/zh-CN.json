@@ -456,7 +456,16 @@
     "template_query_required": "模板内容必须包含 {query} 占位符",
     "template_updated": "模板已更新",
 "template_created": "模板已创建",
-"save": "保存"
+"save": "保存",
+"paged_attn": "PagedAttention",
+"paged_attn_desc": "分页注意力机制，降低显存占用以支持更长上下文",
+"paged_attn_enabled": "PagedAttention 已启用",
+"paged_attn_disabled": "PagedAttention 已禁用",
+"kernel_mode": "GEMV 内核模式",
+"kernel_mode_desc": "选择本地推理的 GEMV 内核实现",
+"kernel_mistral": "Mistral.rs",
+"kernel_custom_gemv": "Custom GEMV",
+"kernel_mode_switched": "内核模式已切换"
 },
   "paywall": {
     "title": "升级到 Pro 版",
