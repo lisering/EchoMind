@@ -24,6 +24,12 @@ pub mod robust_downloader;
 /// 语义缓存 SQLite 适配器（REQ-PERF-001）：L0 精确 + L1 语义 + L3 检索结果三级缓存。
 pub mod sqlite_cache;
 pub mod sqlite_storage;
+/// Prompt Prefix 磁盘缓存 + LRU 驱逐（DS-01：借鉴 ds4 `ds4_kvstore.c`）。
+///
+/// 缓存 tokenize 后的 prompt prefix，加速会话恢复。SHA1 文本前缀匹配、
+/// LRU 驱逐评分（半衰期 6 小时）、边界裁剪 + 对齐（防 BPE 重分词）、
+/// 4 种保存时机（cold/continued/evict/shutdown）、原子写入、预算管理。
+pub mod prompt_cache;
 
 // ---- Pro 模块（仅在 --features pro 时编译）----
 /// ColBERT 多向量嵌入引擎（REQ-PERF-008, Pro feature）：token 级多向量嵌入 + MaxSim 检索。
@@ -127,6 +133,9 @@ mod perf_suite_tests;
 mod quant_blocks_tests;
 #[cfg(test)]
 mod storage_tests;
+/// Prompt Prefix 磁盘缓存 TDD 测试（DS-01：借鉴 ds4 `ds4_kvstore.c`）。
+#[cfg(test)]
+mod prompt_cache_tests;
 #[cfg(all(test, feature = "pro"))]
 mod weight_repack_tests;
 

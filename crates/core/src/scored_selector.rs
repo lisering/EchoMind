@@ -361,6 +361,7 @@ mod tests {
 
     use super::*;
 
+    #[allow(clippy::too_many_arguments)]
     fn make_candidate(
         name: &str,
         model: &str,

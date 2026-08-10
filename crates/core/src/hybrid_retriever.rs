@@ -25,6 +25,8 @@ use std::sync::Arc;
 
 use echomind_models::RetrievalResult;
 
+use crate::mmr_diversifier::{MmrConfig, mmr_diversify};
+use crate::retrieval_quality_gate::{QualityGateConfig, QualityVerdict, score_retrieval_quality};
 use crate::{Embedder, QueryRewriter, Reranker, Retriever, Storage};
 
 /// RRF 常量 k（标准参数 60，来自 Cormack et al. 2009 论文）。
@@ -161,6 +163,12 @@ pub struct HybridRetriever<E: Embedder, S: Storage> {
     /// 可选查询改写器（REQ-RAG-021 HyDE）：注入后向量检索使用改写后的文本嵌入。
     /// 关键词检索仍使用原始查询（精确匹配）。`None` 时跳过改写，行为与未注入时完全一致。
     rewriter: Option<Arc<dyn QueryRewriter>>,
+    /// MMR 多样性重排配置（借鉴 OpenMontage corpus.py）。
+    /// `None` 时禁用 MMR，行为与之前完全一致。启用后在 RRF/重排序后、Chunk Expansion 前执行。
+    mmr_config: Option<MmrConfig>,
+    /// 检索质量门控配置（借鉴 OpenMontage slideshow_risk.py）。
+    /// 每次检索后评估质量并输出 tracing 日志，不影响检索结果（仅可观测性）。
+    quality_gate_config: QualityGateConfig,
 }
 
 impl<E: Embedder, S: Storage> HybridRetriever<E, S> {
@@ -173,6 +181,8 @@ impl<E: Embedder, S: Storage> HybridRetriever<E, S> {
             hybrid_enabled: true,
             reranker: None,
             rewriter: None,
+            mmr_config: None,
+            quality_gate_config: QualityGateConfig::default(),
         }
     }
 
@@ -185,6 +195,8 @@ impl<E: Embedder, S: Storage> HybridRetriever<E, S> {
             hybrid_enabled: true,
             reranker: None,
             rewriter: None,
+            mmr_config: None,
+            quality_gate_config: QualityGateConfig::default(),
         }
     }
 
@@ -206,6 +218,80 @@ impl<E: Embedder, S: Storage> HybridRetriever<E, S> {
     /// 传入 `None` 可在运行时关闭查询改写。
     pub fn set_rewriter(&mut self, rewriter: Option<Arc<dyn QueryRewriter>>) {
         self.rewriter = rewriter;
+    }
+
+    /// 设置 MMR 多样性重排配置（借鉴 OpenMontage corpus.py）。
+    /// 传入 `Some(config)` 启用 MMR，`None` 关闭。
+    /// 启用后，检索结果在 RRF/重排序后、Chunk Expansion 前执行 MMR 多样性重排。
+    pub fn set_mmr(&mut self, config: Option<MmrConfig>) {
+        self.mmr_config = config;
+    }
+
+    /// Builder 方法：启用 MMR 多样性重排。
+    #[must_use]
+    pub fn with_mmr(mut self, config: MmrConfig) -> Self {
+        self.mmr_config = Some(config);
+        self
+    }
+
+    /// 设置检索质量门控配置（借鉴 OpenMontage slideshow_risk.py）。
+    /// 每次检索后评估质量并输出 tracing 日志。
+    pub fn set_quality_gate_config(&mut self, config: QualityGateConfig) {
+        self.quality_gate_config = config;
+    }
+
+    /// Builder 方法：自定义质量门控配置。
+    #[must_use]
+    pub fn with_quality_gate(mut self, config: QualityGateConfig) -> Self {
+        self.quality_gate_config = config;
+        self
+    }
+
+    /// 对检索结果应用 MMR 多样性重排（如已启用）。
+    /// 在 RRF 融合/重排序后、Chunk Expansion 前调用。
+    fn apply_mmr(&self, results: Vec<RetrievalResult>, top_k: usize) -> Vec<RetrievalResult> {
+        if let Some(ref config) = self.mmr_config {
+            mmr_diversify(results, config, top_k)
+        } else {
+            results
+        }
+    }
+
+    /// 评估检索质量并输出 tracing 日志（可观测性，不影响结果）。
+    fn log_quality(&self, results: &[RetrievalResult], query: &str) {
+        let report = score_retrieval_quality(results, &self.quality_gate_config);
+        match report.verdict {
+            QualityVerdict::Strong => {
+                tracing::debug!(
+                    target: "echomind::retriever::quality",
+                    verdict = report.verdict.as_str(),
+                    score = report.overall_score,
+                    query = %query,
+                    "检索质量评估: Strong"
+                );
+            }
+            QualityVerdict::Acceptable => {
+                tracing::info!(
+                    target: "echomind::retriever::quality",
+                    verdict = report.verdict.as_str(),
+                    score = report.overall_score,
+                    query = %query,
+                    violations = ?report.violations,
+                    "检索质量评估: Acceptable"
+                );
+            }
+            QualityVerdict::Revise | QualityVerdict::Fail => {
+                tracing::warn!(
+                    target: "echomind::retriever::quality",
+                    verdict = report.verdict.as_str(),
+                    score = report.overall_score,
+                    query = %query,
+                    violations = ?report.violations,
+                    suggestions = ?report.suggestions,
+                    "检索质量评估: 需要改进"
+                );
+            }
+        }
     }
 
     /// 检索候选结果（不含 Chunk Expansion），供重排序管线使用。
@@ -344,7 +430,11 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
             let embedding = self.embedder.embed(&embedding_query).await?;
             let mut hits = self.storage.vector_search(&embedding, top_k).await?;
             hits.retain(|h| h.score >= self.score_threshold);
-            return crate::retriever::expand_neighbors(&self.storage, &hits).await;
+            // MMR 多样性重排（如已启用）
+            let mmr_hits = self.apply_mmr(hits, top_k);
+            // 质量门控评估（仅日志，不影响结果）
+            self.log_quality(&mmr_hits, query);
+            return crate::retriever::expand_neighbors(&self.storage, &mmr_hits).await;
         }
 
         match &self.reranker {
@@ -357,13 +447,21 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
                 let reranked = reranker.rerank(query, &candidates).await?;
                 let top_k_results: Vec<RetrievalResult> =
                     reranked.into_iter().take(top_k).collect();
-                crate::retriever::expand_neighbors(&self.storage, &top_k_results).await
+                // MMR 多样性重排（如已启用）
+                let mmr_results = self.apply_mmr(top_k_results, top_k);
+                // 质量门控评估（仅日志）
+                self.log_quality(&mmr_results, query);
+                crate::retriever::expand_neighbors(&self.storage, &mmr_results).await
             }
             None => {
                 let fused = self.retrieve_candidates(query, top_k).await?;
                 let fused_top: Vec<RetrievalResult> =
                     fused.into_iter().take(top_k.saturating_mul(2)).collect();
-                crate::retriever::expand_neighbors(&self.storage, &fused_top).await
+                // MMR 多样性重排（如已启用）
+                let mmr_results = self.apply_mmr(fused_top, top_k);
+                // 质量门控评估（仅日志）
+                self.log_quality(&mmr_results, query);
+                crate::retriever::expand_neighbors(&self.storage, &mmr_results).await
             }
         }
     }
@@ -391,7 +489,11 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
         if !self.hybrid_enabled && self.reranker.is_none() {
             let mut hits = self.storage.vector_search(query_embedding, top_k).await?;
             hits.retain(|h| h.score >= self.score_threshold);
-            return crate::retriever::expand_neighbors(&self.storage, &hits).await;
+            // MMR 多样性重排（如已启用）
+            let mmr_hits = self.apply_mmr(hits, top_k);
+            // 质量门控评估（仅日志）
+            self.log_quality(&mmr_hits, query);
+            return crate::retriever::expand_neighbors(&self.storage, &mmr_hits).await;
         }
 
         match &self.reranker {
@@ -406,7 +508,11 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
                 let reranked = reranker.rerank(query, &candidates).await?;
                 let top_k_results: Vec<RetrievalResult> =
                     reranked.into_iter().take(top_k).collect();
-                crate::retriever::expand_neighbors(&self.storage, &top_k_results).await
+                // MMR 多样性重排（如已启用）
+                let mmr_results = self.apply_mmr(top_k_results, top_k);
+                // 质量门控评估（仅日志）
+                self.log_quality(&mmr_results, query);
+                crate::retriever::expand_neighbors(&self.storage, &mmr_results).await
             }
             None => {
                 let fused = self
@@ -414,7 +520,11 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
                     .await?;
                 let fused_top: Vec<RetrievalResult> =
                     fused.into_iter().take(top_k.saturating_mul(2)).collect();
-                crate::retriever::expand_neighbors(&self.storage, &fused_top).await
+                // MMR 多样性重排（如已启用）
+                let mmr_results = self.apply_mmr(fused_top, top_k);
+                // 质量门控评估（仅日志）
+                self.log_quality(&mmr_results, query);
+                crate::retriever::expand_neighbors(&self.storage, &mmr_results).await
             }
         }
     }

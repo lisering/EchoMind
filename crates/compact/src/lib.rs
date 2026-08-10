@@ -207,6 +207,58 @@ const STRUCTURED_SUMMARY_TEMPLATE: &str = r#"请按以下 Markdown 结构输出�
 /// 降级截断时插入的提示消息前缀。
 const FALLBACK_NOTICE: &str = "[早期对话历史已截断] ";
 
+// ============================================================
+// DS-02: 原文尾部保留压缩配置（借鉴 ds4 misc/COMPACT.md）
+// ============================================================
+
+/// 原文尾部保留压缩配置。
+///
+/// 借鉴 ds4 的 COMPACT.md 设计：
+/// - 保留最近 10% 上下文（上限 50000 tokens）原文不动
+/// - 尾部对齐到 user message 边界
+/// - 摘要 + 原文尾部 = 重建后的历史
+#[derive(Debug, Clone)]
+pub struct VerbatimTailConfig {
+    /// 尾部保留比例（0.0-1.0，默认 0.1 = 10%）
+    pub tail_percentage: f64,
+    /// 尾部最大 token 数（默认 50000）
+    pub max_tail_tokens: usize,
+    /// 软触发阈值（0.0-1.0，默认 0.85 = 85% 上下文使用）
+    pub soft_trigger_threshold: f64,
+    /// 硬触发剩余 token 数（默认 8192）
+    pub hard_trigger_remaining_tokens: usize,
+}
+
+impl Default for VerbatimTailConfig {
+    fn default() -> Self {
+        Self {
+            tail_percentage: 0.1,
+            max_tail_tokens: 50000,
+            soft_trigger_threshold: 0.85,
+            hard_trigger_remaining_tokens: 8192,
+        }
+    }
+}
+
+impl VerbatimTailConfig {
+    /// 创建默认配置。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 设置尾部保留比例。
+    pub fn with_tail_percentage(mut self, pct: f64) -> Self {
+        self.tail_percentage = pct.clamp(0.01, 0.5);
+        self
+    }
+
+    /// 设置尾部最大 token 数。
+    pub fn with_max_tail_tokens(mut self, max: usize) -> Self {
+        self.max_tail_tokens = max;
+        self
+    }
+}
+
 /// 对话历史压缩引擎。
 ///
 /// 泛型参数 `L` 为 `LLMProvider` trait 的具体实现（远程 API 或本地推理引擎）。
@@ -449,6 +501,183 @@ impl<'a, L: LLMProvider> CompactionEngine<'a, L> {
                 total_tokens,
                 compacted_tokens,
                 token_limit: config.max_tokens,
+                compaction_kind: None,
+            }),
+        })
+    }
+
+    // ============================================================
+    // DS-02: 原文尾部保留压缩（借鉴 ds4 misc/COMPACT.md）
+    // ============================================================
+
+    /// 检查是否需要原文尾部保留压缩（软触发 / 硬触发）。
+    ///
+    /// 借鉴 ds4 COMPACT.md 的双触发机制：
+    /// - 软触发：上下文使用 ≥ `soft_trigger_threshold`（85%）
+    /// - 硬触发：剩余 token < `hard_trigger_remaining_tokens`（8192）
+    pub fn needs_verbatim_tail_compaction(
+        &self,
+        history: &[ChatMessage],
+        ctx_size: usize,
+        config: &VerbatimTailConfig,
+    ) -> bool {
+        if history.is_empty() {
+            return false;
+        }
+
+        let encoder = match bpe() {
+            Ok(e) => e,
+            Err(_) => return false,
+        };
+
+        let total_tokens: usize = history
+            .iter()
+            .map(|m| encoder.encode_with_special_tokens(&m.content).len() + 4)
+            .sum();
+
+        // 软触发：使用率 ≥ 阈值
+        let usage = total_tokens as f64 / ctx_size as f64;
+        if usage >= config.soft_trigger_threshold {
+            return true;
+        }
+
+        // 硬触发：剩余 token 不足
+        let remaining = ctx_size.saturating_sub(total_tokens);
+        if remaining <= config.hard_trigger_remaining_tokens {
+            return true;
+        }
+
+        false
+    }
+
+    /// 原文尾部保留压缩：摘要旧状态 + 保留最近原文尾部。
+    ///
+    /// 借鉴 ds4 COMPACT.md 的压缩策略：
+    /// 1. 记录当前 transcript 长度为 BOTTOM
+    /// 2. LLM 生成旧状态摘要（目标/文件/命令/决策/下一步）
+    /// 3. 从 BOTTOM 向前扫描，取最近 `tail_percentage`% 上下文原文
+    /// 4. 尾部对齐到 user message 边界
+    /// 5. 重建：system prompt + 摘要 + 原文尾部
+    ///
+    /// # 参数
+    /// - `history` — 完整历史消息列表（按时间正序）
+    /// - `ctx_size` — 上下文 token 限制
+    /// - `config` — 原文尾部保留配置
+    ///
+    /// # 返回
+    /// `CompactionResult` 包含：[摘要 system 消息] + [原文尾部消息]
+    pub async fn compact_with_verbatim_tail(
+        &self,
+        history: &[ChatMessage],
+        ctx_size: usize,
+        config: &VerbatimTailConfig,
+    ) -> anyhow::Result<CompactionResult> {
+        // 空历史或短历史无需压缩
+        if history.len() <= 2 {
+            return Ok(CompactionResult {
+                history: history.to_vec(),
+                info: None,
+            });
+        }
+
+        let encoder = bpe()?;
+
+        // 计算每条消息的 token 数
+        let msg_tokens: Vec<usize> = history
+            .iter()
+            .map(|m| encoder.encode_with_special_tokens(&m.content).len() + 4)
+            .collect();
+        let total_tokens: usize = msg_tokens.iter().sum();
+
+        // 未触发压缩条件
+        if !self.needs_verbatim_tail_compaction(history, ctx_size, config) {
+            return Ok(CompactionResult {
+                history: history.to_vec(),
+                info: None,
+            });
+        }
+
+        // 计算尾部 token 预算
+        let tail_budget = (ctx_size as f64 * config.tail_percentage) as usize;
+        let tail_budget = tail_budget.min(config.max_tail_tokens);
+
+        // 从末尾向前扫描，找到尾部边界
+        let bottom = history.len();
+        let mut tail_start = bottom;
+        let mut tail_tokens = 0usize;
+
+        for i in (0..bottom).rev() {
+            if tail_tokens.saturating_add(msg_tokens[i]) > tail_budget && tail_start < bottom {
+                break;
+            }
+            tail_start = i;
+            tail_tokens += msg_tokens[i];
+        }
+
+        // 尾部对齐到 user message 边界
+        // 借鉴 ds4：扫描到 `<｜User｜>` 边界
+        // EchoMind 使用 ChatMessage.role == "user" 作为边界
+        tail_start = align_to_user_boundary(history, tail_start);
+
+        // 旧消息 = [0..tail_start)，待摘要
+        let old_messages = &history[..tail_start];
+        let tail_messages = &history[tail_start..];
+
+        if old_messages.is_empty() {
+            return Ok(CompactionResult {
+                history: history.to_vec(),
+                info: None,
+            });
+        }
+
+        // 生成旧状态摘要（复用现有 generate_summary）
+        let summary_msg = match self.generate_summary(old_messages).await {
+            Ok(summary) => ChatMessage {
+                id: None,
+                role: "system".to_string(),
+                content: format!("[对话历史摘要] {summary}"),
+                sources: None,
+                reasoning: None,
+                turn_group: None,
+                version: None,
+            },
+            Err(e) => {
+                eprintln!(
+                    "CompactionEngine: verbatim tail LLM 摘要失败，降级为截断: {e:#}"
+                );
+                ChatMessage {
+                    id: None,
+                    role: "system".to_string(),
+                    content: format!(
+                        "{FALLBACK_NOTICE}已省略 {old_count} 条早期对话消息（摘要生成失败）。",
+                        old_count = old_messages.len()
+                    ),
+                    sources: None,
+                    reasoning: None,
+                    turn_group: None,
+                    version: None,
+                }
+            }
+        };
+
+        // 计算压缩后 token 数
+        let summary_tokens = encoder
+            .encode_with_special_tokens(&summary_msg.content)
+            .len()
+            + 4;
+        let compacted_tokens = summary_tokens + tail_tokens;
+
+        // 组装压缩后历史：[摘要 system 消息] + [原文尾部消息]
+        let mut compacted_history = vec![summary_msg];
+        compacted_history.extend(tail_messages.iter().cloned());
+
+        Ok(CompactionResult {
+            history: compacted_history,
+            info: Some(CompactionInfo {
+                compacted_count: old_messages.len(),
+                total_tokens,
+                compacted_tokens,
+                token_limit: ctx_size,
                 compaction_kind: None,
             }),
         })
@@ -954,6 +1183,34 @@ fn has_observation_pattern(content: &str) -> bool {
     content
         .lines()
         .any(|line| line.trim().to_lowercase().starts_with("observation:"))
+}
+
+/// 尾部对齐到 user message 边界（DS-02：借鉴 ds4 COMPACT.md）。
+///
+/// ds4 对齐到 `<｜User｜>` token 边界；EchoMind 使用 `role == "user"` 作为边界。
+/// 从 `start` 位置向前扫描，找到第一个 user message 的索引。
+/// 如果找不到 user message，返回 `start` 原值。
+///
+/// # 参数
+/// - `history` — 完整历史消息列表
+/// - `start` — 初始尾部起始位置
+///
+/// # 返回
+/// 对齐后的尾部起始位置
+fn align_to_user_boundary(history: &[ChatMessage], start: usize) -> usize {
+    if start >= history.len() {
+        return start;
+    }
+
+    // 从 start 向前扫描，找到第一个 user message
+    for i in (0..=start).rev() {
+        if i < history.len() && history[i].role == "user" {
+            return i;
+        }
+    }
+
+    // 找不到 user message，返回原值
+    start
 }
 
 #[cfg(test)]

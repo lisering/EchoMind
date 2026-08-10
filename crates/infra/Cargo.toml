@@ -72,6 +72,8 @@ tokio-util = { version = "0.7", features = ["rt"] }
 backon = "1"
 # SHA256 完整性校验（下载后哈希验证）
 sha2 = "0.10"
+# SHA1 Prompt Prefix 缓存键（DS-01：借鉴 ds4_kvstore.c SHA1 文本前缀匹配）
+sha1 = "0.10"
 # 代码符号引擎（tree-sitter 代码感知 RAG，REQ-RAG-031）
 # 纯本地 AST 解析（零网络），支持 Rust / TypeScript / Python / Go 四种语言
 tree-sitter = { version = "0.25", optional = true }
