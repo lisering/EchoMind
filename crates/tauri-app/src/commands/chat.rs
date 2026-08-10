@@ -10,6 +10,10 @@ use echomind_core::budget::estimate_cost_usd;
 ///
 /// **Panic 安全**：使用 `catch_unwind` 捕获 `chat_inner` 中的 panic（如 ONNX 运行时崩溃），
 /// 确保前端始终收到 `chat_error` 事件，不会永久停留在「初始化向量化引擎」阶段。
+///
+/// **S5: SessionCoordinator** — `session_coordinator.run()` 包装对话执行，
+/// 同一 conversation_id 的请求串行化（防止并发写入消息历史损坏），
+/// 不同 conversation_id 并发执行互不阻塞。
 #[tauri::command]
 pub async fn chat(
     app: AppHandle,
@@ -20,43 +24,65 @@ pub async fn chat(
     version: Option<i32>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // Panic 恢复：捕获 chat_inner 中的 panic，确保前端不会卡死在等待状态
-    let inner_future = std::panic::AssertUnwindSafe(chat_inner(
-        &app,
-        &query,
-        &history,
-        &conversation_id,
-        turn_group.as_deref(),
-        version,
-        state.inner(),
-    ));
-    let result = inner_future
-        .catch_unwind()
-        .await
-        .map_err(|panic_payload| {
-            let msg = panic_payload
-                .downcast_ref::<&str>()
-                .copied()
-                .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
-                .unwrap_or("未知 panic");
-            format!("UNKNOWN: 对话引擎内部错误（panic）: {msg}")
-        })
-        .and_then(|r| r);
+    let state_inner = state.inner();
 
-    if let Err(err) = &result {
-        // REQ-ERR-001：确保所有错误都携带分类前缀
-        let classified = if has_error_prefix(err) {
-            err.clone()
+    // S5: SessionCoordinator — 会话级串行化
+    let coord = state_inner.session_coordinator.clone();
+
+    // Clone owned data for Fn closure（每次调用需 clone）
+    let app_c = app.clone();
+    let query_c = query.clone();
+    let history_c = history.clone();
+    let conv_id_c = conversation_id.clone();
+    let tg_c = turn_group.clone();
+    let ver_c = version;
+
+    let coord_result = coord
+        .run(&conversation_id, move || {
+            let app = app_c.clone();
+            let query = query_c.clone();
+            let history = history_c.clone();
+            let conv_id = conv_id_c.clone();
+            let tg = tg_c.clone();
+            let ver = ver_c;
+            async move {
+                // Panic 恢复：捕获 chat_inner 中的 panic
+                let inner_future = std::panic::AssertUnwindSafe(chat_inner(
+                    &app,
+                    &query,
+                    &history,
+                    &conv_id,
+                    tg.as_deref(),
+                    ver,
+                    state_inner,
+                ));
+                inner_future
+                    .catch_unwind()
+                    .await
+                    .map_err(|panic_payload| {
+                        let msg = panic_payload
+                            .downcast_ref::<&str>()
+                            .copied()
+                            .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                            .unwrap_or("未知 panic");
+                        anyhow::anyhow!("UNKNOWN: 对话引擎内部错误（panic）: {msg}")
+                    })
+                    .and_then(|r| r.map_err(|e| anyhow::anyhow!(e)))
+            }
+        })
+        .await;
+
+    // 转换 anyhow::Result<()> → Result<(), String>
+    coord_result.map_err(|e| {
+        let err_str = e.to_string();
+        if has_error_prefix(&err_str) {
+            err_str
         } else {
-            prefix_error(ERR_UNKNOWN, err)
-        };
-        // 不再 emit chat_error 事件：Err 返回值已由前端 invoke().catch() 处理。
-        // 此前同时 emit + return Err 导致前端显示两个重复 toast（Bug: 双重报告）。
-        // chat_error 事件仅保留给 chat_inner 内部「非致命错误 + Ok(())」场景
-        // （如「知识库中未找到相关内容」），避免与 Err 返回重复。
-        return Err(classified);
-    }
-    result
+            prefix_error(ERR_UNKNOWN, &err_str)
+        }
+    })?;
+
+    Ok(())
 }
 
 /// 对话编排（命令与集成测试复用）：空库拦截 → 配置检查 → 引擎初始化 → 检索对话 → 落库。
@@ -359,6 +385,25 @@ pub async fn chat_inner<R: Runtime>(
         usage_handle = Some(p.usage_handle());
         LlmProvider::Remote(p)
     };
+
+    // S4: Q06/S71 Shadow Screen 集成 — Strict 模式下对用户 query 执行 LLM 安全分类。
+    //
+    // Shadow 筛查**不影响**对话流（安全隔离），仅收集 agree/disagree 统计。
+    // LLM 不可用 / 超时 5s → 降级为 Unscreened，不阻断对话。
+    {
+        let posture = echomind_core::security::SecurityPosture::from_u8(
+            state
+                .security_posture
+                .load(std::sync::atomic::Ordering::SeqCst),
+        );
+        echomind_core::security::execute_shadow_screen(
+            posture,
+            query,
+            &provider,
+            &state.shadow_screen_collector,
+        )
+        .await;
+    }
 
     // REQ-RAG-017：对话上下文长度管理 — 压缩超限历史消息（替代纯截断策略）
     // 复用上方批量读取的 settings_map（避免再次 DB 查询）

@@ -5,12 +5,99 @@
 use std::path::Path;
 use tracing::{error, info, warn};
 
-/// **性能优化（秒出答案）**：内存向量缓存类型。
+// ============================================================================
+// S6: LRU 向量缓存 — 带驱逐策略的内存向量缓存
+// ============================================================================
+
+/// **S6: LRU 向量缓存**。
 ///
-/// `Arc<Vec<(chunk_id, vector)>>` — 全量向量数据在内存中的只读快照。
-/// 外层 `Arc<RwLock<Option<...>>>` 实现懒加载 + 写时失效。
-type VectorCache =
-    std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<Vec<(String, Vec<f32>)>>>>>;
+/// 带容量限制的向量缓存，超限时驱逐最久未访问的条目。
+/// 替代原全量加载策略，限制大规模知识库（10K+ chunks）的内存占用。
+pub(crate) struct LruVectorCache {
+    entries: std::collections::HashMap<String, Vec<f32>>,
+    order: std::collections::VecDeque<String>,
+    max_entries: usize,
+}
+
+impl LruVectorCache {
+    pub(crate) fn new(max_entries: usize) -> Self {
+        Self {
+            entries: std::collections::HashMap::new(),
+            order: std::collections::VecDeque::new(),
+            max_entries,
+        }
+    }
+
+    pub(crate) fn from_vectors(vectors: Vec<(String, Vec<f32>)>, max_entries: usize) -> Self {
+        let mut cache = Self::new(max_entries);
+        for (id, vec) in vectors {
+            cache.insert(id, vec);
+        }
+        cache
+    }
+
+    pub(crate) fn insert(&mut self, key: String, value: Vec<f32>) {
+        if self.entries.contains_key(&key) {
+            self.order.retain(|k| k != &key);
+        } else if self.entries.len() >= self.max_entries
+            && let Some(old_key) = self.order.pop_front()
+        {
+            self.entries.remove(&old_key);
+        }
+        self.order.push_back(key.clone());
+        self.entries.insert(key, value);
+    }
+
+    pub(crate) fn touch(&mut self, key: &str) {
+        if self.entries.contains_key(key) {
+            self.order.retain(|k| k != key);
+            self.order.push_back(key.to_string());
+        }
+    }
+
+    pub(crate) fn touch_batch(&mut self, keys: &[String]) {
+        for key in keys {
+            self.touch(key);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn remove(&mut self, key: &str) {
+        if self.entries.remove(key).is_some() {
+            self.order.retain(|k| k != key);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Vec<f32>)> {
+        self.entries.iter()
+    }
+
+    pub(crate) fn to_vec(&self) -> Vec<(String, Vec<f32>)> {
+        self.entries
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+}
+
+type VectorCache = std::sync::Arc<std::sync::RwLock<Option<LruVectorCache>>>;
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -405,8 +492,10 @@ pub struct SqliteStorage {
     /// - 100K chunks: ~150MB 内存，检索从 ~5s → ~100ms
     ///
     /// 写操作（add_embedding / delete_chunks_by_doc）时自动失效，下次检索重建。
-    /// 使用 `Arc<Vec<...>>` 实现零拷贝读取（RwLock read 仅克隆 Arc）。
+    /// S6: 使用 `LruVectorCache` 带容量限制的 LRU 缓存。
     vector_cache: VectorCache,
+    /// S6: LRU 缓存容量上限（默认 5000）。
+    max_vectors: usize,
 }
 
 impl SqliteStorage {
@@ -435,6 +524,7 @@ impl SqliteStorage {
             #[cfg(feature = "pro")]
             hnsw_dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             vector_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            max_vectors: 5000,
         };
         storage.init_schema()?;
         Ok(storage)
@@ -475,6 +565,7 @@ impl SqliteStorage {
             #[cfg(feature = "pro")]
             hnsw_dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             vector_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            max_vectors: 5000,
         };
         storage.init_schema()?;
         Ok(storage)
@@ -483,6 +574,20 @@ impl SqliteStorage {
     /// 返回连接池的克隆（供 `SqliteCache` 共享同一数据库，REQ-PERF-001）。
     pub fn pool_clone(&self) -> Pool {
         self.pool.clone()
+    }
+
+    /// S6: 设置 LRU 向量缓存容量上限。
+    ///
+    /// 更新后会使现有缓存失效（下次检索按新容量重建）。
+    pub fn set_max_vectors(&mut self, max: usize) {
+        self.max_vectors = max;
+        self.invalidate_vector_cache();
+    }
+
+    /// S6: 获取 LRU 向量缓存容量上限。
+    #[must_use]
+    pub fn max_vectors(&self) -> usize {
+        self.max_vectors
     }
 
     /// **性能优化（秒出答案）**：使内存向量缓存失效。
@@ -1546,34 +1651,37 @@ Ok(())
         }
 
         // ---- 内存向量缓存快速路径（性能优化：秒出答案）----
-        // 首次检索时全量加载向量到内存，后续检索跳过 SQLite BLOB I/O + 反序列化。
-        // 1000 chunks: ~20ms → ~1ms；10K chunks: ~200ms → ~10ms。
-        let cached_vectors = {
+        // S6: 使用 LruVectorCache 带容量限制的 LRU 缓存。
+        // 首次检索时加载向量到内存，后续检索跳过 SQLite BLOB I/O + 反序列化。
+        // 注意：read guard 必须在 .await 前释放（std::sync::RwLockReadGuard 非 Send）
+        let cached: Option<Vec<(String, Vec<f32>)>> = {
             let guard = self.vector_cache.read();
-            guard.ok().and_then(|g| g.clone())
+            guard
+                .ok()
+                .and_then(|g| g.as_ref().map(|cache| cache.to_vec()))
         };
 
-        let vectors: std::sync::Arc<Vec<(String, Vec<f32>)>> = match cached_vectors {
+        let vectors: Vec<(String, Vec<f32>)> = match cached {
             Some(v) => v,
             None => {
-                // 缓存未命中：全量加载并填充缓存
+                // 缓存未命中：全量加载并填充 LRU 缓存
                 let loaded = self.load_all_embeddings().await?;
-                let arc = std::sync::Arc::new(loaded);
+                let cache = LruVectorCache::from_vectors(loaded, self.max_vectors);
+                let vec = cache.to_vec();
                 if let Ok(mut guard) = self.vector_cache.write() {
-                    *guard = Some(std::sync::Arc::clone(&arc));
+                    *guard = Some(cache);
                 }
-                arc
+                vec
             }
         };
 
         // 在内存中计算余弦相似度，取 top-k
         let query_vec = query_embedding.to_vec();
-        let vectors_clone = std::sync::Arc::clone(&vectors);
         let top_k_val = top_k;
         let top_hits: Vec<(String, f32)> = tokio::task::spawn_blocking(move || {
             // 使用简单的 Vec + sort 取 top-k（比 BinaryHeap 更直观，性能相当）
-            let mut all_scores: Vec<(String, f32)> = Vec::with_capacity(vectors_clone.len());
-            for (chunk_id, vector) in vectors_clone.iter() {
+            let mut all_scores: Vec<(String, f32)> = Vec::with_capacity(vectors.len());
+            for (chunk_id, vector) in &vectors {
                 let score = cosine_similarity(&query_vec, vector);
                 all_scores.push((chunk_id.clone(), score));
             }
@@ -1583,6 +1691,16 @@ Ok(())
         })
         .await
         .context("内存向量检索任务执行失败")?;
+
+        // S6: 搜索后 touch top-k 结果（更新 LRU 访问顺序）
+        if !top_hits.is_empty() {
+            let touch_keys: Vec<String> = top_hits.iter().map(|(id, _)| id.clone()).collect();
+            if let Ok(mut guard) = self.vector_cache.write()
+                && let Some(cache) = guard.as_mut()
+            {
+                cache.touch_batch(&touch_keys);
+            }
+        }
 
         if top_hits.is_empty() {
             return Ok(vec![]);
@@ -4888,6 +5006,7 @@ impl RetrievalMemoryStore for SqliteStorage {
 
 #[cfg(test)]
 mod fts5_query_tests {
+    use super::LruVectorCache;
     use super::build_fts5_or_query;
 
     #[test]
@@ -4921,5 +5040,111 @@ mod fts5_query_tests {
         let q = build_fts5_or_query("test NEAR water");
         // "NEAR" 被双引号包裹后视为普通字符串，不作为 FTS5 操作符
         assert!(q.contains("\"NEAR\""));
+    }
+
+    // ========================================================================
+    // S6: LRU 向量缓存 TDD 测试（TC-LRU-001~003）
+    // ========================================================================
+
+    /// TC-LRU-001：缓存满时驱逐最旧条目。
+    ///
+    /// 向容量为 3 的 LRU 缓存插入 5 个条目，
+    /// 验证仅保留最后 3 个，最旧的 2 个被驱逐。
+    #[test]
+    fn tc_lru_001_evict_oldest_when_full() {
+        let mut cache = LruVectorCache::new(3);
+        cache.insert("a".to_string(), vec![1.0]);
+        cache.insert("b".to_string(), vec![2.0]);
+        cache.insert("c".to_string(), vec![3.0]);
+        cache.insert("d".to_string(), vec![4.0]);
+        cache.insert("e".to_string(), vec![5.0]);
+
+        assert_eq!(cache.len(), 3, "容量 3 应仅保留 3 个条目");
+        // "a" 和 "b" 应被驱逐（最旧）
+        let entries: Vec<(String, Vec<f32>)> = cache.to_vec();
+        let has = |key: &str| entries.iter().any(|(k, _)| k == key);
+        assert!(!has("a"), "\"a\" 应被驱逐");
+        assert!(!has("b"), "\"b\" 应被驱逐");
+        assert!(has("c"), "\"c\" 应保留");
+        assert!(has("d"), "\"d\" 应保留");
+        assert!(has("e"), "\"e\" 应保留");
+    }
+
+    /// TC-LRU-002：检索操作更新访问顺序。
+    ///
+    /// 插入 a, b, c（容量 3），touch "a"（移到 MRU 端），
+    /// 再插入 "d" → "b"（最旧）被驱逐而非 "a"。
+    #[test]
+    fn tc_lru_002_touch_updates_access_order() {
+        let mut cache = LruVectorCache::new(3);
+        cache.insert("a".to_string(), vec![1.0]);
+        cache.insert("b".to_string(), vec![2.0]);
+        cache.insert("c".to_string(), vec![3.0]);
+
+        // touch "a" → 移到 MRU 端（最新）
+        cache.touch("a");
+
+        // 插入 "d" → "b" 被驱逐（"a" 已被 touch，不是最旧了）
+        cache.insert("d".to_string(), vec![4.0]);
+
+        assert_eq!(cache.len(), 3);
+        let entries: Vec<(String, Vec<f32>)> = cache.to_vec();
+        let has = |key: &str| entries.iter().any(|(k, _)| k == key);
+        assert!(has("a"), "\"a\" 被 touch 后应保留");
+        assert!(!has("b"), "\"b\" 应被驱逐（最旧）");
+        assert!(has("c"), "\"c\" 应保留");
+        assert!(has("d"), "\"d\" 应保留");
+    }
+
+    /// TC-LRU-003：写操作失效对应条目。
+    ///
+    /// 插入 a, b, c，remove "b" → "b" 被移除，其余保留。
+    /// 再插入 "d" 不会驱逐任何条目（有空位）。
+    #[test]
+    fn tc_lru_003_remove_invalidates_entry() {
+        let mut cache = LruVectorCache::new(5);
+        cache.insert("a".to_string(), vec![1.0]);
+        cache.insert("b".to_string(), vec![2.0]);
+        cache.insert("c".to_string(), vec![3.0]);
+
+        // remove "b"
+        cache.remove("b");
+
+        assert_eq!(cache.len(), 2, "remove 后应剩 2 个条目");
+        let entries: Vec<(String, Vec<f32>)> = cache.to_vec();
+        let has = |key: &str| entries.iter().any(|(k, _)| k == key);
+        assert!(has("a"), "\"a\" 应保留");
+        assert!(!has("b"), "\"b\" 应被移除");
+        assert!(has("c"), "\"c\" 应保留");
+
+        // 插入 "d" 不驱逐（有空位）
+        cache.insert("d".to_string(), vec![4.0]);
+        assert_eq!(cache.len(), 3, "有空位时插入不驱逐");
+    }
+
+    /// 额外：from_vectors 超量截断验证。
+    #[test]
+    fn tc_lru_extra_from_vectors_truncation() {
+        let vectors = vec![
+            ("a".to_string(), vec![1.0]),
+            ("b".to_string(), vec![2.0]),
+            ("c".to_string(), vec![3.0]),
+            ("d".to_string(), vec![4.0]),
+            ("e".to_string(), vec![5.0]),
+        ];
+        let cache = LruVectorCache::from_vectors(vectors, 3);
+        assert_eq!(cache.len(), 3, "from_vectors 应截断到 max_entries");
+    }
+
+    /// 额外：clear 清空全部。
+    #[test]
+    fn tc_lru_extra_clear() {
+        let mut cache = LruVectorCache::new(5);
+        cache.insert("a".to_string(), vec![1.0]);
+        cache.insert("b".to_string(), vec![2.0]);
+        assert!(!cache.is_empty());
+        cache.clear();
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
     }
 }

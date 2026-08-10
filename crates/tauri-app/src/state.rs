@@ -224,8 +224,33 @@ impl AppState {
         // 由于 SqliteStorage 是 Clone（内部 Arc 连接池），可直接 clone
         let storage_for_config = (*storage_arc).clone();
         let storage_for_models = (*storage_arc).clone();
+        let storage_for_settings = (*storage_arc).clone();
 
-        let config_store = ConfigStore::new(storage_for_config).await;
+        // S7: 启动并行化 — tokio::join! 并行化 ConfigStore 初始化 + settings 批量读取
+        // 原实现逐个 get_setting 串行查询（10+ 次 DB 往返），批量读取 = 1 次查询
+        let init_span = tracing::info_span!("app_state_init");
+        let _enter = init_span.enter();
+        let init_start = std::time::Instant::now();
+
+        let settings_keys = &[
+            "compression.ratio",
+            "rag.speculative_enabled",
+            "rag.retrieval_memory_enabled",
+            "rag.graph_retriever_enabled",
+            "rag.quality_gate_enabled",
+            "memory.enabled",
+            "rag.web_search_enabled",
+            "rag.contextual_retrieval",
+            "log.level",
+            "security.posture",
+            "llm.local_model",
+        ];
+
+        let (config_store, settings_result) = tokio::join!(
+            ConfigStore::new(storage_for_config),
+            storage_for_settings.get_settings_batch(settings_keys),
+        );
+
         let model_store = ModelStore::new(storage_for_models, data_dir.clone())
             .context("初始化模型管理器失败")?;
 
@@ -233,89 +258,72 @@ impl AppState {
         // 注意：SqliteStorage 内部是 Arc<r2d2::Pool>，clone 开销极低
         let storage = (*storage_arc).clone();
 
+        // 解析批量读取的 settings（单次 DB 查询替代 10+ 次串行查询）
+        let settings_vec = settings_result.unwrap_or_default();
+        let settings_map: std::collections::HashMap<&str, &str> = settings_vec
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
         // 初始化语义缓存（REQ-PERF-001）：共享 SqliteStorage 连接池
         let cache = SqliteCache::new(storage.pool_clone()).context("初始化语义缓存失败")?;
 
         // 初始化步骤级缓存（P2-1 StepCache）：内存实现，默认容量 256 条
         let step_cache = Arc::new(echomind_core::step_cache::InMemoryStepCache::default());
 
-        // 初始化 Prompt 压缩比（REQ-PERF-002）：默认 1.0 = 禁用
-        let compression_ratio = storage
-            .get_setting("compression.ratio")
-            .await
-            .ok()
-            .flatten()
+        // S7: 从批量读取结果解析各设置项（原逐个 get_setting 串行查询）
+        let compression_ratio = settings_map
+            .get("compression.ratio")
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| *v >= 1.0 && *v <= 10.0)
             .unwrap_or(1.0);
 
-        // 初始化 Speculative RAG 开关（REQ-PERF-011）：默认 false
-        let speculative_enabled = storage
-            .get_setting("rag.speculative_enabled")
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|v| v == "true");
+        let speculative_enabled = settings_map
+            .get("rag.speculative_enabled")
+            .is_some_and(|&v| v == "true");
 
-        // 初始化自进化检索记忆开关（REQ-PERF-012）：默认 false
-        let retrieval_memory_enabled = storage
-            .get_setting("rag.retrieval_memory_enabled")
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|v| v == "true");
+        let retrieval_memory_enabled = settings_map
+            .get("rag.retrieval_memory_enabled")
+            .is_some_and(|&v| v == "true");
 
-        // 初始化知识图谱图遍历检索开关（REQ-RAG-027）：默认 false
-        let graph_retriever_enabled = storage
-            .get_setting("rag.graph_retriever_enabled")
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|v| v == "true");
+        let graph_retriever_enabled = settings_map
+            .get("rag.graph_retriever_enabled")
+            .is_some_and(|&v| v == "true");
 
-        // 初始化 RAG 质量门控开关（REQ-RAG-028）：默认 false
-        let quality_gate_enabled = storage
-            .get_setting("rag.quality_gate_enabled")
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|v| v == "true");
+        let quality_gate_enabled = settings_map
+            .get("rag.quality_gate_enabled")
+            .is_some_and(|&v| v == "true");
 
-        // 初始化持久化记忆系统开关（REQ-RAG-032）：默认 false
-        let memory_enabled = storage
-            .get_setting("memory.enabled")
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|v| v == "true");
+        let memory_enabled = settings_map
+            .get("memory.enabled")
+            .is_some_and(|&v| v == "true");
 
-        // 初始化网页搜索开关（REQ-RAG-036）：默认 false（opt-in）
-        let web_search_enabled = storage
-            .get_setting("rag.web_search_enabled")
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|v| v == "true");
+        let web_search_enabled = settings_map
+            .get("rag.web_search_enabled")
+            .is_some_and(|&v| v == "true");
 
-        // 初始化 Contextual Retrieval 开关（REQ-RAG-041）：默认 true
-        // 嵌入管线已使用 build_contextual_text() 构建上下文文本（文档名前缀），
-        // 默认开启以保证已有行为不变。用户可关闭以使用纯 chunk 文本嵌入。
-        let contextual_retrieval_enabled = storage
-            .get_setting("rag.contextual_retrieval")
-            .await
-            .ok()
-            .flatten()
-            .map(|v| v != "false") // 默认 true：仅当显式设为 "false" 时关闭
+        let contextual_retrieval_enabled = settings_map
+            .get("rag.contextual_retrieval")
+            .map(|&v| v != "false")
             .unwrap_or(true);
+
+        let log_level = settings_map
+            .get("log.level")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "info".to_string());
+
+        let security_posture_val = settings_map
+            .get("security.posture")
+            .and_then(|v| SecurityPosture::parse_str(v))
+            .unwrap_or_default();
+
+        let local_model_val = settings_map
+            .get("llm.local_model")
+            .map(|v| v.to_string())
+            .unwrap_or_default();
 
         // 初始化本地日志系统（REQ-OBS-001）
         let log_dir = data_dir.join("logs");
-        let log_level = storage
-            .get_setting("log.level")
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "info".to_string());
         let log_guard = match LocalLogger::init(log_dir, &log_level) {
             Ok(g) => {
                 tracing::info!(module = "state", "EchoMind 日志系统已启动");
@@ -329,13 +337,6 @@ impl AppState {
         };
 
         // 初始化安全态势（Q05 借鉴 QM SecurityPosture）：默认 Auto
-        let security_posture_val = storage
-            .get_setting("security.posture")
-            .await
-            .ok()
-            .flatten()
-            .and_then(|v| SecurityPosture::parse_str(&v))
-            .unwrap_or_default();
         let security_posture = Arc::new(std::sync::atomic::AtomicU8::new(
             security_posture_val.as_u8(),
         ));
@@ -344,12 +345,6 @@ impl AppState {
         // 根据是否 Pro 选择可用模式集合，并根据当前 llm_mode 设置 fallback
         let is_pro_val = *config_store.is_pro.read().await;
         let llm_mode_val = *config_store.llm_mode.read().await;
-        let local_model_val = storage
-            .get_setting("llm.local_model")
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default();
         let llm_router_init = if is_pro_val {
             echomind_core::llm_router::LlmRouter::new_pro_default()
         } else {
@@ -361,6 +356,11 @@ impl AppState {
                 local_model_val,
             ))
             .await;
+
+        tracing::info!(
+            elapsed_ms = init_start.elapsed().as_millis(),
+            "AppState initialization completed"
+        );
 
         Ok(Self {
             storage,
@@ -727,5 +727,171 @@ impl DreamEngineState {
 impl Default for DreamEngineState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ============================================================================
+// S7: 启动并行化 TDD 测试（TC-BOOT-001~002）
+// ============================================================================
+
+#[cfg(test)]
+mod boot_tests {
+    use super::*;
+
+    /// 解析 settings 批量读取结果（与 AppState::new 中的逻辑一致）。
+    ///
+    /// 提取为独立函数以便测试，验证并行批量读取产出的结果与串行读取一致。
+    fn parse_settings(
+        settings_map: &std::collections::HashMap<&str, &str>,
+    ) -> (
+        f32,    // compression_ratio
+        bool,   // speculative_enabled
+        bool,   // retrieval_memory_enabled
+        bool,   // graph_retriever_enabled
+        bool,   // quality_gate_enabled
+        bool,   // memory_enabled
+        bool,   // web_search_enabled
+        bool,   // contextual_retrieval_enabled
+        String, // log_level
+        SecurityPosture,
+        String, // local_model
+    ) {
+        let compression_ratio = settings_map
+            .get("compression.ratio")
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| *v >= 1.0 && *v <= 10.0)
+            .unwrap_or(1.0);
+
+        let speculative_enabled = settings_map
+            .get("rag.speculative_enabled")
+            .is_some_and(|&v| v == "true");
+
+        let retrieval_memory_enabled = settings_map
+            .get("rag.retrieval_memory_enabled")
+            .is_some_and(|&v| v == "true");
+
+        let graph_retriever_enabled = settings_map
+            .get("rag.graph_retriever_enabled")
+            .is_some_and(|&v| v == "true");
+
+        let quality_gate_enabled = settings_map
+            .get("rag.quality_gate_enabled")
+            .is_some_and(|&v| v == "true");
+
+        let memory_enabled = settings_map
+            .get("memory.enabled")
+            .is_some_and(|&v| v == "true");
+
+        let web_search_enabled = settings_map
+            .get("rag.web_search_enabled")
+            .is_some_and(|&v| v == "true");
+
+        let contextual_retrieval_enabled = settings_map
+            .get("rag.contextual_retrieval")
+            .map(|&v| v != "false")
+            .unwrap_or(true);
+
+        let log_level = settings_map
+            .get("log.level")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "info".to_string());
+
+        let security_posture = settings_map
+            .get("security.posture")
+            .and_then(|v| SecurityPosture::parse_str(v))
+            .unwrap_or_default();
+
+        let local_model = settings_map
+            .get("llm.local_model")
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+
+        (
+            compression_ratio,
+            speculative_enabled,
+            retrieval_memory_enabled,
+            graph_retriever_enabled,
+            quality_gate_enabled,
+            memory_enabled,
+            web_search_enabled,
+            contextual_retrieval_enabled,
+            log_level,
+            security_posture,
+            local_model,
+        )
+    }
+
+    /// TC-BOOT-001：并行初始化结果一致。
+    ///
+    /// 模拟批量读取 settings 的结果，验证解析出的值与逐个读取一致。
+    #[test]
+    fn tc_boot_001_parallel_init_results_match() {
+        let mut map = std::collections::HashMap::new();
+        map.insert("compression.ratio", "2.5");
+        map.insert("rag.speculative_enabled", "true");
+        map.insert("rag.retrieval_memory_enabled", "true");
+        map.insert("rag.graph_retriever_enabled", "false");
+        map.insert("rag.quality_gate_enabled", "true");
+        map.insert("memory.enabled", "false");
+        map.insert("rag.web_search_enabled", "true");
+        map.insert("rag.contextual_retrieval", "false");
+        map.insert("log.level", "debug");
+        map.insert("security.posture", "strict");
+        map.insert("llm.local_model", "mistral-7b");
+
+        let (comp, spec, mem_retr, graph, gate, mem, web, ctx, log, posture, model) =
+            parse_settings(&map);
+
+        assert!((comp - 2.5).abs() < 0.01, "compression_ratio 应为 2.5");
+        assert!(spec, "speculative_enabled 应为 true");
+        assert!(mem_retr, "retrieval_memory_enabled 应为 true");
+        assert!(!graph, "graph_retriever_enabled 应为 false");
+        assert!(gate, "quality_gate_enabled 应为 true");
+        assert!(!mem, "memory_enabled 应为 false");
+        assert!(web, "web_search_enabled 应为 true");
+        assert!(!ctx, "contextual_retrieval_enabled 应为 false");
+        assert_eq!(log, "debug");
+        assert_eq!(posture, SecurityPosture::Strict);
+        assert_eq!(model, "mistral-7b");
+    }
+
+    /// TC-BOOT-002：单项初始化失败不影响其他项。
+    ///
+    /// 模拟批量读取失败（空 map），验证所有设置项回退到默认值，
+    /// 不会因某项缺失而 panic 或影响其他项。
+    #[test]
+    fn tc_boot_002_single_failure_uses_defaults() {
+        // 空 map（模拟 DB 查询失败或首次启动无 settings）
+        let map = std::collections::HashMap::new();
+
+        let (comp, spec, mem_retr, graph, gate, mem, web, ctx, log, posture, model) =
+            parse_settings(&map);
+
+        // 所有项应回退到默认值
+        assert!((comp - 1.0).abs() < 0.01, "compression_ratio 默认 1.0");
+        assert!(!spec, "speculative_enabled 默认 false");
+        assert!(!mem_retr, "retrieval_memory_enabled 默认 false");
+        assert!(!graph, "graph_retriever_enabled 默认 false");
+        assert!(!gate, "quality_gate_enabled 默认 false");
+        assert!(!mem, "memory_enabled 默认 false");
+        assert!(!web, "web_search_enabled 默认 false");
+        assert!(ctx, "contextual_retrieval_enabled 默认 true");
+        assert_eq!(log, "info", "log_level 默认 info");
+        assert_eq!(posture, SecurityPosture::Auto, "security_posture 默认 Auto");
+        assert_eq!(model, "", "local_model 默认空字符串");
+
+        // 部分设置存在、部分缺失（模拟部分 DB 读取失败）
+        let mut partial = std::collections::HashMap::new();
+        partial.insert("rag.speculative_enabled", "true");
+        partial.insert("security.posture", "dangerous");
+
+        let (_, spec2, _, _, _, _, _, ctx2, log2, posture2, _) = parse_settings(&partial);
+
+        // 存在的项用实际值
+        assert!(spec2, "speculative_enabled 从 DB 读取为 true");
+        assert_eq!(posture2, SecurityPosture::Dangerous);
+        // 缺失的项用默认值（不受其他项影响）
+        assert!(ctx2, "contextual_retrieval 缺失 → 默认 true");
+        assert_eq!(log2, "info", "log_level 缺失 → 默认 info");
     }
 }

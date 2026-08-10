@@ -442,4 +442,154 @@ mod tests {
             self.current.fetch_sub(1, Ordering::SeqCst);
         }
     }
+
+    // ========================================================================
+    // S5: SessionCoordinator 生产集成测试（TC-COORD-INTEGRATE-001~003）
+    //
+    // 验证 SessionCoordinator 在 chat_inner 集成场景下的行为：
+    // 同会话串行化 / interrupt 中断清理 / wake 合并唤醒。
+    // ========================================================================
+
+    /// TC-COORD-INTEGRATE-001：会话级串行执行（同会话不并发）。
+    ///
+    /// 模拟两个 chat_inner 调用同时到达同一 conversation_id：
+    /// 第二个请求等待第一个完成后才执行，最大并发数为 1。
+    #[tokio::test]
+    async fn tc_coord_integrate_001_serial_same_session() {
+        let coord = SessionCoordinator::new();
+        let max_concurrent = Arc::new(AtomicUsize::new(0));
+        let current = Arc::new(AtomicUsize::new(0));
+
+        // 模拟两个并发 chat 请求（同一 conversation_id）
+        let mc1 = max_concurrent.clone();
+        let cur1 = current.clone();
+        let coord1 = coord.clone();
+        let h1 = tokio::spawn(async move {
+            coord1
+                .run("conv-001", move || {
+                    let mc = mc1.clone();
+                    let cur = cur1.clone();
+                    async move {
+                        let _g = ActiveGuard::new(cur.clone());
+                        let now = cur.load(Ordering::SeqCst);
+                        mc.fetch_max(now, Ordering::SeqCst);
+                        // 模拟 RAG 检索 + LLM 生成耗时
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        Ok::<_, anyhow::Error>(())
+                    }
+                })
+                .await
+        });
+
+        let mc2 = max_concurrent.clone();
+        let cur2 = current.clone();
+        let coord2 = coord.clone();
+        let h2 = tokio::spawn(async move {
+            coord2
+                .run("conv-001", move || {
+                    let mc = mc2.clone();
+                    let cur = cur2.clone();
+                    async move {
+                        let _g = ActiveGuard::new(cur.clone());
+                        let now = cur.load(Ordering::SeqCst);
+                        mc.fetch_max(now, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        Ok::<_, anyhow::Error>(())
+                    }
+                })
+                .await
+        });
+
+        let _ = h1.await;
+        let _ = h2.await;
+
+        // 最大并发 = 1（串行执行）
+        assert_eq!(
+            max_concurrent.load(Ordering::SeqCst),
+            1,
+            "同一 conversation_id 的 chat 请求应串行执行"
+        );
+    }
+
+    /// TC-COORD-INTEGRATE-002：interrupt 中断后清理。
+    ///
+    /// 模拟 abort_chat 调用 interrupt，之后会话从活跃列表移除。
+    #[tokio::test]
+    async fn tc_coord_integrate_002_interrupt_cleanup() {
+        let coord = SessionCoordinator::new();
+
+        let coord1 = coord.clone();
+        let h = tokio::spawn(async move {
+            coord1
+                .run("conv-abort", || async {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    Ok::<_, anyhow::Error>(())
+                })
+                .await
+        });
+
+        // 等待执行开始
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !coord.active_sessions().await.is_empty(),
+            "执行中应有活跃会话"
+        );
+
+        // 模拟 abort_chat → interrupt
+        coord.interrupt("conv-abort").await;
+        assert!(
+            coord.is_stopping("conv-abort").await,
+            "interrupt 后应标记 stopping"
+        );
+
+        let _ = h.await;
+
+        // 执行完成后会话从活跃列表移除
+        assert!(
+            coord.active_sessions().await.is_empty(),
+            "interrupt + 完成后会话应从活跃列表移除"
+        );
+    }
+
+    /// TC-COORD-INTEGRATE-003：wake 合并唤醒。
+    ///
+    /// 模拟多次新消息到达同一会话（如用户快速连续发送），
+    /// wake 合并为一次重执行，而非多次。
+    #[tokio::test]
+    async fn tc_coord_integrate_003_wake_merge() {
+        let coord = SessionCoordinator::new();
+        let exec_count = Arc::new(AtomicUsize::new(0));
+
+        let ec = exec_count.clone();
+        let coord1 = coord.clone();
+        let h = tokio::spawn(async move {
+            coord1
+                .run("conv-wake", move || {
+                    let ec = ec.clone();
+                    async move {
+                        ec.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(80)).await;
+                        Ok::<_, anyhow::Error>(())
+                    }
+                })
+                .await
+        });
+
+        // 等待执行开始
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        // 模拟 3 次快速 wake（应合并为 1 次重执行）
+        coord.wake("conv-wake").await;
+        coord.wake("conv-wake").await;
+        coord.wake("conv-wake").await;
+
+        let _ = h.await;
+
+        // 初始执行 + 1 次 wake 合并重执行 = 2 次
+        assert_eq!(
+            exec_count.load(Ordering::SeqCst),
+            2,
+            "多次 wake 应合并为 1 次重执行（总执行 2 次）"
+        );
+    }
 }

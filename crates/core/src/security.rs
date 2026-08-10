@@ -535,6 +535,61 @@ pub async fn llm_classify<L: crate::LLMProvider>(
     }
 }
 
+/// 执行 Shadow 安全筛查（S4 集成：Q06/S71 Shadow Screen 生产集成）。
+///
+/// 当 `posture == Strict` 时，对用户 `query` 执行 LLM 安全分类，
+/// 与权威决策（始终 "allow"）对比并记录统计到 `collector`。
+///
+/// # 安全隔离
+/// Shadow 筛查**不影响**对话流程：无论 LLM 返回什么裁决，
+/// 用户查询照常进入 RAG 管线。此函数仅收集 agree/disagree 统计，
+/// 用于验证筛查效果后可切换为阻断模式。
+///
+/// # 降级策略
+/// - `posture != Strict` → 不执行（直接返回）
+/// - LLM 不支持 `judge` 或调用失败 → `None`（`Unavailable`）
+/// - 超时 5s → `unscreened` 裁决（`Unavailable`）
+///
+/// # 参数
+/// - `posture`: 当前安全态势
+/// - `query`: 用户输入文本
+/// - `llm`: LLM Provider（实现 `LLMProvider`）
+/// - `collector`: Shadow 筛查统计收集器
+pub async fn execute_shadow_screen<L: crate::LLMProvider>(
+    posture: SecurityPosture,
+    query: &str,
+    llm: &L,
+    collector: &ShadowScreenCollector,
+) {
+    if posture != SecurityPosture::Strict {
+        return;
+    }
+
+    // 权威决策：当前系统始终允许用户查询（不做阻断）
+    let authoritative = async {
+        Some(SecurityScreenVerdict {
+            decision: "allow".to_string(),
+            reason: None,
+            unscreened: false,
+        })
+    };
+
+    // Shadow 决策：LLM 安全分类（5s 超时降级）
+    let shadow = llm_classify(llm, query);
+
+    let result =
+        run_shadow_screen_with_timeout(authoritative, shadow, Duration::from_secs(5)).await;
+
+    // 记入统计（fire-and-forget，不影响对话流）
+    collector.record(&result).await;
+
+    tracing::debug!(
+        agreement = ?result.agreement,
+        shadow_decision = ?result.shadow.as_ref().map(|v| &v.decision),
+        "Shadow screen completed (Strict posture)"
+    );
+}
+
 /// 安全管理器
 ///
 /// 管理应用的安全状态、自动锁屏定时器、暴力破解防护。
