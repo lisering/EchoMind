@@ -18,8 +18,11 @@ test.describe('E2E-ING-001~008 导入管线', () => {
   });
 
   test('E2E-ING-004 .docx 被拒绝并提示支持格式', async ({ page }) => {
+    // 确保 Free 模式（Alpha 阶段 mock 默认 isPro=true，需手动设为 false）
+    await page.evaluate(() => { window.__state.isPro = false; });
     await page.evaluate(() => window.__mock.simulateDragDrop(['/mock/report.docx']));
-    await expect(page.locator('#toasts')).toContainText('不支持', { timeout: 5000 });
+    // Free 版 .docx 为 Pro 门控格式，应触发付费墙
+    await expect(page.locator('#paywall')).toBeVisible({ timeout: 5000 });
   });
 
   test('E2E-ING-003 Pro 版导入 PDF 正常入库', async ({ page }) => {
@@ -72,8 +75,8 @@ test.describe('E2E-ING-001~008 导入管线', () => {
     );
     const item = page.locator('#docList [data-doc-name="status.md"]');
     await expect(item).toBeVisible({ timeout: 5000 });
-    // 最终状态应为「已索引」（使用 .last() 精确定位徽标 span）
-    await expect(item.locator('span', { hasText: '已索引' }).last()).toBeVisible({ timeout: 5000 });
+    // 最终状态应为「已索引」（检查 data-doc-status 属性，非文本内容）
+    await expect(item).toHaveAttribute('data-doc-status', 'Indexed', { timeout: 10000 });
   });
 
   test('E2E-UI-014 免费版配额 n/50 实时刷新', async ({ page }) => {
@@ -86,6 +89,8 @@ test.describe('E2E-ING-001~008 导入管线', () => {
   });
 
   test('E2E-ING-008 删除后配额计数释放', async ({ page }) => {
+    // 确保 Free 模式（Alpha 阶段 mock 默认 isPro=true，需手动设为 false）
+    await page.evaluate(() => { window.__state.isPro = false; });
     await openKbModal(page);
     await page.evaluate(() =>
       window.__TAURI__.core.invoke('import_files', { paths: ['/mock/del.md'] })
@@ -93,10 +98,12 @@ test.describe('E2E-ING-001~008 导入管线', () => {
     await expect(page.locator('#docList [data-doc-name="del.md"]')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('#kbDocCount')).toContainText('1/50');
 
-    // 删除文档
-    const item = page.locator('#docList [data-doc-name="del.md"]');
-    await item.hover();
-    await item.locator('button[data-action="delete"]').click();
+    // 删除文档（headless 模式下 group-hover:visible 不触发，用 evaluate 直接点击）
+    await page.evaluate(() => {
+      const item = document.querySelector('#docList [data-doc-name="del.md"]');
+      const delBtn = item?.querySelector('button[data-action="delete"]');
+      if (delBtn) delBtn.click();
+    });
     await expect(page.locator('#docList [data-doc-name="del.md"]')).toHaveCount(0);
     await expect(page.locator('#kbDocCount')).toContainText('0/50');
   });

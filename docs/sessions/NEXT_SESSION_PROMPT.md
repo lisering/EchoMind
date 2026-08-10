@@ -3,7 +3,7 @@
 > **复制下方 `~~~` 代码块中的全部内容作为下个 session 的第一条消息即可。只需复制一次。**
 
 ~~~
-你正在继续 EchoMind（灵犀）项目的开发。上一个 session 完成了 Git 状态清理（49 个未提交文件分 4 组提交）。
+你正在继续 EchoMind（灵犀）项目的开发。上一个 session 完成了架构优化与技术债清理。
 
 ## 项目背景
 
@@ -16,51 +16,42 @@ EchoMind 是 Rust + Tauri v2 桌面 RAG 知识库应用。面向有隐私需求�
   - `crates/context` — 系统上下文注册表（纪元管理, 持久化基线, ContextEpochManager）
   - `crates/core` — 端口 Trait + 业务逻辑（ChatEngine, ImportService, AgentEngine, SecurityManager, MemoryStore, LlmRouter 等）
   - `crates/infra` — 适配器（SqliteStorage, LocalEmbedder, OpenAIProvider, HNSW, LocalLlmEngine mistral.rs, OCR, VLM, SymbolEngine, WasmExecutor）
-  - `crates/tauri-app` — Tauri 外壳，162 个 IPC 命令（模块化拆分到 commands/ 目录 14 个子模块）
+  - `crates/tauri-app` — Tauri 外壳，~175 个 IPC 命令 Free / ~187 Pro（模块化拆分到 commands/ 目录 14 个子模块）
   - `crates/license-issuer` — Ed25519 License 签发 CLI
-- **前端**: 单文件 SPA（`ui/index.html`），vanilla JS ES modules（54 个源文件），esbuild 打包 IIFE（13580 行），Tailwind CSS JIT，无框架无 CDN
+- **前端**: 单文件 SPA（`ui/index.html`），vanilla JS ES modules（54 个源文件），esbuild 打包 IIFE（13582 行），Tailwind CSS JIT，无框架无 CDN
 - **许可证**: BUSL-1.1（商业源码许可证，允许个人非商业使用，2030-01-01 转 Apache 2.0）
 - **版本**: v1.4.0（全部 8 crate + tauri.conf.json）
 - **Rust Edition**: 2024（≥1.85，原生 async fn in trait，无 #[async_trait] 宏）
 
-## 当前测试基线
+## 当前测试基线（全量通过，零失败）
 
-- Rust Free: 1028 passed, 9 failed (pre-existing), 20 ignored (`cargo test`)
+- Rust Free: 1059 passed, 0 failed, 28 ignored (`cargo test`)
 - Rust Pro: 1094 passed, 0 failed, 44 ignored (`cargo test --features pro`)
 - Clippy Free: 零警告 (`cargo clippy --all-targets -- -D warnings`)
+- Clippy Pro: 零警告 (`cargo clippy --all-targets --features pro -- -D warnings`)
 - cargo fmt: 通过
 - TypeScript: 0 errors (`npx tsc --noEmit`)
-- esbuild: 13580 行 (`node scripts/build-ui.mjs`)
+- esbuild: 13582 行 (`node scripts/build-ui.mjs`)
 - Vitest: 419 passed, 27 files (`cd e2e-tests && npm run test:unit`)
-- E2E 桥接: pre-existing 失败在 error-handling.spec.ts（Alpha 阶段付费墙不触发）
-- IPC 命令数: 162
+- E2E (Playwright): **1019 passed, 10 skipped, 0 failed** ✅ 全量通过
+- IPC 命令数: ~175 Free / ~187 Pro（文档漂移待同步）
 - ADR 数: 13
 
-## Pre-existing 失败说明
+## 上一个 Session 完成内容
 
-9 个 Rust 集成测试失败全在 `echomind-tauri-app` 集成测试中：
-- `tc_edge_003_free_tier_50_doc_limit` / `tc_lic_003_free_tier_quota_blocked` — 配额限制
-- `tc_lic_005*` / `tc_lic_006*` — 许可证验证
-- `tc_pro_gate_*` — Pro 门控
-- `tc_vec_custom_005_free_user_rejected` — 自定义模型 Pro 门控
-原因是 Alpha 阶段 `ALPHA_ALL_FEATURES_FREE = true` 配置，与前端改造无关。
+架构优化与技术债清理（5 项工作）：
 
-## 前端架构升级（Session 1-3 已完成）
+1. **依赖更新** — `cargo update` 更新 69 个 Rust 包（ort rc.12→rc.13, fastembed 5.17.3→5.17.4, http 1.4.2→1.5.0, rustls 0.23.42→0.23.43, ureq 3.3.0→3.4.0 等）+ npm 更新 Playwright 1.61.1→1.62.1 + @wdio/* minor。编译通过 5m37s，全部测试通过。
+2. **Pro 门控审计** — 12 编译时门控命令（`#[cfg(feature = "pro")]`：local_llm/KV cache/ColBERT/symbol）+ 4+ 运行时门控命令（is_pro 检查：audit/code_executor/custom_embedding）全部正确。发现 1 个 UX 改进点：`set_llm_mode("local")` 允许 Free 用户切换但 chat 时才报 PRO_REQUIRED（非安全漏洞，LlmRouter 在 chat 时拦截）。
+3. **日文 i18n 补全** — `ja.json` 从 204 行扩展到完整翻译（约 600+ 键，覆盖全部 zh-CN.json 结构），包括 wizard/sidebar/chat/knowledge_base/import/settings/paywall/command_palette/markdown/doc_phases/presets/menu/errors/backend/time/ctx/security/db_error/download/graph/code_executor/workflow/memory/dream/symbol/perf/voice/web_search/export_pdf/wiki/tree 全部 section。
+4. **编译速度分析** — 8 crate workspace 分割已优化（prompt/compact/context 从 core 拆出），dev profile opt-level=3 已设置，主要瓶颈 ML 依赖（fastembed/ort/mistral.rs）不可避免。无需重大改变。
+5. **文档核查** — 发现 IPC 命令数文档漂移（文档 162 vs 实际 ~175 Free/~187 Pro），Q01-Q11 + B01-B14 新增命令未同步到 ipc-commands.md/code-contracts.md 等文档。
 
-- **Z-index 分层**: `zindex.js` — 12 层级常量 + zClass() 辅助函数
-- **面板栈**: `panel-stack.js` — 全局面板栈（push/remove/closeTop/peek/isOpen/hasOpen/clear）
-- **Focus Trap 栈**: `focus-trap.js` — LIFO 栈管理（pause/resume），只激活栈顶 Trap
-- **State 补全**: `state.js` 新增 6 字段（hybridEnabled/agentEnabled/subAgentEnabled/memoryEnabled/webSearchEnabled/docList）
-- **会话切换关闭面板**: `main.js` `closeAllPanels()` 函数
-- **统一输入 keydown**: `input-keymap.js` — 斜杠命令 > Enter > 历史 > Escape
-- **输入历史/草稿**: `input-history.js` — 会话级历史导航 + 草稿持久化 + Token 估算
-
-## Git 状态（Session 4 清理完成）
+## Git 状态
 
 - **分支**: main
-- **未提交变更**: 0
-- **提交历史**: 4 个分组提交（前端架构 / Rust 后端 / 文档 / submodule）
-- **发布仓库**: `EchoMind/EchoMind/`（无 remote，需手动 `git remote add` 后 `git push`）
+- **未提交变更**: 4 文件（Cargo.lock + package-lock.json + ui/locales/ja.json + ui/index.html）
+- **发布仓库**: `EchoMind/EchoMind/`（通过 `sync-to-github.sh` 同步，无 remote 配置，需手动 `git remote add` 后 `git push`）
 
 ## 已完成版本
 
@@ -81,14 +72,14 @@ EchoMind 是 Rust + Tauri v2 桌面 RAG 知识库应用。面向有隐私需求�
 ```bash
 cargo build                           # Free 编译
 cargo build --release --features pro  # Pro Release 编译
-cargo test                            # Free 测试 (1028 passed, 9 pre-existing failed)
+cargo test                            # Free 测试 (1059 passed)
 cargo test --features pro             # Pro 测试 (1094 passed)
 cargo clippy --all-targets -- -D warnings          # Free Clippy
 cargo clippy --all-targets --features pro -- -D warnings  # Pro Clippy
 cargo fmt --check                     # 格式检查
 npx tsc --noEmit                      # TypeScript 类型检查
 node scripts/build-ui.mjs             # 前端 esbuild 打包
-cd e2e-tests && npm run test:bridge   # E2E 桥接测试
+cd e2e-tests && npm run test:bridge   # E2E 桥接测试 (1019 passed)
 cd e2e-tests && npm run test:unit     # Vitest 前端测试 (419 passed)
 ./sync-to-github.sh --commit          # 同步到发布仓库
 ```
@@ -104,19 +95,20 @@ cd e2e-tests && npm run test:unit     # Vitest 前端测试 (419 passed)
 - 多模态文档处理增强（图片/图表 OCR 提取优化）
 流程：ROI 评估 → 原子计划文档 → SRS REQ 定义 → TDD 开发
 
-### 方向 2: E2E 测试质量提升
-- 修复 9 个 pre-existing Rust 集成测试失败（Alpha 阶段配置问题）
-- 修复 pre-existing E2E 失败用例（error-handling.spec.ts 付费墙 + 超长标题）
-- 补充 QM/OpenCode 借鉴功能的 E2E 测试覆盖
+### 方向 2: 文档全面同步（高优先级）
+- IPC 命令文档同步：`docs/api/ipc-commands.md` 更新到实际命令列表（162→~175/~187）
+- `docs/api/code-contracts.md` 更新 QM/OpenCode 借鉴新增 Trait
+- `docs/api/database-schema.md` 更新 pending_inputs 等新表
+- `docs/api/frontend-modules.md` 更新 zindex/panel-stack/focus-trap/input-keymap/input-history 模块
+- `docs/api/settings-reference.md` 更新 Q01-Q11/B01-B14 新增设置键
+- SRS 更新所有 QM/OpenCode REQ 状态为 Implemented
+- `docs/SOFTWARE_ASSET.md` 更新功能矩阵
+
+### 方向 3: E2E 测试覆盖增强
+- 补充 QM/OpenCode 借鉴功能的 E2E 测试覆盖（记忆系统 / 上下文压缩 / 安全态势 / LLM Router 等新功能）
 - 混沌测试覆盖率提升
 - CI 集成 E2E 测试到 GitHub Actions
-
-### 方向 3: 架构优化与技术债清理
-- 编译速度优化（crate 分割、增量编译优化）
-- Pro 功能审计（确保所有 Pro 门控正确）
-- 文档全面同步（SRS/PROJECT_RULES 更新到最新状态）
-- 依赖版本更新（cargo update + npm outdated）
-- 新增日文 i18n（ui/locales/ja.json 已存在但可能不完整）
+- 补充 dream-panel.spec.ts 中 4 个 pre-existing 失败修复（DOM ID 重复 strict mode violation）
 
 ### 方向 4: 生产就绪加固
 - 日志系统增强（结构化日志 + OpenTelemetry）

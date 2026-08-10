@@ -435,7 +435,7 @@ async function validateAndContinue() {
     return;
   }
   if (btn) { btn.disabled = false; btn.textContent = t('wizard.validate_and_continue'); }
-  setState({ currentModel: model, currentLlmMode: 'remote' });
+  setState({ currentModel: model, currentLlmMode: 'remote', llmConfigured: true });
   updateModelPill();
   toast(t('wizard.llm_configured'), 'success');
   // 进入 Step 3

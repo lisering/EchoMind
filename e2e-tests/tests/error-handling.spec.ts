@@ -28,6 +28,8 @@ test.describe('E2E-ERR 错误处理与降级策略（REQ-ERR-001~005）', () => 
   // ─── 错误前缀分类 ───
 
   test('E2E-ERR-001 LIMIT_REACHED 前缀触发付费墙', async ({ page }) => {
+    // 确保 Free 模式（Alpha 阶段 mock 默认 isPro=true，需手动设为 false）
+    await page.evaluate(() => { window.__state.isPro = false; });
     // 模拟已有 50 个文档（触发配额限制）
     await page.evaluate(() => {
       for (let i = 0; i < 50; i++) {
@@ -53,6 +55,8 @@ test.describe('E2E-ERR 错误处理与降级策略（REQ-ERR-001~005）', () => 
   });
 
   test('E2E-ERR-002 PRO_REQUIRED 前缀触发付费墙', async ({ page }) => {
+    // 确保 Free 模式（Alpha 阶段 mock 默认 isPro=true，需手动设为 false）
+    await page.evaluate(() => { window.__state.isPro = false; });
     // 免费版导入 PDF
     await page.evaluate(() => window.__mock.simulateDragDrop(['/mock/paper.pdf']));
     await expect(page.locator('#paywall')).toBeVisible({ timeout: 5000 });

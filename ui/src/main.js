@@ -651,6 +651,7 @@ function _createDocItem(d, isPro, multiSelect) {
 
   const del = document.createElement('button');
   del.className = 'invisible group-hover:visible text-text-quaternary hover:text-red-400 px-1 text-xs transition-opacity';
+  del.dataset.action = 'delete';
   del.textContent = '×';
   del.title = t('knowledge_base.delete_doc');
   del.onclick = async (ev) => { ev.stopPropagation(); await removeDocument(d.id, name); };
@@ -1200,6 +1201,7 @@ setState({
   vlmEnabled: settings.vlm_enabled,
   currentModel: settings.model || '',
   currentLlmMode: settings.llm_mode || 'remote',
+  llmConfigured: true,
   // 方案4：初始化功能toggle状态
   hybridEnabled: settings.hybrid_search || false,
   agentEnabled: settings.agent_enabled || false,

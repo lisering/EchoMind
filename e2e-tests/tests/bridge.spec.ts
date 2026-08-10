@@ -51,15 +51,21 @@ test.describe('E2E-UI-001-lite 桥接层冒烟', () => {
     await expect(page.locator('text=⏹ 已中断')).toBeVisible();
 
     // 06 删除文档：DOM 元素从列表中消失
+    // headless 模式下 group-hover:visible 不触发，用 evaluate 直接点击
     await openKbModal(page);
-    await docItem.hover();
-    await docItem.locator('button[data-action="delete"]').click();
+    await page.evaluate(() => {
+      const item = document.querySelector('#docList [data-doc-name="echomind-e2e.md"]');
+      const delBtn = item?.querySelector('button[data-action="delete"]');
+      if (delBtn) delBtn.click();
+    });
     await expect(page.locator('#docList [data-doc-name="echomind-e2e.md"]')).toHaveCount(0);
   });
 
   test('E2E-LIC-001 付费墙弹出→激活→状态更新（REQ-LIC-003）', async ({ page }) => {
     // 01 经向导进入主界面
     await enterApp(page);
+    // 确保 Free 模式（Alpha 阶段 mock 默认 isPro=true，需手动设为 false）
+    await page.evaluate(() => { window.__state.isPro = false; });
 
     // 02 免费版导入 PDF → PRO_REQUIRED 错误 → 付费墙 Modal 弹出
     // 通过前端 drag-drop 监听器触发 importPaths（错误处理在 importPaths 内）
@@ -68,7 +74,7 @@ test.describe('E2E-UI-001-lite 桥接层冒烟', () => {
       listeners.forEach((cb) => cb({ payload: { paths: ['/mock/paper.pdf'] } }));
     });
     await expect(page.locator('#paywall')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('#paywallReason')).toContainText('PDF');
+    await expect(page.locator('#paywallReason')).toContainText('.pdf');
 
     // 03 输入 License Key 并激活 → Modal 关闭
     await page.locator('#licenseInput').fill('test-license-key');

@@ -44,8 +44,8 @@ test.describe('E2E-RAG-001~015 对话链路', () => {
 
   test('E2E-RAG-002 流式过程中 UI 不冻结，可滚动', async ({ page }) => {
     await sendMessage(page, '测试不冻结');
-    // 流式过程中输入框被禁用（streaming 态）
-    await expect(page.locator('#queryInput')).toBeDisabled();
+    // V5 重构：流式过程中输入框保持启用（支持排队发送）
+    await expect(page.locator('#queryInput')).not.toBeDisabled();
     // 但 chatArea 仍可滚动（非阻塞）
     const canScroll = await page.evaluate(() => {
       const area = document.getElementById('chatArea');
