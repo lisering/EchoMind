@@ -169,8 +169,10 @@
     "slash_translate_desc": "翻译回答内容",
     "slash_timeline": "时间线",
     "slash_timeline_desc": "从内容生成时间线",
-    "slash_mindmap": "思维导图",
-    "slash_mindmap_desc": "从内容生成思维导图",
+"slash_mindmap": "思维导图",
+"slash_mindmap_desc": "从内容生成思维导图",
+"slash_web": "网页搜索",
+"slash_web_desc": "结合网页搜索结果回答",
     "slash_no_match": "无匹配指令",
     "slash_custom": "自定义",
     "doc_mention_empty": "无匹配文档",
@@ -629,7 +631,10 @@
     "paste": "粘贴",
     "selectAll": "全选",
     "copy_doc_name": "复制文件名",
-    "copy_chunk": "复制引用片段"
+    "copy_chunk": "复制引用片段",
+    "reclassify_doc": "重分类文档",
+    "reclassifying": "正在重分类…",
+    "reclassify_success": "重分类完成"
   },
   "security": {
     "section_title": "安全防御",
@@ -1130,5 +1135,24 @@
     "clear_all": "清空全部",
     "clear_confirm": "确认清空所有待办？",
     "need_text": "请输入待办内容"
+  },
+  "kv_cache": {
+    "title": "KV Cache 管理",
+    "enable": "启用 KV Cache",
+    "enable_desc": "跨会话复用 KV Cache，加速多轮对话",
+    "file_count": "缓存文件数",
+    "total_size": "总占用",
+    "cache_dir": "缓存目录",
+    "save": "保存当前",
+    "load": "加载缓存",
+    "clear": "清除缓存",
+    "clear_confirm": "确认清除当前会话的 KV Cache？",
+    "enabled": "KV Cache 已启用",
+    "disabled": "KV Cache 已禁用",
+    "saved": "KV Cache 已保存",
+    "loaded": "KV Cache 已加载",
+    "not_found": "未找到缓存文件",
+    "cleared": "KV Cache 已清除",
+    "no_conversation": "请先选择会话"
   }
 }

@@ -5313,6 +5313,7 @@
           embedModelApi: () => embedModelApi,
           importApi: () => importApi,
           invoke: () => invoke,
+          kvCacheApi: () => kvCacheApi,
           licenseApi: () => licenseApi,
           listen: () => listen,
           llmApi: () => llmApi,
@@ -5324,10 +5325,12 @@
           promptTemplateApi: () => promptTemplateApi,
           saveDialog: () => saveDialog,
           securityApi: () => securityApi,
+          symbolApi: () => symbolApi,
           syncApi: () => syncApi,
           todoApi: () => todoApi,
           traceApi: () => traceApi,
-          vlmApi: () => vlmApi
+          vlmApi: () => vlmApi,
+          webSearchApi: () => webSearchApi
         });
         function invoke(cmd, args = {}) {
           return window.__TAURI__.core.invoke(cmd, args);
@@ -5347,7 +5350,7 @@
           } catch (_) {
           }
         }
-        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi;
+        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, symbolApi, webSearchApi;
         var init_ipc = __esm({
           "ui/src/ipc.js"() {
             llmApi = {
@@ -5370,6 +5373,10 @@
               /** 从指定消息创建新分支（REQ-RAG-039） */
               branchFromMessage: (conversationId, messageId, newContent) => invoke("branch_from_message", { conversationId, messageId, newContent }),
               delete: (id) => invoke("delete_conversation", { id }),
+              /** 分页获取会话列表（大列表性能优化） */
+              listPaginated: (offset, limit, workspaceId) => invoke("get_conversations_paginated", { offset, limit, workspaceId }),
+              /** 分页获取消息列表（长对话性能优化） */
+              messagesPaginated: (conversationId, offset, limit) => invoke("get_messages_paginated", { conversationId, offset, limit }),
               /** 导出会话为 Markdown（REQ-EXP-001）*/
               exportMarkdown: (conversationId) => invoke("export_conversation_markdown", { conversationId }),
               /** 保存文本文件到指定路径（REQ-EXP-001 辅助）*/
@@ -5445,7 +5452,23 @@
               /** 设置当前选中的本地模型文件名 */
               setLocalModel: (filename) => invoke("set_local_model", { filename }),
               /** 设置采样参数（S11，Pro 功能） */
-              setSamplingParams: (params) => invoke("set_sampling_params", { params })
+              setSamplingParams: (params) => invoke("set_sampling_params", { params }),
+              /** 获取当前设备类型（CPU/Metal/CUDA，Pro 功能） */
+              getDeviceKind: () => invoke("get_local_llm_device_kind"),
+              /** 设置嵌入模型（Pro 功能，运行时切换 ONNX 嵌入模型） */
+              setEmbedderModel: (model) => invoke("set_embedder_model", { model })
+            };
+            kvCacheApi = {
+              /** 保存当前会话的 KV Cache 到磁盘 */
+              save: (conversationId) => invoke("save_kv_cache", { conversationId }),
+              /** 从磁盘恢复指定会话的 KV Cache，返回是否成功 */
+              load: (conversationId) => invoke("load_kv_cache", { conversationId }),
+              /** 清除指定会话的 KV Cache 文件 */
+              clear: (conversationId) => invoke("clear_kv_cache", { conversationId }),
+              /** 获取 KV Cache 状态（enabled/cache_dir/file_count/total_size_bytes） */
+              getStatus: () => invoke("get_kv_cache_status"),
+              /** 启用/禁用 KV Cache 功能 */
+              setEnabled: (enabled) => invoke("set_kv_cache_enabled", { enabled })
             };
             downloadApi = {
               /** 暂停指定文件的下载（保留 .partial + .meta.json，可恢复） */
@@ -5558,6 +5581,18 @@
             docExtApi = {
               /** 重新分类文档领域 */
               reclassify: (docId) => invoke("reclassify_document", { docId })
+            };
+            symbolApi = {
+              /** 搜索代码符号（全局搜索） */
+              search: (query, language) => invoke("search_symbols", { query, language }),
+              /** 获取指定 chunk 的代码符号列表 */
+              getForChunk: (chunkId) => invoke("get_symbols_for_chunk", { chunkId }),
+              /** 重建符号索引 */
+              rebuildIndex: () => invoke("rebuild_symbol_index")
+            };
+            webSearchApi = {
+              /** 执行网页搜索并融合到 RAG 结果中 */
+              search: (query) => invoke("web_search", { query })
             };
           }
         });
@@ -7215,6 +7250,13 @@
             desc: "chat.slash_mindmap_desc",
             icon: "\u{1F9E0}",
             promptTemplate: "\u8BF7\u4ECE\u4EE5\u4E0B\u5185\u5BB9\u4E2D\u751F\u6210\u601D\u7EF4\u5BFC\u56FE\uFF08Mermaid \u683C\u5F0F\uFF09\uFF1A{query}"
+          },
+          {
+            name: "web",
+            label: "chat.slash_web",
+            desc: "chat.slash_web_desc",
+            icon: "\u{1F310}",
+            promptTemplate: "\u8BF7\u7ED3\u5408\u7F51\u9875\u641C\u7D22\u7ED3\u679C\u56DE\u7B54\u4EE5\u4E0B\u95EE\u9898\uFF1A{query}"
           }
         ];
         var _customCommands = [];
@@ -15348,6 +15390,209 @@
           if (!_inlineProgressFilename) return;
           await cancelDownload(_inlineProgressFilename);
         }
+        function formatCacheSize(bytes) {
+          if (bytes < 1024) return bytes + " B";
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+          if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + " MB";
+          return (bytes / 1024 / 1024 / 1024).toFixed(2) + " GB";
+        }
+        async function renderKvCacheSettings(container) {
+          if (!container) return;
+          let status = null;
+          try {
+            status = await kvCacheApi.getStatus();
+          } catch (_) {
+          }
+          const enabled = status?.enabled || false;
+          const fileCount = status?.file_count || 0;
+          const totalSize = status?.total_size_bytes || 0;
+          const cacheDir = status?.cache_dir || "-";
+          container.innerHTML = `
+          <div class="border-t border-border-default pt-5 mt-5" id="kvCacheSection">
+            <h3 class="text-sm font-semibold m-0 mb-4 flex items-center gap-1">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" style="display:inline; vertical-align:middle; margin-right:6px;">
+                <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+                <polyline points="17 21 17 13 7 13 7 21"/>
+                <polyline points="7 3 7 8 17 8"/>
+              </svg>
+              <span data-i18n="kv_cache.title">KV Cache \u7BA1\u7406</span>
+            </h3>
+      
+            <!-- \u542F\u7528\u5F00\u5173 -->
+            <div class="flex items-center justify-between py-2">
+              <div class="flex flex-col gap-0.5 flex-1">
+                <span data-i18n="kv_cache.enable">\u542F\u7528 KV Cache</span>
+                <span class="text-xs text-text-tertiary leading-tight" data-i18n="kv_cache.enable_desc">\u8DE8\u4F1A\u8BDD\u590D\u7528 KV Cache\uFF0C\u52A0\u901F\u591A\u8F6E\u5BF9\u8BDD</span>
+              </div>
+              <button id="kvCacheToggle" class="shrink-0 ml-4 relative w-11 h-6 rounded-full transition-colors ${enabled ? "bg-accent" : "bg-slate-600"}" role="switch" aria-checked="${enabled}">
+                <span class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${enabled ? "translate-x-5" : ""}"></span>
+              </button>
+            </div>
+      
+            <!-- \u72B6\u6001\u4FE1\u606F -->
+            <div class="bg-surface-2 rounded-lg p-3 mt-2 space-y-1.5">
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-text-quaternary" data-i18n="kv_cache.file_count">\u7F13\u5B58\u6587\u4EF6\u6570</span>
+                <span class="text-xs text-text-primary tabular-nums">${fileCount}</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-text-quaternary" data-i18n="kv_cache.total_size">\u603B\u5360\u7528</span>
+                <span class="text-xs text-text-primary tabular-nums">${formatCacheSize(totalSize)}</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-text-quaternary" data-i18n="kv_cache.cache_dir">\u7F13\u5B58\u76EE\u5F55</span>
+                <span class="text-xs text-text-tertiary truncate max-w-[200px]" title="${cacheDir}">${cacheDir}</span>
+              </div>
+            </div>
+      
+            <!-- \u64CD\u4F5C\u6309\u94AE -->
+            <div class="flex gap-2 mt-3">
+              <button id="btnSaveKvCache" class="flex-1 text-xs px-3 py-2 rounded-lg border border-border-default text-text-tertiary hover:text-text-secondary hover:bg-surface-3 transition-colors" data-i18n="kv_cache.save">\u4FDD\u5B58\u5F53\u524D</button>
+              <button id="btnLoadKvCache" class="flex-1 text-xs px-3 py-2 rounded-lg border border-border-default text-text-tertiary hover:text-text-secondary hover:bg-surface-3 transition-colors" data-i18n="kv_cache.load">\u52A0\u8F7D\u7F13\u5B58</button>
+              <button id="btnClearKvCache" class="flex-1 text-xs px-3 py-2 rounded-lg border border-border-default text-text-tertiary hover:text-red-400 hover:border-red-400/40 transition-colors" data-i18n="kv_cache.clear">\u6E05\u9664\u7F13\u5B58</button>
+            </div>
+          </div>
+        `;
+          initKvCacheHandlers();
+        }
+        function initKvCacheHandlers() {
+          const toggle = $("kvCacheToggle");
+          if (toggle) {
+            toggle.onclick = async () => {
+              const isCurrentlyEnabled = toggle.getAttribute("aria-checked") === "true";
+              const newEnabled = !isCurrentlyEnabled;
+              try {
+                await kvCacheApi.setEnabled(newEnabled);
+                toggle.setAttribute("aria-checked", String(newEnabled));
+                toggle.classList.toggle("bg-accent", newEnabled);
+                toggle.classList.toggle("bg-slate-600", !newEnabled);
+                toggle.querySelector("span").classList.toggle("translate-x-5", newEnabled);
+                toastSuccess(newEnabled ? t("kv_cache.enabled", "KV Cache \u5DF2\u542F\u7528") : t("kv_cache.disabled", "KV Cache \u5DF2\u7981\u7528"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+          const btnSave = $("btnSaveKvCache");
+          if (btnSave) {
+            btnSave.onclick = async () => {
+              const convId = get("currentConversationId");
+              if (!convId) {
+                toast(t("kv_cache.no_conversation", "\u8BF7\u5148\u9009\u62E9\u4F1A\u8BDD"), "error");
+                return;
+              }
+              try {
+                await kvCacheApi.save(convId);
+                toastSuccess(t("kv_cache.saved", "KV Cache \u5DF2\u4FDD\u5B58"));
+                await renderKvCacheSettings($("kvCacheContainer"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+          const btnLoad = $("btnLoadKvCache");
+          if (btnLoad) {
+            btnLoad.onclick = async () => {
+              const convId = get("currentConversationId");
+              if (!convId) {
+                toast(t("kv_cache.no_conversation", "\u8BF7\u5148\u9009\u62E9\u4F1A\u8BDD"), "error");
+                return;
+              }
+              try {
+                const success = await kvCacheApi.load(convId);
+                if (success) {
+                  toastSuccess(t("kv_cache.loaded", "KV Cache \u5DF2\u52A0\u8F7D"));
+                } else {
+                  toast(t("kv_cache.not_found", "\u672A\u627E\u5230\u7F13\u5B58\u6587\u4EF6"), "info");
+                }
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+          const btnClear = $("btnClearKvCache");
+          if (btnClear) {
+            btnClear.onclick = async () => {
+              const convId = get("currentConversationId");
+              if (!convId) {
+                toast(t("kv_cache.no_conversation", "\u8BF7\u5148\u9009\u62E9\u4F1A\u8BDD"), "error");
+                return;
+              }
+              const confirmed = await showConfirmDialog({
+                title: t("kv_cache.clear_confirm", "\u786E\u8BA4\u6E05\u9664\u5F53\u524D\u4F1A\u8BDD\u7684 KV Cache\uFF1F"),
+                danger: true
+              });
+              if (!confirmed) return;
+              try {
+                await kvCacheApi.clear(convId);
+                toastSuccess(t("kv_cache.cleared", "KV Cache \u5DF2\u6E05\u9664"));
+                await renderKvCacheSettings($("kvCacheContainer"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+        }
+        async function renderDeviceKindSettings(container) {
+          if (!container) return;
+          let deviceKind = "CPU";
+          try {
+            deviceKind = await localLlmApi.getDeviceKind();
+          } catch (_) {
+          }
+          const deviceIcon = deviceKind === "Metal" ? "\u{1F34E}" : deviceKind === "CUDA" ? "\u{1F7E2}" : "\u{1F4BB}";
+          const deviceLabel = deviceKind === "Metal" ? "Apple Metal" : deviceKind === "CUDA" ? "NVIDIA CUDA" : "CPU";
+          const deviceColor = deviceKind === "CPU" ? "text-text-tertiary" : "text-success";
+          container.innerHTML = `
+          <div class="flex items-center justify-between py-2 border-t border-border-default" id="deviceKindSection">
+            <div class="flex flex-col gap-0.5 flex-1">
+              <span data-i18n="settings.device_kind">\u786C\u4EF6\u52A0\u901F</span>
+              <span class="text-xs text-text-tertiary leading-tight" data-i18n="settings.device_kind_desc">\u672C\u5730\u63A8\u7406\u4F7F\u7528\u7684\u8BA1\u7B97\u8BBE\u5907</span>
+            </div>
+            <div class="shrink-0 ml-4 flex items-center gap-1.5">
+              <span class="text-base">${deviceIcon}</span>
+              <span class="text-sm font-medium ${deviceColor}">${deviceLabel}</span>
+            </div>
+          </div>
+        `;
+        }
+        async function renderEmbedderModelSettings(container) {
+          if (!container) return;
+          let currentModel = "all-MiniLM-L6-v2";
+          try {
+            const settings = await Promise.resolve().then(() => (init_ipc(), ipc_exports)).then((m) => m.llmApi.getSettings());
+            currentModel = settings.embedding_model || "all-MiniLM-L6-v2";
+          } catch (_) {
+          }
+          container.innerHTML = `
+          <div class="flex items-center justify-between py-2 border-t border-border-default" id="embedderModelSection">
+            <div class="flex flex-col gap-0.5 flex-1">
+              <span data-i18n="settings.embedder_model">\u5D4C\u5165\u6A21\u578B</span>
+              <span class="text-xs text-text-tertiary leading-tight" data-i18n="settings.embedder_model_desc">\u8FD0\u884C\u65F6\u5207\u6362 ONNX \u5D4C\u5165\u6A21\u578B\uFF08Pro \u529F\u80FD\uFF09</span>
+            </div>
+            <div class="shrink-0 ml-4 flex items-center gap-2">
+              <input type="text" id="embedderModelInput" class="px-2.5 py-1 text-[13px] border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]"
+                     value="${currentModel}" style="width: 180px;" placeholder="all-MiniLM-L6-v2"/>
+              <button id="btnSetEmbedderModel" class="text-xs px-3 py-1 rounded-md bg-primary text-surface-0 cursor-pointer hover:bg-primary-hover transition-colors" data-i18n="settings.apply">\u5E94\u7528</button>
+            </div>
+          </div>
+        `;
+          const btnApply = $("btnSetEmbedderModel");
+          const input = $("embedderModelInput");
+          if (btnApply && input) {
+            btnApply.onclick = async () => {
+              const model = input.value.trim();
+              if (!model) return;
+              try {
+                await localLlmApi.setEmbedderModel(model);
+                toastSuccess(t("settings.embedder_model_set", "\u5D4C\u5165\u6A21\u578B\u5DF2\u5207\u6362") + ": " + model);
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+        }
       
         // ui/src/export.js
         init_state();
@@ -15855,6 +16100,36 @@
             if (tmplContainer) {
               tmplContainer.innerHTML = "";
               renderPromptTemplateSettings(tmplContainer);
+            }
+            const kvContainer = $("kvCacheContainer") || (() => {
+              if (!perfContainer) return null;
+              const div = document.createElement("div");
+              div.id = "kvCacheContainer";
+              perfContainer.appendChild(div);
+              return div;
+            })();
+            if (kvContainer) {
+              renderKvCacheSettings(kvContainer);
+            }
+            const deviceContainer = $("deviceKindContainer") || (() => {
+              if (!perfContainer) return null;
+              const div = document.createElement("div");
+              div.id = "deviceKindContainer";
+              perfContainer.appendChild(div);
+              return div;
+            })();
+            if (deviceContainer) {
+              renderDeviceKindSettings(deviceContainer);
+            }
+            const embedderContainer = $("embedderModelContainer") || (() => {
+              if (!perfContainer) return null;
+              const div = document.createElement("div");
+              div.id = "embedderModelContainer";
+              perfContainer.appendChild(div);
+              return div;
+            })();
+            if (embedderContainer) {
+              renderEmbedderModelSettings(embedderContainer);
             }
             loadWatchedFolders();
             await loadLlmModeSetting(settings);
@@ -16960,6 +17235,7 @@
         init_utils();
         init_i18n();
         init_toast();
+        init_ipc();
         var _visible = false;
         function initContextMenu() {
           const menu = $("ctxMenu");
@@ -16969,7 +17245,7 @@
             const docItem = target.closest("[data-doc-name]");
             if (docItem) {
               e.preventDefault();
-              _showDocMenu(e.clientX, e.clientY, docItem.dataset.docName || "");
+              _showDocMenu(e.clientX, e.clientY, docItem.dataset.docName || "", docItem.dataset.docId || "");
               return;
             }
             const sourceChip = target.closest(".source-chip");
@@ -17006,13 +17282,18 @@
           window.addEventListener("blur", () => _hideMenu());
           document.addEventListener("scroll", () => _hideMenu(), true);
         }
-        function _showDocMenu(x, y, docName) {
+        function _showDocMenu(x, y, docName, docId) {
           const menu = $("ctxMenu");
           if (!menu) return;
           const items = [];
           items.push(_item("copyDocName", t("ctx.copy_doc_name"), "", true));
+          if (docId) {
+            items.push(_separator());
+            items.push(_item("reclassifyDoc", t("ctx.reclassify_doc", "\u91CD\u5206\u7C7B\u6587\u6863"), "", true));
+          }
           menu.innerHTML = items.join("");
           menu.dataset.docName = docName;
+          menu.dataset.docId = docId;
           menu.classList.add("visible");
           const mw = menu.offsetWidth;
           const mh = menu.offsetHeight;
@@ -17080,7 +17361,7 @@
         function _separator() {
           return '<div class="ctx-separator"></div>';
         }
-        function _executeAction(action) {
+        async function _executeAction(action) {
           const menu = $("ctxMenu");
           if (action === "copyDocName") {
             const docName = menu?.dataset.docName || "";
@@ -17091,6 +17372,19 @@
                 toastError(t("chat.copy_failed"));
               }
             });
+            return;
+          }
+          if (action === "reclassifyDoc") {
+            const docId = menu?.dataset.docId || "";
+            if (!docId) return;
+            try {
+              toast(t("ctx.reclassifying", "\u6B63\u5728\u91CD\u5206\u7C7B\u2026"), "info");
+              const result = await docExtApi.reclassify(docId);
+              const newDomain = typeof result === "string" ? result : result?.domain || result?.new_domain || "";
+              toastSuccess(t("ctx.reclassify_success", "\u91CD\u5206\u7C7B\u5B8C\u6210") + (newDomain ? ": " + newDomain : ""));
+            } catch (err) {
+              toastError(err);
+            }
             return;
           }
           if (action === "copyChunk") {

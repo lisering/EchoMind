@@ -169,8 +169,10 @@
     "slash_translate_desc": "Translate the answer",
     "slash_timeline": "Timeline",
     "slash_timeline_desc": "Generate a timeline from content",
-    "slash_mindmap": "Mind Map",
-    "slash_mindmap_desc": "Generate a mind map from content",
+"slash_mindmap": "Mind Map",
+"slash_mindmap_desc": "Generate a mind map from content",
+"slash_web": "Web Search",
+"slash_web_desc": "Answer with web search results",
     "slash_no_match": "No matching commands",
     "slash_custom": "Custom",
     "doc_mention_empty": "No matching documents",
@@ -629,7 +631,10 @@
     "paste": "Paste",
     "selectAll": "Select All",
     "copy_doc_name": "Copy Filename",
-    "copy_chunk": "Copy Citation"
+    "copy_chunk": "Copy Citation",
+    "reclassify_doc": "Reclassify Document",
+    "reclassifying": "Reclassifying…",
+    "reclassify_success": "Reclassification complete"
   },
   "security": {
     "section_title": "Security",
@@ -1130,5 +1135,24 @@
     "clear_all": "Clear All",
     "clear_confirm": "Clear all todos?",
     "need_text": "Please enter todo text"
+  },
+  "kv_cache": {
+    "title": "KV Cache Management",
+    "enable": "Enable KV Cache",
+    "enable_desc": "Reuse KV Cache across sessions for faster multi-turn dialogue",
+    "file_count": "Cache Files",
+    "total_size": "Total Size",
+    "cache_dir": "Cache Directory",
+    "save": "Save Current",
+    "load": "Load Cache",
+    "clear": "Clear Cache",
+    "clear_confirm": "Clear KV Cache for this conversation?",
+    "enabled": "KV Cache enabled",
+    "disabled": "KV Cache disabled",
+    "saved": "KV Cache saved",
+    "loaded": "KV Cache loaded",
+    "not_found": "Cache file not found",
+    "cleared": "KV Cache cleared",
+    "no_conversation": "Please select a conversation first"
   }
 }
