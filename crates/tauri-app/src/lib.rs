@@ -325,6 +325,10 @@ pub fn run() {
             commands::branch_from_message,
             // 对话全文搜索（REQ-RAG-040）
             commands::search_conversations,
+            // Session Strip 会话条带化（REQ-RAG-046）
+            commands::strip_messages,
+            commands::strip_keeping_recent,
+            commands::preview_strip,
             // Contextual Retrieval 上下文增强嵌入（REQ-RAG-041）
             commands::set_contextual_retrieval,
             commands::rebuild_contextual_embeddings,

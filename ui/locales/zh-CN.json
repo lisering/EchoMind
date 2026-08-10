@@ -1039,5 +1039,24 @@
     "error": "加载分支树失败",
     "switch": "切换到此分支",
     "version": "版本"
+  },
+  "session_strip": {
+    "title": "会话条带化",
+    "msg_count": "条消息。条带化将移除消息以减少上下文。",
+    "tab_range": "范围",
+    "tab_recent": "保留最近",
+    "from": "起始",
+    "to": "结束",
+    "keep_last": "保留最后",
+    "messages": "条消息",
+    "preview": "预览",
+    "replace_summary": "用摘要替代",
+    "summary_placeholder": "摘要文本...",
+    "execute": "条带化消息",
+    "confirm_title": "确认条带化",
+    "confirm_msg": "确定要条带化消息吗？此操作不可撤销。",
+    "confirm_btn": "条带化",
+    "cancel_btn": "取消",
+    "tooltip": "条带化消息"
   }
 }

@@ -588,3 +588,105 @@ pub async fn search_conversations_inner(
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+/// Session Strip：按索引范围移除消息（REQ-RAG-046）。
+#[tauri::command]
+pub async fn strip_messages(
+    conversation_id: String,
+    from_index: usize,
+    to_index: usize,
+    replace_with_summary: bool,
+    summary_text: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<StripResult, String> {
+    strip_messages_inner(
+        &conversation_id,
+        from_index,
+        to_index,
+        replace_with_summary,
+        summary_text,
+        state.inner(),
+    )
+    .await
+}
+
+/// Session Strip 逻辑（命令与集成测试复用）。
+pub async fn strip_messages_inner(
+    conversation_id: &str,
+    from_index: usize,
+    to_index: usize,
+    replace_with_summary: bool,
+    summary_text: Option<String>,
+    state: &AppState,
+) -> Result<StripResult, String> {
+    let config = StripConfig {
+        from_index,
+        to_index,
+        replace_with_summary,
+        summary_text,
+    };
+    SessionStripper::strip_range(&state.storage, conversation_id, &config)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Session Strip：保留最后 N 条消息（REQ-RAG-046）。
+#[tauri::command]
+pub async fn strip_keeping_recent(
+    conversation_id: String,
+    keep_last_n: usize,
+    replace_with_summary: bool,
+    summary_text: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<StripResult, String> {
+    strip_keeping_recent_inner(
+        &conversation_id,
+        keep_last_n,
+        replace_with_summary,
+        summary_text,
+        state.inner(),
+    )
+    .await
+}
+
+/// Session Strip 保留最近逻辑（命令与集成测试复用）。
+pub async fn strip_keeping_recent_inner(
+    conversation_id: &str,
+    keep_last_n: usize,
+    replace_with_summary: bool,
+    summary_text: Option<String>,
+    state: &AppState,
+) -> Result<StripResult, String> {
+    SessionStripper::strip_keeping_recent(
+        &state.storage,
+        conversation_id,
+        keep_last_n,
+        replace_with_summary,
+        summary_text.as_deref(),
+    )
+    .await
+    .map_err(|e| format!("{e:#}"))
+}
+
+/// Session Strip：预览将被移除的消息（REQ-RAG-046）。
+#[tauri::command]
+pub async fn preview_strip(
+    conversation_id: String,
+    from_index: usize,
+    to_index: usize,
+    state: State<'_, AppState>,
+) -> Result<StripPreview, String> {
+    preview_strip_inner(&conversation_id, from_index, to_index, state.inner()).await
+}
+
+/// Session Strip 预览逻辑（命令与集成测试复用）。
+pub async fn preview_strip_inner(
+    conversation_id: &str,
+    from_index: usize,
+    to_index: usize,
+    state: &AppState,
+) -> Result<StripPreview, String> {
+    SessionStripper::preview(&state.storage, conversation_id, from_index, to_index)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}

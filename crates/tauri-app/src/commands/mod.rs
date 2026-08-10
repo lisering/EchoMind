@@ -35,6 +35,7 @@ use echomind_core::hybrid_retriever::HybridRetriever;
 use echomind_core::import::{ImportOutcome, ImportService};
 use echomind_core::license::verify_license;
 use echomind_core::retriever::build_contextual_text;
+use echomind_core::session_strip::SessionStripper;
 use echomind_core::step_cache::StepCache as _;
 use echomind_infra::duckduckgo_provider::DuckDuckGoProvider;
 use echomind_infra::hyde_rewriter::HydeRewriter;
@@ -47,7 +48,8 @@ use echomind_models::{
     GraphCommunity, GraphPath, GraphStats, GraphTriple, ImportProgressPayload, LlmConfig, LlmMode,
     LlmSamplingParams, MemoryEntry, MemoryTier, MessageSearchResult, ModelInfo, PaginatedResult,
     PendingInput, PromptTemplate, RetrievalResult, SearchResult, SessionTodo, SettingsPayload,
-    TodoStatus, TokenUsage, TurnActiveVersion, Workflow, WorkflowResult,
+    StripConfig, StripPreview, StripResult, TodoStatus, TokenUsage, TurnActiveVersion, Workflow,
+    WorkflowResult,
 };
 use futures::FutureExt;
 use futures::StreamExt;

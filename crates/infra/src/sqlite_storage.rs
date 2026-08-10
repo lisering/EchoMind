@@ -2042,6 +2042,40 @@ Ok(())
         .await
     }
 
+    async fn delete_messages_by_ids(
+        &self,
+        conversation_id: &str,
+        message_ids: &[String],
+    ) -> anyhow::Result<usize> {
+        if message_ids.is_empty() {
+            return Ok(0);
+        }
+        let pool = self.pool.clone();
+        let conversation_id = conversation_id.to_string();
+        let ids = message_ids.to_vec();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            // 构建 IN (?, ?, ...) 占位符
+            let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
+            let sql = format!(
+                "DELETE FROM messages WHERE conversation_id = ?1 AND id IN ({})",
+                placeholders.join(", ")
+            );
+            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(ids.len() + 1);
+            params_vec.push(Box::new(conversation_id.clone()));
+            for id in &ids {
+                params_vec.push(Box::new(id.clone()));
+            }
+            let param_refs: Vec<&dyn rusqlite::ToSql> =
+                params_vec.iter().map(|p| p.as_ref()).collect();
+            let deleted = conn
+                .execute(&sql, param_refs.as_slice())
+                .context("批量删除消息失败")?;
+            Ok(deleted)
+        })
+        .await
+    }
+
     /// 首次编辑升级：把原始 user 消息行及紧随其后的 assistant 行原地标记为
     /// 指定 turn_group 的 version=1（REQ-QA 首次编辑分页）。
     ///

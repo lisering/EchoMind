@@ -2578,6 +2578,102 @@ impl Default for RagEvalSettings {
     }
 }
 
+// ============================================================
+// Session Strip（REQ-RAG-046，DS4 DS-03 借鉴）
+// ============================================================
+
+/// Strip 操作配置（REQ-RAG-046）。
+///
+/// 定义从对话历史中移除消息的范围和选项。
+/// 借鉴 ds4 (DwarfStar) `/strip` 命令——移除数据以减少上下文窗口消耗。
+///
+/// # 字段
+/// - `from_index` / `to_index`：0-based 闭区间消息索引
+/// - `replace_with_summary`：是否插入摘要 system 消息替代被移除的消息
+/// - `summary_text`：预生成的摘要文本（`None` 时不插入摘要）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StripConfig {
+    /// 0-based 起始消息索引（包含）
+    pub from_index: usize,
+    /// 0-based 结束消息索引（包含）
+    pub to_index: usize,
+    /// 是否插入摘要 system 消息
+    pub replace_with_summary: bool,
+    /// 预生成的摘要文本
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub summary_text: Option<String>,
+}
+
+impl StripConfig {
+    /// 创建新的 strip 配置。
+    pub fn new(from_index: usize, to_index: usize) -> Self {
+        Self {
+            from_index,
+            to_index,
+            replace_with_summary: false,
+            summary_text: None,
+        }
+    }
+
+    /// 启用摘要替代。
+    pub fn with_summary(mut self, summary: String) -> Self {
+        self.replace_with_summary = true;
+        self.summary_text = Some(summary);
+        self
+    }
+}
+
+/// Strip 操作结果（REQ-RAG-046）。
+///
+/// 记录 strip 操作的执行结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StripResult {
+    /// 被移除的消息数量
+    pub stripped_count: usize,
+    /// 是否插入了摘要 system 消息
+    pub summary_inserted: bool,
+    /// 被移除消息的 ID 列表
+    pub stripped_message_ids: Vec<String>,
+    /// 估算的 token 节省量（4 字符 ≈ 1 token）
+    pub estimated_tokens_saved: usize,
+}
+
+impl StripResult {
+    /// 创建空结果（无消息被 strip）。
+    pub fn empty() -> Self {
+        Self {
+            stripped_count: 0,
+            summary_inserted: false,
+            stripped_message_ids: Vec::new(),
+            estimated_tokens_saved: 0,
+        }
+    }
+}
+
+/// Strip 预览（REQ-RAG-046）。
+///
+/// 预览 strip 操作将影响哪些消息，不执行实际删除。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StripPreview {
+    /// 将被 strip 的消息列表
+    pub messages: Vec<ChatMessage>,
+    /// 对话中的消息总数
+    pub total_messages: usize,
+    /// 估算的 token 节省量
+    pub estimated_tokens_saved: usize,
+}
+
+impl StripPreview {
+    /// 创建空预览。
+    pub fn empty(total_messages: usize) -> Self {
+        Self {
+            messages: Vec::new(),
+            total_messages,
+            estimated_tokens_saved: 0,
+        }
+    }
+}
+
 /// 缓存设置新增到 SettingsPayload（REQ-PERF-001）。
 ///
 /// 通过 `get_settings` 返回给前端，前端据此渲染缓存设置 UI。
