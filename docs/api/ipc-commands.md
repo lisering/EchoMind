@@ -1,13 +1,13 @@
 # IPC 命令契约
 
-> **状态**：活跃 | **最后审阅**：2026-08-10（v10 全量同步 187 个命令：补充 Q01-Q11/B05-B08/B09-B10/S69-S70 新增 37 个命令 + 安全态势/Shadow 筛查/Scratch 记忆/Burst Buffer/语音转写/网页搜索/文档标签/会话待办/预算追踪/Token 预算/Trace 系统/主题切换/下载管理；v9 补充 KV Cache 跨会话复用 5 个命令；v8 补充 model_load_progress 事件）
+> **状态**：活跃 | **最后审阅**：2026-08-10（v12 新增 Session Strip 3 个命令，共 194 个命令；v11 新增 RAG 评估指标 4 个命令，共 191 个命令；v10 全量同步 187 个命令：补充 Q01-Q11/B05-B08/B09-B10/S69-S70 新增 37 个命令 + 安全态势/Shadow 筛查/Scratch 记忆/Burst Buffer/语音转写/网页搜索/文档标签/会话待办/预算追踪/Token 预算/Trace 系统/主题切换/下载管理；v9 补充 KV Cache 跨会话复用 5 个命令；v8 补充 model_load_progress 事件）
 >
 > 本文档定义所有 Tauri IPC 命令的签名、参数、返回值与事件负载。
 > 源码：`crates/tauri-app/src/commands/` + `crates/tauri-app/src/lib.rs`。
 
 ---
 
-## 1. 命令总览（187 个 Free / 199 个 Pro，含 12 个编译时 Pro 门控）
+## 1. 命令总览（194 个 Free / 206 个 Pro，含 12 个编译时 Pro 门控）
 
 | 分类 | 命令 | 参数 | 返回值 |
 |---|---|---|---|
@@ -132,6 +132,9 @@
 | 对话分支树 | `get_conversation_tree` | `conversationId: String` | `ConversationTree` |
 | 对话分支树 | `branch_from_message` | `conversationId: String, messageId: String, newContent: String` | `BranchResult { new_version, turn_group }` |
 | 对话搜索 | `search_conversations` | `query: String, limit?: usize` | `Vec<MessageSearchResult>` |
+| Session Strip | `strip_messages` | `conversation_id: String, from_index: usize, to_index: usize, replace_with_summary: bool, summary_text: Option<String>` | `StripResult` |
+| Session Strip | `strip_keeping_recent` | `conversation_id: String, keep_last_n: usize, replace_with_summary: bool, summary_text: Option<String>` | `StripResult` |
+| Session Strip | `preview_strip` | `conversation_id: String, from_index: usize, to_index: usize` | `StripPreview` |
 | 对话分支 | `set_turn_active_version` | `conversation_id: String, turn_group: String, active_version: i32` | `()` |
 | 对话分支 | `get_turn_active_versions` | `conversation_id: String` | `Vec<TurnActiveVersion>` |
 | Contextual Retrieval | `set_contextual_retrieval` | `enabled: bool` | `()` |
@@ -1480,3 +1483,47 @@ invoke('delete_custom_model', { name: string }): Promise<void>
 - **参数**：`name` — 要删除的模型名称
 - **Pro 门控**：是（Free 返回 `PRO_REQUIRED` 错误）
 - **关联**：REQ-VEC-014 AC-4/AC-7
+
+### 2.54 RAG 评估指标系统（4 个，REQ-RAG-045）
+
+#### 2.54.1 evaluate_rag_response
+
+```typescript
+invoke('evaluate_rag_response', { sample: RagEvalSample }): Promise<RagEvalMetric[]>
+```
+
+- **行为**：评估单个 RAG 响应质量。输入评估样本（query + answer + contexts + 可选 ground_truth / relevant_indices / relevance_scores / query_embedding / context_embeddings），返回各指标分数。纯 Rust 指标（HitRate / MRR / NDCG / KeywordOverlap / ContextSimilarity）零 LLM 调用，LLM-as-Judge 指标（Faithfulness / AnswerRelevance / ContextPrecision / ContextRecall）使用已配置的 LLM Provider。LLM 指标失败时优雅降级（跳过该指标）。
+- **参数**：`sample: RagEvalSample` — 评估样本
+- **返回**：`RagEvalMetric[]` — 指标分数数组，每个 `{ metric_type: string, score: number, details: string | null }`
+- **关联**：REQ-RAG-045 AC-1~AC-10
+
+#### 2.54.2 evaluate_rag_batch
+
+```typescript
+invoke('evaluate_rag_batch', { samples: RagEvalSample[] }): Promise<RagEvalReport>
+```
+
+- **行为**：批量评估多个 RAG 响应，返回聚合报告（各指标平均值 + 每样本明细）。
+- **参数**：`samples: RagEvalSample[]` — 评估样本数组
+- **返回**：`RagEvalReport` — `{ sample_count: number, aggregate_metrics: RagEvalMetric[], per_sample_metrics: RagEvalMetric[][] }`
+- **关联**：REQ-RAG-045 AC-10
+
+#### 2.54.3 get_rag_eval_settings
+
+```typescript
+invoke('get_rag_eval_settings'): Promise<RagEvalSettings>
+```
+
+- **行为**：从 settings 表读取 RAG 评估配置（`rag.eval_settings` 键），反序列化为 `RagEvalSettings`。无配置时返回默认值。
+- **返回**：`RagEvalSettings` — `{ enable_faithfulness: bool, enable_answer_relevance: bool, enable_context_precision: bool, enable_context_recall: bool, enable_retrieval_metrics: bool, enable_embedding_metrics: bool, enable_keyword_overlap: bool }`
+- **关联**：REQ-RAG-045
+
+#### 2.54.4 set_rag_eval_settings
+
+```typescript
+invoke('set_rag_eval_settings', { settings: RagEvalSettings }): Promise<void>
+```
+
+- **行为**：将 RAG 评估配置序列化为 JSON 并存储到 settings 表（`rag.eval_settings` 键）。
+- **参数**：`settings: RagEvalSettings` — 评估配置
+- **关联**：REQ-RAG-045

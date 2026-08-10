@@ -756,3 +756,5 @@ finalizeStream()
 | `sidebar.js` | `toggleSidebar()` / `openFlyout()` / `initSidebar()` | 侧栏折叠与交互 |
 | `utils.js` | `formatBytes()` / `debounce()` / `throttle()` | 通用工具函数 |
 | `error-detail.js` | `showErrorDetail()` | 错误详情面板（可展开的错误信息） |
+| `rag-eval.js` | `showRagEvalModal()` / `evaluateBatch()` / `renderRagEvalSettings()` | RAG 评估指标面板（RAGAS 风格，REQ-RAG-045） |
+| `session-strip.js` | `openStripPanel()` / `closeStripPanel()` / `initSessionStrip()` | Session Strip 会话条带化面板（REQ-RAG-046，DS4 DS-03 借鉴） |

@@ -90,6 +90,9 @@ pub mod prompt_compressor;
 pub mod proposition_splitter;
 /// RAG 质量门控系统（REQ-RAG-028）：检索后评估结果质量，低质量时触发降级策略。
 pub mod quality_gate;
+/// RAG 评估指标系统（REQ-RAG-045，RAGAS 风格）：
+/// 纯 Rust 检索指标 + LLM-as-Judge 生成指标。
+pub mod rag_eval;
 /// 自进化检索记忆（REQ-PERF-012）：记录检索方法效果，自适应选择最佳策略。
 pub mod retrieval_memory;
 /// 检索质量门控（借鉴 OpenMontage slideshow_risk.py）：多维度评分 + verdict 系统。
@@ -105,6 +108,8 @@ pub mod semantic_splitter;
 /// Session Run Coordinator（B06 会话运行协调器）：
 /// 同会话串行 / 跨会话并发 / wake 合并 / interrupt 中断。
 pub mod session_coordinator;
+/// Session Strip（会话条带化，REQ-RAG-046）：借鉴 ds4 /strip 命令，移除消息减少上下文消耗。
+pub mod session_strip;
 /// Skill 系统发现（B09 Skill Discovery，REQ-ARCH-010）：
 /// 从 Markdown 文件的 YAML frontmatter 解析技能信息。
 pub mod skill;
@@ -373,6 +378,25 @@ pub trait Storage: Send + Sync {
     /// 默认实现委托 `list_messages` 后计数；生产实现应覆盖为 SQL COUNT。
     async fn count_messages(&self, conversation_id: &str) -> anyhow::Result<usize> {
         Ok(self.list_messages(conversation_id).await?.len())
+    }
+
+    /// 按 ID 批量删除消息（REQ-RAG-046 Session Strip）。
+    ///
+    /// 从指定会话中删除消息 ID 列表对应的消息行。
+    /// 默认实现为空操作（内存存储）；SqliteStorage 覆盖为 DELETE IN (?)。
+    ///
+    /// # 参数
+    /// - `conversation_id`：会话 ID（安全约束：只删除该会话的消息）
+    /// - `message_ids`：要删除的消息 ID 列表
+    ///
+    /// # 返回
+    /// 实际删除的行数。
+    async fn delete_messages_by_ids(
+        &self,
+        _conversation_id: &str,
+        _message_ids: &[String],
+    ) -> anyhow::Result<usize> {
+        Ok(0)
     }
 
     /// 设置轮次的活跃版本号（分支切换状态持久化）。
@@ -2107,11 +2131,15 @@ mod proposition_splitter_tests;
 #[cfg(test)]
 mod quality_gate_tests;
 #[cfg(test)]
+mod rag_eval_tests;
+#[cfg(test)]
 mod retrieval_memory_tests;
 #[cfg(test)]
 mod retriever_tests;
 #[cfg(test)]
 mod security_tests;
+#[cfg(test)]
+mod session_strip_tests;
 #[cfg(test)]
 mod speculative_rag_tests;
 #[cfg(test)]

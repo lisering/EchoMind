@@ -1039,5 +1039,24 @@
     "error": "Failed to load branch tree",
     "switch": "Switch to this branch",
     "version": "Version"
+  },
+  "session_strip": {
+    "title": "Session Strip",
+    "msg_count": "messages in this conversation. Stripping removes messages to reduce context.",
+    "tab_range": "Range",
+    "tab_recent": "Keep Recent",
+    "from": "From",
+    "to": "To",
+    "keep_last": "Keep last",
+    "messages": "messages",
+    "preview": "Preview",
+    "replace_summary": "Replace with summary",
+    "summary_placeholder": "Summary text...",
+    "execute": "Strip Messages",
+    "confirm_title": "Confirm Strip",
+    "confirm_msg": "Are you sure you want to strip messages? This cannot be undone.",
+    "confirm_btn": "Strip",
+    "cancel_btn": "Cancel",
+    "tooltip": "Strip messages"
   }
 }

@@ -1984,6 +1984,76 @@ created_at: m.created_at || 0,
 }
 
 // ============================================================
+// Session Strip 会话条带化（REQ-RAG-046）
+// ============================================================
+
+case 'strip_messages': {
+const convId = args.conversation_id;
+const fromIdx = args.from_index || 0;
+const toIdx = args.to_index || 0;
+const convMessages = (state.messages || []).filter(m => m.conversation_id === convId);
+const stripped = convMessages.slice(fromIdx, toIdx + 1);
+const strippedIds = stripped.map(m => m.id).filter(Boolean);
+state.messages = (state.messages || []).filter(m => !strippedIds.includes(m.id));
+let summaryInserted = false;
+if (args.replace_with_summary && args.summary_text) {
+state.messages.push({
+id: 'strip-summary-' + Date.now(),
+conversation_id: convId,
+role: 'system',
+content: '[摘要] ' + args.summary_text,
+created_at: Date.now(),
+});
+summaryInserted = true;
+}
+return {
+stripped_count: stripped.length,
+summary_inserted: summaryInserted,
+stripped_message_ids: strippedIds,
+estimated_tokens_saved: stripped.reduce((sum, m) => sum + Math.floor((m.content || '').length / 4), 0),
+};
+}
+
+case 'strip_keeping_recent': {
+const convId = args.conversation_id;
+const keepN = args.keep_last_n || 0;
+const convMessages = (state.messages || []).filter(m => m.conversation_id === convId);
+const stripped = convMessages.slice(0, convMessages.length - keepN);
+const strippedIds = stripped.map(m => m.id).filter(Boolean);
+state.messages = (state.messages || []).filter(m => !strippedIds.includes(m.id));
+let summaryInserted = false;
+if (args.replace_with_summary && args.summary_text) {
+state.messages.push({
+id: 'strip-summary-' + Date.now(),
+conversation_id: convId,
+role: 'system',
+content: '[摘要] ' + args.summary_text,
+created_at: Date.now(),
+});
+summaryInserted = true;
+}
+return {
+stripped_count: stripped.length,
+summary_inserted: summaryInserted,
+stripped_message_ids: strippedIds,
+estimated_tokens_saved: stripped.reduce((sum, m) => sum + Math.floor((m.content || '').length / 4), 0),
+};
+}
+
+case 'preview_strip': {
+const convId = args.conversation_id;
+const fromIdx = args.from_index || 0;
+const toIdx = args.to_index || 0;
+const convMessages = (state.messages || []).filter(m => m.conversation_id === convId);
+const previewMessages = convMessages.slice(fromIdx, toIdx + 1);
+return {
+messages: previewMessages,
+total_messages: convMessages.length,
+estimated_tokens_saved: previewMessages.reduce((sum, m) => sum + Math.floor((m.content || '').length / 4), 0),
+};
+}
+
+// ============================================================
 // 持久化记忆系统（REQ-RAG-033）
 // ============================================================
       case 'set_memory_enabled':
@@ -2516,6 +2586,43 @@ case 'get_budget_stats':
 
 case 'set_budget_limit':
     state.budgetDailyLimit = args.daily_limit_usd || 0;
+    return null;
+
+// ============================================================
+// RAG 评估指标（REQ-RAG-045，RAGAS 风格）
+// ============================================================
+
+case 'evaluate_rag_response':
+    return [
+        { metric_type: 'faithfulness', score: 0.85, details: null },
+        { metric_type: 'answer_relevance', score: 0.9, details: null },
+        { metric_type: 'context_precision', score: 0.75, details: null },
+        { metric_type: 'keyword_overlap', score: 0.8, details: null },
+    ];
+
+case 'evaluate_rag_batch':
+    return {
+        sample_count: args.samples ? args.samples.length : 0,
+        aggregate_metrics: [
+            { metric_type: 'faithfulness', score: 0.82, details: null },
+            { metric_type: 'answer_relevance', score: 0.88, details: null },
+        ],
+        per_sample_metrics: [],
+    };
+
+case 'get_rag_eval_settings':
+    return state.ragEvalSettings || {
+        enable_faithfulness: true,
+        enable_answer_relevance: true,
+        enable_context_precision: true,
+        enable_context_recall: false,
+        enable_retrieval_metrics: true,
+        enable_embedding_metrics: false,
+        enable_keyword_overlap: true,
+    };
+
+case 'set_rag_eval_settings':
+    state.ragEvalSettings = args.settings;
     return null;
 
 // ============================================================

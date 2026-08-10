@@ -21,6 +21,7 @@ import { renderSecuritySettings } from './security.js';
 import { showConfirmDialog } from './confirm-dialog.js';
 import { createFocusTrap } from './focus-trap.js';
 import { renderPerfSettings } from './perf-settings.js';
+import { renderRagEvalSettings } from './rag-eval.js';
 import { renderMemorySettings } from './memory-panel.js';
 import { resetCustomTemplates, loadCustomTemplates } from './slash-commands.js';
 import { pushPanel, removePanel } from './panel-stack.js';
@@ -150,6 +151,17 @@ if (coordinatorToggleEl) {
     if (perfContainer) {
       perfContainer.innerHTML = '';
       renderPerfSettings(perfContainer);
+    }
+
+    // 渲染 RAG 评估指标设置区块（REQ-RAG-045）
+    const evalContainer = $('ragEvalSettingsContainer') || perfContainer;
+    if (evalContainer) {
+      const evalDiv = document.createElement('div');
+      evalDiv.id = 'ragEvalSettingsContainer';
+      if (!$('ragEvalSettingsContainer')) {
+        evalContainer.appendChild(evalDiv);
+      }
+      renderRagEvalSettings($('ragEvalSettingsContainer'));
     }
 
     // 渲染自定义快捷指令模板区块（S56）

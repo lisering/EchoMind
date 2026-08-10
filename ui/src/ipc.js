@@ -93,6 +93,15 @@ export const convApi = {
   exportMarkdown: (conversationId) => invoke('export_conversation_markdown', { conversationId }),
   /** 保存文本文件到指定路径（REQ-EXP-001 辅助）*/
   saveTextFile: (path, content) => invoke('save_text_file', { path, content }),
+  /** Session Strip: strip messages by index range (REQ-RAG-046) */
+  stripMessages: (conversationId, fromIndex, toIndex, replaceWithSummary, summaryText) =>
+    invoke('strip_messages', { conversationId, fromIndex, toIndex, replaceWithSummary, summaryText }),
+  /** Session Strip: keep last N messages (REQ-RAG-046) */
+  stripKeepingRecent: (conversationId, keepLastN, replaceWithSummary, summaryText) =>
+    invoke('strip_keeping_recent', { conversationId, keepLastN, replaceWithSummary, summaryText }),
+  /** Session Strip: preview messages to be stripped (REQ-RAG-046) */
+  previewStrip: (conversationId, fromIndex, toIndex) =>
+    invoke('preview_strip', { conversationId, fromIndex, toIndex }),
 };
 
 /** 文档相关 */

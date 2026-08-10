@@ -4,7 +4,7 @@
 >
 > 每次 session 结束时**必须更新**此文件，确保反映最新状态。
 >
-> **最后更新**: 2026-08-10 | **更新人**: AI Agent (文档全面同步 + DS4/OpenMontage 借鉴实现 + 测试基线更新)
+> **最后更新**: 2026-08-10 | **更新人**: AI Agent (DS4 DS-03 Session Strip 借鉴实施)
 
 ---
 
@@ -12,7 +12,7 @@
 
 | 指标 | 数值 | 备注 |
 |---|---|---|
-| Rust 单元+集成测试 (Free) | **1166 passed**, 0 failed, 28 ignored | `cargo test`（含 DS-01 27 + DS-02 14 + OpenMontage 65 新测试）|
+| Rust 单元+集成测试 (Free) | **1224 passed**, 0 failed, 28 ignored | `cargo test`（含 DS-01 27 + DS-02 14 + OpenMontage 65 + DS-03 13 新测试）|
 | Rust 单元+集成测试 (Pro) | ~1135 passed, 0 failed, 44 ignored | `cargo test --features pro`（预估，含 Free 新测试 + Pro 专属测试）|
 | Clippy (Free) | 零警告 | `cargo clippy --all-targets -- -D warnings` |
 | Clippy (Pro) | 零警告 | `cargo clippy --all-targets --features pro -- -D warnings`（6m39s）|
@@ -21,11 +21,11 @@
 | UI 类型检查 | 0 errors | `npx tsc --noEmit` |
 | E2E 桥接测试 (Playwright) | 1019 passed, 10 skipped, 0 failed | 全量通过 ✅ |
 | 版本号 | 1.4.0 | 全部 7 crate + tauri.conf.json（v1.4.0 发布升级）|
-| IPC 命令数 | **187 Free / 199 Pro** | ✅ 文档已同步（含 12 个 Pro 门控）|
+| IPC 命令数 | **194 Free / 206 Pro** | ✅ 文档已同步（含 12 个 Pro 门控 + 3 个 Session Strip）|
 | ADR 数 | 13 | 新增 ADR-013-knowledge-graph |
 | 供应链安全 | cargo audit + cargo deny | `deny.toml` 配置 |
-| 前端构建行数 | 13582 | esbuild 打包 IIFE 单文件 |
-| 前端模块数 | 54 | `ui/src/*.js`（含 zindex/panel-stack/input-keymap/input-history/focus-trap 等）|
+| 前端构建行数 | 13890 | esbuild 打包 IIFE 单文件 |
+| 前端模块数 | 56 | `ui/src/*.js`（含 zindex/panel-stack/input-keymap/input-history/focus-trap/session-strip 等）|
 | Rust Edition | 2024 (≥1.85) | 原生 `async fn` in trait |
 
 ---
@@ -368,8 +368,8 @@ cd e2e-tests && npm run test:bridge # Playwright E2E
 | OpenCode | ✅ 全部完成 (B01-B14) | System Context / Epoch / 压缩模板 / Prompt Caching / Admission / Coordinator / Tool Bounding / Skill / 多协议 / Permission |
 | 跨 Phase 整合 | ✅ 全部完成 (S67+S68+S71) | Burst Buffer / Sweeper / Shadow 筛查 |
 | OpenMontage | ✅ 全部完成 | MMR 多样性重排 / 检索质量门控 / Scored Selector / Pipeline Checkpoint / Event Stream |
-| DS4 (DwarfStar) | ✅ DS-01 + DS-02 完成 | Prompt Prefix 磁盘缓存 / 上下文压缩原文尾部保留 |
-| DS4 剩余 | 📋 待定 (DS-03~DS-07) | Session Strip / 功率管理 / Tool Call 续接 / Radix Tree / SSD 流式 |
+| DS4 (DwarfStar) | ✅ DS-01 + DS-02 + DS-03 完成 | Prompt Prefix 磁盘缓存 / 上下文压缩原文尾部保留 / Session Strip 会话条带化 |
+| DS4 剩余 | 📋 待定 (DS-04~DS-07) | 功率管理 / Tool Call 续接 / Radix Tree / SSD 流式 |
 
 ---
 

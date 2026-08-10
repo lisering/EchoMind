@@ -51,6 +51,7 @@ import { openSymbolSearch, closeSymbolSearch, initSymbolSearch } from './symbol-
 import { openWorkflowPanel, closeWorkflowPanel, initWorkflowPanel } from './workflow-panel.js';
 import { initVoiceInput, stopAllTTS } from './voice-input.js';
 import { initExportButtons } from './export.js';
+import { initSessionStrip } from './session-strip.js';
 import { loadCustomTemplates } from './slash-commands.js';
 import { convApi } from './ipc.js';
 import { createInputKeyHandler } from './input-keymap.js';
@@ -1114,6 +1115,9 @@ initVoiceInput();
 
 // 初始化 PDF 导出按钮（REQ-EXP-005）
 initExportButtons();
+
+// 初始化 Session Strip（REQ-RAG-046）
+initSessionStrip();
 
 // 注册对话流事件监听
 initChatEventListeners({

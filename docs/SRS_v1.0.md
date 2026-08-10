@@ -1766,6 +1766,41 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
   - AC-5：跨会话（重新打开会话）可恢复 Todo 列表（TC-TODO-005）。
 - 契约：`session_todos` 表（id/conversation_id/content/status/priority/position/created_at + ON DELETE CASCADE）+ `SessionTodo` 模型 + `TodoStatus` / `TodoPriority` 枚举 + Storage trait 5 方法 + 5 IPC 命令 ｜ 关联测试：TC-TODO-001~005
 
+#### REQ-RAG-045 RAG 评估指标系统（RAGAS 风格）
+- 优先级：P2 ｜ 状态：Implemented ｜ 依赖：REQ-RAG-001
+- 描述：借鉴 RAGAS（Retrieval-Augmented Generation Assessment）框架，实现纯 Rust + LLM-as-Judge 双层 RAG 评估指标体系。纯 Rust 检索指标（HitRate / MRR / NDCG / ContextSimilarity / KeywordOverlap）零 LLM 调用，LLM-as-Judge 生成指标（Faithfulness / AnswerRelevance / ContextPrecision / ContextRecall）使用 `LLMProvider::one_shot` 方法。零新增依赖（复用 LLMProvider + echomind_models）。
+- 验收标准：
+  - AC-1：Hit Rate 在有相关文档时返回 1.0，无相关文档时返回 0.0（TC-EVAL-001~003）。
+  - AC-2：MRR 第一个结果相关时返回 1.0，第 n 个相关时返回 1/n（TC-EVAL-004~006）。
+  - AC-3：NDCG 完美排序（降序）返回 1.0，逆序得分低于正序（TC-EVAL-007~010）。
+  - AC-4：Keyword Overlap 全匹配返回 1.0，无匹配返回 0.0，支持中文分词（TC-EVAL-011~014）。
+  - AC-5：Context Embedding Similarity 相同向量返回 1.0，正交向量返回 0.5（TC-EVAL-015~017）。
+  - AC-6：Faithfulness LLM 返回 N/M 声明可推导 → 分数 M/N，空输入返回 0.0，Provider 不支持 one_shot 返回 0.0（TC-EVAL-018~022）。
+  - AC-7：Answer Relevance LLM 评分 0-10 → 归一化 [0, 1]，空输入返回 0.0（TC-EVAL-023~025）。
+  - AC-8：Context Precision LLM 返回相关性数组 → 加权精度，全相关返回 1.0（TC-EVAL-026~028）。
+  - AC-9：Context Recall LLM 返回 N/M 声明可推导 → 分数 M/N，无 GT 返回 0.0（TC-EVAL-029~030）。
+  - AC-10：RagEvaluator LLM 失败时优雅降级（跳过 LLM 指标，保留 Rust 指标），批量评估返回正确聚合报告（TC-EVAL-031~036）。
+  - AC-11：数据模型序列化往返一致，分数裁剪到 [0, 1]，指标类型标记正确（TC-EVAL-037~045）。
+- 契约：`crates/models/src/lib.rs`（`RagMetricType` / `RagEvalSample` / `RagEvalMetric` / `RagEvalReport` / `RagEvalSettings` 模型）+ `crates/core/src/rag_eval.rs`（`RagEvaluator` + 5 纯 Rust 指标函数 + 4 LLM-as-Judge 指标函数）+ 4 IPC 命令 ｜ 关联测试：TC-EVAL-001~045
+
+#### REQ-RAG-046 Session Strip（会话条带化）
+- 优先级：P2 ｜ 状态：Implemented ｜ 依赖：REQ-RAG-001
+- 描述：借鉴 ds4 (DwarfStar) `/strip` 命令，实现会话消息条带化操作。允许用户从对话历史中移除指定范围的消息，可选地用摘要 system 消息替代，以减少上下文窗口消耗。支持三种操作模式：按索引范围 strip、保留最近 N 条消息 strip、预览 strip 效果。零新增依赖（复用 Storage trait + echomind_models）。
+- 验收标准：
+  - AC-1：`strip_range()` 按 `[from_index, to_index]` 闭区间删除指定消息，返回删除数量和估算 token 节省（TC-STRIP-001）。
+  - AC-2：`strip_range()` 的 `replace_with_summary=true` 时插入一条 system 消息作为摘要替代（TC-STRIP-002）。
+  - AC-3：`strip_keeping_recent()` 保留最后 N 条消息，删除其余全部消息（TC-STRIP-003）。
+  - AC-4：`strip_keeping_recent()` 的 `keep_last_n=0` 时删除全部消息（TC-STRIP-004）。
+  - AC-5：`preview()` 返回将被 strip 的消息列表和 token 估算，不执行实际删除（TC-STRIP-005）。
+  - AC-6：索引越界时返回 `Err`（`from_index > to_index` 或 `to_index >= total_messages`）（TC-STRIP-006）。
+  - AC-7：空对话 strip 操作返回 `Ok` 且 `stripped_count=0`（TC-STRIP-007）。
+  - AC-8：`estimate_tokens()` 使用 4 字符 ≈ 1 token 的粗略估算（TC-STRIP-008）。
+  - AC-9：`StripConfig` / `StripResult` / `StripPreview` 数据模型 serde 序列化往返一致（TC-STRIP-009~010）。
+  - AC-10：`delete_messages_by_ids()` Storage trait 默认空操作，SqliteStorage 实现 DELETE IN (?) 批量删除（TC-STRIP-011）。
+  - AC-11：strip 后 `list_messages()` 不包含已删除的消息（TC-STRIP-012）。
+  - AC-12：摘要 system 消息的 role 为 "system"，content 为用户提供的摘要文本（TC-STRIP-013）。
+- 契约：`crates/models/src/lib.rs`（`StripConfig` / `StripResult` / `StripPreview` 模型）+ `crates/core/src/session_strip.rs`（`SessionStripper` + `strip_range()` / `strip_keeping_recent()` / `preview()` / `estimate_tokens()`）+ `crates/core/src/lib.rs`（Storage trait `delete_messages_by_ids` 方法）+ 3 IPC 命令 ｜ 关联测试：TC-STRIP-001~013
+
 #### REQ-ARCH-010 Skill 系统发现（技能发现）
 - 优先级：P2 ｜ 状态：Implemented ｜ 依赖：REQ-ARCH-000
 - 描述：借鉴 OpenCode `skill.ts`，实现 Markdown 文件驱动的技能发现。从本地目录扫描 `.md` 文件，解析 YAML frontmatter 中的 `name` / `description` / `slash` 字段，提取 Markdown 正文作为技能内容。纯函数 `parse_skill()` 不依赖 I/O，可独立单元测试。`discover_from_dir()` 使用 `tokio::fs` 异步扫描目录。无新依赖（复用 serde / serde_json / tokio）。
@@ -4190,3 +4225,5 @@ function hideSkeleton() {
 | v9.0.0 | 2026-08-09 | **OpenMontage 借鉴实现（MMR 多样性重排 + 检索质量门控 + Scored Selector + Pipeline Checkpoint + Event Stream）**：(1) **core/src/mmr_diversifier.rs** — MMR 多样性重排（借鉴 corpus.py），16 个 TDD 测试；(2) **core/src/retrieval_quality_gate.rs** — 检索质量门控 5 维度评分（借鉴 slideshow_risk.py），10 个 TDD 测试；(3) **core/src/scored_selector.rs** — LLM Provider 7 维度加权评分选择（借鉴 scoring.py），12 个 TDD 测试；(4) **HybridRetriever 集成 MMR + Quality Gate** — RRF/重排序后插入 mmr_diversify()，检索后 score_retrieval_quality() 输出 tracing 日志；(5) **LlmRouter 集成 Scored Selector** — 新增 resolve_scored() 方法 + last_provider 追踪 + continuity 评分；(6) **core/src/pipeline_checkpoint.rs** — 阶段门控（借鉴 checkpoint.py），15 个 TDD 测试；(7) **core/src/event_stream.rs** — 零负担自动埋点（借鉴 events.py），JSONL 格式 + 逐字符 JSON 转义/反转义 + 容错读取，12 个 TDD 测试。总计 65 个新测试。零新增依赖。 | Dev |
 | v9.1.0 | 2026-08-09 | **DS4 (DwarfStar) 借鉴实现（DS-01 Prompt Prefix 磁盘缓存 + DS-02 上下文压缩原文尾部保留）**：(1) **DS-01**: `infra/src/prompt_cache.rs` — KPC 文件格式(32字节头+JSON payload) + SHA1 匹配 + LRU 驱逐评分公式 `(effective_hits+1)*tokens/file_size*anchor_factor*exp2(-elapsed/6h)` + 边界裁剪(trim 32, align 2048) + 原子写入(.tmp→rename) + 预算管理(1% headroom)。27 个 TDD 测试。新增 `sha1 = "0.10"` 依赖。(2) **DS-02**: `compact/src/lib.rs` 新增 `VerbatimTailConfig` + `needs_verbatim_tail_compaction()`（双触发: 软85%+硬8192）+ `compact_with_verbatim_tail()`（摘要+原文尾部）+ `align_to_user_boundary()`。14 个 TDD 测试 TC-DS02-001~014。压缩后历史 = [摘要 system 消息] + [原文尾部消息]；LLM 失败降级为截断提示。 | Dev |
 | v9.2.0 | 2026-08-10 | **文档全面同步 + 测试基线更新**：(1) 全量 `cargo test --workspace` 验证通过，Free 测试基线从 1059 更新至 **1166 passed**（含 DS-01 的 27 个 prompt_cache 测试 + DS-02 的 14 个 verbatim_tail 测试 + OpenMontage 的 65 个新测试）；(2) IPC 命令文档同步：`docs/api/ipc-commands.md` 更新命令数量统计为 **187 Free / 199 Pro**；(3) 代码契约文档更新：`docs/api/code-contracts.md` 新增 §4.11 DS4 借鉴契约（PromptCache trait + VerbatimTailConfig）；(4) 数据库 Schema 文档已在 v3 全量同步 23 张表；(5) 前端模块文档已在 v2.6 全量同步 56 个 JS 模块；(6) 设置键文档已在 v9 逐条核对，修复 `rag.contextual_retrieval` 重复条目；(7) 软件资产文档更新：新增 Prompt Prefix 磁盘缓存 / 上下文压缩增强 / OpenMontage 借鉴功能描述；(8) `docs/sessions/CURRENT_STATE.md` 更新测试基线和 IPC 命令数。 | Dev |
+| v9.3.0 | 2026-08-10 | **REQ-RAG-045 RAG 评估指标系统（RAGAS 风格）**：(1) **models/src/lib.rs** 新增 `RagMetricType` 枚举（9 种指标：Faithfulness / AnswerRelevance / ContextPrecision / ContextRecall / HitRate / MRR / NDCG / ContextSimilarity / KeywordOverlap）+ `RagEvalSample`（评估样本）+ `RagEvalMetric`（指标分数）+ `RagEvalReport`（聚合报告）+ `RagEvalSettings`（评估配置）数据模型；(2) **core/src/rag_eval.rs** 新建模块：5 个纯 Rust 检索指标函数（`hit_rate` / `mrr` / `ndcg` / `keyword_overlap` / `context_embedding_similarity`，零 LLM 调用）+ 4 个 LLM-as-Judge 生成指标函数（`faithfulness` / `answer_relevance` / `context_precision` / `context_recall`，使用 `LLMProvider::one_shot`）+ `RagEvaluator` 主评估器（选择性计算 + LLM 失败优雅降级 + 批量评估）；(3) **core/src/rag_eval_tests.rs** 45 个 TDD 测试 TC-EVAL-001~045；(4) **commands/rag_eval.rs** 4 个 IPC 命令（`evaluate_rag_response` / `evaluate_rag_batch` / `get_rag_eval_settings` / `set_rag_eval_settings`）；(5) **ui/src/rag-eval.js** 前端评估面板（模态框 + 指标条 + 设置开关）；(6) **tauri-stub.js** 4 个 mock。零新增依赖（复用 `LLMProvider::one_shot` + `echomind_models`）。借鉴 RAGAS 框架。 | Dev |
+| v9.4.0 | 2026-08-10 | **REQ-RAG-046 Session Strip（会话条带化，DS4 DS-03 借鉴）**：(1) **models/src/lib.rs** 新增 `StripConfig`（from_index/to_index/replace_with_summary/summary_text）+ `StripResult`（stripped_count/summary_inserted/stripped_message_ids/estimated_tokens_saved）+ `StripPreview`（messages/total_messages/estimated_tokens_saved）数据模型；(2) **core/src/session_strip.rs** 新建模块：`SessionStripper` 结构体 + `strip_range()`（按索引范围删除消息）+ `strip_keeping_recent()`（保留最后 N 条）+ `preview()`（预览不执行）+ `estimate_tokens()`（4 字符≈1 token）+ `validate_range()` 范围校验；(3) **core/src/lib.rs** Storage trait 新增 `delete_messages_by_ids()` 默认空操作方法；(4) **infra/src/sqlite_storage.rs** 实现 `delete_messages_by_ids()`（DELETE WHERE conversation_id=? AND id IN (?)）；(5) **core/src/session_strip_tests.rs** 13 个 TDD 测试 TC-STRIP-001~013；(6) **commands/conversation.rs** 3 个 IPC 命令（`strip_messages` / `strip_keeping_recent` / `preview_strip`）；(7) **lib.rs** 注册 3 命令；(8) **tauri-stub.js** 3 个 mock。零新增依赖。借鉴 ds4 (DwarfStar) `/strip` 命令。 | Dev |
