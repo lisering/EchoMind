@@ -699,3 +699,45 @@ pub async fn set_budget_limit_inner(daily_limit_usd: f64, state: &AppState) -> R
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+// ============================================================================
+// S4 v1.6: 窗口关闭行为 — 最小化到托盘设置（REQ-WIN-003）
+// ============================================================================
+
+/// 获取「关闭窗口时最小化到托盘」设置（REQ-WIN-003 v1.6）。
+///
+/// 默认关闭（false）。开启后，点击窗口关闭按钮将隐藏窗口而非退出应用。
+#[tauri::command]
+pub async fn get_close_to_tray(state: State<'_, AppState>) -> Result<bool, String> {
+    get_close_to_tray_inner(state.inner()).await
+}
+
+/// 关闭到托盘设置读取逻辑（命令与集成测试复用）。
+pub async fn get_close_to_tray_inner(state: &AppState) -> Result<bool, String> {
+    let val = state
+        .storage
+        .get_setting("window.close_to_tray")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(val.is_some_and(|v| v == "true"))
+}
+
+/// 设置「关闭窗口时最小化到托盘」（REQ-WIN-003 v1.6）。
+///
+/// 持久化到 settings 表 `window.close_to_tray` 键。
+#[tauri::command]
+pub async fn set_close_to_tray(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    set_close_to_tray_inner(enabled, state.inner()).await
+}
+
+/// 关闭到托盘设置写入逻辑（命令与集成测试复用）。
+pub async fn set_close_to_tray_inner(enabled: bool, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .set_setting(
+            "window.close_to_tray",
+            if enabled { "true" } else { "false" },
+        )
+        .await
+        .map_err(|e| format!("{e:#}"))
+}

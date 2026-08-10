@@ -99,7 +99,22 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             // REQ-WIN-001：窗口关闭时保存位置/尺寸/最大化状态
-            if let WindowEvent::CloseRequested { .. } = event {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                // S4 v1.6：close-to-tray — 如果设置开启，阻止关闭并隐藏窗口
+                let state = window.app_handle().try_state::<AppState>();
+                if let Some(state) = state {
+                    let close_to_tray = tauri::async_runtime::block_on(
+                        state.storage.get_setting("window.close_to_tray"),
+                    )
+                    .ok()
+                    .flatten()
+                    .is_some_and(|v| v == "true");
+                    if close_to_tray {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        return;
+                    }
+                }
                 save_window_state(window);
             }
         })
@@ -344,6 +359,11 @@ pub fn run() {
             commands::filter_documents_by_tag,
             // KB 统计仪表盘（REQ-KB-003 v1.5）
             commands::get_kb_stats,
+            // S4 v1.6: 窗口关闭行为 — 最小化到托盘设置（REQ-WIN-003）
+            commands::get_close_to_tray,
+            commands::set_close_to_tray,
+            // S5 v1.6: 错误日志导出（REQ-ERR-005）
+            commands::export_error_logs,
             // Durable Prompt Admission（B05 持久化提示接纳）
             commands::admit_input,
             commands::promote_input,

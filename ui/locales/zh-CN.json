@@ -633,6 +633,7 @@
     "copy_doc_name": "复制文件名",
     "copy_chunk": "复制引用片段",
     "export_pdf": "导出为 PDF",
+    "export_html": "导出为 HTML",
     "reclassify_doc": "重分类文档",
     "reclassifying": "正在重分类…",
     "reclassify_success": "重分类完成"
@@ -1249,5 +1250,49 @@
     "privacy_pii": "PII 检测可自动识别和脱敏 8 类敏感信息（邮箱、电话、身份证、银行卡、IP、SSN、护照、国际电话）。",
     "privacy_audit": "审计日志使用防篡改哈希链。对审计日志的任何修改可通过链验证检测。",
     "privacy_noproxy": "应用程序不使用任何代理。所有网络连接均为直连。你可以在源代码中验证——每个 reqwest 客户端都使用 .no_proxy()。"
+  },
+  "date": {
+    "just_now": "刚刚",
+    "minutes_ago": "{n} 分钟前",
+    "hours_ago": "{n} 小时前",
+    "days_ago": "{n} 天前"
+  },
+  "export_html": {
+    "title": "导出为 HTML",
+    "success": "已导出为 HTML 文件",
+    "empty": "没有可导出的内容",
+    "no_conversation": "请先选择一个会话",
+    "no_document": "文档不存在",
+    "default_title": "EchoMind 导出",
+    "exported_at": "导出时间",
+    "footer": "由 EchoMind 生成"
+  },
+  "about": {
+    "title": "关于 EchoMind",
+    "version": "版本",
+    "build_date": "构建日期",
+    "tech_stack": "技术栈",
+    "tech_stack_desc": "Rust + Tauri v2 + fastembed ONNX + SQLite",
+    "license": "开源许可",
+    "license_desc": "EchoMind 是一款本地优先的 RAG 知识库应用，数据不出域，BYOK 买断制。",
+    "privacy_policy": "隐私政策",
+    "privacy_summary": "所有数据存储在本地设备。除你配置的 LLM API 调用外，不向任何服务器发送数据。",
+    "contact": "联系支持",
+    "copyright": "© 2026 EchoMind. 保留所有权利。",
+    "tab_about": "关于"
+  },
+  "window_settings": {
+    "close_to_tray": "关闭窗口时最小化到托盘",
+    "close_to_tray_desc": "开启后，点击关闭按钮将隐藏窗口而非退出应用",
+    "close_to_tray_on": "已开启最小化到托盘",
+    "close_to_tray_off": "已关闭最小化到托盘",
+    "section_title": "窗口管理"
+  },
+  "error_logs": {
+    "export": "导出错误日志",
+    "exporting": "正在导出错误日志…",
+    "exported": "错误日志已导出",
+    "empty": "暂无错误日志",
+    "title": "错误日志"
   }
 }

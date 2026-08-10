@@ -106,6 +106,42 @@ pub async fn export_logs_inner(
         .map_err(|e| format!("读取日志文件失败: {e:#}"))
 }
 
+/// 导出错误日志（REQ-ERR-005 v1.6）。
+///
+/// 读取最近 1000 行日志，过滤出 ERROR 级别的条目，返回为 JSON Lines 格式字符串。
+/// 每行一个 JSON 对象，包含时间戳、级别、目标模块、消息内容。
+/// 不包含用户文档内容或 API Key 明文。
+///
+/// # 返回
+///
+/// JSON Lines 格式字符串（每行一个 ERROR 级别日志条目）。无错误日志时返回空字符串。
+#[tauri::command]
+pub async fn export_error_logs(state: State<'_, AppState>) -> Result<String, String> {
+    export_error_logs_inner(state.inner()).await
+}
+
+/// 错误日志导出逻辑（命令与集成测试复用）。
+pub async fn export_error_logs_inner(state: &AppState) -> Result<String, String> {
+    let log_dir = state.logs_dir();
+
+    if !log_dir.exists() {
+        return Ok(String::new());
+    }
+
+    let logs = echomind_infra::local_logger::LocalLogger::read_logs_from_dir(&log_dir, 1000)
+        .map_err(|e| format!("读取日志文件失败: {e:#}"))?;
+
+    // 过滤 ERROR 级别日志行
+    // tracing JSON Lines 格式：{"timestamp":"...","level":"ERROR","target":"...","message":"..."}
+    let error_lines: String = logs
+        .lines()
+        .filter(|line| line.contains("\"level\":\"ERROR\"") || line.contains("\"level\":\"error\""))
+        .collect::<Vec<&str>>()
+        .join("\n");
+
+    Ok(error_lines)
+}
+
 /// 导出诊断信息（REQ-OBS-002）。
 ///
 /// 收集系统信息、应用版本、数据库规模、知识库规模、嵌入维度、
