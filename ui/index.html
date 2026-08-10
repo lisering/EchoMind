@@ -5313,6 +5313,7 @@
           embedModelApi: () => embedModelApi,
           importApi: () => importApi,
           invoke: () => invoke,
+          kbStatsApi: () => kbStatsApi,
           kvCacheApi: () => kvCacheApi,
           licenseApi: () => licenseApi,
           listen: () => listen,
@@ -5350,7 +5351,7 @@
           } catch (_) {
           }
         }
-        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, symbolApi, webSearchApi;
+        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, symbolApi, webSearchApi;
         var init_ipc = __esm({
           "ui/src/ipc.js"() {
             llmApi = {
@@ -5581,6 +5582,10 @@
             docExtApi = {
               /** 重新分类文档领域 */
               reclassify: (docId) => invoke("reclassify_document", { docId })
+            };
+            kbStatsApi = {
+              /** 获取知识库统计仪表盘数据 */
+              getStats: () => invoke("get_kb_stats")
             };
             symbolApi = {
               /** 搜索代码符号（全局搜索） */
@@ -17299,6 +17304,7 @@
           items.push(_item("copyDocName", t("ctx.copy_doc_name"), "", true));
           if (docId) {
             items.push(_separator());
+            items.push(_item("exportPdf", t("ctx.export_pdf", "\u5BFC\u51FA\u4E3A PDF"), "", true));
             items.push(_item("reclassifyDoc", t("ctx.reclassify_doc", "\u91CD\u5206\u7C7B\u6587\u6863"), "", true));
           }
           menu.innerHTML = items.join("");
@@ -17382,6 +17388,12 @@
                 toastError(t("chat.copy_failed"));
               }
             });
+            return;
+          }
+          if (action === "exportPdf") {
+            const docId = menu?.dataset.docId || "";
+            if (!docId) return;
+            await exportDocumentToPdf(docId);
             return;
           }
           if (action === "reclassifyDoc") {
@@ -19107,6 +19119,547 @@
           });
         }
       
+        // ui/src/keyboard-help.js
+        init_utils();
+        init_i18n();
+        var _created = false;
+        var _panelEl = null;
+        var SHORTCUT_GROUPS = [
+          {
+            titleKey: "keyboard_help.group_general",
+            shortcuts: [
+              { keys: ["\u2318", "K"], descKey: "keyboard_help.cmd_palette" },
+              { keys: ["\u2318", "N"], descKey: "keyboard_help.new_chat" },
+              { keys: ["\u2318", "J"], descKey: "keyboard_help.new_chat_alt" },
+              { keys: ["\u2318", "O"], descKey: "keyboard_help.import_files" },
+              { keys: ["\u2318", ","], descKey: "keyboard_help.settings" },
+              { keys: ["\u2318", "B"], descKey: "keyboard_help.toggle_sidebar" },
+              { keys: ["?"], descKey: "keyboard_help.show_help" }
+            ]
+          },
+          {
+            titleKey: "keyboard_help.group_chat",
+            shortcuts: [
+              { keys: ["Enter"], descKey: "keyboard_help.send_message" },
+              { keys: ["\u21E7", "Enter"], descKey: "keyboard_help.new_line" },
+              { keys: ["Esc"], descKey: "keyboard_help.stop_or_close" },
+              { keys: ["\u2318", "\u2191"], descKey: "keyboard_help.history_prev" },
+              { keys: ["\u2318", "\u2193"], descKey: "keyboard_help.history_next" }
+            ]
+          },
+          {
+            titleKey: "keyboard_help.group_search",
+            shortcuts: [
+              { keys: ["\u2191", "\u2193"], descKey: "keyboard_help.navigate_results" },
+              { keys: ["Enter"], descKey: "keyboard_help.select_result" },
+              { keys: ["Esc"], descKey: "keyboard_help.close_search" }
+            ]
+          },
+          {
+            titleKey: "keyboard_help.group_edit",
+            shortcuts: [
+              { keys: ["\u2318", "X"], descKey: "keyboard_help.cut" },
+              { keys: ["\u2318", "C"], descKey: "keyboard_help.copy" },
+              { keys: ["\u2318", "V"], descKey: "keyboard_help.paste" },
+              { keys: ["\u2318", "A"], descKey: "keyboard_help.select_all" }
+            ]
+          }
+        ];
+        function _ensurePanel() {
+          if (_created && _panelEl && _panelEl.isConnected) return _panelEl;
+          const overlay = document.createElement("div");
+          overlay.id = "keyboardHelpOverlay";
+          overlay.className = `fixed inset-0 bg-black/50 flex items-center justify-center ${zClass(Z_INDEX.PANEL_1)}`;
+          overlay.setAttribute("role", "dialog");
+          overlay.setAttribute("aria-modal", "true");
+          overlay.setAttribute("aria-labelledby", "keyboardHelpTitle");
+          const panel = document.createElement("div");
+          panel.className = "bg-surface-1 border border-line rounded-xl shadow-2xl w-[480px] max-h-[80vh] overflow-y-auto";
+          panel.setAttribute("role", "document");
+          const header = document.createElement("div");
+          header.className = "flex items-center justify-between px-6 py-4 border-b border-line sticky top-0 bg-surface-1";
+          const title = document.createElement("h2");
+          title.id = "keyboardHelpTitle";
+          title.className = "text-lg font-semibold text-text-primary";
+          title.textContent = t("keyboard_help.title");
+          const closeBtn = document.createElement("button");
+          closeBtn.className = "text-text-tertiary hover:text-text-primary transition-colors p-1 rounded";
+          closeBtn.setAttribute("aria-label", t("common.close"));
+          closeBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+          closeBtn.onclick = closeKeyboardHelp;
+          header.appendChild(title);
+          header.appendChild(closeBtn);
+          const body = document.createElement("div");
+          body.className = "px-6 py-4 space-y-6";
+          for (const group of SHORTCUT_GROUPS) {
+            const groupEl = document.createElement("div");
+            const groupTitle = document.createElement("h3");
+            groupTitle.className = "text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2";
+            groupTitle.textContent = t(group.titleKey);
+            groupEl.appendChild(groupTitle);
+            const list = document.createElement("div");
+            list.className = "space-y-1.5";
+            for (const sc of group.shortcuts) {
+              const row = document.createElement("div");
+              row.className = "flex items-center justify-between";
+              const desc = document.createElement("span");
+              desc.className = "text-sm text-text-secondary";
+              desc.textContent = t(sc.descKey);
+              const kbdContainer = document.createElement("div");
+              kbdContainer.className = "flex items-center gap-1";
+              for (const key of sc.keys) {
+                const kbd = document.createElement("kbd");
+                kbd.className = "px-2 py-0.5 text-xs font-mono bg-surface-3 border border-line rounded text-text-secondary";
+                kbd.textContent = key;
+                kbdContainer.appendChild(kbd);
+              }
+              row.appendChild(desc);
+              row.appendChild(kbdContainer);
+              list.appendChild(row);
+            }
+            groupEl.appendChild(list);
+            body.appendChild(groupEl);
+          }
+          const footer = document.createElement("div");
+          footer.className = "px-6 py-3 border-t border-line text-xs text-text-quaternary text-center";
+          footer.textContent = t("keyboard_help.footer_hint");
+          panel.appendChild(header);
+          panel.appendChild(body);
+          panel.appendChild(footer);
+          overlay.appendChild(panel);
+          overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) closeKeyboardHelp();
+          });
+          document.body.appendChild(overlay);
+          _panelEl = overlay;
+          _created = true;
+          return overlay;
+        }
+        function openKeyboardHelp() {
+          const overlay = _ensurePanel();
+          overlay.classList.remove("hidden");
+          const panel = overlay.querySelector('div[role="document"]');
+          if (panel) panel.focus();
+          pushPanel({ id: "keyboard-help", close: closeKeyboardHelp, element: overlay, label: "Keyboard Help" });
+        }
+        function closeKeyboardHelp() {
+          removePanel("keyboard-help");
+          if (_panelEl) {
+            _panelEl.classList.add("hidden");
+          }
+        }
+        function initKeyboardHelp() {
+          document.addEventListener("keydown", (e) => {
+            if (e.key === "?" && !_isInputFocused()) {
+              e.preventDefault();
+              openKeyboardHelp();
+            }
+          });
+        }
+        function _isInputFocused() {
+          const el = document.activeElement;
+          if (!el) return false;
+          const tag = el.tagName;
+          return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+        }
+      
+        // ui/src/error-recovery.js
+        init_toast();
+        init_i18n();
+        var ErrorKind = {
+          NETWORK: "network",
+          QUOTA: "quota",
+          AUTH: "auth",
+          NOT_FOUND: "not_found",
+          VALIDATION: "validation",
+          INTERNAL: "internal",
+          UNKNOWN: "unknown"
+        };
+        function classifyError2(err) {
+          const msg = typeof err === "string" ? err : err?.message || String(err || "");
+          const lower = msg.toLowerCase();
+          if (lower.includes("network") || lower.includes("fetch") || lower.includes("timeout") || lower.includes("econnrefused") || lower.includes("failed to fetch")) {
+            return ErrorKind.NETWORK;
+          }
+          if (lower.includes("quota") || lower.includes("limit") || lower.includes("plan")) {
+            return ErrorKind.QUOTA;
+          }
+          if (lower.includes("auth") || lower.includes("unauthorized") || lower.includes("401") || lower.includes("403") || lower.includes("api key")) {
+            return ErrorKind.AUTH;
+          }
+          if (lower.includes("not found") || lower.includes("404")) {
+            return ErrorKind.NOT_FOUND;
+          }
+          if (lower.includes("validation") || lower.includes("invalid") || lower.includes("400")) {
+            return ErrorKind.VALIDATION;
+          }
+          if (lower.includes("internal") || lower.includes("500") || lower.includes("panic")) {
+            return ErrorKind.INTERNAL;
+          }
+          return ErrorKind.UNKNOWN;
+        }
+        function friendlyErrorMessage(err) {
+          const kind = classifyError2(err);
+          const original = typeof err === "string" ? err : err?.message || String(err || "");
+          switch (kind) {
+            case ErrorKind.NETWORK:
+              return t("error_recovery.network", "Network error. Please check your connection and retry.");
+            case ErrorKind.QUOTA:
+              return t("error_recovery.quota", "Quota limit reached. Upgrade to Pro for more capacity.");
+            case ErrorKind.AUTH:
+              return t("error_recovery.auth", "Authentication failed. Please check your API key in Settings.");
+            case ErrorKind.NOT_FOUND:
+              return t("error_recovery.not_found", "Resource not found. It may have been deleted.");
+            case ErrorKind.VALIDATION:
+              return t("error_recovery.validation", "Invalid input. Please check your data.");
+            case ErrorKind.INTERNAL:
+              return t("error_recovery.internal", "Internal error. Retrying\u2026");
+            default:
+              return original || t("error_recovery.unknown", "An unexpected error occurred.");
+          }
+        }
+        var _errorBoundaryInitialized = false;
+        var _uncaughtCount = 0;
+        function initErrorBoundary() {
+          if (_errorBoundaryInitialized) return;
+          _errorBoundaryInitialized = true;
+          window.addEventListener("error", (event) => {
+            _uncaughtCount++;
+            const err = event.error || event.message || "Unknown error";
+            const kind = classifyError2(err);
+            if (kind === ErrorKind.NETWORK) {
+              toast(friendlyErrorMessage(err), "error");
+            } else {
+              console.error("[ErrorBoundary]", err);
+            }
+          });
+          window.addEventListener("unhandledrejection", (event) => {
+            _uncaughtCount++;
+            const err = event.reason || "Unhandled rejection";
+            const kind = classifyError2(err);
+            if (kind === ErrorKind.NETWORK) {
+              toast(friendlyErrorMessage(err), "error");
+              event.preventDefault?.();
+            } else {
+              console.error("[ErrorBoundary] unhandledrejection:", err);
+            }
+          });
+        }
+      
+        // ui/src/kb-stats.js
+        init_utils();
+        init_ipc();
+        init_i18n();
+        init_toast();
+        var _created2 = false;
+        var _panelEl2 = null;
+        function formatBytes2(bytes) {
+          if (bytes === 0) return "0 B";
+          const units = ["B", "KB", "MB", "GB", "TB"];
+          const i = Math.floor(Math.log(bytes) / Math.log(1024));
+          return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+        }
+        function _summaryCard(label, value, icon = "") {
+          return `<div class="bg-surface-2 border border-line rounded-lg p-4 flex flex-col gap-1">
+          <div class="flex items-center gap-2 text-text-tertiary text-xs uppercase tracking-wider">${icon}${label}</div>
+          <div class="text-2xl font-semibold text-text-primary">${value}</div>
+        </div>`;
+        }
+        function _distributionList(title, items, maxCount) {
+          if (!items || items.length === 0) {
+            return `<div class="space-y-1">
+            <h3 class="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2">${title}</h3>
+            <div class="text-sm text-text-quaternary">${t("kb_stats.empty", "No data")}</div>
+          </div>`;
+          }
+          const rows = items.map(([name, count]) => {
+            const pct = maxCount > 0 ? count / maxCount * 100 : 0;
+            return `<div class="flex items-center gap-2">
+            <span class="text-sm text-text-secondary w-24 truncate shrink-0">${name}</span>
+            <div class="flex-1 bg-surface-3 rounded-full h-5 overflow-hidden relative">
+              <div class="bg-accent/30 h-full rounded-full transition-all" style="width: ${pct}%"></div>
+              <span class="absolute inset-0 flex items-center px-2 text-xs text-text-secondary">${count}</span>
+            </div>
+          </div>`;
+          }).join("");
+          return `<div class="space-y-1.5">
+          <h3 class="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2">${title}</h3>
+          ${rows}
+        </div>`;
+        }
+        function _tagHeatmap(tags) {
+          if (!tags || tags.length === 0) {
+            return `<div class="space-y-1">
+            <h3 class="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2">${t("kb_stats.tag_heatmap", "Tag Heatmap")}</h3>
+            <div class="text-sm text-text-quaternary">${t("kb_stats.empty", "No data")}</div>
+          </div>`;
+          }
+          const maxCount = Math.max(...tags.map(([, c]) => c));
+          const chips = tags.map(([name, count]) => {
+            const ratio = maxCount > 0 ? count / maxCount : 0;
+            const sizeClass = ratio > 0.66 ? "text-base" : ratio > 0.33 ? "text-sm" : "text-xs";
+            const opacity = 0.3 + ratio * 0.7;
+            return `<span class="${sizeClass} px-2 py-1 rounded-full bg-accent" style="opacity: ${opacity}">${name} <span class="text-text-quaternary">(${count})</span></span>`;
+          }).join(" ");
+          return `<div class="space-y-2">
+          <h3 class="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2">${t("kb_stats.tag_heatmap", "Tag Heatmap")}</h3>
+          <div class="flex flex-wrap gap-2">${chips}</div>
+        </div>`;
+        }
+        function _ensurePanel2() {
+          if (_created2 && _panelEl2 && _panelEl2.isConnected) return _panelEl2;
+          const overlay = document.createElement("div");
+          overlay.id = "kbStatsOverlay";
+          overlay.className = `fixed inset-0 bg-black/50 flex items-center justify-center ${zClass(Z_INDEX.PANEL_1)}`;
+          overlay.setAttribute("role", "dialog");
+          overlay.setAttribute("aria-modal", "true");
+          overlay.setAttribute("aria-labelledby", "kbStatsTitle");
+          const panel = document.createElement("div");
+          panel.className = "bg-surface-1 border border-line rounded-xl shadow-2xl w-[560px] max-h-[80vh] overflow-y-auto";
+          const header = document.createElement("div");
+          header.className = "flex items-center justify-between px-6 py-4 border-b border-line sticky top-0 bg-surface-1";
+          const title = document.createElement("h2");
+          title.id = "kbStatsTitle";
+          title.className = "text-lg font-semibold text-text-primary";
+          title.textContent = t("kb_stats.title", "Knowledge Base Statistics");
+          const closeBtn = document.createElement("button");
+          closeBtn.className = "text-text-tertiary hover:text-text-primary transition-colors p-1 rounded";
+          closeBtn.setAttribute("aria-label", t("common.close"));
+          closeBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+          closeBtn.onclick = closeKbStats;
+          header.appendChild(title);
+          header.appendChild(closeBtn);
+          const body = document.createElement("div");
+          body.id = "kbStatsBody";
+          body.className = "px-6 py-4 space-y-6";
+          body.innerHTML = `<div class="text-center text-text-tertiary py-8">${t("kb_stats.loading", "Loading\u2026")}</div>`;
+          panel.appendChild(header);
+          panel.appendChild(body);
+          overlay.appendChild(panel);
+          overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) closeKbStats();
+          });
+          document.body.appendChild(overlay);
+          _panelEl2 = overlay;
+          _created2 = true;
+          return overlay;
+        }
+        function _renderStats(stats) {
+          const body = document.getElementById("kbStatsBody");
+          if (!body) return;
+          const maxDomain = Math.max(1, ...stats.domain_distribution.map(([, c]) => c));
+          const maxFormat = Math.max(1, ...stats.format_distribution.map(([, c]) => c));
+          const docIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+          const chunkIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>';
+          const sizeIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>';
+          body.innerHTML = `
+          <div class="grid grid-cols-3 gap-3">
+            ${_summaryCard(t("kb_stats.doc_count", "Documents"), String(stats.doc_count), docIcon)}
+            ${_summaryCard(t("kb_stats.chunk_count", "Chunks"), String(stats.chunk_count), chunkIcon)}
+            ${_summaryCard(t("kb_stats.storage_size", "Storage"), formatBytes2(stats.db_size_bytes), sizeIcon)}
+          </div>
+          ${_distributionList(t("kb_stats.domain_distribution", "Domain Distribution"), stats.domain_distribution, maxDomain)}
+          ${_distributionList(t("kb_stats.format_distribution", "Format Distribution"), stats.format_distribution, maxFormat)}
+          ${_tagHeatmap(stats.tags)}
+        `;
+        }
+        async function openKbStats() {
+          const overlay = _ensurePanel2();
+          overlay.classList.remove("hidden");
+          pushPanel({ id: "kb-stats", close: closeKbStats, element: overlay, label: "KB Statistics" });
+          try {
+            const stats = await kbStatsApi.getStats();
+            _renderStats(stats);
+          } catch (err) {
+            const body = document.getElementById("kbStatsBody");
+            if (body) {
+              body.innerHTML = `<div class="text-center text-red-400 py-8">${t("kb_stats.error", "Failed to load statistics")}</div>`;
+            }
+            toastError(err);
+          }
+        }
+        function closeKbStats() {
+          removePanel("kb-stats");
+          if (_panelEl2) {
+            _panelEl2.classList.add("hidden");
+          }
+        }
+      
+        // ui/src/help-panel.js
+        init_utils();
+        init_i18n();
+        var _created3 = false;
+        var _panelEl3 = null;
+        var _activeTab = "quickstart";
+        var TABS = [
+          { id: "quickstart", labelKey: "help.tab_quickstart" },
+          { id: "shortcuts", labelKey: "help.tab_shortcuts" },
+          { id: "faq", labelKey: "help.tab_faq" },
+          { id: "privacy", labelKey: "help.tab_privacy" }
+        ];
+        function _renderQuickStart() {
+          return `
+          <div class="space-y-4">
+            <h3 class="text-base font-medium text-text-primary">${t("help.qs_title", "Quick Start")}</h3>
+            <ol class="space-y-3 text-sm text-text-secondary list-decimal list-inside">
+              <li><strong class="text-text-primary">${t("help.qs_step1_title", "Import Documents")}</strong><br>${t("help.qs_step1_desc", "Click the + button or drag files to import Markdown, TXT, PDF, HTML files into your knowledge base.")}</li>
+              <li><strong class="text-text-primary">${t("help.qs_step2_title", "Configure LLM")}</strong><br>${t("help.qs_step2_desc", "Open Settings (\u2318,) and enter your API Key and Base URL. Any OpenAI-compatible endpoint works.")}</li>
+              <li><strong class="text-text-primary">${t("help.qs_step3_title", "Ask Questions")}</strong><br>${t("help.qs_step3_desc", "Type your question in the input box. AI answers based on your knowledge base documents.")}</li>
+              <li><strong class="text-text-primary">${t("help.qs_step4_title", "Review Sources")}</strong><br>${t("help.qs_step4_desc", "Each answer shows reference sources. Click to view the original document chunks.")}</li>
+            </ol>
+          </div>`;
+        }
+        function _renderShortcuts() {
+          const groups = [
+            { title: t("help.sc_general", "General"), items: [
+              { keys: "\u2318 K", desc: t("help.sc_cmd_palette", "Command palette") },
+              { keys: "\u2318 N", desc: t("help.sc_new_chat", "New conversation") },
+              { keys: "\u2318 O", desc: t("help.sc_import", "Import files") },
+              { keys: "\u2318 ,", desc: t("help.sc_settings", "Settings") },
+              { keys: "\u2318 B", desc: t("help.sc_sidebar", "Toggle sidebar") },
+              { keys: "?", desc: t("help.sc_help", "Keyboard help") }
+            ] },
+            { title: t("help.sc_chat", "Chat"), items: [
+              { keys: "Enter", desc: t("help.sc_send", "Send message") },
+              { keys: "\u21E7 Enter", desc: t("help.sc_newline", "New line") },
+              { keys: "Esc", desc: t("help.sc_stop", "Stop / Close") }
+            ] }
+          ];
+          return groups.map((group) => `
+          <div class="space-y-2">
+            <h4 class="text-xs font-medium text-text-tertiary uppercase tracking-wider">${group.title}</h4>
+            ${group.items.map((item) => `
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">${item.desc}</span>
+                <kbd class="px-2 py-0.5 text-xs font-mono bg-surface-3 border border-line rounded text-text-secondary">${item.keys}</kbd>
+              </div>
+            `).join("")}
+          </div>
+        `).join("");
+        }
+        function _renderFaq() {
+          const faqs = [
+            { q: t("help.faq_q1", "How do I configure my LLM?"), a: t("help.faq_a1", "Open Settings (\u2318,) and enter your API Key, Base URL, and model name. Any OpenAI-compatible API works (OpenAI, DeepSeek, Ollama, etc.).") },
+            { q: t("help.faq_q2", "What file formats are supported?"), a: t("help.faq_a2", "Markdown (.md), Text (.txt), PDF (.pdf), HTML (.html), Word (.docx), PowerPoint (.pptx), and EPUB (.epub).") },
+            { q: t("help.faq_q3", "Where is my data stored?"), a: t("help.faq_a3", "All data stays locally on your device in the app data directory. Nothing is sent to any server except your LLM API calls.") },
+            { q: t("help.faq_q4", "How do I activate Pro?"), a: t("help.faq_a4", "Go to Settings \u2192 License and enter your Pro license key. Pro unlocks: unlimited documents, PDF import, local LLM, OCR, and more.") },
+            { q: t("help.faq_q5", "What is the embedding model?"), a: t("help.faq_a5", "EchoMind uses all-MiniLM-L6-v2 (384-dimensional, ~30MB) by default. It runs locally via ONNX Runtime. Pro users can upload custom models.") },
+            { q: t("help.faq_q6", "How does encryption work?"), a: t("help.faq_a6", "Database encryption uses SQLCipher (AES-256). Your password is derived via Argon2id KDF. The database is transparently encrypted at rest.") }
+          ];
+          return faqs.map((faq) => `
+          <div class="space-y-1">
+            <h4 class="text-sm font-medium text-text-primary">${faq.q}</h4>
+            <p class="text-sm text-text-secondary leading-relaxed">${faq.a}</p>
+          </div>
+        `).join("");
+        }
+        function _renderPrivacy() {
+          return `
+          <div class="space-y-3 text-sm text-text-secondary leading-relaxed">
+            <h3 class="text-base font-medium text-text-primary">${t("help.privacy_title", "Privacy & Security")}</h3>
+            <p>${t("help.privacy_local", "All your documents, embeddings, and conversations are stored locally on your device. No data is sent to any external server.")}</p>
+            <p>${t("help.privacy_llm", "When you ask a question, only your query and relevant document chunks are sent to your configured LLM API endpoint. No other data leaves your device.")}</p>
+            <p>${t("help.privacy_encryption", "Database encryption (SQLCipher AES-256) protects your data at rest. Your password never leaves your device.")}</p>
+            <p>${t("help.privacy_pii", "PII detection can automatically identify and redact 8 types of sensitive information (email, phone, ID card, bank card, IP, SSN, passport, international phone).")}</p>
+            <p>${t("help.privacy_audit", "Audit logging uses a tamper-evident hash chain. Any modification to audit logs is detectable via chain verification.")}</p>
+            <p>${t("help.privacy_noproxy", "The application does not use any proxy. All network connections are direct. You can verify this in the source code \u2014 every reqwest client uses .no_proxy().")}</p>
+          </div>`;
+        }
+        function _renderTabContent(tabId) {
+          switch (tabId) {
+            case "quickstart":
+              return _renderQuickStart();
+            case "shortcuts":
+              return _renderShortcuts();
+            case "faq":
+              return _renderFaq();
+            case "privacy":
+              return _renderPrivacy();
+            default:
+              return "";
+          }
+        }
+        function _ensurePanel3() {
+          if (_created3 && _panelEl3 && _panelEl3.isConnected) return _panelEl3;
+          const overlay = document.createElement("div");
+          overlay.id = "helpPanelOverlay";
+          overlay.className = `fixed inset-0 bg-black/50 flex items-center justify-center ${zClass(Z_INDEX.PANEL_1)}`;
+          overlay.setAttribute("role", "dialog");
+          overlay.setAttribute("aria-modal", "true");
+          overlay.setAttribute("aria-labelledby", "helpPanelTitle");
+          const panel = document.createElement("div");
+          panel.className = "bg-surface-1 border border-line rounded-xl shadow-2xl w-[600px] max-h-[80vh] overflow-hidden flex flex-col";
+          const header = document.createElement("div");
+          header.className = "flex items-center justify-between px-6 py-4 border-b border-line";
+          const title = document.createElement("h2");
+          title.id = "helpPanelTitle";
+          title.className = "text-lg font-semibold text-text-primary";
+          title.textContent = t("help.title", "Help");
+          const closeBtn = document.createElement("button");
+          closeBtn.className = "text-text-tertiary hover:text-text-primary transition-colors p-1 rounded";
+          closeBtn.setAttribute("aria-label", t("common.close"));
+          closeBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+          closeBtn.onclick = closeHelpPanel;
+          header.appendChild(title);
+          header.appendChild(closeBtn);
+          const tabBar = document.createElement("div");
+          tabBar.id = "helpTabBar";
+          tabBar.className = "flex gap-1 px-6 py-2 border-b border-line";
+          for (const tab of TABS) {
+            const btn = document.createElement("button");
+            btn.dataset.tabId = tab.id;
+            btn.className = "px-3 py-1.5 text-sm rounded transition-colors";
+            btn.textContent = t(tab.labelKey);
+            btn.onclick = () => _switchTab(tab.id);
+            tabBar.appendChild(btn);
+          }
+          const content = document.createElement("div");
+          content.id = "helpContent";
+          content.className = "flex-1 overflow-y-auto px-6 py-4 space-y-4";
+          panel.appendChild(header);
+          panel.appendChild(tabBar);
+          panel.appendChild(content);
+          overlay.appendChild(panel);
+          overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) closeHelpPanel();
+          });
+          document.body.appendChild(overlay);
+          _panelEl3 = overlay;
+          _created3 = true;
+          return overlay;
+        }
+        function _switchTab(tabId) {
+          _activeTab = tabId;
+          _updateTabUI();
+          const content = document.getElementById("helpContent");
+          if (content) {
+            content.innerHTML = _renderTabContent(tabId);
+          }
+        }
+        function _updateTabUI() {
+          const tabBar = document.getElementById("helpTabBar");
+          if (!tabBar) return;
+          tabBar.querySelectorAll("button[data-tab-id]").forEach((btn) => {
+            if (btn.dataset.tabId === _activeTab) {
+              btn.className = "px-3 py-1.5 text-sm rounded transition-colors bg-accent/20 text-accent";
+            } else {
+              btn.className = "px-3 py-1.5 text-sm rounded transition-colors text-text-tertiary hover:text-text-secondary hover:bg-surface-2";
+            }
+          });
+        }
+        function openHelpPanel(initialTab = "quickstart") {
+          const overlay = _ensurePanel3();
+          overlay.classList.remove("hidden");
+          _switchTab(initialTab);
+          pushPanel({ id: "help-panel", close: closeHelpPanel, element: overlay, label: "Help" });
+        }
+        function closeHelpPanel() {
+          removePanel("help-panel");
+          if (_panelEl3) {
+            _panelEl3.classList.add("hidden");
+          }
+        }
+      
         // ui/src/session-strip.js
         init_ipc();
         init_state();
@@ -20212,6 +20765,20 @@
           });
           initVoiceInput();
           initExportButtons();
+          initKeyboardHelp();
+          initErrorBoundary();
+          {
+            const kbStatsBtn = document.getElementById("kbStatsBtn");
+            if (kbStatsBtn) kbStatsBtn.onclick = openKbStats;
+          }
+          window.__openKbStats = openKbStats;
+          window.__closeKbStats = closeKbStats;
+          window.__openHelpPanel = openHelpPanel;
+          window.__closeHelpPanel = closeHelpPanel;
+          {
+            const helpBtn = document.getElementById("helpBtn");
+            if (helpBtn) helpBtn.onclick = () => openHelpPanel();
+          }
           initSessionStrip();
           initChatEventListeners({
             onChatDone: async () => {

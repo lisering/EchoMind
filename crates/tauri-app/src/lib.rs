@@ -12,6 +12,7 @@ use echomind_core::Storage as _;
 use state::AppState;
 use tauri::Emitter;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, PhysicalPosition, PhysicalSize, WindowEvent};
 
 /// 窗口最小尺寸约束（与 tauri.conf.json minWidth/minHeight 保持一致）
@@ -61,6 +62,10 @@ pub fn run() {
             // **重要**：仅当模型文件已齐备时才预热。文件缺失时不触发下载——
             // 下载由首启向导（init_embedder 命令 + 进度事件）负责，避免与向导竞争。
             app.manage(state);
+
+            // REQ-WIN-005 v1.5：系统托盘图标（显示/隐藏/退出）
+            setup_tray_icon(app)?;
+
             {
                 let app_for_warm = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
@@ -337,6 +342,8 @@ pub fn run() {
             commands::remove_document_tag,
             commands::list_all_tags,
             commands::filter_documents_by_tag,
+            // KB 统计仪表盘（REQ-KB-003 v1.5）
+            commands::get_kb_stats,
             // Durable Prompt Admission（B05 持久化提示接纳）
             commands::admit_input,
             commands::promote_input,
@@ -542,5 +549,62 @@ fn setup_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         &[&app_menu, &file_menu, &edit_menu, &window_menu, &help_menu],
     )?;
     app.set_menu(menu)?;
+    Ok(())
+}
+
+/// 配置系统托盘图标（REQ-WIN-005 v1.5）。
+///
+/// 托盘菜单：Show/Hide · Quit。
+/// 单击托盘图标切换窗口可见性。
+fn setup_tray_icon(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let show_item = MenuItem::with_id(app, "tray_show", "Show/Hide", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "tray_quit", "Quit EchoMind", true, None::<&str>)?;
+    let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+    let mut builder = TrayIconBuilder::with_id("main-tray")
+        .menu(&tray_menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray_show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    if window.is_visible().unwrap_or(false) {
+                        let _ = window.hide();
+                    } else {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
+            "tray_quit" => {
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                if let Some(window) = app.get_webview_window("main") {
+                    if window.is_visible().unwrap_or(false) {
+                        let _ = window.hide();
+                    } else {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
+        });
+
+    // 设置托盘图标（使用应用默认窗口图标，如存在）
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+
+    let _tray = builder.build(app)?;
+
     Ok(())
 }

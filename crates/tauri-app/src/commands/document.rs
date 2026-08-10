@@ -310,3 +310,91 @@ pub async fn filter_documents_by_tag_inner(
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+/// 知识库统计仪表盘数据（REQ-KB-003 v1.5）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct KbStats {
+    /// 文档总数
+    pub doc_count: usize,
+    /// 分块总数
+    pub chunk_count: usize,
+    /// 数据库文件大小（字节）
+    pub db_size_bytes: u64,
+    /// 领域分布（领域名, 文档数）
+    pub domain_distribution: Vec<(String, usize)>,
+    /// 格式分布（文件扩展名, 文档数）
+    pub format_distribution: Vec<(String, usize)>,
+    /// 标签热图（标签名, 文档数）
+    pub tags: Vec<(String, usize)>,
+}
+
+/// 获取知识库统计仪表盘数据（REQ-KB-003 v1.5）。
+///
+/// 聚合文档数/分块数/存储大小/领域分布/格式分布/标签热图。
+#[tauri::command]
+pub async fn get_kb_stats(state: State<'_, AppState>) -> Result<KbStats, String> {
+    get_kb_stats_inner(state.inner()).await
+}
+
+/// `get_kb_stats` 的逻辑实现（命令与集成测试复用）。
+pub async fn get_kb_stats_inner(state: &AppState) -> Result<KbStats, String> {
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let doc_count = docs.len();
+
+    let chunk_count = state
+        .storage
+        .count_chunks()
+        .await
+        .map_err(|e| format!("{e:#}"))
+        .unwrap_or(0);
+
+    // 数据库文件大小
+    let db_path = state.data_dir.join("echomind.db");
+    let db_size_bytes = tokio::fs::metadata(&db_path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    // 领域分布
+    let mut domain_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut format_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for doc in &docs {
+        let domain = doc.domain.clone().unwrap_or_else(|| "general".to_string());
+        *domain_map.entry(domain).or_insert(0) += 1;
+
+        // 从 file_path 提取扩展名
+        let ext = std::path::Path::new(&doc.file_path)
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_else(|| "unknown".to_string());
+        *format_map.entry(ext).or_insert(0) += 1;
+    }
+
+    // 排序：按计数降序
+    let mut domain_distribution: Vec<(String, usize)> = domain_map.into_iter().collect();
+    domain_distribution.sort_by_key(|b| std::cmp::Reverse(b.1));
+
+    let mut format_distribution: Vec<(String, usize)> = format_map.into_iter().collect();
+    format_distribution.sort_by_key(|b| std::cmp::Reverse(b.1));
+
+    // 标签热图
+    let tags = state
+        .storage
+        .list_all_tags()
+        .await
+        .map_err(|e| format!("{e:#}"))
+        .unwrap_or_default();
+
+    Ok(KbStats {
+        doc_count,
+        chunk_count,
+        db_size_bytes,
+        domain_distribution,
+        format_distribution,
+        tags,
+    })
+}
