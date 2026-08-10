@@ -748,6 +748,33 @@ impl<'a, L: LLMProvider> CompactionEngine<'a, L> {
     // Q03: 双阈值压缩判断 + 后台异步压缩调度
     // ============================================================
 
+    /// 智能压缩：根据上下文使用率自动选择普通压缩或原文尾部保留压缩。
+    ///
+    /// 当上下文使用率较低时走普通 `compact`（摘要 + 最近消息），
+    /// 当使用率达到 verbatim tail 阈值时走 `compact_with_verbatim_tail`
+    /// （摘要 + 原文尾部消息，保留最近对话的精确措辞）。
+    ///
+    /// # 参数
+    /// - `history` — 完整历史消息列表（按时间正序）
+    /// - `ctx_size` — 上下文 token 限制
+    /// - `verbatim_config` — 原文尾部保留配置
+    ///
+    /// # 返回
+    /// `CompactionResult`，`info` 为 `None` 表示无需压缩。
+    pub async fn compact_smart(
+        &self,
+        history: &[ChatMessage],
+        ctx_size: usize,
+        verbatim_config: &VerbatimTailConfig,
+    ) -> anyhow::Result<CompactionResult> {
+        if self.needs_verbatim_tail_compaction(history, ctx_size, verbatim_config) {
+            self.compact_with_verbatim_tail(history, ctx_size, verbatim_config)
+                .await
+        } else {
+            self.compact(history, ctx_size).await
+        }
+    }
+
     /// 检查是否需要压缩（借鉴 QM `overBudgetFraction` + `COMPACT_SOFT/HARD_FRACTION`）。
     ///
     /// 双阈值判断逻辑：
