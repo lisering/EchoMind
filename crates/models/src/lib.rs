@@ -2271,6 +2271,313 @@ impl PromptTemplate {
     }
 }
 
+// ============================================================
+// RAG 评估指标系统（REQ-RAG-045，RAGAS 风格）
+// ============================================================
+
+/// RAG 评估指标类型（REQ-RAG-045）。
+///
+/// 借鉴 RAGAS（Retrieval-Augmented Generation Assessment）框架，
+/// 将 RAG 评估指标分为两大类：
+///
+/// **纯 Rust 检索指标（不需要 LLM）**：
+/// - `HitRate`：相关文档是否在 top-k 检索结果中
+/// - `MRR`：第一个相关文档的倒数排名
+/// - `NDCG`：归一化折扣累积增益（排序质量）
+/// - `ContextSimilarity`：查询与上下文的平均嵌入余弦相似度
+/// - `KeywordOverlap`：查询与上下文的关键词重叠率
+///
+/// **LLM-as-Judge 生成指标（需要 LLMProvider）**：
+/// - `Faithfulness`：答案是否忠实于检索上下文（无幻觉）
+/// - `AnswerRelevance`：答案是否切题回答了用户问题
+/// - `ContextPrecision`：检索上下文是否与问题相关
+/// - `ContextRecall`：检索上下文是否包含回答问题所需的信息
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RagMetricType {
+    /// 答案忠实度（LLM-as-Judge）：答案中的声明是否可从上下文推导
+    Faithfulness,
+    /// 答案相关性（LLM-as-Judge）：答案是否切题回答了问题
+    AnswerRelevance,
+    /// 上下文精度（LLM-as-Judge）：检索到的上下文是否与问题相关
+    ContextPrecision,
+    /// 上下文召回（LLM-as-Judge）：上下文是否包含回答所需信息（需要 ground truth）
+    ContextRecall,
+    /// 命中率（纯 Rust）：相关文档是否在 top-k 中
+    HitRate,
+    /// 平均倒数排名（纯 Rust）：第一个相关文档的排名倒数
+    MRR,
+    /// 归一化折扣累积增益（纯 Rust）：排序质量
+    NDCG,
+    /// 上下文嵌入相似度（纯 Rust）：查询与上下文的平均余弦相似度
+    ContextSimilarity,
+    /// 关键词重叠率（纯 Rust）：查询与上下文的 token 重叠比例
+    KeywordOverlap,
+}
+
+impl RagMetricType {
+    /// 转换为字符串（用于序列化和显示）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Faithfulness => "faithfulness",
+            Self::AnswerRelevance => "answer_relevance",
+            Self::ContextPrecision => "context_precision",
+            Self::ContextRecall => "context_recall",
+            Self::HitRate => "hit_rate",
+            Self::MRR => "mrr",
+            Self::NDCG => "ndcg",
+            Self::ContextSimilarity => "context_similarity",
+            Self::KeywordOverlap => "keyword_overlap",
+        }
+    }
+
+    /// 从字符串解析。
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s {
+            "faithfulness" => Some(Self::Faithfulness),
+            "answer_relevance" => Some(Self::AnswerRelevance),
+            "context_precision" => Some(Self::ContextPrecision),
+            "context_recall" => Some(Self::ContextRecall),
+            "hit_rate" => Some(Self::HitRate),
+            "mrr" => Some(Self::MRR),
+            "ndcg" => Some(Self::NDCG),
+            "context_similarity" => Some(Self::ContextSimilarity),
+            "keyword_overlap" => Some(Self::KeywordOverlap),
+            _ => None,
+        }
+    }
+
+    /// 是否需要 LLM 调用。
+    pub fn needs_llm(&self) -> bool {
+        matches!(
+            self,
+            Self::Faithfulness
+                | Self::AnswerRelevance
+                | Self::ContextPrecision
+                | Self::ContextRecall
+        )
+    }
+
+    /// 是否需要 ground truth 答案。
+    pub fn needs_ground_truth(&self) -> bool {
+        matches!(self, Self::ContextRecall)
+    }
+
+    /// 是否需要嵌入向量。
+    pub fn needs_embedding(&self) -> bool {
+        matches!(self, Self::ContextSimilarity)
+    }
+}
+
+/// RAG 评估样本（单次问答评估输入，REQ-RAG-045）。
+///
+/// 一个样本代表一次完整的 RAG 问答交互：
+/// 用户提问 → 检索上下文 → LLM 生成答案。
+///
+/// # 字段说明
+/// - `query`：用户问题
+/// - `answer`：LLM 生成的答案
+/// - `contexts`：检索到的上下文片段列表（按相关性排序）
+/// - `ground_truth`：参考答案（可选，用于 ContextRecall 指标）
+/// - `relevance_scores`：每个上下文的相关性分数（可选，用于 NDCG 指标）
+/// - `relevant_indices`：相关文档的索引列表（可选，用于 HitRate/MRR 指标）
+/// - `query_embedding`：查询的嵌入向量（可选，用于 ContextSimilarity 指标）
+/// - `context_embeddings`：上下文的嵌入向量列表（可选，用于 ContextSimilarity 指标）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RagEvalSample {
+    /// 用户问题
+    pub query: String,
+    /// LLM 生成的答案
+    pub answer: String,
+    /// 检索到的上下文片段列表（按相关性排序）
+    pub contexts: Vec<String>,
+    /// 参考答案（可选，用于 ContextRecall 指标）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ground_truth: Option<String>,
+    /// 每个上下文的相关性分数 0.0-1.0（可选，用于 NDCG 指标）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub relevance_scores: Option<Vec<f32>>,
+    /// 相关文档的索引列表（可选，用于 HitRate/MRR 指标）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub relevant_indices: Option<Vec<usize>>,
+    /// 查询的嵌入向量（可选，用于 ContextSimilarity 指标）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub query_embedding: Option<Vec<f32>>,
+    /// 上下文的嵌入向量列表（可选，用于 ContextSimilarity 指标）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub context_embeddings: Option<Vec<Vec<f32>>>,
+}
+
+impl RagEvalSample {
+    /// 创建新的评估样本（必需字段：query + answer + contexts）。
+    pub fn new(query: String, answer: String, contexts: Vec<String>) -> Self {
+        Self {
+            query,
+            answer,
+            contexts,
+            ground_truth: None,
+            relevance_scores: None,
+            relevant_indices: None,
+            query_embedding: None,
+            context_embeddings: None,
+        }
+    }
+
+    /// 设置参考答案。
+    pub fn with_ground_truth(mut self, truth: String) -> Self {
+        self.ground_truth = Some(truth);
+        self
+    }
+
+    /// 设置相关性分数。
+    pub fn with_relevance_scores(mut self, scores: Vec<f32>) -> Self {
+        self.relevance_scores = Some(scores);
+        self
+    }
+
+    /// 设置相关文档索引。
+    pub fn with_relevant_indices(mut self, indices: Vec<usize>) -> Self {
+        self.relevant_indices = Some(indices);
+        self
+    }
+}
+
+/// RAG 评估指标结果（REQ-RAG-045）。
+///
+/// 单个指标的评估结果，包含分数和可选的详细信息。
+/// 分数范围 [0.0, 1.0]，1.0 表示最优。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RagEvalMetric {
+    /// 指标类型
+    pub metric_type: RagMetricType,
+    /// 分数 [0.0, 1.0]，1.0 = 最优
+    pub score: f32,
+    /// 详细信息（如 LLM 判断的理由、统计明细等）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub details: Option<String>,
+}
+
+impl RagEvalMetric {
+    /// 创建新的指标结果。
+    pub fn new(metric_type: RagMetricType, score: f32) -> Self {
+        Self {
+            metric_type,
+            score: score.clamp(0.0, 1.0),
+            details: None,
+        }
+    }
+
+    /// 创建带详细信息的指标结果。
+    pub fn with_details(metric_type: RagMetricType, score: f32, details: String) -> Self {
+        Self {
+            metric_type,
+            score: score.clamp(0.0, 1.0),
+            details: Some(details),
+        }
+    }
+}
+
+/// RAG 评估报告（REQ-RAG-045）。
+///
+/// 批量评估多个样本后的聚合报告，包含每个样本的指标和整体平均值。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RagEvalReport {
+    /// 评估样本数量
+    pub sample_count: usize,
+    /// 聚合指标（各指标的平均值）
+    pub aggregate_metrics: Vec<RagEvalMetric>,
+    /// 每个样本的指标列表
+    pub per_sample_metrics: Vec<Vec<RagEvalMetric>>,
+}
+
+impl RagEvalReport {
+    /// 创建空报告。
+    pub fn empty() -> Self {
+        Self {
+            sample_count: 0,
+            aggregate_metrics: Vec::new(),
+            per_sample_metrics: Vec::new(),
+        }
+    }
+
+    /// 从多个样本的指标列表构建报告（自动计算平均值）。
+    pub fn from_samples(per_sample: Vec<Vec<RagEvalMetric>>) -> Self {
+        let sample_count = per_sample.len();
+        if sample_count == 0 {
+            return Self::empty();
+        }
+
+        // 收集所有指标类型
+        let mut type_scores: std::collections::HashMap<String, Vec<f32>> =
+            std::collections::HashMap::new();
+        for metrics in &per_sample {
+            for m in metrics {
+                let name = m.metric_type.as_str().to_string();
+                type_scores.entry(name).or_default().push(m.score);
+            }
+        }
+
+        // 计算平均值
+        let aggregate: Vec<RagEvalMetric> = type_scores
+            .iter()
+            .filter_map(|(name, scores)| {
+                RagMetricType::parse_str(name).map(|mt| {
+                    let avg = scores.iter().sum::<f32>() / scores.len() as f32;
+                    RagEvalMetric::new(mt, avg)
+                })
+            })
+            .collect();
+
+        Self {
+            sample_count,
+            aggregate_metrics: aggregate,
+            per_sample_metrics: per_sample,
+        }
+    }
+
+    /// 获取指定指标的聚合分数。
+    pub fn get_metric(&self, metric_type: &RagMetricType) -> Option<f32> {
+        self.aggregate_metrics
+            .iter()
+            .find(|m| &m.metric_type == metric_type)
+            .map(|m| m.score)
+    }
+}
+
+/// RAG 评估设置（REQ-RAG-045）。
+///
+/// 控制哪些指标启用，以及 LLM 评估的参数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RagEvalSettings {
+    /// 启用 Faithfulness 指标
+    pub enable_faithfulness: bool,
+    /// 启用 Answer Relevance 指标
+    pub enable_answer_relevance: bool,
+    /// 启用 Context Precision 指标
+    pub enable_context_precision: bool,
+    /// 启用 Context Recall 指标
+    pub enable_context_recall: bool,
+    /// 启用检索指标（HitRate/MRR/NDCG）
+    pub enable_retrieval_metrics: bool,
+    /// 启用嵌入相似度指标
+    pub enable_embedding_metrics: bool,
+    /// 启用关键词重叠指标
+    pub enable_keyword_overlap: bool,
+}
+
+impl Default for RagEvalSettings {
+    fn default() -> Self {
+        Self {
+            enable_faithfulness: true,
+            enable_answer_relevance: true,
+            enable_context_precision: true,
+            enable_context_recall: false, // 需要 ground truth，默认关闭
+            enable_retrieval_metrics: true,
+            enable_embedding_metrics: false, // 需要嵌入向量，默认关闭
+            enable_keyword_overlap: true,
+        }
+    }
+}
+
 /// 缓存设置新增到 SettingsPayload（REQ-PERF-001）。
 ///
 /// 通过 `get_settings` 返回给前端，前端据此渲染缓存设置 UI。

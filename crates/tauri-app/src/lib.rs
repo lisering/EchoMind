@@ -346,6 +346,11 @@ pub fn run() {
             // Q08: 预算追踪（QM 借鉴 — LLM API 费用控制和速率限制）
             commands::get_budget_stats,
             commands::set_budget_limit,
+            // RAG 评估指标（REQ-RAG-045，RAGAS 风格）
+            commands::evaluate_rag_response,
+            commands::evaluate_rag_batch,
+            commands::get_rag_eval_settings,
+            commands::set_rag_eval_settings,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {
