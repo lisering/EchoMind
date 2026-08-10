@@ -70,6 +70,9 @@ pub mod loader;
 /// 自动从对话中提取关键事实（LLM 辅助），查询时注入相关记忆到 RAG prompt，
 /// AutoDream 后台空闲时自动整合（提升/遗忘）。
 pub mod memory_store;
+/// 语义分块器：段落→句子→子句递归分割，保留代码块完整性。
+/// MMR 多样性重排（借鉴 OpenMontage corpus.py）：Maximal Marginal Relevance。
+pub mod mmr_diversifier;
 /// Permission 细粒度控制（B11 Permission Rule Engine，REQ-ARCH-011）：
 /// Wildcard 匹配的 RBAC 权限规则引擎（Allow / Deny / Ask）。
 pub mod permission;
@@ -85,12 +88,15 @@ pub mod proposition_splitter;
 pub mod quality_gate;
 /// 自进化检索记忆（REQ-PERF-012）：记录检索方法效果，自适应选择最佳策略。
 pub mod retrieval_memory;
+/// 检索质量门控（借鉴 OpenMontage slideshow_risk.py）：多维度评分 + verdict 系统。
+pub mod retrieval_quality_gate;
 pub mod retriever;
+/// LLM Provider 评分选择引擎（借鉴 OpenMontage scoring.py）：多维度加权评分 + 可解释选择。
+pub mod scored_selector;
 /// 章节感知分块器：Markdown 标题层级 → section 切分 → 章节路径前缀（REQ-VEC-006）。
 pub mod section_aware_splitter;
 /// 安全管理模块（自动锁屏 + 剪贴板清除 + 紧急销毁 + 系统睡眠检测）。
 pub mod security;
-/// 语义分块器：段落→句子→子句递归分割，保留代码块完整性。
 pub mod semantic_splitter;
 /// Session Run Coordinator（B06 会话运行协调器）：
 /// 同会话串行 / 跨会话并发 / wake 合并 / interrupt 中断。

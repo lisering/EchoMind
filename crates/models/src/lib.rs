@@ -102,7 +102,7 @@ impl Document {
 }
 
 /// 文档分块（对应 REQ-VEC-001 的元数据要求）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Chunk {
     /// 分块唯一标识（UUID v4）
     pub id: String,
