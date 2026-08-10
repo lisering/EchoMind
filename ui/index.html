@@ -5538,7 +5538,7 @@
               /** 获取预算统计 */
               getStats: () => invoke("get_budget_stats"),
               /** 设置预算限制（日限额美元） */
-              setLimit: (dailyLimitUsd) => invoke("set_budget_limit", { dailyLimitUsd }),
+              setLimit: (dailyLimitUsd) => invoke("set_budget_limit", { daily_limit_usd: dailyLimitUsd }),
               /** 获取 Token 预算配置 */
               getConfig: () => invoke("get_token_budget_config"),
               /** 设置 Token 预算配置 */
@@ -14130,6 +14130,7 @@
         init_toast();
         async function renderTraceBudgetSettings(container) {
           if (!container) return;
+          container.innerHTML = "";
           let traceCount = 0;
           let recentTraces = [];
           let budgetStats = null;
@@ -14476,6 +14477,7 @@
         init_toast();
         async function renderDurableTodoSettings(container) {
           if (!container) return;
+          container.innerHTML = "";
           let conversationId = "";
           try {
             const { getState: getState2 } = await Promise.resolve().then(() => (init_state(), state_exports));
@@ -16061,71 +16063,79 @@
               perfContainer.innerHTML = "";
               renderPerfSettings(perfContainer);
             }
-            const evalContainer = $("ragEvalSettingsContainer") || perfContainer;
+            let insertAfter = perfContainer || memContainer || secContainer;
+            let evalContainer = $("ragEvalSettingsContainer");
+            if (!evalContainer && insertAfter) {
+              evalContainer = document.createElement("div");
+              evalContainer.id = "ragEvalSettingsContainer";
+              insertAfter.after(evalContainer);
+              insertAfter = evalContainer;
+            }
             if (evalContainer) {
-              const evalDiv = document.createElement("div");
-              evalDiv.id = "ragEvalSettingsContainer";
-              if (!$("ragEvalSettingsContainer")) {
-                evalContainer.appendChild(evalDiv);
-              }
-              renderRagEvalSettings($("ragEvalSettingsContainer"));
+              renderRagEvalSettings(evalContainer);
             }
             const traceContainer = $("traceBudgetContainer") || (() => {
-              if (!perfContainer) return null;
+              if (!insertAfter) return null;
               const div = document.createElement("div");
               div.id = "traceBudgetContainer";
-              perfContainer.appendChild(div);
+              insertAfter.after(div);
+              insertAfter = div;
               return div;
             })();
             if (traceContainer) {
               renderTraceBudgetSettings(traceContainer);
             }
             const durableContainer = $("durableTodoContainer") || (() => {
-              if (!perfContainer) return null;
+              if (!insertAfter) return null;
               const div = document.createElement("div");
               div.id = "durableTodoContainer";
-              perfContainer.appendChild(div);
+              insertAfter.after(div);
+              insertAfter = div;
               return div;
             })();
             if (durableContainer) {
               renderDurableTodoSettings(durableContainer);
             }
             let tmplContainer = $("promptTemplateContainer");
-            if (!tmplContainer && perfContainer) {
+            if (!tmplContainer && insertAfter) {
               tmplContainer = document.createElement("div");
               tmplContainer.id = "promptTemplateContainer";
               tmplContainer.className = "mt-5";
-              perfContainer.after(tmplContainer);
+              insertAfter.after(tmplContainer);
+              insertAfter = tmplContainer;
             }
             if (tmplContainer) {
               tmplContainer.innerHTML = "";
               renderPromptTemplateSettings(tmplContainer);
             }
             const kvContainer = $("kvCacheContainer") || (() => {
-              if (!perfContainer) return null;
+              if (!insertAfter) return null;
               const div = document.createElement("div");
               div.id = "kvCacheContainer";
-              perfContainer.appendChild(div);
+              insertAfter.after(div);
+              insertAfter = div;
               return div;
             })();
             if (kvContainer) {
               renderKvCacheSettings(kvContainer);
             }
             const deviceContainer = $("deviceKindContainer") || (() => {
-              if (!perfContainer) return null;
+              if (!insertAfter) return null;
               const div = document.createElement("div");
               div.id = "deviceKindContainer";
-              perfContainer.appendChild(div);
+              insertAfter.after(div);
+              insertAfter = div;
               return div;
             })();
             if (deviceContainer) {
               renderDeviceKindSettings(deviceContainer);
             }
             const embedderContainer = $("embedderModelContainer") || (() => {
-              if (!perfContainer) return null;
+              if (!insertAfter) return null;
               const div = document.createElement("div");
               div.id = "embedderModelContainer";
-              perfContainer.appendChild(div);
+              insertAfter.after(div);
+              insertAfter = div;
               return div;
             })();
             if (embedderContainer) {
