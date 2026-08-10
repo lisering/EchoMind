@@ -5068,6 +5068,162 @@
             __defProp(target, name, { get: all[name], enumerable: true });
         };
       
+        // ui/src/state.js
+        var state_exports = {};
+        __export(state_exports, {
+          currentConv: () => currentConv,
+          get: () => get,
+          getState: () => getState,
+          isAuditing: () => isAuditing,
+          isEncrypted: () => isEncrypted,
+          isLocked: () => isLocked,
+          isProUser: () => isProUser,
+          isStreaming: () => isStreaming,
+          resetState: () => resetState,
+          setState: () => setState,
+          subscribe: () => subscribe,
+          subscribeAll: () => subscribeAll
+        });
+        function getState() {
+          return { ..._state };
+        }
+        function get(key) {
+          return _state[key];
+        }
+        function setState(partial) {
+          const changed = [];
+          for (const key of Object.keys(partial)) {
+            if (_state[key] !== partial[key]) {
+              changed.push(key);
+            }
+          }
+          if (changed.length === 0) return _state;
+          _state = { ..._state, ...partial };
+          for (const key of changed) {
+            const subs = _subscribers.get(key);
+            if (subs) {
+              for (const cb of subs) {
+                try {
+                  cb(_state[key], key);
+                } catch (_) {
+                }
+              }
+            }
+          }
+          for (const cb of _globalSubscribers) {
+            try {
+              cb(_state, changed);
+            } catch (_) {
+            }
+          }
+          return _state;
+        }
+        function subscribe(key, callback) {
+          if (!_subscribers.has(key)) {
+            _subscribers.set(key, /* @__PURE__ */ new Set());
+          }
+          _subscribers.get(key).add(callback);
+          return () => _subscribers.get(key)?.delete(callback);
+        }
+        function subscribeAll(callback) {
+          _globalSubscribers.add(callback);
+          return () => _globalSubscribers.delete(callback);
+        }
+        function resetState() {
+          _state = { ...initialState };
+          _subscribers.clear();
+          _globalSubscribers.clear();
+        }
+        function isStreaming() {
+          return _state.streaming;
+        }
+        function isProUser() {
+          return _state.isPro;
+        }
+        function currentConv() {
+          return _state.currentConversationId;
+        }
+        function isAuditing() {
+          return _state.auditingDocId !== null;
+        }
+        function isEncrypted() {
+          return _state.securityState !== "unencrypted";
+        }
+        function isLocked() {
+          return _state.securityState === "locked";
+        }
+        var initialState, _state, _subscribers, _globalSubscribers;
+        var init_state = __esm({
+          "ui/src/state.js"() {
+            initialState = {
+              history: [],
+              currentRawMarkdown: "",
+              lastSources: null,
+              streaming: false,
+              currentAssistantEl: null,
+              renderScheduled: false,
+              currentConversationId: null,
+              isNewConversation: false,
+              activePreset: "deepseek",
+              isPro: false,
+              vlmEnabled: false,
+              rerankEnabled: false,
+              hydeEnabled: false,
+              auditingDocId: null,
+              importing: false,
+              docCount: 0,
+              chunkCount: 0,
+              documents: [],
+              activeSidebarTab: "conversations",
+              cmdSelectedIndex: 0,
+              cmdFiltered: [],
+              cmdPrevFocus: null,
+              // 当前 LLM 模型信息（TC-QA-004：每条 assistant 消息标注模型）
+              currentModel: "",
+              // 如 'claude-3.5-sonnet' 或 'qwen2.5-7b.gguf'
+              currentLlmMode: "remote",
+              // 'remote' 或 'local'
+              // 上下文窗口用量（TC-QA-020~026：上下文窗口指示器）
+              contextTokens: 0,
+              // 当前对话已用 token 数
+              contextLimit: 8e3,
+              // 模型上下文窗口大小（默认 8K）
+              // 安全状态
+              securityState: "unencrypted",
+              // 'unencrypted' | 'encrypted_unlocked' | 'locked'
+              piiDetectionEnabled: false,
+              autoLockTimeout: 0,
+              // 0 = disabled
+              clipboardClearEnabled: true,
+              // S2 复盘：剪贴板自动清除开关
+              clipboardClearTimeout: 30,
+              // S2 复盘：剪贴板清除超时（秒）
+              theme: "dark",
+              // REQ-UI-011：主题模式 dark/light/system
+              llmConfigured: false,
+              // LLM 是否已配置
+              drafts: {},
+              // 会话级草稿（conversationId → 未发送文本）
+              // 功能开关状态（方案4：input-toggles.js 状态补全）
+              hybridEnabled: false,
+              // 混合搜索开关
+              agentEnabled: false,
+              // Agent 模式开关
+              subAgentEnabled: false,
+              // 子代理开关
+              memoryEnabled: false,
+              // 记忆开关
+              webSearchEnabled: false,
+              // 网页搜索开关
+              docList: []
+              // 文档提及列表（chat.js doc-mention 需要）
+            };
+            _state = { ...initialState };
+            _subscribers = /* @__PURE__ */ new Map();
+            _globalSubscribers = /* @__PURE__ */ new Set();
+          }
+        });
+      
         // ui/src/utils.js
         function $(id) {
           return document.getElementById(id);
@@ -5147,10 +5303,13 @@
         // ui/src/ipc.js
         var ipc_exports = {};
         __export(ipc_exports, {
+          budgetApi: () => budgetApi,
           chatApi: () => chatApi,
           convApi: () => convApi,
           docApi: () => docApi,
+          docExtApi: () => docExtApi,
           downloadApi: () => downloadApi,
+          durableApi: () => durableApi,
           embedModelApi: () => embedModelApi,
           importApi: () => importApi,
           invoke: () => invoke,
@@ -5158,6 +5317,7 @@
           listen: () => listen,
           llmApi: () => llmApi,
           localLlmApi: () => localLlmApi,
+          memoryExtApi: () => memoryExtApi,
           modelApi: () => modelApi,
           openDialog: () => openDialog,
           openUrl: () => openUrl,
@@ -5165,6 +5325,8 @@
           saveDialog: () => saveDialog,
           securityApi: () => securityApi,
           syncApi: () => syncApi,
+          todoApi: () => todoApi,
+          traceApi: () => traceApi,
           vlmApi: () => vlmApi
         });
         function invoke(cmd, args = {}) {
@@ -5185,7 +5347,7 @@
           } catch (_) {
           }
         }
-        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, downloadApi, importApi, securityApi, promptTemplateApi;
+        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi;
         var init_ipc = __esm({
           "ui/src/ipc.js"() {
             llmApi = {
@@ -5315,7 +5477,21 @@
               setPiiDetection: (enabled) => invoke("set_pii_detection_enabled", { enabled }),
               clearClipboard: () => invoke("clear_clipboard"),
               setClipboardClearTimeout: (seconds) => invoke("set_clipboard_clear_timeout", { seconds }),
-              checkStatus: () => invoke("check_security_status")
+              checkStatus: () => invoke("check_security_status"),
+              // S2 复盘 — 僵尸命令接线
+              unlockApp: () => invoke("unlock_app"),
+              recordActivity: () => invoke("record_activity"),
+              setAutoLockConfig: (enabled, timeoutSecs, lockOnSleep) => invoke("set_auto_lock_config", { enabled, timeoutSecs, lockOnSleep }),
+              checkPasswordStrength: (password) => invoke("check_password_strength", { password }),
+              setPanicWipePassword: (password) => invoke("set_panic_wipe_password", { password }),
+              clearPanicWipePassword: () => invoke("clear_panic_wipe_password"),
+              isPanicWipeEnabled: () => invoke("is_panic_wipe_enabled"),
+              clearAuditLogs: () => invoke("clear_audit_logs"),
+              setClipboardConfig: (enabled, clearAfterSecs) => invoke("set_clipboard_config", { enabled, clearAfterSecs }),
+              setSecurityPosture: (posture) => invoke("set_security_posture", { posture }),
+              getSecurityPosture: () => invoke("get_security_posture"),
+              getSecurityScreenStats: () => invoke("get_security_screen_stats"),
+              resetSecurityScreenStats: () => invoke("reset_security_screen_stats")
             };
             promptTemplateApi = {
               /** 创建或更新模板（返回模板 ID） */
@@ -5324,6 +5500,64 @@
               list: () => invoke("list_prompt_templates"),
               /** 删除指定模板 */
               delete: (templateId) => invoke("delete_prompt_template", { templateId })
+            };
+            traceApi = {
+              /** 获取最近的 trace 记录列表 */
+              getRecent: (limit = 20) => invoke("get_recent_traces", { limit }),
+              /** 获取指定 ID 的 trace 记录详情 */
+              getDetail: (id) => invoke("get_trace_detail", { id }),
+              /** 清空所有 trace 记录 */
+              clear: () => invoke("clear_traces"),
+              /** 获取 trace 记录数量 */
+              getCount: () => invoke("get_trace_count")
+            };
+            budgetApi = {
+              /** 获取预算统计 */
+              getStats: () => invoke("get_budget_stats"),
+              /** 设置预算限制（日限额美元） */
+              setLimit: (dailyLimitUsd) => invoke("set_budget_limit", { dailyLimitUsd }),
+              /** 获取 Token 预算配置 */
+              getConfig: () => invoke("get_token_budget_config"),
+              /** 设置 Token 预算配置 */
+              setConfig: (config) => invoke("set_token_budget_config", { config })
+            };
+            memoryExtApi = {
+              /** 固定记忆（pin） */
+              pin: (memoryId) => invoke("pin_memory", { memory_id: memoryId }),
+              /** 手动触发 Scratch 层 LLM 整合 */
+              triggerConsolidation: () => invoke("trigger_memory_consolidation"),
+              /** 查询 scratch 日志 */
+              getScratchLogs: (limit = 50) => invoke("get_scratch_logs", { limit }),
+              /** 推送 Burst Buffer 轮次 */
+              pushBurstTurn: (turn) => invoke("push_burst_turn", { turn }),
+              /** 手动 flush Burst Buffer */
+              flushBurstBuffer: () => invoke("flush_memory_burst_buffer"),
+              /** 获取 Burst Buffer 状态 */
+              getBurstBufferStatus: () => invoke("get_burst_buffer_status")
+            };
+            durableApi = {
+              /** 接收待处理输入 */
+              admit: (conversationId, content, delivery) => invoke("admit_input", { conversationId, content, delivery }),
+              /** 提升待处理输入为正式消息 */
+              promote: (inputId) => invoke("promote_input", { inputId }),
+              /** 获取待处理输入列表 */
+              getPending: (conversationId) => invoke("get_pending_inputs", { conversationId })
+            };
+            todoApi = {
+              /** 添加待办事项 */
+              add: (conversationId, text) => invoke("add_session_todo", { conversationId, text }),
+              /** 更新待办状态 */
+              updateStatus: (todoId, status) => invoke("update_todo_status", { todoId, status }),
+              /** 获取会话待办列表 */
+              list: (conversationId) => invoke("get_session_todos", { conversationId }),
+              /** 删除单个待办 */
+              delete: (todoId) => invoke("delete_session_todo", { todoId }),
+              /** 删除会话全部待办 */
+              deleteAll: (conversationId) => invoke("delete_session_todos", { conversationId })
+            };
+            docExtApi = {
+              /** 重新分类文档领域 */
+              reclassify: (docId) => invoke("reclassify_document", { docId })
             };
           }
         });
@@ -5522,132 +5756,25 @@
           }
         });
       
-        // ui/src/state.js
-        var initialState = {
-          history: [],
-          currentRawMarkdown: "",
-          lastSources: null,
-          streaming: false,
-          currentAssistantEl: null,
-          renderScheduled: false,
-          currentConversationId: null,
-          isNewConversation: false,
-          activePreset: "deepseek",
-          isPro: false,
-          vlmEnabled: false,
-          rerankEnabled: false,
-          hydeEnabled: false,
-          auditingDocId: null,
-          importing: false,
-          docCount: 0,
-          chunkCount: 0,
-          documents: [],
-          activeSidebarTab: "conversations",
-          cmdSelectedIndex: 0,
-          cmdFiltered: [],
-          cmdPrevFocus: null,
-          // 当前 LLM 模型信息（TC-QA-004：每条 assistant 消息标注模型）
-          currentModel: "",
-          // 如 'claude-3.5-sonnet' 或 'qwen2.5-7b.gguf'
-          currentLlmMode: "remote",
-          // 'remote' 或 'local'
-          // 上下文窗口用量（TC-QA-020~026：上下文窗口指示器）
-          contextTokens: 0,
-          // 当前对话已用 token 数
-          contextLimit: 8e3,
-          // 模型上下文窗口大小（默认 8K）
-          // 安全状态
-          securityState: "unencrypted",
-          // 'unencrypted' | 'encrypted_unlocked' | 'locked'
-          piiDetectionEnabled: false,
-          autoLockTimeout: 0,
-          // 0 = disabled
-          theme: "dark",
-          // REQ-UI-011：主题模式 dark/light/system
-          llmConfigured: false,
-          // LLM 是否已配置
-          drafts: {},
-          // 会话级草稿（conversationId → 未发送文本）
-          // 功能开关状态（方案4：input-toggles.js 状态补全）
-          hybridEnabled: false,
-          // 混合搜索开关
-          agentEnabled: false,
-          // Agent 模式开关
-          subAgentEnabled: false,
-          // 子代理开关
-          memoryEnabled: false,
-          // 记忆开关
-          webSearchEnabled: false,
-          // 网页搜索开关
-          docList: []
-          // 文档提及列表（chat.js doc-mention 需要）
-        };
-        var _state = { ...initialState };
-        var _subscribers = /* @__PURE__ */ new Map();
-        var _globalSubscribers = /* @__PURE__ */ new Set();
-        function getState() {
-          return { ..._state };
-        }
-        function get(key) {
-          return _state[key];
-        }
-        function setState(partial) {
-          const changed = [];
-          for (const key of Object.keys(partial)) {
-            if (_state[key] !== partial[key]) {
-              changed.push(key);
-            }
-          }
-          if (changed.length === 0) return _state;
-          _state = { ..._state, ...partial };
-          for (const key of changed) {
-            const subs = _subscribers.get(key);
-            if (subs) {
-              for (const cb of subs) {
-                try {
-                  cb(_state[key], key);
-                } catch (_) {
-                }
-              }
-            }
-          }
-          for (const cb of _globalSubscribers) {
-            try {
-              cb(_state, changed);
-            } catch (_) {
-            }
-          }
-          return _state;
-        }
-        function subscribe(key, callback) {
-          if (!_subscribers.has(key)) {
-            _subscribers.set(key, /* @__PURE__ */ new Set());
-          }
-          _subscribers.get(key).add(callback);
-          return () => _subscribers.get(key)?.delete(callback);
-        }
-        function isEncrypted() {
-          return _state.securityState !== "unencrypted";
-        }
-        function isLocked() {
-          return _state.securityState === "locked";
-        }
-      
         // ui/src/main.js
+        init_state();
         init_utils();
         init_ipc();
         init_toast();
       
         // ui/src/chat-render.js
+        init_state();
         init_utils();
         init_ipc();
       
         // ui/src/import.js
+        init_state();
         init_utils();
         init_ipc();
         init_toast();
       
         // ui/src/paywall.js
+        init_state();
         init_utils();
         init_ipc();
         init_toast();
@@ -6626,17 +6753,20 @@
         }
       
         // ui/src/chat.js
+        init_state();
         init_utils();
         init_ipc();
         init_toast();
         init_i18n();
       
         // ui/src/guards.js
+        init_state();
         init_utils();
         init_i18n();
         init_toast();
       
         // ui/src/queue-send.js
+        init_state();
         init_utils();
         init_i18n();
         var _queue = [];
@@ -6984,6 +7114,7 @@
         }
       
         // ui/src/context-bar.js
+        init_state();
         init_i18n();
         var DEFAULT_CONTEXT_LIMIT = 8e3;
         function getContextPercentage(used, limit) {
@@ -7422,10 +7553,12 @@
       
         // ui/src/retrieval-feedback.js
         init_ipc();
+        init_state();
       
         // ui/src/input-toggles.js
         init_i18n();
         init_ipc();
+        init_state();
         var ICON_HYBRID = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
         var ICON_AGENT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v1a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4z"/><path d="M5 12h14M12 8v8"/></svg>`;
         var ICON_SUB_AGENT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>`;
@@ -7732,6 +7865,7 @@
         }
       
         // ui/src/input-history.js
+        init_state();
         init_utils();
         var _histories = /* @__PURE__ */ new Map();
         var MAX_HISTORY = 50;
@@ -8150,6 +8284,7 @@
       
         // ui/src/turn-tree.js
         init_ipc();
+        init_state();
         init_i18n();
         var _turnTree = [];
         function buildTurnTree(messages) {
@@ -8471,6 +8606,7 @@
         // ui/src/message-edit.js
         init_i18n();
         init_ipc();
+        init_state();
         var _editingBlock = null;
         var _onResendCallback = null;
         var _onAttachCallback = null;
@@ -8855,12 +8991,12 @@
           }
         }
         function setInputState(state, hint = "") {
-          const isStreaming = state === "streaming";
-          setState({ streaming: isStreaming });
+          const isStreaming2 = state === "streaming";
+          setState({ streaming: isStreaming2 });
           setInputHint(hint);
           updateSendButton();
           updateInputUI();
-          if (!isStreaming) {
+          if (!isStreaming2) {
             const docCount = get("docCount");
             if (docCount > 0 && !requireUnlocked_guard()) {
               $("queryInput").focus();
@@ -9406,6 +9542,7 @@
       
         // ui/src/empty-state.js
         init_i18n();
+        init_state();
         var DEFAULT_RECOMMENDATIONS = [
           "summarize_key_points",
           "compare_differences",
@@ -9553,6 +9690,7 @@
         }
       
         // ui/src/privacy-indicator.js
+        init_state();
         init_i18n();
         var PRIVACY_STATUS_TEXT = {
           encrypted: "AES-256 \u52A0\u5BC6",
@@ -11568,6 +11706,7 @@
         }
       
         // ui/src/command-palette.js
+        init_state();
         init_utils();
         init_i18n();
         function filterCommands(query, commands) {
@@ -11906,6 +12045,7 @@
         }
       
         // ui/src/wizard.js
+        init_state();
         init_utils();
         init_ipc();
         init_toast();
@@ -12345,6 +12485,7 @@
         }
       
         // ui/src/settings.js
+        init_state();
         init_utils();
         init_ipc();
         init_ipc();
@@ -12352,6 +12493,7 @@
         init_i18n();
       
         // ui/src/security.js
+        init_state();
         init_ipc();
         init_i18n();
         init_toast();
@@ -12494,7 +12636,9 @@
           const now = Date.now();
           if (now - _activityThrottle < 5e3) return;
           _activityThrottle = now;
-          securityApi.checkStatus().catch(() => {
+          securityApi.recordActivity().catch(() => {
+            securityApi.checkStatus().catch(() => {
+            });
           });
         }
         function renderSecuritySettings(container) {
@@ -12584,6 +12728,70 @@
               <div class="shrink-0 ml-4 flex gap-2">
                 <button id="btnViewAuditLog" class="px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" data-i18n="security.view_log">\u67E5\u770B\u65E5\u5FD7</button>
                 <button id="btnVerifyAudit" class="px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" data-i18n="security.verify_integrity">\u9A8C\u8BC1\u5B8C\u6574\u6027</button>
+                <button id="btnClearAuditLogs" class="px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:text-red-400 hover:border-red-400/40 transition-colors" data-i18n="security.clear_logs">\u6E05\u7A7A\u65E5\u5FD7</button>
+              </div>
+            </div>
+      
+            <!-- \u526A\u8D34\u677F\u81EA\u52A8\u6E05\u9664\u914D\u7F6E\uFF08S2 \u590D\u76D8\u63A5\u7EBF\uFF09 -->
+            <div class="flex items-center justify-between py-3 border-t border-border-default">
+              <div class="flex flex-col gap-0.5 flex-1">
+                <span data-i18n="security.clipboard_clear">\u526A\u8D34\u677F\u81EA\u52A8\u6E05\u9664</span>
+                <span class="text-xs text-text-tertiary leading-tight" data-i18n="security.clipboard_clear_desc">\u590D\u5236\u654F\u611F\u6570\u636E\u540E\u81EA\u52A8\u6E05\u9664\u526A\u8D34\u677F\uFF08\u79D2\uFF0C0=\u7981\u7528\uFF09</span>
+              </div>
+              <div class="shrink-0 ml-4 flex items-center gap-2">
+                <input type="number" id="clipboardClearTimeoutInput" class="px-2.5 py-1 text-[13px] border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]"
+                       min="0" max="300" step="5"
+                       value="${state.clipboardClearTimeout || 30}"
+                       style="width: 70px;"/>
+                <label class="relative inline-block w-10 h-[22px]">
+                  <input type="checkbox" id="clipboardClearToggle" class="peer opacity-0 w-0 h-0" ${state.clipboardClearEnabled ? "checked" : ""}/>
+                  <span class="absolute cursor-pointer inset-0 bg-border-default rounded-[11px] transition-[background] duration-300 before:content-[''] before:absolute before:h-4 before:w-4 before:left-[3px] before:bottom-[3px] before:bg-white before:rounded-full before:transition-transform before:duration-300 peer-checked:bg-primary peer-checked:before:translate-x-[18px]"></span>
+                </label>
+              </div>
+            </div>
+      
+            <!-- \u5B89\u5168\u6001\u52BF\u9009\u62E9\u5668\uFF08S2 \u590D\u76D8\u63A5\u7EBF\uFF09 -->
+            <div class="flex items-center justify-between py-3 border-t border-border-default">
+              <div class="flex flex-col gap-0.5 flex-1">
+                <span data-i18n="security.posture">\u5B89\u5168\u6001\u52BF</span>
+                <span class="text-xs text-text-tertiary leading-tight" data-i18n="security.posture_desc">\u63A7\u5236\u5B89\u5168\u7B5B\u67E5\u4E25\u683C\u7A0B\u5EA6</span>
+              </div>
+              <div class="shrink-0 ml-4 flex gap-1" id="postureSelector">
+                <button class="posture-btn px-2.5 py-1 text-xs font-medium rounded-md border border-border-default text-text-tertiary hover:bg-surface-3 transition-colors" data-posture="dangerous" data-i18n="security.posture_dangerous">\u5BBD\u677E</button>
+                <button class="posture-btn px-2.5 py-1 text-xs font-medium rounded-md border border-border-default text-text-tertiary hover:bg-surface-3 transition-colors" data-posture="auto" data-i18n="security.posture_auto">\u81EA\u52A8</button>
+                <button class="posture-btn px-2.5 py-1 text-xs font-medium rounded-md border border-border-default text-text-tertiary hover:bg-surface-3 transition-colors" data-posture="strict" data-i18n="security.posture_strict">\u4E25\u683C</button>
+              </div>
+            </div>
+      
+            <!-- Shadow \u7B5B\u67E5\u7EDF\u8BA1\uFF08S2 \u590D\u76D8\u63A5\u7EBF\uFF09 -->
+            <div class="py-3 border-t border-border-default" id="shadowScreenSection">
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span data-i18n="security.shadow_screen">Shadow \u7B5B\u67E5\u7EDF\u8BA1</span>
+                  <span class="text-xs text-text-tertiary leading-tight" data-i18n="security.shadow_screen_desc">\u5E76\u884C\u5B89\u5168\u7B5B\u67E5\u5BF9\u6BD4\u7EDF\u8BA1</span>
+                </div>
+                <button id="btnResetShadowStats" class="shrink-0 ml-4 px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" data-i18n="security.reset_stats">\u91CD\u7F6E</button>
+              </div>
+              <div class="flex gap-3 text-sm" id="shadowScreenStats">
+                <span class="text-text-tertiary"><span data-i18n="security.shadow_total">\u603B\u8BA1</span>: <span class="font-semibold text-text-primary" id="shadowTotal">-</span></span>
+                <span class="text-success"><span data-i18n="security.shadow_agree">\u4E00\u81F4</span>: <span class="font-semibold" id="shadowAgree">-</span></span>
+                <span class="text-danger"><span data-i18n="security.shadow_disagree">\u5206\u6B67</span>: <span class="font-semibold" id="shadowDisagree">-</span></span>
+                <span class="text-text-quaternary"><span data-i18n="security.shadow_unavailable">\u4E0D\u53EF\u7528</span>: <span class="font-semibold" id="shadowUnavailable">-</span></span>
+              </div>
+            </div>
+      
+            <!-- \u7D27\u6025\u9500\u6BC1\uFF08S2 \u590D\u76D8\u63A5\u7EBF\uFF09 -->
+            <div class="py-3 border-t border-border-default" id="panicWipeSection">
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span data-i18n="security.panic_wipe">\u7D27\u6025\u9500\u6BC1</span>
+                  <span class="text-xs text-text-tertiary leading-tight" data-i18n="security.panic_wipe_desc">\u8BBE\u7F6E\u7D27\u6025\u5BC6\u7801\uFF0C\u8F93\u5165\u540E\u7ACB\u5373\u9500\u6BC1\u6240\u6709\u6570\u636E</span>
+                </div>
+                <button id="btnSetPanicWipe" class="shrink-0 ml-4 px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" data-i18n="security.set_panic_password">\u8BBE\u7F6E\u5BC6\u7801</button>
+              </div>
+              <div class="flex items-center gap-2" id="panicWipeStatus" style="display:none">
+                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-[rgba(var(--success-rgb),0.12)] text-success" data-i18n="security.panic_enabled">\u5DF2\u542F\u7528</span>
+                <button id="btnClearPanicWipe" class="px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:text-red-400 hover:border-red-400/40 transition-colors" data-i18n="security.clear_panic">\u6E05\u9664</button>
               </div>
             </div>
           </div>
@@ -12641,6 +12849,128 @@
           if (btnVerify) {
             btnVerify.addEventListener("click", verifyAuditChain);
           }
+          const btnClearLogs = container.querySelector("#btnClearAuditLogs");
+          if (btnClearLogs) {
+            btnClearLogs.addEventListener("click", async () => {
+              const confirmed = await showConfirmDialog({
+                title: t("security.clear_logs_confirm", "\u786E\u8BA4\u6E05\u7A7A\u6240\u6709\u5BA1\u8BA1\u65E5\u5FD7\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002")
+              });
+              if (!confirmed) return;
+              try {
+                await securityApi.clearAuditLogs();
+                toast(t("security.logs_cleared", "\u5BA1\u8BA1\u65E5\u5FD7\u5DF2\u6E05\u7A7A"), "success");
+              } catch (err) {
+                toast(t("security.clear_failed", "\u6E05\u7A7A\u5931\u8D25") + ": " + String(err), "error");
+              }
+            });
+          }
+          const clipboardToggle = container.querySelector("#clipboardClearToggle");
+          const clipboardInput = container.querySelector("#clipboardClearTimeoutInput");
+          if (clipboardToggle && clipboardInput) {
+            const updateClipboard = async () => {
+              const enabled = clipboardToggle.checked;
+              const secs = parseInt(clipboardInput.value, 10) || 0;
+              try {
+                await securityApi.setClipboardConfig(enabled, secs);
+                setState({ clipboardClearEnabled: enabled, clipboardClearTimeout: secs });
+              } catch (err) {
+                toast(t("security.update_failed", "\u66F4\u65B0\u5931\u8D25") + ": " + String(err), "error");
+              }
+            };
+            clipboardToggle.addEventListener("change", updateClipboard);
+            clipboardInput.addEventListener("change", updateClipboard);
+          }
+          const postureButtons = container.querySelectorAll(".posture-btn");
+          if (postureButtons.length > 0) {
+            securityApi.getSecurityPosture().then((posture) => {
+              postureButtons.forEach((btn) => {
+                const isActive = btn.dataset.posture === posture;
+                btn.classList.toggle("bg-accent", isActive);
+                btn.classList.toggle("text-surface-0", isActive);
+                btn.classList.toggle("border-accent", isActive);
+                btn.classList.toggle("text-text-tertiary", !isActive);
+                btn.classList.toggle("border-border-default", !isActive);
+              });
+            }).catch(() => {
+            });
+            postureButtons.forEach((btn) => {
+              btn.addEventListener("click", async () => {
+                const posture = btn.dataset.posture;
+                try {
+                  await securityApi.setSecurityPosture(posture);
+                  postureButtons.forEach((b) => {
+                    const active = b.dataset.posture === posture;
+                    b.classList.toggle("bg-accent", active);
+                    b.classList.toggle("text-surface-0", active);
+                    b.classList.toggle("border-accent", active);
+                    b.classList.toggle("text-text-tertiary", !active);
+                    b.classList.toggle("border-border-default", !active);
+                  });
+                  toast(t("security.posture_updated", "\u5B89\u5168\u6001\u52BF\u5DF2\u66F4\u65B0"), "success");
+                } catch (err) {
+                  toast(t("security.update_failed", "\u66F4\u65B0\u5931\u8D25") + ": " + String(err), "error");
+                }
+              });
+            });
+          }
+          const shadowSection = container.querySelector("#shadowScreenSection");
+          if (shadowSection) {
+            const loadShadowStats = async () => {
+              try {
+                const stats = await securityApi.getSecurityScreenStats();
+                const el = (id) => shadowSection.querySelector(id);
+                if (el("#shadowTotal")) el("#shadowTotal").textContent = String(stats.total || 0);
+                if (el("#shadowAgree")) el("#shadowAgree").textContent = String(stats.agree || 0);
+                if (el("#shadowDisagree")) el("#shadowDisagree").textContent = String(stats.disagree || 0);
+                if (el("#shadowUnavailable")) el("#shadowUnavailable").textContent = String(stats.unavailable || 0);
+              } catch (_) {
+              }
+            };
+            loadShadowStats();
+            const resetBtn = container.querySelector("#btnResetShadowStats");
+            if (resetBtn) {
+              resetBtn.addEventListener("click", async () => {
+                try {
+                  await securityApi.resetSecurityScreenStats();
+                  await loadShadowStats();
+                  toast(t("security.stats_reset", "\u7EDF\u8BA1\u5DF2\u91CD\u7F6E"), "success");
+                } catch (err) {
+                  toast(String(err), "error");
+                }
+              });
+            }
+          }
+          const btnSetPanic = container.querySelector("#btnSetPanicWipe");
+          const panicStatus = container.querySelector("#panicWipeStatus");
+          const btnClearPanic = container.querySelector("#btnClearPanicWipe");
+          if (btnSetPanic) {
+            securityApi.isPanicWipeEnabled().then((enabled) => {
+              if (enabled && panicStatus) {
+                panicStatus.style.display = "flex";
+                btnSetPanic.textContent = t("security.update_panic_password", "\u66F4\u65B0\u5BC6\u7801");
+              }
+            }).catch(() => {
+            });
+            btnSetPanic.addEventListener("click", () => {
+              showPanicWipeDialog(btnSetPanic, panicStatus);
+            });
+          }
+          if (btnClearPanic) {
+            btnClearPanic.addEventListener("click", async () => {
+              const confirmed = await showConfirmDialog({
+                title: t("security.clear_panic_confirm", "\u786E\u8BA4\u6E05\u9664\u7D27\u6025\u9500\u6BC1\u5BC6\u7801\uFF1F")
+              });
+              if (!confirmed) return;
+              try {
+                await securityApi.clearPanicWipePassword();
+                if (panicStatus) panicStatus.style.display = "none";
+                if (btnSetPanic) btnSetPanic.textContent = t("security.set_panic_password", "\u8BBE\u7F6E\u5BC6\u7801");
+                toast(t("security.panic_cleared", "\u7D27\u6025\u9500\u6BC1\u5DF2\u6E05\u9664"), "success");
+              } catch (err) {
+                toast(String(err), "error");
+              }
+            });
+          }
         }
         function showEncryptDialog() {
           const dialog = document.createElement("div");
@@ -12683,15 +13013,30 @@
           const errorEl = dialog.querySelector("#encError");
           const cancelBtn = dialog.querySelector("#encCancelBtn");
           const confirmBtn = dialog.querySelector("#encConfirmBtn");
-          pwdInput.addEventListener("input", () => {
+          pwdInput.addEventListener("input", async () => {
             const pwd = pwdInput.value;
             if (!pwd) {
               strengthEl.textContent = "";
               return;
             }
-            const strength = assessPasswordStrength(pwd);
-            strengthEl.textContent = strength.label;
-            strengthEl.className = `text-xs font-medium mt-1.5 min-h-[18px] ${strength.level === "weak" ? "text-danger" : strength.level === "medium" ? "text-warning" : "text-success"}`;
+            const localStrength = assessPasswordStrength(pwd);
+            strengthEl.textContent = localStrength.label;
+            strengthEl.className = `text-xs font-medium mt-1.5 min-h-[18px] ${localStrength.level === "weak" ? "text-danger" : localStrength.level === "medium" ? "text-warning" : "text-success"}`;
+            try {
+              const result = await securityApi.checkPasswordStrength(pwd);
+              if (result && result.level) {
+                const pct = result.percentage || 0;
+                const color = result.color || "";
+                const suggestions = result.suggestions || [];
+                const levelText = t("security.pwd_" + result.level, result.level);
+                strengthEl.textContent = `${levelText} (${pct}%)`;
+                strengthEl.className = `text-xs font-medium mt-1.5 min-h-[18px] ${color || (result.level === "weak" ? "text-danger" : result.level === "medium" ? "text-warning" : "text-success")}`;
+                if (suggestions.length > 0 && pwd.length < 12) {
+                  strengthEl.textContent += " \u2014 " + suggestions[0];
+                }
+              }
+            } catch (_) {
+            }
           });
           cancelBtn.addEventListener("click", () => {
             if (encTrap) encTrap.deactivate();
@@ -12763,6 +13108,7 @@
             </div>
             <div class="modal-footer">
               <button class="btn btn-secondary" id="auditCloseBtn" data-i18n="common.close">\u5173\u95ED</button>
+              <button class="btn btn-secondary" id="auditClearBtn" data-i18n="security.clear_logs">\u6E05\u7A7A\u65E5\u5FD7</button>
               <button class="btn btn-secondary" id="auditVerifyBtn" data-i18n="security.verify_integrity">\u9A8C\u8BC1\u5B8C\u6574\u6027</button>
             </div>
           </div>
@@ -12776,6 +13122,22 @@
             panel.remove();
           });
           verifyBtn.addEventListener("click", verifyAuditChain);
+          const clearBtn = panel.querySelector("#auditClearBtn");
+          if (clearBtn) {
+            clearBtn.addEventListener("click", async () => {
+              const confirmed = await showConfirmDialog({
+                title: t("security.clear_logs_confirm", "\u786E\u8BA4\u6E05\u7A7A\u6240\u6709\u5BA1\u8BA1\u65E5\u5FD7\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002")
+              });
+              if (!confirmed) return;
+              try {
+                await securityApi.clearAuditLogs();
+                toast(t("security.logs_cleared", "\u5BA1\u8BA1\u65E5\u5FD7\u5DF2\u6E05\u7A7A"), "success");
+                contentEl.innerHTML = `<p class="empty-text" data-i18n="security.no_audit_logs">\u6682\u65E0\u5BA1\u8BA1\u65E5\u5FD7\u8BB0\u5F55</p>`;
+              } catch (err) {
+                toast(t("security.clear_failed", "\u6E05\u7A7A\u5931\u8D25") + ": " + String(err), "error");
+              }
+            });
+          }
           const auditTrap = createFocusTrap(panel);
           auditTrap.activate();
           try {
@@ -12881,6 +13243,71 @@
             action: verifyAuditChain
           });
           return commands;
+        }
+        function showPanicWipeDialog(btnSetPanic, panicStatus) {
+          const dialog = document.createElement("div");
+          dialog.className = `fixed inset-0 ${zClass(Z_INDEX.AUDIT_LOG)} flex items-center justify-center bg-black/50 backdrop-blur-[4px]`;
+          dialog.innerHTML = `
+          <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[420px] w-[90%]">
+            <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="security.panic_wipe_title">\u{1F6A8} \u7D27\u6025\u9500\u6BC1\u5BC6\u7801</h3>
+            <div class="px-7 py-5">
+              <p class="text-sm text-text-secondary leading-normal m-0 mb-5" data-i18n="security.panic_wipe_warning">
+                \u8BBE\u7F6E\u7D27\u6025\u9500\u6BC1\u5BC6\u7801\u540E\uFF0C\u5728\u9501\u5C4F\u754C\u9762\u8F93\u5165\u6B64\u5BC6\u7801\u5C06\u7ACB\u5373\u6C38\u4E45\u5220\u9664\u6240\u6709\u6570\u636E\u5E93\u5185\u5BB9\u3002\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002
+              </p>
+              <div class="mb-4">
+                <label class="block text-[13px] font-medium mb-1.5" data-i18n="security.password">\u5BC6\u7801</label>
+                <input type="password" id="panicPwdInput" class="w-full px-3.5 py-2.5 text-sm border border-border-default rounded-md bg-bg-input text-text-primary outline-none box-border transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]" autocomplete="new-password" placeholder="\u81F3\u5C11 8 \u4E2A\u5B57\u7B26\u2026"/>
+              </div>
+              <div class="mb-4">
+                <label class="block text-[13px] font-medium mb-1.5" data-i18n="security.confirm_password">\u786E\u8BA4\u5BC6\u7801</label>
+                <input type="password" id="panicPwdConfirm" class="w-full px-3.5 py-2.5 text-sm border border-border-default rounded-md bg-bg-input text-text-primary outline-none box-border transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]" autocomplete="new-password" placeholder="\u518D\u6B21\u8F93\u5165\u5BC6\u7801\u2026"/>
+              </div>
+              <p id="panicError" class="text-[13px] text-danger min-h-[18px] mt-2"></p>
+            </div>
+            <div class="flex justify-end gap-3 px-7 pb-6">
+              <button class="px-3.5 py-2.5 text-sm font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" id="panicCancelBtn" data-i18n="common.cancel">\u53D6\u6D88</button>
+              <button class="px-3.5 py-2.5 text-sm font-medium border-none rounded-md bg-danger text-surface-0 cursor-pointer hover:opacity-90 transition-opacity" id="panicConfirmBtn" data-i18n="security.set_panic_confirm">\u786E\u8BA4\u8BBE\u7F6E</button>
+            </div>
+          </div>
+        `;
+          document.body.appendChild(dialog);
+          const pwdInput = dialog.querySelector("#panicPwdInput");
+          const pwdConfirm = dialog.querySelector("#panicPwdConfirm");
+          const errorEl = dialog.querySelector("#panicError");
+          const cancelBtn = dialog.querySelector("#panicCancelBtn");
+          const confirmBtn = dialog.querySelector("#panicConfirmBtn");
+          const trap = createFocusTrap(dialog);
+          trap.activate();
+          const closeDialog = () => {
+            trap.deactivate();
+            dialog.remove();
+          };
+          cancelBtn.addEventListener("click", closeDialog);
+          dialog.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") closeDialog();
+          });
+          confirmBtn.addEventListener("click", async () => {
+            const pwd = pwdInput.value;
+            const confirm2 = pwdConfirm.value;
+            if (!pwd || pwd.length < 8) {
+              errorEl.textContent = t("security.error_pwd_too_short", "\u5BC6\u7801\u81F3\u5C11 8 \u4E2A\u5B57\u7B26");
+              return;
+            }
+            if (pwd !== confirm2) {
+              errorEl.textContent = t("security.error_pwd_mismatch", "\u4E24\u6B21\u8F93\u5165\u7684\u5BC6\u7801\u4E0D\u4E00\u81F4");
+              return;
+            }
+            try {
+              await securityApi.setPanicWipePassword(pwd);
+              if (panicStatus) panicStatus.style.display = "flex";
+              if (btnSetPanic) btnSetPanic.textContent = t("security.update_panic_password", "\u66F4\u65B0\u5BC6\u7801");
+              toast(t("security.panic_set", "\u7D27\u6025\u9500\u6BC1\u5BC6\u7801\u5DF2\u8BBE\u7F6E"), "success");
+              closeDialog();
+            } catch (err) {
+              errorEl.textContent = String(err);
+            }
+          });
+          pwdInput.focus();
         }
       
         // ui/src/perf-settings.js
@@ -13320,6 +13747,7 @@
         // ui/src/memory-panel.js
         init_utils();
         init_ipc();
+        init_ipc();
         init_i18n();
         init_toast();
         var TIER_CONFIG = [
@@ -13385,6 +13813,33 @@
             <div id="memTierContent">
               ${renderTierContent(TIER_CONFIG.find((tg) => tg.key === _activeTier), allMemories.filter((m) => m.tier === _activeTier))}
             </div>
+      
+            <!-- Scratch \u5C42\u6574\u5408 + Burst Buffer\uFF08S2 \u590D\u76D8\u63A5\u7EBF\uFF09 -->
+            <div class="border-t border-border-subtle pt-3 mt-3 space-y-2" id="memExtSection">
+              <div class="flex items-center justify-between">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span class="text-xs font-medium" data-i18n="memory.consolidation">Scratch \u6574\u5408</span>
+                  <span class="text-[11px] text-text-tertiary" data-i18n="memory.consolidation_desc">\u624B\u52A8\u89E6\u53D1 Scratch \u5C42 LLM \u6574\u5408</span>
+                </div>
+                <button id="btnTriggerConsolidation" class="shrink-0 ml-3 px-2.5 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-surface-3 transition-colors" data-i18n="memory.trigger">\u89E6\u53D1</button>
+              </div>
+      
+              <div class="flex items-center justify-between">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span class="text-xs font-medium" data-i18n="memory.scratch_logs">Scratch \u65E5\u5FD7</span>
+                  <span class="text-[11px] text-text-tertiary" data-i18n="memory.scratch_logs_desc">\u67E5\u770B\u4E34\u65F6\u8BB0\u5FC6\u65E5\u5FD7</span>
+                </div>
+                <button id="btnViewScratchLogs" class="shrink-0 ml-3 px-2.5 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-surface-3 transition-colors" data-i18n="memory.view_logs">\u67E5\u770B</button>
+              </div>
+      
+              <div class="flex items-center justify-between">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span class="text-xs font-medium" data-i18n="memory.burst_buffer">Burst Buffer</span>
+                  <span class="text-[11px] text-text-tertiary" id="burstBufferStatus" data-i18n="memory.burst_buffer_idle">\u7A7A\u95F2</span>
+                </div>
+                <button id="btnFlushBurstBuffer" class="shrink-0 ml-3 px-2.5 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-surface-3 transition-colors" data-i18n="memory.flush">Flush</button>
+              </div>
+            </div>
           </div>
         `;
           initMemoryHandlers(memoryEnabled, allMemories);
@@ -13431,6 +13886,7 @@
             </div>
             <div class="flex items-center gap-2 pt-0.5">
               ${tier.key !== "room" ? `<button class="mem-promote-btn text-xs px-2 py-0.5 rounded text-accent hover:bg-accent/10 transition-colors" data-mem-id="${mem.id}">${t("memory.promote")}</button>` : ""}
+              <button class="mem-pin-btn text-xs px-2 py-0.5 rounded text-text-tertiary hover:text-accent hover:bg-accent/10 transition-colors" data-mem-id="${mem.id}" data-i18n="memory.pin">\u{1F4CC}</button>
               <button class="mem-delete-btn text-xs px-2 py-0.5 rounded text-text-quaternary hover:text-red-400 hover:bg-red-400/10 transition-colors" data-mem-id="${mem.id}">${t("memory.delete")}</button>
             </div>
           </div>
@@ -13488,6 +13944,74 @@
               }
             };
           });
+          containerQuerySelectorAll(".mem-pin-btn").forEach((btn) => {
+            btn.onclick = async () => {
+              const memId = btn.dataset.memId;
+              try {
+                await memoryExtApi.pin(memId);
+                toastSuccess(t("memory.pinned", "\u5DF2\u56FA\u5B9A"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          });
+          const btnConsolidate = $("btnTriggerConsolidation");
+          if (btnConsolidate) {
+            btnConsolidate.onclick = async () => {
+              btnConsolidate.textContent = t("memory.consolidating", "\u6574\u5408\u4E2D\u2026");
+              btnConsolidate.disabled = true;
+              try {
+                const result = await memoryExtApi.triggerConsolidation();
+                toastSuccess(t("memory.consolidation_done", "\u6574\u5408\u5B8C\u6210") + (result ? `: ${JSON.stringify(result)}` : ""));
+                await renderMemorySettings($("memorySettingsContainer"));
+              } catch (err) {
+                toastError(err);
+              } finally {
+                btnConsolidate.textContent = t("memory.trigger", "\u89E6\u53D1");
+                btnConsolidate.disabled = false;
+              }
+            };
+          }
+          const btnScratchLogs = $("btnViewScratchLogs");
+          if (btnScratchLogs) {
+            btnScratchLogs.onclick = async () => {
+              try {
+                const logs = await memoryExtApi.getScratchLogs(50);
+                showScratchLogsDialog(logs);
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+          const burstStatusEl = $("burstBufferStatus");
+          const btnFlush = $("btnFlushBurstBuffer");
+          const loadBurstStatus = async () => {
+            if (!burstStatusEl) return;
+            try {
+              const status = await memoryExtApi.getBurstBufferStatus();
+              const pending = status?.pending_count || 0;
+              const total = status?.total_turns || 0;
+              burstStatusEl.textContent = pending > 0 ? `${t("memory.burst_pending", "\u5F85\u5904\u7406")}: ${pending} / ${total}` : t("memory.burst_buffer_idle", "\u7A7A\u95F2");
+            } catch (_) {
+            }
+          };
+          loadBurstStatus();
+          if (btnFlush) {
+            btnFlush.onclick = async () => {
+              btnFlush.textContent = t("memory.flushing", "\u5904\u7406\u4E2D\u2026");
+              btnFlush.disabled = true;
+              try {
+                await memoryExtApi.flushBurstBuffer();
+                toastSuccess(t("memory.flush_done", "Burst Buffer \u5DF2\u6E05\u7A7A"));
+                await loadBurstStatus();
+              } catch (err) {
+                toastError(err);
+              } finally {
+                btnFlush.textContent = t("memory.flush", "Flush");
+                btnFlush.disabled = false;
+              }
+            };
+          }
           containerQuerySelectorAll(".mem-clear-btn").forEach((btn) => {
             btn.onclick = async () => {
               const tier = btn.dataset.tier;
@@ -13522,8 +14046,589 @@
             if (knob) knob.classList.remove("translate-x-5");
           }
         }
+        function showScratchLogsDialog(logs) {
+          const dialog = document.createElement("div");
+          dialog.className = "fixed inset-0 flex items-center justify-center bg-black/50 backdrop-blur-[4px]";
+          dialog.style.zIndex = "9000";
+          dialog.innerHTML = `
+          <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[600px] w-[90%] max-h-[80vh] overflow-y-auto">
+            <h3 class="text-lg font-semibold px-6 pt-6 m-0">\u{1F4DD} Scratch \u65E5\u5FD7</h3>
+            <div class="px-6 py-4">
+              ${!logs || logs.length === 0 ? `
+                <p class="text-sm text-text-quaternary text-center py-8">\u6682\u65E0 Scratch \u65E5\u5FD7</p>
+              ` : logs.map((log) => {
+            const time = log.created_at ? new Date(log.created_at).toLocaleString() : "-";
+            return `
+                  <div class="bg-surface-2 rounded-lg p-3 mb-2">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-xs text-text-quaternary">${time}</span>
+                      <span class="text-xs text-text-tertiary">${log.date || "-"}</span>
+                    </div>
+                    <p class="text-sm text-text-primary m-0">${log.content || "-"}</p>
+                  </div>
+                `;
+          }).join("")}
+            </div>
+            <div class="flex justify-end px-6 pb-6">
+              <button class="px-3.5 py-2.5 text-sm font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" id="scratchLogsCloseBtn">\u5173\u95ED</button>
+            </div>
+          </div>
+        `;
+          document.body.appendChild(dialog);
+          dialog.querySelector("#scratchLogsCloseBtn").onclick = () => dialog.remove();
+          dialog.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") dialog.remove();
+          });
+        }
+      
+        // ui/src/trace-panel.js
+        init_utils();
+        init_ipc();
+        init_i18n();
+        init_toast();
+        async function renderTraceBudgetSettings(container) {
+          if (!container) return;
+          let traceCount = 0;
+          let recentTraces = [];
+          let budgetStats = null;
+          let budgetConfig = null;
+          try {
+            traceCount = await traceApi.getCount();
+            recentTraces = await traceApi.getRecent(5);
+          } catch (_) {
+          }
+          try {
+            budgetStats = await budgetApi.getStats();
+            budgetConfig = await budgetApi.getConfig();
+          } catch (_) {
+          }
+          const dailySpent = budgetStats?.daily_spent_usd || 0;
+          const dailyLimit = budgetStats?.daily_limit_usd || 0;
+          const monthlySpent = budgetStats?.monthly_spent_usd || 0;
+          const usagePct = dailyLimit > 0 ? Math.min(100, Math.round(dailySpent / dailyLimit * 100)) : 0;
+          const maxTokens = budgetConfig?.max_tokens || 32768;
+          const threshold = budgetConfig?.compaction_threshold || 0.8;
+          const keepRatio = budgetConfig?.recent_keep_ratio || 0.67;
+          const minMsgs = budgetConfig?.min_messages_to_compact || 3;
+          container.innerHTML = `
+          <div class="border-t border-border-default pt-5 mt-5" id="traceBudgetSection">
+            <!-- Trace \u8FFD\u8E2A -->
+            <h3 class="text-sm font-semibold m-0 mb-4 flex items-center gap-1">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" style="display:inline; vertical-align:middle; margin-right:6px;">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+              </svg>
+              <span data-i18n="trace.title">RAG \u94FE\u8DEF\u8FFD\u8E2A</span>
+            </h3>
+      
+            <div class="flex items-center justify-between py-2">
+              <div class="flex flex-col gap-0.5 flex-1">
+                <span data-i18n="trace.count">\u8FFD\u8E2A\u8BB0\u5F55\u6570</span>
+                <span class="text-xs text-text-tertiary leading-tight">${traceCount} ${t("trace.records", "\u6761\u8BB0\u5F55")}</span>
+              </div>
+              <div class="shrink-0 ml-4 flex gap-2">
+                <button id="btnViewTraces" class="px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" data-i18n="trace.view_recent">\u67E5\u770B\u6700\u8FD1</button>
+                <button id="btnClearTraces" class="px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:text-red-400 hover:border-red-400/40 transition-colors" data-i18n="trace.clear">\u6E05\u7A7A</button>
+              </div>
+            </div>
+      
+            <!-- \u6700\u8FD1 5 \u6761 trace \u9884\u89C8 -->
+            ${recentTraces.length > 0 ? `
+              <div class="bg-surface-2 rounded-lg p-3 mb-3 max-h-40 overflow-y-auto">
+                ${recentTraces.map((tr) => {
+            const time = tr.created_at ? new Date(tr.created_at).toLocaleString() : "-";
+            const duration = tr.total_duration_ms ? `${tr.total_duration_ms}ms` : "-";
+            const tokenCount = tr.total_tokens || 0;
+            return `
+                    <div class="flex items-center gap-3 py-1 text-xs border-b border-border-subtle last:border-0">
+                      <span class="text-text-quaternary tabular-nums shrink-0">${time}</span>
+                      <span class="text-text-secondary truncate flex-1">${tr.query || "-"}</span>
+                      <span class="text-text-tertiary shrink-0">${duration}</span>
+                      <span class="text-text-quaternary shrink-0">${tokenCount} tok</span>
+                      <button class="trace-detail-btn text-accent hover:underline shrink-0" data-trace-id="${tr.id || ""}" data-i18n="trace.detail">\u8BE6\u60C5</button>
+                    </div>
+                  `;
+          }).join("")}
+              </div>
+            ` : ""}
+      
+            <!-- Token \u9884\u7B97 -->
+            <h3 class="text-sm font-semibold m-0 mb-4 mt-5 flex items-center gap-1">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" style="display:inline; vertical-align:middle; margin-right:6px;">
+                <rect x="2" y="5" width="20" height="14" rx="2"/>
+                <line x1="2" y1="10" x2="22" y2="10"/>
+              </svg>
+              <span data-i18n="trace.budget_title">Token \u9884\u7B97</span>
+            </h3>
+      
+            <!-- \u65E5\u7528\u91CF\u8FDB\u5EA6\u6761 -->
+            <div class="py-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-sm text-text-secondary" data-i18n="trace.daily_usage">\u4ECA\u65E5\u7528\u91CF</span>
+                <span class="text-xs text-text-quaternary">${dailySpent.toFixed(4)} / ${dailyLimit.toFixed(2)}</span>
+              </div>
+              <div class="h-2 bg-surface-3 rounded-full overflow-hidden">
+                <div class="h-full rounded-full transition-all ${usagePct > 80 ? "bg-danger" : usagePct > 50 ? "bg-warning" : "bg-success"}" style="width:${usagePct}%"></div>
+              </div>
+              <div class="flex justify-between text-[10px] text-text-quaternary mt-1">
+                <span>${usagePct}%</span>
+                <span data-i18n="trace.monthly_usage">\u6708\u7D2F\u8BA1</span>: ${monthlySpent.toFixed(4)}
+              </div>
+            </div>
+      
+            <!-- \u65E5\u9650\u989D\u8BBE\u7F6E -->
+            <div class="flex items-center justify-between py-2 border-t border-border-default">
+              <div class="flex flex-col gap-0.5 flex-1">
+                <span data-i18n="trace.daily_limit">\u65E5\u9650\u989D (USD)</span>
+                <span class="text-xs text-text-tertiary leading-tight" data-i18n="trace.daily_limit_desc">\u8D85\u8FC7\u540E\u62D2\u7EDD LLM \u8C03\u7528</span>
+              </div>
+              <div class="shrink-0 ml-4">
+                <input type="number" id="budgetDailyLimitInput" class="px-2.5 py-1 text-[13px] border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]"
+                       min="0" max="100" step="0.5"
+                       value="${dailyLimit}"
+                       style="width: 80px;"/>
+              </div>
+            </div>
+      
+            <!-- Token \u9884\u7B97\u914D\u7F6E -->
+            <div class="py-2 border-t border-border-default space-y-3">
+              <div class="flex items-center justify-between">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span data-i18n="trace.max_tokens">\u4E0A\u4E0B\u6587\u7A97\u53E3\u9650\u5236</span>
+                  <span class="text-xs text-text-tertiary leading-tight" data-i18n="trace.max_tokens_desc">\u8D85\u51FA\u89E6\u53D1\u4E0A\u4E0B\u6587\u538B\u7F29</span>
+                </div>
+                <input type="number" id="budgetMaxTokensInput" class="shrink-0 ml-4 px-2.5 py-1 text-[13px] border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]"
+                       min="4096" max="131072" step="1024"
+                       value="${maxTokens}"
+                       style="width: 100px;"/>
+              </div>
+      
+              <div class="flex items-center justify-between">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span data-i18n="trace.threshold">\u538B\u7F29\u9608\u503C</span>
+                  <span class="text-xs text-text-tertiary leading-tight" data-i18n="trace.threshold_desc">\u8FBE\u5230\u7A97\u53E3\u7684\u591A\u5C11\u6BD4\u4F8B\u65F6\u89E6\u53D1\u538B\u7F29</span>
+                </div>
+                <input type="number" id="budgetThresholdInput" class="shrink-0 ml-4 px-2.5 py-1 text-[13px] border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]"
+                       min="0.5" max="0.95" step="0.05"
+                       value="${threshold}"
+                       style="width: 70px;"/>
+              </div>
+      
+              <div class="flex items-center justify-between">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span data-i18n="trace.keep_ratio">\u4FDD\u7559\u6BD4\u4F8B</span>
+                  <span class="text-xs text-text-tertiary leading-tight" data-i18n="trace.keep_ratio_desc">\u538B\u7F29\u540E\u4FDD\u7559\u6700\u8FD1\u6D88\u606F\u7684\u6BD4\u4F8B</span>
+                </div>
+                <input type="number" id="budgetKeepRatioInput" class="shrink-0 ml-4 px-2.5 py-1 text-[13px] border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]"
+                       min="0.2" max="0.9" step="0.05"
+                       value="${keepRatio}"
+                       style="width: 70px;"/>
+              </div>
+      
+              <div class="flex items-center justify-between">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span data-i18n="trace.min_msgs">\u6700\u5C0F\u538B\u7F29\u6D88\u606F\u6570</span>
+                  <span class="text-xs text-text-tertiary leading-tight" data-i18n="trace.min_msgs_desc">\u6D88\u606F\u6570\u4E0D\u8DB3\u65F6\u4E0D\u89E6\u53D1\u538B\u7F29</span>
+                </div>
+                <input type="number" id="budgetMinMsgsInput" class="shrink-0 ml-4 px-2.5 py-1 text-[13px] border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]"
+                       min="2" max="50" step="1"
+                       value="${minMsgs}"
+                       style="width: 60px;"/>
+              </div>
+      
+              <button id="btnSaveBudgetConfig" class="w-full text-xs px-3 py-2 rounded-lg border border-border-default text-text-tertiary hover:text-text-secondary hover:bg-surface-3 transition-colors" data-i18n="trace.save_config">\u4FDD\u5B58\u914D\u7F6E</button>
+            </div>
+          </div>
+        `;
+          initTraceBudgetHandlers();
+        }
+        function initTraceBudgetHandlers() {
+          const btnView = $("btnViewTraces");
+          if (btnView) {
+            btnView.onclick = async () => {
+              try {
+                const traces = await traceApi.getRecent(20);
+                showTraceListDialog(traces);
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+          const btnClear = $("btnClearTraces");
+          if (btnClear) {
+            btnClear.onclick = async () => {
+              const confirmed = await showConfirmDialog({
+                title: t("trace.clear_confirm", "\u786E\u8BA4\u6E05\u7A7A\u6240\u6709\u8FFD\u8E2A\u8BB0\u5F55\uFF1F")
+              });
+              if (!confirmed) return;
+              try {
+                await traceApi.clear();
+                toastSuccess(t("trace.cleared", "\u8FFD\u8E2A\u8BB0\u5F55\u5DF2\u6E05\u7A7A"));
+                await renderTraceBudgetSettings($("traceBudgetContainer"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+          document.querySelectorAll(".trace-detail-btn").forEach((btn) => {
+            btn.onclick = async () => {
+              const id = btn.dataset.traceId;
+              if (!id) return;
+              try {
+                const detail = await traceApi.getDetail(id);
+                if (detail) showTraceDetailDialog(detail);
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          });
+          const btnSave = $("btnSaveBudgetConfig");
+          if (btnSave) {
+            btnSave.onclick = async () => {
+              const maxTokens = parseInt($("budgetMaxTokensInput")?.value, 10) || 32768;
+              const threshold = parseFloat($("budgetThresholdInput")?.value) || 0.8;
+              const keepRatio = parseFloat($("budgetKeepRatioInput")?.value) || 0.67;
+              const minMsgs = parseInt($("budgetMinMsgsInput")?.value, 10) || 3;
+              try {
+                await budgetApi.setConfig({
+                  max_tokens: maxTokens,
+                  compaction_threshold: threshold,
+                  recent_keep_ratio: keepRatio,
+                  min_messages_to_compact: minMsgs
+                });
+                toastSuccess(t("trace.config_saved", "\u914D\u7F6E\u5DF2\u4FDD\u5B58"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+          const limitInput = $("budgetDailyLimitInput");
+          if (limitInput) {
+            limitInput.onchange = async () => {
+              const limit = parseFloat(limitInput.value) || 0;
+              try {
+                await budgetApi.setLimit(limit);
+                toast(t("trace.daily_limit_set", "\u65E5\u9650\u989D\u5DF2\u8BBE\u7F6E") + ": $" + limit.toFixed(2), "success");
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+        }
+        function showTraceListDialog(traces) {
+          const dialog = document.createElement("div");
+          dialog.className = "fixed inset-0 flex items-center justify-center bg-black/50 backdrop-blur-[4px]";
+          dialog.style.zIndex = "9000";
+          dialog.innerHTML = `
+          <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[700px] w-[90%] max-h-[85vh] overflow-y-auto">
+            <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="trace.list_title">\u{1F4CB} RAG \u94FE\u8DEF\u8FFD\u8E2A</h3>
+            <div class="px-6 py-4">
+              ${traces.length === 0 ? `
+                <p class="text-sm text-text-quaternary text-center py-8" data-i18n="trace.no_records">\u6682\u65E0\u8FFD\u8E2A\u8BB0\u5F55</p>
+              ` : traces.map((tr) => {
+            const time = tr.created_at ? new Date(tr.created_at).toLocaleString() : "-";
+            return `
+                  <div class="bg-surface-2 rounded-lg p-3 mb-2 cursor-pointer hover:bg-surface-3 transition-colors trace-list-item" data-trace-id="${tr.id || ""}">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-xs text-text-quaternary tabular-nums">${time}</span>
+                      <span class="text-xs text-text-tertiary">${tr.total_duration_ms || 0}ms \xB7 ${tr.total_tokens || 0} tokens</span>
+                    </div>
+                    <p class="text-sm text-text-primary m-0 truncate">${tr.query || "-"}</p>
+                  </div>
+                `;
+          }).join("")}
+            </div>
+            <div class="flex justify-end px-6 pb-6">
+              <button class="px-3.5 py-2.5 text-sm font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" id="traceListCloseBtn" data-i18n="common.close">\u5173\u95ED</button>
+            </div>
+          </div>
+        `;
+          document.body.appendChild(dialog);
+          dialog.querySelector("#traceListCloseBtn").onclick = () => dialog.remove();
+          dialog.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") dialog.remove();
+          });
+          dialog.querySelectorAll(".trace-list-item").forEach((item) => {
+            item.onclick = async () => {
+              const id = item.dataset.traceId;
+              if (!id) return;
+              try {
+                const detail = await traceApi.getDetail(id);
+                if (detail) {
+                  dialog.remove();
+                  showTraceDetailDialog(detail);
+                }
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          });
+        }
+        function showTraceDetailDialog(detail) {
+          const dialog = document.createElement("div");
+          dialog.className = "fixed inset-0 flex items-center justify-center bg-black/50 backdrop-blur-[4px]";
+          dialog.style.zIndex = "9000";
+          const time = detail.created_at ? new Date(detail.created_at).toLocaleString() : "-";
+          dialog.innerHTML = `
+          <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[600px] w-[90%] max-h-[85vh] overflow-y-auto">
+            <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="trace.detail_title">\u{1F50D} \u8FFD\u8E2A\u8BE6\u60C5</h3>
+            <div class="px-6 py-4 space-y-3">
+              <div>
+                <span class="text-xs text-text-quaternary" data-i18n="trace.time">\u65F6\u95F4</span>
+                <p class="text-sm text-text-primary m-0">${time}</p>
+              </div>
+              <div>
+                <span class="text-xs text-text-quaternary" data-i18n="trace.query">\u67E5\u8BE2</span>
+                <p class="text-sm text-text-primary m-0">${detail.query || "-"}</p>
+              </div>
+              <div class="flex gap-4">
+                <div>
+                  <span class="text-xs text-text-quaternary" data-i18n="trace.duration">\u8017\u65F6</span>
+                  <p class="text-sm text-text-primary m-0">${detail.total_duration_ms || 0}ms</p>
+                </div>
+                <div>
+                  <span class="text-xs text-text-quaternary" data-i18n="trace.tokens">Token \u6570</span>
+                  <p class="text-sm text-text-primary m-0">${detail.total_tokens || 0}</p>
+                </div>
+                <div>
+                  <span class="text-xs text-text-quaternary" data-i18n="trace.retrieval_count">\u68C0\u7D22\u7ED3\u679C\u6570</span>
+                  <p class="text-sm text-text-primary m-0">${detail.retrieval_count || 0}</p>
+                </div>
+              </div>
+              ${detail.stages ? `
+                <div>
+                  <span class="text-xs text-text-quaternary" data-i18n="trace.stages">\u9636\u6BB5</span>
+                  <div class="mt-1 space-y-1">
+                    ${detail.stages.map((s) => `
+                      <div class="flex items-center gap-2 text-xs">
+                        <span class="text-text-secondary">${s.name || "-"}</span>
+                        <span class="text-text-tertiary">${s.duration_ms || 0}ms</span>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+              ` : ""}
+              ${detail.error ? `
+                <div class="text-sm text-danger bg-[rgba(var(--danger-rgb),0.08)] px-3 py-2 rounded-lg">
+                  <span data-i18n="trace.error">\u9519\u8BEF</span>: ${detail.error}
+                </div>
+              ` : ""}
+            </div>
+            <div class="flex justify-end px-6 pb-6">
+              <button class="px-3.5 py-2.5 text-sm font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" id="traceDetailCloseBtn" data-i18n="common.close">\u5173\u95ED</button>
+            </div>
+          </div>
+        `;
+          document.body.appendChild(dialog);
+          dialog.querySelector("#traceDetailCloseBtn").onclick = () => dialog.remove();
+          dialog.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") dialog.remove();
+          });
+        }
+      
+        // ui/src/durable-panel.js
+        init_utils();
+        init_ipc();
+        init_i18n();
+        init_toast();
+        async function renderDurableTodoSettings(container) {
+          if (!container) return;
+          let conversationId = "";
+          try {
+            const { getState: getState2 } = await Promise.resolve().then(() => (init_state(), state_exports));
+            conversationId = getState2().currentConversationId || "";
+          } catch (_) {
+          }
+          let pendingInputs = [];
+          let todos = [];
+          if (conversationId) {
+            try {
+              pendingInputs = await durableApi.getPending(conversationId);
+            } catch (_) {
+            }
+            try {
+              todos = await todoApi.list(conversationId);
+            } catch (_) {
+            }
+          }
+          container.innerHTML = `
+          <div class="border-t border-border-default pt-5 mt-5" id="durableTodoSection">
+            <!-- Durable \u8F93\u5165\u961F\u5217 -->
+            <h3 class="text-sm font-semibold m-0 mb-4 flex items-center gap-1">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" style="display:inline; vertical-align:middle; margin-right:6px;">
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+              </svg>
+              <span data-i18n="durable.title">\u5F85\u5904\u7406\u8F93\u5165</span>
+            </h3>
+      
+            ${pendingInputs.length > 0 ? `
+              <div class="space-y-2 mb-3 max-h-40 overflow-y-auto">
+                ${pendingInputs.map((inp) => `
+                  <div class="bg-surface-2 border border-border-subtle rounded-lg px-3 py-2 flex items-center gap-2" data-input-id="${inp.id || ""}">
+                    <p class="text-sm text-text-primary flex-1 m-0 truncate">${inp.content || "-"}</p>
+                    <span class="text-xs text-text-quaternary shrink-0">${inp.delivery || "queue"}</span>
+                    <button class="promote-input-btn text-xs px-2 py-0.5 rounded text-accent hover:bg-accent/10 transition-colors shrink-0" data-input-id="${inp.id || ""}" data-i18n="durable.promote">\u63D0\u5347</button>
+                  </div>
+                `).join("")}
+              </div>
+            ` : `
+              <p class="text-xs text-text-quaternary mb-3" data-i18n="durable.empty">\u6682\u65E0\u5F85\u5904\u7406\u8F93\u5165</p>
+            `}
+      
+            <!-- \u6DFB\u52A0\u5F85\u5904\u7406\u8F93\u5165 -->
+            <div class="flex gap-2 mb-3">
+              <input type="text" id="durableInputText" class="flex-1 px-3 py-1.5 text-sm border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]" placeholder="\u8F93\u5165\u5F85\u5904\u7406\u5185\u5BB9\u2026" data-i18n-placeholder="durable.input_placeholder"/>
+              <button id="btnAdmitInput" class="shrink-0 px-3 py-1.5 text-sm font-medium rounded-md bg-primary text-surface-0 cursor-pointer hover:bg-primary-hover transition-colors" data-i18n="durable.add">\u6DFB\u52A0</button>
+            </div>
+      
+            <!-- Session Todo -->
+            <h3 class="text-sm font-semibold m-0 mb-4 mt-5 flex items-center gap-1">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" style="display:inline; vertical-align:middle; margin-right:6px;">
+                <path d="M9 11l3 3L22 4"/>
+                <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+              </svg>
+              <span data-i18n="todo.title">\u4F1A\u8BDD\u5F85\u529E</span>
+            </h3>
+      
+            <!-- \u6DFB\u52A0 todo -->
+            <div class="flex gap-2 mb-2">
+              <input type="text" id="todoTextInput" class="flex-1 px-3 py-1.5 text-sm border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]" placeholder="\u6DFB\u52A0\u5F85\u529E\u4E8B\u9879\u2026" data-i18n-placeholder="todo.input_placeholder"/>
+              <button id="btnAddTodo" class="shrink-0 px-3 py-1.5 text-sm font-medium rounded-md bg-primary text-surface-0 cursor-pointer hover:bg-primary-hover transition-colors" data-i18n="todo.add">\u6DFB\u52A0</button>
+            </div>
+      
+            <!-- Todo \u5217\u8868 -->
+            <div class="space-y-1.5 max-h-48 overflow-y-auto" id="todoListContainer">
+              ${todos.length > 0 ? todos.map((td) => renderTodoItem(td)).join("") : `
+                <p class="text-xs text-text-quaternary py-2" data-i18n="todo.empty">\u6682\u65E0\u5F85\u529E\u4E8B\u9879</p>
+              `}
+            </div>
+      
+            ${todos.length > 0 ? `
+              <button id="btnDeleteAllTodos" class="mt-2 text-xs px-3 py-1 rounded-md border border-border-default text-text-tertiary hover:text-red-400 hover:border-red-400/40 transition-colors" data-i18n="todo.clear_all">\u6E05\u7A7A\u5168\u90E8</button>
+            ` : ""}
+          </div>
+        `;
+          initDurableTodoHandlers(conversationId);
+        }
+        function renderTodoItem(td) {
+          const isDone = td.status === "done" || td.status === "completed";
+          return `
+          <div class="flex items-center gap-2 bg-surface-2 border border-border-subtle rounded-lg px-3 py-2" data-todo-id="${td.id || ""}">
+            <input type="checkbox" class="todo-checkbox shrink-0" ${isDone ? "checked" : ""} data-todo-id="${td.id || ""}"/>
+            <span class="text-sm flex-1 ${isDone ? "line-through text-text-quaternary" : "text-text-primary"}">${td.text || td.content || "-"}</span>
+            <button class="todo-delete-btn text-xs px-1.5 py-0.5 rounded text-text-quaternary hover:text-red-400 hover:bg-red-400/10 transition-colors shrink-0" data-todo-id="${td.id || ""}">\u2715</button>
+          </div>
+        `;
+        }
+        function initDurableTodoHandlers(conversationId) {
+          const btnAdmit = $("btnAdmitInput");
+          const inputText = $("durableInputText");
+          if (btnAdmit && inputText) {
+            const admit = async () => {
+              const content = inputText.value.trim();
+              if (!content || !conversationId) {
+                toast(t("durable.need_content", "\u8BF7\u8F93\u5165\u5185\u5BB9"), "error");
+                return;
+              }
+              try {
+                await durableApi.admit(conversationId, content, "queue");
+                inputText.value = "";
+                toastSuccess(t("durable.admitted", "\u5DF2\u6DFB\u52A0\u5230\u5F85\u5904\u7406\u961F\u5217"));
+                await renderDurableTodoSettings($("durableTodoContainer"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+            btnAdmit.onclick = admit;
+            inputText.addEventListener("keydown", (e) => {
+              if (e.key === "Enter") admit();
+            });
+          }
+          document.querySelectorAll(".promote-input-btn").forEach((btn) => {
+            btn.onclick = async () => {
+              const id = btn.dataset.inputId;
+              if (!id) return;
+              try {
+                await durableApi.promote(id);
+                toastSuccess(t("durable.promoted", "\u5DF2\u63D0\u5347\u4E3A\u6B63\u5F0F\u6D88\u606F"));
+                await renderDurableTodoSettings($("durableTodoContainer"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          });
+          const btnAddTodo = $("btnAddTodo");
+          const todoInput = $("todoTextInput");
+          if (btnAddTodo && todoInput) {
+            const addTodo = async () => {
+              const text = todoInput.value.trim();
+              if (!text || !conversationId) {
+                toast(t("todo.need_text", "\u8BF7\u8F93\u5165\u5F85\u529E\u5185\u5BB9"), "error");
+                return;
+              }
+              try {
+                await todoApi.add(conversationId, text);
+                todoInput.value = "";
+                toastSuccess(t("todo.added", "\u5F85\u529E\u5DF2\u6DFB\u52A0"));
+                await renderDurableTodoSettings($("durableTodoContainer"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+            btnAddTodo.onclick = addTodo;
+            todoInput.addEventListener("keydown", (e) => {
+              if (e.key === "Enter") addTodo();
+            });
+          }
+          document.querySelectorAll(".todo-checkbox").forEach((cb) => {
+            cb.onchange = async () => {
+              const id = cb.dataset.todoId;
+              if (!id) return;
+              const status = cb.checked ? "done" : "pending";
+              try {
+                await todoApi.updateStatus(id, status);
+                await renderDurableTodoSettings($("durableTodoContainer"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          });
+          document.querySelectorAll(".todo-delete-btn").forEach((btn) => {
+            btn.onclick = async () => {
+              const id = btn.dataset.todoId;
+              if (!id) return;
+              try {
+                await todoApi.delete(id);
+                toastSuccess(t("todo.deleted", "\u5DF2\u5220\u9664"));
+                await renderDurableTodoSettings($("durableTodoContainer"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          });
+          const btnDeleteAll = $("btnDeleteAllTodos");
+          if (btnDeleteAll) {
+            btnDeleteAll.onclick = async () => {
+              const confirmed = await showConfirmDialog({
+                title: t("todo.clear_confirm", "\u786E\u8BA4\u6E05\u7A7A\u6240\u6709\u5F85\u529E\uFF1F")
+              });
+              if (!confirmed) return;
+              try {
+                await todoApi.deleteAll(conversationId);
+                toastSuccess(t("todo.cleared", "\u5DF2\u6E05\u7A7A"));
+                await renderDurableTodoSettings($("durableTodoContainer"));
+              } catch (err) {
+                toastError(err);
+              }
+            };
+          }
+        }
       
         // ui/src/settings-local-llm.js
+        init_state();
         init_utils();
         init_ipc();
         init_toast();
@@ -14245,6 +15350,7 @@
         }
       
         // ui/src/export.js
+        init_state();
         init_ipc();
         init_toast();
         init_i18n();
@@ -14718,6 +15824,26 @@
                 evalContainer.appendChild(evalDiv);
               }
               renderRagEvalSettings($("ragEvalSettingsContainer"));
+            }
+            const traceContainer = $("traceBudgetContainer") || (() => {
+              if (!perfContainer) return null;
+              const div = document.createElement("div");
+              div.id = "traceBudgetContainer";
+              perfContainer.appendChild(div);
+              return div;
+            })();
+            if (traceContainer) {
+              renderTraceBudgetSettings(traceContainer);
+            }
+            const durableContainer = $("durableTodoContainer") || (() => {
+              if (!perfContainer) return null;
+              const div = document.createElement("div");
+              div.id = "durableTodoContainer";
+              perfContainer.appendChild(div);
+              return div;
+            })();
+            if (durableContainer) {
+              renderDurableTodoSettings(durableContainer);
             }
             let tmplContainer = $("promptTemplateContainer");
             if (!tmplContainer && perfContainer) {
@@ -17679,6 +18805,7 @@
       
         // ui/src/session-strip.js
         init_ipc();
+        init_state();
         var stripPanel = null;
         var currentConversationId = null;
         async function openStripPanel(conversationId) {
@@ -17876,6 +19003,7 @@
         init_ipc();
       
         // ui/src/input-keymap.js
+        init_state();
         function checkPopups() {
           const slashPanel = document.querySelector(".slash-command-panel");
           const docMentionPopup = document.querySelector(".doc-mention-popup");
