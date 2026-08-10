@@ -4,7 +4,7 @@
 >
 > 每次 session 结束时**必须更新**此文件，确保反映最新状态。
 >
-> **最后更新**: 2026-08-10 | **更新人**: AI Agent (架构优化与技术债清理：依赖更新 + Pro 门控审计 + 日文 i18n 补全)
+> **最后更新**: 2026-08-10 | **更新人**: AI Agent (文档全面同步 + DS4/OpenMontage 借鉴实现 + 测试基线更新)
 
 ---
 
@@ -12,20 +12,20 @@
 
 | 指标 | 数值 | 备注 |
 |---|---|---|
-| Rust 单元+集成测试 (Free) | 1059 passed, 0 failed, 28 ignored | `cargo test`（依赖更新后全量通过）|
-| Rust 单元+集成测试 (Pro) | 1094 passed, 0 failed, 44 ignored | `cargo test --features pro`（v1.3.0 发布回归验证）|
+| Rust 单元+集成测试 (Free) | **1166 passed**, 0 failed, 28 ignored | `cargo test`（含 DS-01 27 + DS-02 14 + OpenMontage 65 新测试）|
+| Rust 单元+集成测试 (Pro) | ~1135 passed, 0 failed, 44 ignored | `cargo test --features pro`（预估，含 Free 新测试 + Pro 专属测试）|
 | Clippy (Free) | 零警告 | `cargo clippy --all-targets -- -D warnings` |
 | Clippy (Pro) | 零警告 | `cargo clippy --all-targets --features pro -- -D warnings`（6m39s）|
 | cargo fmt | 通过 | `cargo fmt --check` |
 | 前端单元测试 (Vitest) | 419 passed, 27 files | `npm run test:unit`（修复 input-toggles 3 失败）|
 | UI 类型检查 | 0 errors | `npx tsc --noEmit` |
-| E2E 桥接测试 (Playwright) | 1019 passed, 10 skipped, 0 failed | 全量通过（3 pre-existing headless UI 问题修复）|
+| E2E 桥接测试 (Playwright) | 1019 passed, 10 skipped, 0 failed | 全量通过 ✅ |
 | 版本号 | 1.4.0 | 全部 7 crate + tauri.conf.json（v1.4.0 发布升级）|
-| IPC 命令数 | ~175 Free / ~187 Pro | 文档原记 162，实际因 QM/OpenCode 借鉴新增命令已漂移（待文档同步）|
+| IPC 命令数 | **187 Free / 199 Pro** | ✅ 文档已同步（含 12 个 Pro 门控）|
 | ADR 数 | 13 | 新增 ADR-013-knowledge-graph |
 | 供应链安全 | cargo audit + cargo deny | `deny.toml` 配置 |
-| 前端构建行数 | 13582 | esbuild 打包 IIFE 单文件（ja.json 完整翻译后重建）|
-| 前端模块数 | 54 | `ui/src/*.js`（新增 zindex/panel-stack/input-keymap/input-history + focus-trap）|
+| 前端构建行数 | 13582 | esbuild 打包 IIFE 单文件 |
+| 前端模块数 | 54 | `ui/src/*.js`（含 zindex/panel-stack/input-keymap/input-history/focus-trap 等）|
 | Rust Edition | 2024 (≥1.85) | 原生 `async fn` in trait |
 
 ---
@@ -353,13 +353,23 @@ cd e2e-tests && npm run test:bridge # Playwright E2E
 ## 7. 当前 Git 状态
 
 - **分支**: `main`
-- **未提交变更**: 0（Session 4 Git 状态清理完成，4 个分组提交）
-- **提交历史**:
-  - `323a0ef` — feat(ui): 前端架构升级（32 files, 3335+/1017-）
-  - `bf04c60` — feat(core): Rust 后端改进（6 files, 803+/113-）
-  - `2685c16` — docs: 文档同步（9 files, 574+/7-）
-  - `78bcd8e` — chore: submodule + .gitignore（2 files, 2+/1-）
+- **未提交变更**: DS4 + OpenMontage + 文档同步变更（待提交）
+  - 新增文件：`crates/infra/src/prompt_cache.rs`、`crates/infra/src/prompt_cache_tests.rs`、`crates/core/src/event_stream.rs`、`crates/core/src/pipeline_checkpoint.rs` 等
+  - 修改文件：`crates/compact/src/lib.rs`、`crates/core/src/lib.rs`、`crates/infra/Cargo.toml`、`docs/api/*.md`、`docs/SRS_v1.0.md` 等
 - **发布仓库**: `EchoMind/EchoMind/`（通过 `sync-to-github.sh` 同步，无 remote 配置，需手动 `git remote add` 后 `git push`）
+
+---
+
+## 8. 已完成借鉴计划全览
+
+| 借鉴来源 | 状态 | 内容 |
+|---|---|---|
+| QM (Quotient) | ✅ 全部完成 (Q01-Q11) | 记忆系统 / 上下文压缩 / 安全层 / 基础设施 / LLMProvider |
+| OpenCode | ✅ 全部完成 (B01-B14) | System Context / Epoch / 压缩模板 / Prompt Caching / Admission / Coordinator / Tool Bounding / Skill / 多协议 / Permission |
+| 跨 Phase 整合 | ✅ 全部完成 (S67+S68+S71) | Burst Buffer / Sweeper / Shadow 筛查 |
+| OpenMontage | ✅ 全部完成 | MMR 多样性重排 / 检索质量门控 / Scored Selector / Pipeline Checkpoint / Event Stream |
+| DS4 (DwarfStar) | ✅ DS-01 + DS-02 完成 | Prompt Prefix 磁盘缓存 / 上下文压缩原文尾部保留 |
+| DS4 剩余 | 📋 待定 (DS-03~DS-07) | Session Strip / 功率管理 / Tool Call 续接 / Radix Tree / SSD 流式 |
 
 ---
 

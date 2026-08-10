@@ -16,6 +16,12 @@ pub mod model_manager;
 pub mod openai_provider;
 /// 性能基准测试框架（借鉴 Zed `util_macros::perf`）：统一计时、吞吐量计算、断言。
 pub mod perf;
+/// Prompt Prefix 磁盘缓存 + LRU 驱逐（DS-01：借鉴 ds4 `ds4_kvstore.c`）。
+///
+/// 缓存 tokenize 后的 prompt prefix，加速会话恢复。SHA1 文本前缀匹配、
+/// LRU 驱逐评分（半衰期 6 小时）、边界裁剪 + 对齐（防 BPE 重分词）、
+/// 4 种保存时机（cold/continued/evict/shutdown）、原子写入、预算管理。
+pub mod prompt_cache;
 /// 健壮下载系统（REQ-LLM-004 v2）：断点续传 + 多源容错 + 并发分块 + 崩溃恢复 + SHA256 校验。
 ///
 /// 参考：Ollama download.go + HuggingFace hf_transfer + HuggingFace Hub file_download.py。
@@ -123,6 +129,9 @@ mod perf_real_e2e_tests;
 /// 全面性能测试套件（REQ-NFR-002 + RAG 管线全链路基准）。
 #[cfg(test)]
 mod perf_suite_tests;
+/// Prompt Prefix 磁盘缓存 TDD 测试（DS-01：借鉴 ds4 `ds4_kvstore.c`）。
+#[cfg(test)]
+mod prompt_cache_tests;
 #[cfg(all(test, feature = "pro"))]
 mod quant_blocks_tests;
 #[cfg(test)]

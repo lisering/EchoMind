@@ -37,6 +37,8 @@ pub mod encryption;
 pub mod entity_extractor;
 /// 统一错误分类体系（REQ-ERR-001）：错误前缀常量 + 分类辅助函数。
 pub mod errors;
+/// 事件流自动埋点（借鉴 OpenMontage events.py）：追加写入 JSONL + 容错读取 + 零负担。
+pub mod event_stream;
 /// 对话导出模块：会话 → Markdown 文件（REQ-EXP-001）。
 pub mod export;
 /// 知识图谱高级分析引擎（REQ-RAG-027 Session 5）：最短路径 + 社区检测 + 度中心性。
@@ -76,6 +78,8 @@ pub mod mmr_diversifier;
 /// Permission 细粒度控制（B11 Permission Rule Engine，REQ-ARCH-011）：
 /// Wildcard 匹配的 RBAC 权限规则引擎（Allow / Deny / Ask）。
 pub mod permission;
+/// 流水线阶段门控（借鉴 OpenMontage checkpoint.py）：前置检查 + 人审门控 + 历史记录。
+pub mod pipeline_checkpoint;
 pub mod privacy;
 /// 渐进式上下文注入（REQ-PERF-010）：按需注入 chunk，LLM 上下文足够时停止追加。
 pub mod progressive_injector;

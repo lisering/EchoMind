@@ -67,7 +67,6 @@
 | `window.height` | 整数字符串（如 `"800"`）/ 不存在 | 窗口高度（REQ-WIN-001-AC-3；≥ 640） | `lib.rs save_window_state()` | `lib.rs restore_window_state()` |
 | `window.maximized` | `"true"` / `"false"` / 不存在 | 窗口最大化状态（REQ-WIN-001-AC-5；最大化时优先恢复，跳过 x/y/width/height） | `lib.rs save_window_state()` | `lib.rs restore_window_state()` |
 | `security.posture` | `"dangerous"` / `"auto"` / `"strict"` / 不存在 | 安全态势分层（Q05 借鉴 QM SecurityPosture；默认 `auto`。`dangerous` 无筛查无审批 / `auto` 有筛查无审批 / `strict` 有筛查有审批。子 scope 只能收紧不能放松父 scope） | `set_security_posture` 命令 | `AppState::get_security_posture()` / `resolve_security_policy()` |
-| `rag.contextual_retrieval` | `"true"` / `"false"` / 不存在 | Contextual Retrieval 开关（REQ-RAG-041；默认 `true`，嵌入时拼接文档名上下文前缀） | `set_contextual_retrieval` 命令 | `embed_document_chunks()` 条件化嵌入文本 + `rebuild_contextual_embeddings` IPC |
 | `stt.api_key` | 明文字符串 / 不存在 | 语音转写 API Key（REQ-RAG-034；OpenAI Whisper API 兼容端点） | `set_stt_config` 命令 | `transcribe_audio` 命令读取 |
 | `stt.base_url` | URL 字符串 / 不存在 | 语音转写 API 端点（REQ-RAG-034） | `set_stt_config` 命令 | `transcribe_audio` 命令读取 |
 | `stt.model` | 模型名字符串 / 不存在 | 语音转写模型名（REQ-RAG-034；默认 `whisper-1`） | `set_stt_config` 命令 | `transcribe_audio` 命令读取 |

@@ -2203,3 +2203,95 @@ pub struct DuckDuckGoProvider {
 
 - `ChatEngine::with_web_search(provider: Arc<dyn WebSearchProvider>) -> Self` — builder 方法，注入网页搜索 provider
 - `chat()` 方法在检索后判断 `should_search()`，若 true 则调用 `search_and_fuse()` 融合结果
+
+### 4.11 DS4 借鉴契约
+
+#### Prompt Prefix 磁盘缓存（DS-01）
+
+**PromptCache trait**（`crates/infra/src/prompt_cache.rs`）：
+
+```rust
+pub trait PromptCache: Send + Sync {
+    async fn find_exact(&self, query: &str) -> Result<Option<CachedPrompt>>;
+    async fn find_text_prefix(&self, query: &str, min_tokens: usize) -> Result<Option<CachedPrompt>>;
+    async fn save(&self, query: &str, token_ids: Vec<u32>, metadata: CacheMetadata) -> Result<()>;
+    async fn cleanup(&self) -> Result<()>;
+    async fn stats(&self) -> CacheStats;
+}
+```
+
+- `find_exact()` — SHA1 完整匹配精确查询
+- `find_text_prefix()` — 查找文本前缀匹配的缓存（≥ min_tokens 个 token）
+- `save()` — 原子写入缓存（.tmp → rename 模式）
+- `cleanup()` — LRU 驱逐 + 预算管理（1% headroom）
+
+**CachedPrompt struct**：
+
+```rust
+pub struct CachedPrompt {
+    pub token_ids: Vec<u32>,        // 缓存的 token ID 序列
+    pub metadata: CacheMetadata,    // 元数据
+    pub hits: u32,                  // 命中次数
+    pub effective_hits: f32,        // 有效命中（加权）
+    pub anchor_factor: f32,         // 锚定因子
+    pub last_used: Instant,         // 最后使用时间
+}
+```
+
+**CacheMetadata struct**：
+
+```rust
+pub struct CacheMetadata {
+    pub query_hash: [u8; 20],       // SHA1 哈希
+    pub tokens: usize,              // token 数量
+    pub file_size: usize,           // 文件大小（磁盘存储优化）
+    pub created_at: Instant,        // 创建时间
+}
+```
+
+**LRU 驱逐评分公式**：
+
+```
+score = (effective_hits + 1) * tokens / file_size * anchor_factor * exp2(-elapsed / 6h)
+```
+
+**KPC 文件格式**：
+
+- 32 字节头部（魔数 + 版本 + flags + payload_len）
+- JSON payload（CachedPrompt 序列化）
+- 边界对齐（trim 32，align 2048）
+
+#### 上下文压缩增强 — 原文尾部保留（DS-02）
+
+**VerbatimTailConfig struct**（`crates/compact/src/lib.rs`）：
+
+```rust
+pub struct VerbatimTailConfig {
+    pub tail_percentage: f32,           // 默认 0.2 (20%)
+    pub max_tail_tokens: usize,         // 默认 1024
+    pub soft_trigger_threshold: f32,    // 默认 0.85 (85%)
+    pub hard_trigger_remaining_tokens: usize, // 默认 8192
+}
+```
+
+**CompactionEngine trait 扩展**：
+
+```rust
+// 新增 VerbatimTail 相关方法
+pub fn needs_verbatim_tail_compaction(history: &[ChatMessage], config: &VerbatimTailConfig) -> bool;
+pub fn compact_with_verbatim_tail(
+    &self,
+    history: &[ChatMessage],
+    config: &VerbatimTailConfig,
+) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<ChatMessage>>> + Send>>;
+pub fn align_to_user_boundary(messages: Vec<ChatMessage>) -> Vec<ChatMessage>;
+```
+
+- `needs_verbatim_tail_compaction()` — 双触发条件：软触发（soft_trigger_threshold ≥ 85%）或硬触发（hard_trigger_remaining_tokens ≤ 8192）
+- `compact_with_verbatim_tail()` — 压缩后历史 = [摘要 system 消息] + [原文尾部消息]
+- `align_to_user_boundary()` — 对齐到最近的 user message 边界
+
+**降级策略**：
+
+- LLM 压缩失败时降级为截断提示（不返回 Err）
+- 截断提示保留关键信息："[历史记录已压缩，省略了 X 条消息]"

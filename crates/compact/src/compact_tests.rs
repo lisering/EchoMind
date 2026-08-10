@@ -20,6 +20,7 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 
 use crate::CompactionEngine;
+use crate::VerbatimTailConfig;
 use echomind_core::LLMProvider;
 
 // ============================================================
@@ -1030,5 +1031,363 @@ async fn tc_sweeper_004_future_auto_releases_pending() {
     {
         let set = pending.lock().await;
         assert!(!set.contains("conv-auto"), "执行后 pending 应释放");
+    }
+}
+
+// ============================================================
+// DS-02: 原文尾部保留压缩测试（借鉴 ds4 misc/COMPACT.md）
+// ============================================================
+
+/// 辅助：生成 N 条 user/assistant 交替的长消息历史。
+fn make_long_history(n_pairs: usize, content_len: usize) -> Vec<ChatMessage> {
+    let content = "x".repeat(content_len);
+    let mut msgs = Vec::with_capacity(n_pairs * 2);
+    for i in 0..n_pairs {
+        msgs.push(ChatMessage {
+            id: None,
+            role: "user".to_string(),
+            content: format!("User message {i}: {content}"),
+            sources: None,
+            reasoning: None,
+            turn_group: None,
+            version: Some(1),
+        });
+        msgs.push(ChatMessage {
+            id: None,
+            role: "assistant".to_string(),
+            content: format!("Assistant reply {i}: {content}"),
+            sources: None,
+            reasoning: None,
+            turn_group: None,
+            version: Some(1),
+        });
+    }
+    msgs
+}
+
+// --- VerbatimTailConfig 测试 ---
+
+/// TC-DS02-001: VerbatimTailConfig 默认值正确。
+#[test]
+fn tc_ds02_001_verbatim_tail_config_defaults() {
+    let config = VerbatimTailConfig::default();
+    assert!((config.tail_percentage - 0.1).abs() < 0.001);
+    assert_eq!(config.max_tail_tokens, 50000);
+    assert!((config.soft_trigger_threshold - 0.85).abs() < 0.001);
+    assert_eq!(config.hard_trigger_remaining_tokens, 8192);
+}
+
+/// TC-DS02-002: VerbatimTailConfig builder 链式调用。
+#[test]
+fn tc_ds02_002_verbatim_tail_config_builder() {
+    let config = VerbatimTailConfig::new()
+        .with_tail_percentage(0.2)
+        .with_max_tail_tokens(10000);
+    assert!((config.tail_percentage - 0.2).abs() < 0.001);
+    assert_eq!(config.max_tail_tokens, 10000);
+}
+
+/// TC-DS02-003: tail_percentage 被 clamp 到 [0.01, 0.5]。
+#[test]
+fn tc_ds02_003_tail_percentage_clamped() {
+    let config = VerbatimTailConfig::new().with_tail_percentage(0.0);
+    assert!((config.tail_percentage - 0.01).abs() < 0.001);
+
+    let config = VerbatimTailConfig::new().with_tail_percentage(1.0);
+    assert!((config.tail_percentage - 0.5).abs() < 0.001);
+}
+
+// --- needs_verbatim_tail_compaction 测试 ---
+
+/// TC-DS02-004: 空历史不需要压缩。
+#[test]
+fn tc_ds02_004_needs_compaction_empty_history() {
+    let llm = SummarySpyLlm::new("摘要");
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig::default();
+    assert!(!engine.needs_verbatim_tail_compaction(&[], 4096, &config));
+}
+
+/// TC-DS02-005: 上下文使用率低于软触发阈值时不压缩。
+#[test]
+fn tc_ds02_005_needs_compaction_below_soft_threshold() {
+    let llm = SummarySpyLlm::new("摘要");
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig {
+        soft_trigger_threshold: 0.85,
+        hard_trigger_remaining_tokens: 100,
+        ..VerbatimTailConfig::default()
+    };
+    // 2 条短消息，远小于 4096 的 85%
+    let history = make_long_history(1, 10);
+    assert!(!engine.needs_verbatim_tail_compaction(&history, 4096, &config));
+}
+
+/// TC-DS02-006: 上下文使用率达到软触发阈值时需要压缩。
+#[test]
+fn tc_ds02_006_needs_compaction_soft_trigger() {
+    let llm = SummarySpyLlm::new("摘要");
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig {
+        soft_trigger_threshold: 0.5,
+        hard_trigger_remaining_tokens: 0,
+        ..VerbatimTailConfig::default()
+    };
+    // 大量消息使 token 超过 50% 上下文
+    let history = make_long_history(50, 100);
+    assert!(engine.needs_verbatim_tail_compaction(&history, 4096, &config));
+}
+
+/// TC-DS02-007: 剩余 token 低于硬触发阈值时需要压缩。
+#[test]
+fn tc_ds02_007_needs_compaction_hard_trigger() {
+    let llm = SummarySpyLlm::new("摘要");
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig {
+        soft_trigger_threshold: 0.99, // 几乎不可能触发
+        hard_trigger_remaining_tokens: 10000,
+        ..VerbatimTailConfig::default()
+    };
+    // 少量消息，使用率低，但剩余 token < 10000
+    let history = make_long_history(5, 50);
+    assert!(engine.needs_verbatim_tail_compaction(&history, 4096, &config));
+}
+
+// --- compact_with_verbatim_tail 测试 ---
+
+/// TC-DS02-008: 短历史（≤2 条）不压缩，原样返回。
+#[tokio::test]
+async fn tc_ds02_008_short_history_no_compaction() {
+    let llm = SummarySpyLlm::new("摘要");
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig::default();
+
+    let history = vec![
+        ChatMessage {
+            id: None,
+            role: "user".to_string(),
+            content: "hi".to_string(),
+            sources: None,
+            reasoning: None,
+            turn_group: None,
+            version: Some(1),
+        },
+        ChatMessage {
+            id: None,
+            role: "assistant".to_string(),
+            content: "hello".to_string(),
+            sources: None,
+            reasoning: None,
+            turn_group: None,
+            version: Some(1),
+        },
+    ];
+
+    let result = engine
+        .compact_with_verbatim_tail(&history, 4096, &config)
+        .await
+        .unwrap();
+
+    assert!(result.info.is_none());
+    assert_eq!(result.history.len(), 2);
+}
+
+/// TC-DS02-009: 未达压缩阈值时不压缩，原样返回。
+#[tokio::test]
+async fn tc_ds02_009_no_trigger_no_compaction() {
+    let llm = SummarySpyLlm::new("摘要");
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig {
+        soft_trigger_threshold: 0.99,
+        hard_trigger_remaining_tokens: 100,
+        ..VerbatimTailConfig::default()
+    };
+
+    // 4 条短消息，远未达到阈值
+    let history = make_long_history(2, 10);
+
+    let result = engine
+        .compact_with_verbatim_tail(&history, 4096, &config)
+        .await
+        .unwrap();
+
+    assert!(result.info.is_none());
+    assert_eq!(result.history.len(), 4);
+}
+
+/// TC-DS02-010: 压缩后历史 = [摘要 system 消息] + [原文尾部消息]。
+#[tokio::test]
+async fn tc_ds02_010_compaction_produces_summary_plus_tail() {
+    let llm = SummarySpyLlm::new("这是摘要");
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig {
+        tail_percentage: 0.1,
+        max_tail_tokens: 500,
+        soft_trigger_threshold: 0.5,
+        hard_trigger_remaining_tokens: 0,
+    };
+
+    // 构建足够大的历史触发压缩（50 对 = 100 条消息）
+    let history = make_long_history(50, 100);
+
+    let result = engine
+        .compact_with_verbatim_tail(&history, 4096, &config)
+        .await
+        .unwrap();
+
+    // 必须触发了压缩
+    assert!(result.info.is_some(), "应触发压缩");
+    let info = result.info.unwrap();
+    assert!(info.compacted_count > 0, "应有旧消息被压缩");
+
+    // 压缩后历史第一条应为 system 消息（摘要）
+    assert_eq!(result.history[0].role, "system");
+    assert!(result.history[0].content.contains("这是摘要"));
+
+    // 压缩后历史长度 < 原始长度
+    assert!(
+        result.history.len() < history.len(),
+        "压缩后历史应更短: {} < {}",
+        result.history.len(),
+        history.len()
+    );
+}
+
+/// TC-DS02-011: 尾部对齐到 user message 边界。
+#[tokio::test]
+async fn tc_ds02_011_tail_aligned_to_user_boundary() {
+    let llm = SummarySpyLlm::new("摘要");
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig {
+        tail_percentage: 0.05,
+        max_tail_tokens: 200,
+        soft_trigger_threshold: 0.5,
+        hard_trigger_remaining_tokens: 0,
+    };
+
+    let history = make_long_history(50, 100);
+
+    let result = engine
+        .compact_with_verbatim_tail(&history, 4096, &config)
+        .await
+        .unwrap();
+
+    if result.info.is_some() {
+        // 尾部第一条消息（跳过摘要 system 消息）应该是 user 角色
+        assert!(
+            result.history.len() > 1,
+            "压缩后应至少有摘要 + 1 条尾部消息"
+        );
+        assert_eq!(
+            result.history[1].role, "user",
+            "尾部应从 user message 开始（对齐到 user 边界）"
+        );
+    }
+}
+
+/// TC-DS02-012: LLM 摘要失败时降级为截断提示。
+#[tokio::test]
+async fn tc_ds02_012_llm_failure_degrades_gracefully() {
+    struct FailingLlm;
+    impl LLMProvider for FailingLlm {
+        async fn chat_stream(
+            &self,
+            _: &str,
+            _: &[ChatMessage],
+            _: &str,
+        ) -> Result<BoxStream<'static, Result<String>>> {
+            Err(anyhow::anyhow!("LLM 不可用"))
+        }
+    }
+
+    let llm = FailingLlm;
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig {
+        tail_percentage: 0.1,
+        max_tail_tokens: 500,
+        soft_trigger_threshold: 0.5,
+        hard_trigger_remaining_tokens: 0,
+    };
+
+    let history = make_long_history(50, 100);
+
+    let result = engine
+        .compact_with_verbatim_tail(&history, 4096, &config)
+        .await
+        .unwrap();
+
+    // 降级后仍应有压缩信息
+    assert!(result.info.is_some(), "降级也应记录压缩信息");
+
+    // 第一条应为 system 消息，包含截断提示
+    assert_eq!(result.history[0].role, "system");
+    assert!(
+        result.history[0].content.contains("已省略"),
+        "降级消息应包含'已省略'，实际: {}",
+        result.history[0].content
+    );
+}
+
+/// TC-DS02-013: 压缩后 token 数应小于原始 token 数。
+#[tokio::test]
+async fn tc_ds02_013_compacted_tokens_less_than_original() {
+    let llm = SummarySpyLlm::new("简短摘要");
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig {
+        tail_percentage: 0.1,
+        max_tail_tokens: 500,
+        soft_trigger_threshold: 0.5,
+        hard_trigger_remaining_tokens: 0,
+    };
+
+    let history = make_long_history(50, 100);
+
+    let result = engine
+        .compact_with_verbatim_tail(&history, 4096, &config)
+        .await
+        .unwrap();
+
+    if let Some(info) = &result.info {
+        assert!(
+            info.compacted_tokens < info.total_tokens,
+            "压缩后 token 数应更少: {} < {}",
+            info.compacted_tokens,
+            info.total_tokens
+        );
+    }
+}
+
+/// TC-DS02-014: 所有旧消息被压缩（old_messages 非空时）。
+#[tokio::test]
+async fn tc_ds02_014_old_messages_compacted() {
+    let llm = SummarySpyLlm::new("摘要");
+    let engine = CompactionEngine::new(&llm);
+    let config = VerbatimTailConfig {
+        tail_percentage: 0.05,
+        max_tail_tokens: 100,
+        soft_trigger_threshold: 0.5,
+        hard_trigger_remaining_tokens: 0,
+    };
+
+    let history = make_long_history(50, 100);
+
+    let result = engine
+        .compact_with_verbatim_tail(&history, 4096, &config)
+        .await
+        .unwrap();
+
+    if let Some(info) = &result.info {
+        assert!(
+            info.compacted_count > 0,
+            "应有旧消息被压缩，实际: {}",
+            info.compacted_count
+        );
+        // 压缩的消息数 + 保留的尾部消息数 = 原始消息数
+        let tail_count = result.history.len() - 1; // 减去摘要 system 消息
+        assert_eq!(
+            info.compacted_count + tail_count,
+            history.len(),
+            "压缩消息数 + 尾部消息数应等于原始消息数"
+        );
     }
 }

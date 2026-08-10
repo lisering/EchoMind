@@ -22,6 +22,8 @@ use std::sync::Arc;
 use echomind_models::LlmMode;
 use tokio::sync::RwLock;
 
+use crate::scored_selector::{ProviderCandidate, ProviderScore, ScoringConfig, select_best};
+
 /// LLM 选择结果（借鉴 QM `RuntimeChoice`）。
 ///
 /// 描述一次 LLM 调用所选择的推理后端及模型标识。
@@ -111,6 +113,8 @@ pub struct LlmRouter {
     last_mode: Arc<RwLock<HashMap<String, LlmMode>>>,
     /// 可用模式集合（Free: `{Remote}`, Pro: `{Remote, Local}`）
     available_modes: Arc<RwLock<HashSet<LlmMode>>>,
+    /// 每会话上次使用的 Provider 名称（用于 scored_selector continuity 评分）
+    last_provider: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl LlmRouter {
@@ -124,6 +128,7 @@ impl LlmRouter {
             fallback: Arc::new(RwLock::new(fallback)),
             last_mode: Arc::new(RwLock::new(HashMap::new())),
             available_modes: Arc::new(RwLock::new(available_modes)),
+            last_provider: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -210,11 +215,83 @@ impl LlmRouter {
     /// 清除指定会话的模式记录（会话删除时调用）。
     pub async fn clear(&self, conversation_id: &str) {
         self.last_mode.write().await.remove(conversation_id);
+        self.last_provider.write().await.remove(conversation_id);
     }
 
     /// 获取当前默认选择。
     pub async fn fallback(&self) -> LlmChoice {
         self.fallback.read().await.clone()
+    }
+
+    /// 使用多维度评分选择最佳 Provider（借鉴 OpenMontage scoring.py）。
+    ///
+    /// 当配置了多个 LLM Provider 候选时，根据任务类型、成本、延迟、可靠性等
+    /// 7 维度加权评分自动选择最优 Provider。选择过程可解释、可审计。
+    ///
+    /// # 参数
+    /// - `conversation_id`：会话 ID（用于 continuity 评分）
+    /// - `candidates`：候选 Provider 列表
+    /// - `config`：评分配置（任务类型、token 估算等）
+    ///
+    /// # 返回
+    /// - `Some((choice, score))`：最佳 Provider 的 LlmChoice 和评分详情
+    /// - `None`：候选列表为空
+    ///
+    /// # 副作用
+    ///
+    /// 成功时更新 `last_provider[conversation_id]` 为选中 Provider 名称。
+    pub async fn resolve_scored(
+        &self,
+        conversation_id: &str,
+        candidates: &[ProviderCandidate],
+        config: &ScoringConfig,
+    ) -> Option<(LlmChoice, ProviderScore)> {
+        // 注入已选 Provider continuity 信息
+        let locked_providers: HashSet<String> = {
+            let lp = self.last_provider.read().await;
+            lp.get(conversation_id).into_iter().cloned().collect()
+        };
+        let config = ScoringConfig {
+            locked_providers,
+            ..config.clone()
+        };
+
+        let (idx, score) = select_best(candidates, &config)?;
+        let candidate = &candidates[idx];
+
+        // 映射到 LlmChoice
+        let mode = if candidate.is_local {
+            LlmMode::Local
+        } else {
+            LlmMode::Remote
+        };
+
+        // 校验模式可用性
+        {
+            let available = self.available_modes.read().await;
+            if !available.contains(&mode) {
+                return None;
+            }
+        }
+
+        let choice = LlmChoice::new(mode, &candidate.model);
+
+        // 记录 provider
+        self.last_provider
+            .write()
+            .await
+            .insert(conversation_id.to_string(), candidate.name.clone());
+
+        Some((choice, score))
+    }
+
+    /// 查询指定会话上次使用的 Provider 名称。
+    pub async fn last_provider_for(&self, conversation_id: &str) -> Option<String> {
+        self.last_provider
+            .read()
+            .await
+            .get(conversation_id)
+            .cloned()
     }
 }
 

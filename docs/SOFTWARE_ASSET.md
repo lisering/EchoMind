@@ -54,7 +54,7 @@ EchoMind（灵犀）是一个 **本地 RAG 知识库桌面应用**，基于 Rust
 | 隐私保护 | 8 类 PII 检测/脱敏 + 审计哈希链 |
 | 安全状态机 | 自动锁屏 / 暴力破解防护 / 紧急销毁 / 剪贴板清除 |
 | 多代理 RAG | ReAct 循环 / Coordinator 多步协调 |
-| 性能优化 | 三级缓存 / Prompt 压缩 / 渐进注入 / Speculative RAG / 检索记忆 |
+| 性能优化 | 三级缓存 / Prompt 压缩 / 渐进注入 / Speculative RAG / 检索记忆 / Prompt Prefix 磁盘缓存 / 上下文压缩增强（原文尾部保留） |
 
 ### 1.3 技术栈
 
