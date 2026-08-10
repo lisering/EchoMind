@@ -249,9 +249,16 @@ impl PromptCache {
         let reason = CacheReason::from_byte(header[4]);
         let model_name_len = u16::from_le_bytes([header[6], header[7]]) as usize;
         let tokens = u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as usize;
-        let ctx_size = u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
-        let created_at = u64::from_le_bytes(header[16..24].try_into().unwrap());
-        let last_used = u64::from_le_bytes(header[24..32].try_into().unwrap());
+        let ctx_size =
+            u32::from_le_bytes([header[12], header[13], header[14], header[15]]) as usize;
+        let created_at = u64::from_le_bytes([
+            header[16], header[17], header[18], header[19], header[20], header[21], header[22],
+            header[23],
+        ]);
+        let last_used = u64::from_le_bytes([
+            header[24], header[25], header[26], header[27], header[28], header[29], header[30],
+            header[31],
+        ]);
 
         let mut model_name_buf = vec![0u8; model_name_len];
         file.read_exact(&mut model_name_buf)?;
@@ -289,10 +296,14 @@ impl PromptCache {
         hex
     }
 
-    /// 查找最匹配的缓存条目（文本前缀匹配）。
+    /// 查找最匹配的缓存条目（精确 SHA1 匹配 + 最大 token 数选择）。
     ///
     /// 借鉴 ds4 的 `ds4_kvstore_find_text_prefix`：在所有缓存条目中
-    /// 找到文本前缀匹配且 token 数最多的条目。
+    /// 找到 SHA1 匹配且 token 数最多的条目。
+    ///
+    /// EchoMind 适配：mistral.rs 不暴露 KV 张量，因此使用完整 prompt text
+    /// 的 SHA1 作为 cache key（而非前缀 SHA1）。前缀复用由调用方通过
+    /// 比较返回的 token IDs 前缀实现。
     ///
     /// # 参数
     /// - `prompt_text` — 渲染后的完整 prompt 文本
@@ -304,102 +315,28 @@ impl PromptCache {
         model_name: &str,
         ctx_size: usize,
     ) -> Option<&CacheEntry> {
-        let prompt_bytes = prompt_text.as_bytes();
-        let mut best: Option<&CacheEntry> = None;
-
-        for entry in self.entries.values() {
-            // 模型名称必须匹配
-            if entry.model_name != model_name {
-                continue;
-            }
-            // 缓存的 ctx_size 必须不超过当前请求的 ctx_size
-            if entry.ctx_size > ctx_size {
-                continue;
-            }
-            // token 数必须达到最小阈值
-            if entry.tokens < self.config.min_tokens {
-                continue;
-            }
-
-            // 计算前缀 SHA1 并比较
-            // 注意：这里我们比较的是 SHA1，而 ds4 比较的是文件名中的 SHA1
-            // 文件名 = SHA1(rendered_prefix_text)
-            // 所以我们只需要验证 prompt_text 的前 N 字节的 SHA1 == entry.sha
-            // 但我们不知道 N（text_bytes），所以需要读取文件头获取
-            // 简化：直接用 entry.sha 对应的文本长度截取 prompt_text 并计算 SHA1
-            // 但这需要知道 text_bytes，而 text_bytes 不在内存索引中
-            // 替代方案：读取文件获取 text_bytes，或在索引中存储 text_bytes
-
-            // 实际上 ds4 的做法是：缓存文件中存储了 text_bytes，
-            // find_text_prefix 时对 prompt_text 的前 text_bytes 字节计算 SHA1 并比较
-            // 但这里我们简化：直接尝试加载文件验证
-
-            // 更高效的方案：在 CacheEntry 中存储 text_bytes
-            // 但为了简化，我们用文件大小减去 header 和 payload 来估算
-            // 不，这太不精确了。让我改为在 CacheEntry 中存储 text_bytes。
-
-            // 为了保持简洁，我直接尝试匹配：读取文件获取 text_bytes
-            if let Ok(text_bytes) = self.read_text_bytes_from_entry(entry) {
-                if text_bytes > prompt_bytes.len() {
-                    continue;
-                }
-                let prefix_sha = Self::sha1_hex(
-                    &String::from_utf8_lossy(&prompt_bytes[..text_bytes]),
-                );
-                if prefix_sha != entry.sha {
-                    continue;
-                }
-                // 选择 token 数最多的匹配
-                if best.is_none_or(|b| entry.tokens > b.tokens) {
-                    best = Some(entry);
-                }
-            }
-        }
-
-        best
-    }
-
-    /// 从缓存条目文件读取 text_bytes（渲染文本长度）。
-    fn read_text_bytes_from_entry(&self, entry: &CacheEntry) -> anyhow::Result<usize> {
-        // 文件格式: header(32) + model_name + token_ids_json
-        // text_bytes 不直接存储，但我们可以从文件内容推算
-        // 实际上，sha 是对 rendered text 的 SHA1
-        // 而 rendered text 并不存储在文件中（ds4 存储，但我们的格式不同）
-        //
-        // 修正：我们的格式不存储 rendered text，只存储 token_ids
-        // 所以我们无法通过 SHA1 匹配。
-        //
-        // 替代方案：改为存储 rendered text（类似 ds4）
-        // 或者：使用 prompt_text 本身的 SHA1 作为 key（而非前缀的 SHA1）
-        //
-        // 最简单的方案：cache key = SHA1(full_prompt_text)
-        // 这样不需要前缀匹配，只做精确匹配
-        // 但这失去了"前缀复用"的能力
-        //
-        // 折中方案：cache key = SHA1(prompt_text 的前 N tokens 对应的 text)
-        // 但我们不知道 N
-        //
-        // 最终决策：简化为精确匹配 + 前缀 token 匹配
-        // cache key = SHA1(full_rendered_text)
-        // 加载时返回 token_ids，调用方比较 token_ids 前缀
-        //
-        // 这样就不需要 text_bytes，直接用 SHA1(full_text) 作为 key
-        // 但这意味着只有完全相同的 prompt 才能命中
-
-        // 返回错误表示需要用精确匹配模式
-        // 实际上，让我重新设计：在文件头中存储 text_bytes
-        Ok(0) // placeholder, will be replaced by new design
+        let sha = Self::sha1_hex(prompt_text);
+        self.entries.get(&sha).filter(|e| {
+            e.model_name == model_name
+                && e.ctx_size <= ctx_size
+                && e.tokens >= self.config.min_tokens
+        })
     }
 
     /// 查找精确匹配的缓存条目（SHA1 完全匹配）。
     ///
     /// 简化版：使用完整 prompt text 的 SHA1 作为 key。
     /// 前缀复用由调用方通过比较 token IDs 实现。
-    pub fn find_exact(&self, prompt_text: &str, model_name: &str, ctx_size: usize) -> Option<&CacheEntry> {
+    pub fn find_exact(
+        &self,
+        prompt_text: &str,
+        model_name: &str,
+        ctx_size: usize,
+    ) -> Option<&CacheEntry> {
         let sha = Self::sha1_hex(prompt_text);
-        self.entries.get(&sha).filter(|e| {
-            e.model_name == model_name && e.ctx_size <= ctx_size
-        })
+        self.entries
+            .get(&sha)
+            .filter(|e| e.model_name == model_name && e.ctx_size <= ctx_size)
     }
 
     /// 加载缓存条目的 token IDs。
@@ -463,7 +400,8 @@ impl PromptCache {
         // 边界裁剪 + 对齐
         let store_len = self.compute_store_len(token_ids.len());
         let store_tokens = &token_ids[..store_len];
-        let store_text = &prompt_text[..prompt_text.char_indices()
+        let store_text = &prompt_text[..prompt_text
+            .char_indices()
             .nth(store_len)
             .map(|(i, _)| i)
             .unwrap_or(prompt_text.len())];
@@ -489,7 +427,9 @@ impl PromptCache {
         }
 
         // 原子写入
-        let tmp_path = self.dir.join(format!("{sha}.kpc.tmp.{}", std::process::id()));
+        let tmp_path = self
+            .dir
+            .join(format!("{sha}.kpc.tmp.{}", std::process::id()));
         let now = current_unix_timestamp();
 
         let mut header = [0u8; KPC_HEADER_SIZE];
@@ -528,7 +468,8 @@ impl PromptCache {
         };
         self.entries.insert(sha, entry);
 
-        if reason == CacheReason::Continued && store_tokens.len() > self.continued_last_store_tokens {
+        if reason == CacheReason::Continued && store_tokens.len() > self.continued_last_store_tokens
+        {
             self.continued_last_store_tokens = store_tokens.len();
         }
 
@@ -541,7 +482,11 @@ impl PromptCache {
         let align = self.config.boundary_align_tokens;
         if tokens > self.config.min_tokens + trim {
             let stable = tokens - trim;
-            let aligned = if align > 0 { stable - (stable % align) } else { stable };
+            let aligned = if align > 0 {
+                stable - (stable % align)
+            } else {
+                stable
+            };
             if aligned >= self.config.min_tokens {
                 return aligned;
             }
@@ -558,7 +503,7 @@ impl PromptCache {
         if live_tokens < self.config.min_tokens {
             return None;
         }
-        if live_tokens % step != 0 {
+        if !live_tokens.is_multiple_of(step) {
             return None;
         }
         if live_tokens <= self.continued_last_store_tokens {
@@ -585,7 +530,7 @@ impl PromptCache {
         let mut current_total = total;
         while current_total > target && !self.entries.is_empty() {
             // 找到评分最低的条目
-            let (victim_sha, _) = self
+            let Some((victim_sha, _)) = self
                 .entries
                 .iter()
                 .map(|(sha, e)| {
@@ -597,7 +542,9 @@ impl PromptCache {
                         .unwrap_or(std::cmp::Ordering::Equal)
                         .then(a.0.cmp(&b.0))
                 })
-                .unwrap();
+            else {
+                break;
+            };
 
             if let Some(entry) = self.entries.remove(&victim_sha) {
                 let _ = fs::remove_file(&entry.path);
@@ -672,11 +619,7 @@ pub fn eviction_score(entry: &CacheEntry, now: u64) -> f64 {
         let elapsed = (now - used_at) as f64;
         let raw = entry.hits as f64;
         let decayed = raw * (2.0f64).powf(-elapsed / HIT_HALF_LIFE_SECONDS);
-        if decayed < 0.01 {
-            0.0
-        } else {
-            decayed
-        }
+        if decayed < 0.01 { 0.0 } else { decayed }
     } else {
         entry.hits as f64
     };

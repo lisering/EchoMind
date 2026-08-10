@@ -642,9 +642,7 @@ impl<'a, L: LLMProvider> CompactionEngine<'a, L> {
                 version: None,
             },
             Err(e) => {
-                eprintln!(
-                    "CompactionEngine: verbatim tail LLM 摘要失败，降级为截断: {e:#}"
-                );
+                eprintln!("CompactionEngine: verbatim tail LLM 摘要失败，降级为截断: {e:#}");
                 ChatMessage {
                     id: None,
                     role: "system".to_string(),

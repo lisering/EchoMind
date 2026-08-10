@@ -1,13 +1,29 @@
 //! Prompt Prefix 磁盘缓存 TDD 测试（DS-01：借鉴 ds4 `ds4_kvstore.c`）。
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::unimplemented
+)]
+
 use crate::prompt_cache::*;
+
+use std::fs;
+use std::path::PathBuf;
 
 use tempfile::TempDir;
 
-/// 辅助：创建临时缓存目录。
+/// 辅助：创建临时缓存目录（使用小 min_tokens 方便测试）。
 fn make_cache() -> (TempDir, PromptCache) {
     let dir = TempDir::new().unwrap();
-    let cache = PromptCache::open(dir.path(), PromptCacheConfig::default()).unwrap();
+    let config = PromptCacheConfig {
+        min_tokens: 10,
+        ..PromptCacheConfig::default()
+    };
+    let cache = PromptCache::open(dir.path(), config).unwrap();
     (dir, cache)
 }
 
@@ -190,7 +206,7 @@ fn test_continued_store_target_at_interval() {
         continued_interval_tokens: 100,
         ..PromptCacheConfig::default()
     };
-    let mut cache = PromptCache::open(dir.path(), config).unwrap();
+    let cache = PromptCache::open(dir.path(), config).unwrap();
 
     // 200 tokens, interval=100, 200 % 100 == 0, 200 > 0 (last_store)
     let target = cache.continued_store_target(200);
@@ -490,12 +506,16 @@ fn test_store_atomic_no_tmp_left() {
 #[test]
 fn test_persistence_across_instances() {
     let dir = TempDir::new().unwrap();
+    let config = PromptCacheConfig {
+        min_tokens: 10,
+        ..PromptCacheConfig::default()
+    };
 
     // 第一个实例存储
     let prompt = fake_prompt(100);
     let tokens = fake_tokens(100);
     {
-        let mut cache = PromptCache::open(dir.path(), PromptCacheConfig::default()).unwrap();
+        let mut cache = PromptCache::open(dir.path(), config.clone()).unwrap();
         cache
             .store(&prompt, &tokens, "test-model", 4096, CacheReason::Cold)
             .unwrap();
@@ -503,7 +523,7 @@ fn test_persistence_across_instances() {
 
     // 第二个实例加载
     {
-        let cache = PromptCache::open(dir.path(), PromptCacheConfig::default()).unwrap();
+        let cache = PromptCache::open(dir.path(), config).unwrap();
         assert_eq!(cache.len(), 1);
 
         let entry = cache.find_exact(&prompt, "test-model", 4096).unwrap();
