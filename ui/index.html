@@ -7289,6 +7289,26 @@
         ];
         var _customCommands = [];
         var _customLoaded = false;
+        var _skillCommands = [];
+        var _skillsLoaded = false;
+        async function loadSkills() {
+          try {
+            const skills = await invoke("discover_skills");
+            _skillCommands = (skills || []).map((skill) => ({
+              name: skill.name,
+              label: skill.description || `chat.slash_${skill.name}`,
+              desc: skill.description || "chat.slash_skill_desc",
+              icon: "\u{1F4E6}",
+              promptTemplate: skill.content + "\n\n---\n\u7528\u6237\u95EE\u9898: {query}",
+              isSkill: true
+            }));
+            _skillsLoaded = true;
+          } catch (_) {
+            _skillCommands = [];
+            _skillsLoaded = true;
+          }
+          return _skillCommands;
+        }
         async function loadCustomTemplates() {
           try {
             const templates = await invoke("list_prompt_templates");
@@ -7313,7 +7333,7 @@
           _customLoaded = false;
         }
         function getAllCommands() {
-          return [...SLASH_COMMANDS, ..._customCommands];
+          return [...SLASH_COMMANDS, ..._customCommands, ..._skillCommands];
         }
         var _selectedIndex = 0;
         var _currentPanel = null;
@@ -7358,6 +7378,13 @@
                 badge.className = "slash-command-badge";
                 badge.textContent = "\u26A1";
                 badge.title = t("chat.slash_custom") || "\u81EA\u5B9A\u4E49";
+                name.appendChild(badge);
+              }
+              if (cmd.isSkill) {
+                const badge = document.createElement("span");
+                badge.className = "slash-command-badge";
+                badge.textContent = "\u{1F4E6}";
+                badge.title = t("chat.slash_skill") || "Skill";
                 name.appendChild(badge);
               }
               const desc = document.createElement("span");
@@ -21321,6 +21348,8 @@
           await initTheme();
           await initI18n();
           loadCustomTemplates().catch(() => {
+          });
+          loadSkills().catch(() => {
           });
           if (!window.__TAURI__ || !window.__TAURI__.core || !window.__TAURI__.event) {
             console.warn("[EchoMind] Tauri runtime not ready, retrying boot() in 200ms\u2026");

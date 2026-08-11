@@ -36,6 +36,7 @@ use echomind_core::import::{ImportOutcome, ImportService};
 use echomind_core::license::verify_license;
 use echomind_core::retriever::build_contextual_text;
 use echomind_core::session_strip::SessionStripper;
+use echomind_core::skill::Skill;
 use echomind_core::step_cache::StepCache as _;
 use echomind_infra::duckduckgo_provider::DuckDuckGoProvider;
 use echomind_infra::hyde_rewriter::HydeRewriter;

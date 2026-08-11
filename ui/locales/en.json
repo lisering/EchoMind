@@ -175,6 +175,8 @@
 "slash_web_desc": "Answer with web search results",
     "slash_no_match": "No matching commands",
     "slash_custom": "Custom",
+    "slash_skill": "Skill",
+    "slash_skill_desc": "Skill loaded from skills directory",
     "doc_mention_empty": "No matching documents",
     "regen_prev": "Previous version",
     "regen_next": "Next version",

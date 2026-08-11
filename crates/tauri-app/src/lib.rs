@@ -382,6 +382,8 @@ pub fn run() {
             commands::evaluate_rag_batch,
             commands::get_rag_eval_settings,
             commands::set_rag_eval_settings,
+            // B09 Skill 系统集成（REQ-ARCH-010 v1.8：斜杠命令面板 Skill 发现）
+            commands::discover_skills,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

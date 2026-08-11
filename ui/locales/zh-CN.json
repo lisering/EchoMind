@@ -175,6 +175,8 @@
 "slash_web_desc": "结合网页搜索结果回答",
     "slash_no_match": "无匹配指令",
     "slash_custom": "自定义",
+    "slash_skill": "Skill",
+    "slash_skill_desc": "从 skills 目录加载的技能",
     "doc_mention_empty": "无匹配文档",
     "regen_prev": "上一个版本",
     "regen_next": "下一个版本",
