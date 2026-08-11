@@ -1291,7 +1291,9 @@
     "cut": "剪切",
     "copy": "复制",
     "paste": "粘贴",
-    "select_all": "全选"
+    "select_all": "全选",
+    "search_placeholder": "搜索快捷键…",
+    "no_results": "未找到匹配的快捷键"
   },
   "error_recovery": {
     "network": "网络错误，请检查连接后重试。",

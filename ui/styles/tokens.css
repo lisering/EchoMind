@@ -118,12 +118,43 @@
   --leading-normal: 1.75;
 
   /* ============================================================
-   * Transition Tokens（动效令牌）
+   * Transition Tokens（动效令牌 — REQ-DS-006）
    * ============================================================ */
-  --duration-micro: 100ms;
-  --duration-fast: 150ms;
-  --duration-normal: 250ms;
-  --ease-out: ease-out;
+  --duration-micro: 100ms;     /* 微交互（按钮按下、选中色变化） */
+  --duration-fast: 150ms;      /* 快速过渡（hover、focus、copy-btn） */
+  --duration-normal: 250ms;    /* 常规过渡（fade-in、modal 打开） */
+  --duration-slow: 400ms;      /* 慢速过渡（侧栏折叠、大型面板展开） */
+  --ease-out: ease-out;        /* 默认缓出 */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);  /* Material Design 标准缓动 */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);  /* 弹簧缓动（scale-in、slide-up） */
+
+  /* ============================================================
+   * Hover Tokens（悬停反馈令牌 — REQ-IX-004）
+   * ============================================================ */
+  --hover-bg: var(--surface-3);                        /* 悬停背景色 */
+  --hover-bg-subtle: rgba(255, 255, 255, 0.05);       /* 微亮悬停背景（列表项） */
+  --hover-color: var(--accent);                        /* 悬停文字色 */
+  --hover-transition: var(--duration-fast) var(--ease-out);  /* 悬停过渡简写 */
+  --hover-opacity: 0.9;                               /* 悬停透明度（sendBtn） */
+
+  /* ============================================================
+   * Radius Tokens（圆角令牌 — REQ-DS-007）
+   * ============================================================ */
+  --radius-none: 0px;
+  --radius-sm: 4px;           /* .copy-btn / .code-lang / 文档徽标 */
+  --radius-md: 8px;           /* 代码块 pre / .md details */
+  --radius-lg: 12px;          /* 按钮 / 输入框 / Toast / 信息卡片 */
+  --radius-xl: 16px;          /* assistant Block / user Block / #inputBar */
+  --radius-2xl: 24px;         /* 拖拽遮罩虚线框 */
+  --radius-full: 9999px;      /* #vlmToggle / 引用芯片 / 进度条 / 圆点 */
+
+  /* ============================================================
+   * Shadow Tokens（阴影令牌 — REQ-DS-007）
+   * ============================================================ */
+  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.15);       /* Toast 单条 */
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);       /* 右键菜单 / 浮动按钮 */
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.4);       /* 大型模态框 */
+  --shadow-focus: 0 0 0 2px var(--surface-0), 0 0 0 4px var(--accent);  /* Focus 环 */
 
   /* ============================================================
    * Layer 2: Semantic Aliases（语义别名层 — DeepSeek 风格三层架构）
@@ -200,6 +231,14 @@
   /* Thinking Panel 组件 */
   --dsl-thinking-text: var(--dsw-alias-label-tertiary);
   --dsl-thinking-content-border: var(--dsw-alias-border-l1);
+
+  /* ============================================================
+   * Animation Component Tokens（组件动效令牌 — REQ-DS-006）
+   * ============================================================ */
+  --anim-modal: scaleIn var(--duration-normal) var(--ease-out);     /* 模态框打开 */
+  --anim-toast: toastIn var(--duration-normal) var(--ease-out);     /* Toast 滑入 */
+  --anim-panel: panelIn var(--duration-fast) var(--ease-out);       /* 面板打开 */
+  --anim-message: messageIn var(--duration-normal) var(--ease-out); /* 消息出现 */
 }
 
 /* ============================================================
@@ -264,6 +303,9 @@
   /* 消息组件令牌 */
   --msg-user-bg: rgba(14, 165, 233, 0.08);
   --msg-user-border: rgba(14, 165, 233, 0.15);
+
+  /* Hover Tokens 覆盖（REQ-IX-004 浅色主题） */
+  --hover-bg-subtle: rgba(0, 0, 0, 0.05);
 }
 
 [data-theme="light"] body {
@@ -383,6 +425,12 @@ body {
 @keyframes caretBlink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
 @keyframes panelIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
+/* REQ-DS-006: Toast 滑入动效（translateY(-100%) → translateY(0)） */
+@keyframes toastIn { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: translateY(0); } }
+
+/* REQ-DS-006: 模态框打开动效（scale(0.95)→scale(1) + opacity(0)→opacity(1)） */
+@keyframes modalIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+
 .animate-fade-in { animation: fadeIn 0.25s ease-out; }
 .animate-scale-in { animation: scaleIn 0.15s ease-out; }
 .animate-slide-up { animation: slideUp 0.2s cubic-bezier(0.34,1.56,0.64,1); }
@@ -391,10 +439,15 @@ body {
 .animate-caret-blink { animation: caretBlink 600ms infinite step-start; }
 .animate-panel-in { animation: panelIn 0.15s ease-out; }
 
+/* REQ-DS-006: 模态框打开动效 + Toast 滑入动效 */
+.animate-modal-in { animation: modalIn var(--duration-normal) var(--ease-out); }
+.animate-toast-in { animation: toastIn var(--duration-normal) var(--ease-out); }
+
 /* 全局 Focus 环 — box-shadow 跟随圆角（DeepSeek 风格，A11Y 兼容） */
+/* REQ-DS-007: 使用 --shadow-focus design token */
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 4px var(--accent);
+  box-shadow: var(--shadow-focus);
 }
 
 /* prefers-reduced-motion 降级（A11Y — 无法用 Tailwind 工具类表达） */

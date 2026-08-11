@@ -1291,7 +1291,9 @@
     "cut": "Cut",
     "copy": "Copy",
     "paste": "Paste",
-    "select_all": "Select all"
+    "select_all": "Select all",
+    "search_placeholder": "Search shortcuts…",
+    "no_results": "No matching shortcuts"
   },
   "error_recovery": {
     "network": "Network error. Please check your connection and retry.",

@@ -2531,3 +2531,60 @@ pointer-events: none;
     right: 12px !important;
   }
 }
+
+/* ============================================================
+ * REQ-IX-004: 悬停反馈规范 — design token 统一
+ *
+ * 以下规则使用 --hover-* / --duration-* / --ease-* design tokens
+ * 统一所有交互元素的悬停视觉反馈，确保跨主题一致性。
+ * Tailwind hover: 变体类保持不变，此处仅补充 Tailwind 无法表达的
+ * CSS 自定义属性引用和组合状态。
+ * ============================================================ */
+
+/* .msg-actions 透明度过渡：opacity 0→1，200ms */
+.msg-actions {
+  transition: opacity var(--duration-normal) var(--ease-out);
+}
+
+/* .copy-btn 悬停：文字色 + 边框色 + 背景色，150ms */
+.copy-btn {
+  transition: color var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+}
+
+/* .cite-ref 引用标记悬停：背景高亮，150ms */
+.cite-ref {
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+/* .md a 链接悬停：底部边框出现，150ms */
+.md a {
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+/* .md summary 折叠标题悬停：背景微亮 */
+.md summary {
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+/* .md tbody tr 表格行悬停：背景高亮 */
+.md tbody tr {
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+/* REQ-DS-006 AC-6: prefers-reduced-motion 禁用新增动效 */
+@media (prefers-reduced-motion: reduce) {
+  .msg-actions,
+  .copy-btn,
+  .cite-ref,
+  .md a,
+  .md summary,
+  .md tbody tr {
+    transition: none;
+  }
+  .animate-modal-in,
+  .animate-toast-in {
+    animation: none;
+  }
+}
