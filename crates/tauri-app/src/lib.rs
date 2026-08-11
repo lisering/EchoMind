@@ -120,6 +120,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::import_files,
+            commands::replace_document,
             commands::get_file_sizes,
             commands::get_file_size_limits,
             commands::chat,
@@ -148,6 +149,8 @@ pub fn run() {
             commands::set_sub_agent_enabled,
             commands::set_embedding_model,
             commands::set_context_token_limit,
+            commands::get_chunk_params,
+            commands::set_chunk_params,
             commands::list_local_models,
             commands::get_recommended_models,
             commands::download_model,
@@ -185,6 +188,7 @@ pub fn run() {
             commands::get_documents,
             commands::delete_document,
             commands::retry_index,
+            commands::rebuild_index,
             commands::reclassify_document,
             commands::activate_pro,
             commands::deactivate_pro,
@@ -297,6 +301,8 @@ pub fn run() {
             commands::regenerate_summary,
             // 文档内容预览（REQ-ING-010）
             commands::get_document_preview,
+            // 文档原文导出（REQ-EXP-004）
+            commands::export_document_original,
             // 代码符号引擎（REQ-RAG-031 代码感知 RAG）
             commands::search_symbols,
             commands::get_symbols_for_chunk,

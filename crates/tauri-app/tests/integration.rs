@@ -20,17 +20,18 @@ use echomind_models::{ChatMessage, Chunk, DocStatus, Document, LlmConfig, LlmMod
 use echomind_tauri_app::commands::{
     activate_pro_inner, chat_inner, create_conversation_inner, deactivate_pro_inner,
     delete_conversation_inner, delete_document_inner, delete_model_inner, edit_user_message_inner,
-    edit_user_message_inner_full, export_conversation_markdown_inner, forward_stream,
-    get_conversation_cost_inner, get_conversations_inner, get_conversations_paginated_inner,
-    get_llm_mode_inner, get_locale_inner, get_messages_inner, get_pro_status_inner,
-    get_settings_inner, get_sidebar_collapsed_inner, get_watched_folders_inner, import_files_inner,
-    list_local_models_inner, open_data_dir_inner, persist_exchange, record_token_usage_inner,
-    remove_watched_folder_inner, retry_index_inner, save_text_file_inner, search_symbols_inner,
-    set_agent_enabled_inner, set_compression_ratio_inner, set_context_token_limit_inner,
-    set_coordinator_mode_inner, set_embedding_model_inner, set_hybrid_search_inner,
-    set_hyde_enabled_inner, set_llm_mode_inner, set_local_model_inner, set_locale_inner,
-    set_memory_enabled_inner, set_rerank_enabled_inner, set_sidebar_collapsed_inner,
-    set_token_budget_inner, update_llm_config_inner,
+    edit_user_message_inner_full, export_conversation_markdown_inner,
+    export_document_original_inner, forward_stream, get_conversation_cost_inner,
+    get_conversations_inner, get_conversations_paginated_inner, get_llm_mode_inner,
+    get_locale_inner, get_messages_inner, get_pro_status_inner, get_settings_inner,
+    get_sidebar_collapsed_inner, get_watched_folders_inner, import_files_inner,
+    list_local_models_inner, open_data_dir_inner, persist_exchange, rebuild_index_inner,
+    record_token_usage_inner, remove_watched_folder_inner, retry_index_inner, save_text_file_inner,
+    search_symbols_inner, set_agent_enabled_inner, set_compression_ratio_inner,
+    set_context_token_limit_inner, set_coordinator_mode_inner, set_embedding_model_inner,
+    set_hybrid_search_inner, set_hyde_enabled_inner, set_llm_mode_inner, set_local_model_inner,
+    set_locale_inner, set_memory_enabled_inner, set_rerank_enabled_inner,
+    set_sidebar_collapsed_inner, set_token_budget_inner, update_llm_config_inner,
 };
 #[cfg(feature = "pro")]
 use echomind_tauri_app::commands::{
@@ -549,6 +550,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
         service.index_document(&doc).await.unwrap();
         let elapsed = start.elapsed();
@@ -582,6 +584,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // index_document 失败时返回 Err（PdfLoader 可能无法提取某些 PDF 的文本）
@@ -613,6 +616,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // TextLoader 使用 from_utf8_lossy，混合编码文件不应导致崩溃
@@ -648,6 +652,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
         service.index_document(&doc).await.unwrap();
 
@@ -692,6 +697,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // 空文件索引不应 Panic（splitter 对空文本返回空 Vec）
@@ -719,6 +725,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // index_document 应返回 Err（PdfLoader 无法解析非 PDF 内容）
@@ -1052,6 +1059,7 @@ mod embed_search_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // 步骤 2：索引（load → split → chunks 入库）
@@ -1103,7 +1111,7 @@ mod embed_search_tests {
 
         // 多文档导入 + 索引 + 向量化 + 检索
         for i in 0..3 {
-            let path = dir.path().join("doc{i}.md");
+            let path = dir.path().join(format!("doc{i}.md"));
             std::fs::write(&path, format!("文档 {i} 的内容，关于主题 {i}。")).unwrap();
             let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
             let outcome = service.import_one(&canon, true).await.unwrap();
@@ -1715,6 +1723,7 @@ mod mm_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // 使用多模态索引（注入 Mock PageRenderer + MockOcrEngine）
@@ -1811,6 +1820,7 @@ mod mm_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // VLM 模拟返回 Markdown 表格
@@ -1880,6 +1890,7 @@ mod mm_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // VLM 模拟返回 Mermaid gantt 语法
@@ -1947,6 +1958,7 @@ mod mm_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         let ocr_calls = Arc::new(AtomicUsize::new(0));
@@ -2127,6 +2139,7 @@ mod mm_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // 模拟 VLM 按 Level 3 策略提取的 CSV 数据
@@ -5128,7 +5141,10 @@ async fn tc_cross_004_multi_doc_top_k_truncation() {
     assert_eq!(hits_2.len(), 2, "top_k=2 应返回 2 个结果");
 }
 
-/// TC-CROSS-005：同名不同内容文件——各自独立入库不冲突。
+/// TC-CROSS-005：同名不同内容文件——REQ-ING-012 同名冲突检测 + 替换。
+///
+/// v1.12 变更：同名不同内容文件不再各自独立入库，而是触发 NameConflict，
+/// 用户需通过 replace_and_import 确认替换。
 #[tokio::test]
 async fn tc_cross_005_same_name_diff_content_independent() {
     let dir = TempDir::new().unwrap();
@@ -5157,21 +5173,47 @@ async fn tc_cross_005_same_name_diff_content_independent() {
         .to_string_lossy()
         .into_owned();
 
-    // 两个同名文件都应成功导入
+    // 文件 A 首次导入成功
     let outcome_a = service.import_one(&canon_a, true).await.unwrap();
-    let outcome_b = service.import_one(&canon_b, true).await.unwrap();
     assert!(
         matches!(outcome_a, ImportOutcome::Imported(_)),
         "文件 A 应导入成功"
     );
+
+    // 文件 B 同名不同内容 → NameConflict（REQ-ING-012）
+    let outcome_b = service.import_one(&canon_b, true).await.unwrap();
+    match &outcome_b {
+        ImportOutcome::NameConflict {
+            old_doc_id,
+            file_name,
+        } => {
+            assert!(!old_doc_id.is_empty(), "应返回旧文档 ID");
+            assert_eq!(file_name, "readme.md", "应返回冲突文件名");
+        }
+        _ => panic!("同名不同内容应返回 NameConflict，实际: {outcome_b:?}"),
+    }
+
+    // 文档数应为 1（B 未导入）
+    let count = state.storage.count_documents().await.unwrap();
+    assert_eq!(count, 1, "同名冲突时文档数应为 1");
+
+    // 通过 replace_and_import 替换
+    let old_doc_id = match &outcome_b {
+        ImportOutcome::NameConflict { old_doc_id, .. } => old_doc_id.clone(),
+        _ => unreachable!(),
+    };
+    let outcome_replace = service
+        .replace_and_import(&canon_b, &old_doc_id, true)
+        .await
+        .unwrap();
     assert!(
-        matches!(outcome_b, ImportOutcome::Imported(_)),
-        "文件 B 应导入成功"
+        matches!(outcome_replace, ImportOutcome::Imported(_)),
+        "替换后应导入成功"
     );
 
-    // 文档数应为 2
+    // 文档数仍为 1（替换，非新增）
     let count = state.storage.count_documents().await.unwrap();
-    assert_eq!(count, 2, "两个同名不同内容文件应各自入库，文档数应为 2");
+    assert_eq!(count, 1, "替换后文档数仍应为 1");
 }
 
 /// TC-CROSS-006：文档全部删除后——count_documents 返回 0，chat 被拦截。
@@ -6720,5 +6762,154 @@ async fn tc_perf_batch_004_idempotent_cache_write() {
     assert!(
         (cached_c.as_ref().unwrap()[0] - 3.0).abs() < 0.001,
         "hash_c 应为 3.0"
+    );
+}
+
+// ==================================================================
+// REQ-EXP-004 文档原文导出
+// ==================================================================
+
+/// TC-EXP-ORIG-001 export_document_original 成功复制文件到目标路径（REQ-EXP-004-AC-1/AC-3）。
+#[tokio::test]
+async fn tc_exp_orig_001_export_document_original_success() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    // 创建测试文件并导入
+    let src_file = dir.path().join("source").join("test_export.md");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(&src_file, b"export test content").unwrap();
+
+    let app = tauri::test::mock_app();
+    let handle = app.handle().clone();
+    let imported = import_files_inner(&handle, &[src_file.to_string_lossy().to_string()], &state)
+        .await
+        .unwrap();
+    assert_eq!(imported.len(), 1, "应导入 1 个文件");
+
+    // 获取文档 ID
+    let docs = state.storage.list_documents().await.unwrap();
+    assert_eq!(docs.len(), 1);
+    let doc_id = &docs[0].id;
+
+    // 导出到一个新路径
+    let dest = dir.path().join("exported.md");
+    export_document_original_inner(doc_id, dest.to_str().unwrap(), &state)
+        .await
+        .unwrap();
+
+    // 验证导出文件内容一致（AC-3：字节级一致）
+    let exported_content = std::fs::read_to_string(&dest).unwrap();
+    assert_eq!(exported_content, "export test content");
+}
+
+/// TC-EXP-ORIG-002 不存在的文档 ID 返回 Err（REQ-EXP-004-AC-1）。
+#[tokio::test]
+async fn tc_exp_orig_002_export_nonexistent_doc_returns_error() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    let dest = dir.path().join("exported.md");
+    let result =
+        export_document_original_inner("nonexistent-id", dest.to_str().unwrap(), &state).await;
+
+    assert!(result.is_err(), "不存在的文档 ID 必须返回 Err");
+    assert!(
+        result.unwrap_err().contains("文档不存在"),
+        "错误消息应包含「文档不存在」"
+    );
+}
+
+/// TC-EXP-ORIG-003 文件副本不存在时返回 Err（REQ-EXP-004 异常场景）。
+#[tokio::test]
+async fn tc_exp_orig_003_export_missing_file_returns_error() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    // 直接插入文档记录（file_path 指向不存在的文件）
+    let doc = Document::new(
+        "/nonexistent/path/to/file.md".to_string(),
+        "fake_hash_001".to_string(),
+    );
+    state.storage.add_document(&doc).await.unwrap();
+
+    let dest = dir.path().join("exported.md");
+    let result = export_document_original_inner(&doc.id, dest.to_str().unwrap(), &state).await;
+
+    assert!(result.is_err(), "文件副本不存在时必须返回 Err");
+    assert!(
+        result.unwrap_err().contains("文档副本文件不存在"),
+        "错误消息应包含「文档副本文件不存在」"
+    );
+}
+
+// ==================================================================
+// REQ-VEC-009 索引重建
+// ==================================================================
+
+/// TC-VEC-REBUILD-001 rebuild_index 对 Indexed 文档清理旧 chunks 并重新索引（REQ-VEC-009-AC-2/AC-3）。
+#[tokio::test]
+async fn tc_vec_rebuild_001_rebuild_index_clears_and_reindexes() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    // 导入文件
+    let src_file = dir.path().join("source").join("rebuild_test.md");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(
+        &src_file,
+        b"# Rebuild Test\n\nSome content for rebuild testing.",
+    )
+    .unwrap();
+
+    let app = tauri::test::mock_app();
+    let handle = app.handle().clone();
+    let imported = import_files_inner(&handle, &[src_file.to_string_lossy().to_string()], &state)
+        .await
+        .unwrap();
+    assert_eq!(imported.len(), 1);
+
+    let docs = state.storage.list_documents().await.unwrap();
+    let doc = &docs[0];
+    assert_eq!(doc.status, DocStatus::Indexed, "导入后应为 Indexed");
+
+    // 记录原始 chunk 数
+    let original_chunks = state.storage.list_chunks(&doc.id).await.unwrap();
+    assert!(!original_chunks.is_empty(), "应有 chunks");
+
+    // 执行重建索引
+    rebuild_index_inner(&handle, &doc.id, &state).await.unwrap();
+
+    // 验证状态恢复为 Indexed（AC-3）
+    let docs_after = state.storage.list_documents().await.unwrap();
+    let doc_after = docs_after
+        .iter()
+        .find(|d| d.id == doc.id)
+        .expect("文档应存在");
+    assert_eq!(
+        doc_after.status,
+        DocStatus::Indexed,
+        "重建后状态应恢复为 Indexed（AC-3）"
+    );
+
+    // 验证 chunks 仍然存在（重新索引后应有 chunks）
+    let rebuilt_chunks = state.storage.list_chunks(&doc.id).await.unwrap();
+    assert!(!rebuilt_chunks.is_empty(), "重建后应有 chunks");
+}
+
+/// TC-VEC-REBUILD-002 不存在的文档 ID 返回 Err（REQ-VEC-009-AC-1）。
+#[tokio::test]
+async fn tc_vec_rebuild_002_rebuild_nonexistent_doc_returns_error() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    let app = tauri::test::mock_app();
+    let handle = app.handle().clone();
+    let result = rebuild_index_inner(&handle, "nonexistent-id", &state).await;
+
+    assert!(result.is_err(), "不存在的文档 ID 必须返回 Err");
+    assert!(
+        result.unwrap_err().contains("文档不存在"),
+        "错误消息应包含「文档不存在」"
     );
 }

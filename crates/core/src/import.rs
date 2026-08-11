@@ -58,6 +58,12 @@ pub enum ImportOutcome {
     Imported(Document),
     /// 内容指纹重复，跳过（REQ-ING-004）
     SkippedDuplicate(String),
+    /// 同名不同内容，需用户确认是否替换（REQ-ING-012）
+    /// 携带旧文档 ID 和文件名，前端弹出替换确认对话框
+    NameConflict {
+        old_doc_id: String,
+        file_name: String,
+    },
 }
 
 /// 文件导入服务。
@@ -192,7 +198,10 @@ impl<S: Storage> ImportService<S> {
         Ok(())
     }
 
-    /// 导入单个文件：校验 → 去重 → 配额 → 复制入库 → 状态 Pending。
+    /// 导入单个文件：校验 → 去重 → 同名检测 → 配额 → 复制入库 → 状态 Pending。
+    ///
+    /// REQ-ING-012：同名不同内容检测。导入同名但内容不同的文件时返回 `NameConflict`，
+    /// 由调用方（前端/IPC 层）决定是否替换。确认替换后调用 `replace_and_import`。
     pub async fn import_one(&self, raw_path: &str, is_pro: bool) -> anyhow::Result<ImportOutcome> {
         let canonical = Self::sanitize_path(raw_path)?;
         let ext = Self::validate_extension(&canonical)?;
@@ -200,8 +209,18 @@ impl<S: Storage> ImportService<S> {
         // GB 级文件优化：流式 MD5（64KB 块），不整读文件
         let hash = Self::content_hash_stream(&canonical).await?;
 
+        // 内容指纹去重（REQ-ING-004）
         if self.storage.find_document_by_hash(&hash).await?.is_some() {
             return Ok(ImportOutcome::SkippedDuplicate(Self::file_name(&canonical)));
+        }
+
+        // 同名不同内容检测（REQ-ING-012）
+        let file_name = Self::file_name(&canonical);
+        if let Some(existing) = self.storage.find_document_by_name(&file_name).await? {
+            return Ok(ImportOutcome::NameConflict {
+                old_doc_id: existing.id,
+                file_name,
+            });
         }
 
         self.check_free_tier_limits(is_pro, &ext).await?;
@@ -223,6 +242,28 @@ impl<S: Storage> ImportService<S> {
         let doc = Document::new(dest.to_string_lossy().into_owned(), hash);
         self.storage.add_document(&doc).await?;
         Ok(ImportOutcome::Imported(doc))
+    }
+
+    /// 替换文档并重新导入（REQ-ING-012）。
+    ///
+    /// 删除旧文档（级联清理 chunks/向量/propositions/entities/relations/wiki_links），
+    /// 然后执行完整导入管线。用于用户确认替换同名不同内容文件后调用。
+    ///
+    /// # 参数
+    /// - `raw_path`: 新文件路径
+    /// - `old_doc_id`: 旧文档 ID（将被删除）
+    /// - `is_pro`: 是否 Pro 用户
+    pub async fn replace_and_import(
+        &self,
+        raw_path: &str,
+        old_doc_id: &str,
+        is_pro: bool,
+    ) -> anyhow::Result<ImportOutcome> {
+        // 先删除旧文档（级联清理）
+        self.storage.delete_document(old_doc_id).await?;
+
+        // 重新导入（旧文档已删除，同名检测不会触发）
+        self.import_one(raw_path, is_pro).await
     }
 
     /// 导入单个文件（监听文件夹增量同步用，REQ-SYNC-002）。

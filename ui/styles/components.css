@@ -786,6 +786,17 @@ input[type="url"],
   transform: translateX(-50%) scale(0.95);
 }
 
+/* REQ-NAV-005 「回到顶部」浮动按钮 */
+.back-to-top {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.back-to-top:active {
+  transform: translateX(-50%) scale(0.95);
+}
+
 
 
 /* ============================================================

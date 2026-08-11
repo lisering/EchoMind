@@ -38,7 +38,19 @@ pub async fn import_files_inner<R: Runtime>(
     state: &AppState,
 ) -> Result<Vec<String>, String> {
     let is_pro = *state.is_pro().read().await;
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
+    // REQ-VEC-011：从 settings 表读取分块参数
+    let chunk_params = crate::commands::settings::get_chunk_params_inner(state)
+        .await
+        .unwrap_or_default();
+    let service = if chunk_params.chunk_size != echomind_core::import::DEFAULT_CHUNK_TOKENS {
+        ImportService::with_chunk_tokens(
+            state.storage.clone(),
+            state.data_dir.clone(),
+            chunk_params.chunk_size,
+        )
+    } else {
+        ImportService::new(state.storage.clone(), state.data_dir.clone())
+    };
     let mut imported = Vec::new();
 
     // REQ-ING-006：导入进度与取消
@@ -239,6 +251,18 @@ pub async fn import_files_inner<R: Runtime>(
             Ok(ImportOutcome::SkippedDuplicate(_)) => {
                 emit_status(app, "done", format!("内容已存在，跳过导入：{name}"));
             }
+            Ok(ImportOutcome::NameConflict {
+                old_doc_id,
+                file_name,
+            }) => {
+                // REQ-ING-012：同名不同内容，返回冲突信息供前端确认
+                emit_status(
+                    app,
+                    "conflict",
+                    format!("文件已存在但内容不同：{file_name}"),
+                );
+                return Err(format!("CONFLICT:{old_doc_id}:{file_name}"));
+            }
             Err(err) => {
                 // REQ-ERR-001：未携带前缀的导入错误统一标记为 STORAGE
                 let msg = err.to_string();
@@ -262,7 +286,145 @@ pub async fn import_files_inner<R: Runtime>(
     Ok(imported)
 }
 
-/// Pro 版 PDF 多模态索引（REQ-MM-004）：文本提取 → 图片渲染 → OCR → VLM 增强 → 分块入库。
+/// 替换文档（REQ-ING-012）：删除旧文档 + 重新导入新文件 + 完整索引管线。
+///
+/// 用户导入同名不同内容文件时，前端收到 `CONFLICT:{old_doc_id}:{file_name}` 错误，
+/// 弹出确认对话框。用户确认后调用此命令完成替换。
+#[tauri::command]
+pub async fn replace_document(
+    app: AppHandle,
+    file_path: String,
+    old_doc_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    replace_document_inner(&app, &file_path, &old_doc_id, state.inner()).await
+}
+
+/// 替换文档逻辑（命令与集成测试复用）。
+pub async fn replace_document_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    file_path: &str,
+    old_doc_id: &str,
+    state: &AppState,
+) -> Result<String, String> {
+    let is_pro = *state.is_pro().read().await;
+    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
+    let name = display_name(file_path);
+
+    // 替换：删除旧文档 → 重新导入
+    match service
+        .replace_and_import(file_path, old_doc_id, is_pro)
+        .await
+    {
+        Ok(ImportOutcome::Imported(doc)) => {
+            // 执行索引（与 import_files_inner 相同的管线）
+            let index_result = {
+                #[cfg(feature = "pro")]
+                {
+                    let ext_lower = Path::new(&doc.file_path)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.to_lowercase())
+                        .unwrap_or_default();
+                    let is_pdf = ext_lower == "pdf";
+                    let is_code = matches!(ext_lower.as_str(), "rs" | "ts" | "tsx" | "py" | "go");
+                    if is_pdf && is_pro {
+                        index_pdf_multimodal(app, &service, &doc, state, &name).await
+                    } else if is_code && is_pro {
+                        emit_status(app, "indexing", format!("正在索引代码符号：{name}"));
+                        let engine = SymbolEngine;
+                        service
+                            .index_document_with_symbols(&doc, &engine)
+                            .await
+                            .map_err(|e| format!("{e:#}"))
+                    } else {
+                        emit_status_with_phase(
+                            app,
+                            "indexing",
+                            format!("正在分块索引：{name}"),
+                            Some("splitting"),
+                        );
+                        service
+                            .index_document(&doc)
+                            .await
+                            .map_err(|e| format!("{e:#}"))
+                    }
+                }
+                #[cfg(not(feature = "pro"))]
+                {
+                    emit_status_with_phase(
+                        app,
+                        "indexing",
+                        format!("正在分块索引：{name}"),
+                        Some("splitting"),
+                    );
+                    service
+                        .index_document(&doc)
+                        .await
+                        .map_err(|e| format!("{e:#}"))
+                }
+            };
+
+            match index_result {
+                Ok(()) => {
+                    emit_status_with_phase(
+                        app,
+                        "indexing",
+                        "正在加载向量化引擎…".to_string(),
+                        Some("loading_model"),
+                    );
+                    match embed_document_chunks(app, state, &doc.id, &name).await {
+                        Ok(count) => {
+                            emit_status(app, "done", format!("替换完成：{name}（{count} 向量）"));
+                            // 清空查询缓存
+                            if let Err(e) = state.cache.clear_all().await {
+                                warn!("替换后清空查询缓存失败: {e:#}");
+                            }
+                            state.step_cache.clear();
+                            Ok(doc.id)
+                        }
+                        Err(err) => {
+                            let _ = state
+                                .storage
+                                .update_doc_status(
+                                    &doc.id,
+                                    DocStatus::Failed(prefix_error(
+                                        ERR_EMBED,
+                                        &format!("向量化失败: {err}"),
+                                    )),
+                                )
+                                .await;
+                            emit_status(
+                                app,
+                                "error",
+                                prefix_error(ERR_EMBED, &format!("向量化失败：{name}（{err}）")),
+                            );
+                            Err(prefix_error(ERR_EMBED, &format!("替换失败：{err}")))
+                        }
+                    }
+                }
+                Err(err) => {
+                    emit_status(
+                        app,
+                        "error",
+                        prefix_error(ERR_PARSE, &format!("索引失败：{name}（{err}）")),
+                    );
+                    Err(prefix_error(ERR_PARSE, &format!("替换失败：{err}")))
+                }
+            }
+        }
+        Ok(ImportOutcome::SkippedDuplicate(_)) => Err("内容与现有文档相同，无需替换".to_string()),
+        Ok(ImportOutcome::NameConflict { .. }) => Err("仍有同名冲突，请重试".to_string()),
+        Err(err) => {
+            let msg = err.to_string();
+            if has_error_prefix(&msg) {
+                Err(msg)
+            } else {
+                Err(prefix_error(ERR_STORAGE, &format!("替换失败：{msg}")))
+            }
+        }
+    }
+}
 #[cfg(feature = "pro")]
 async fn index_pdf_multimodal<R: Runtime>(
     app: &AppHandle<R>,
@@ -713,4 +875,36 @@ pub async fn clear_model_cache(
     .await
     .map_err(|e| format!("缓存清理任务失败: {e:#}"))?;
     Ok(freed)
+}
+
+// ------------------------------------------------------------------
+// 索引重建（REQ-VEC-009）
+// ------------------------------------------------------------------
+
+/// 重建已索引文档的索引（REQ-VEC-009）。
+///
+/// 删除该文档的全部 chunks 与向量，重新执行解析 → 分块 → 嵌入 → 存储链路。
+/// 适用于嵌入模型升级或分块策略变更后重新索引。
+/// 重建期间文档状态标记为 Processing，重建完成后恢复 Indexed。
+///
+/// 内部复用 `retry_index_inner` 逻辑（清理旧 chunks → 重新索引 + 嵌入）。
+#[tauri::command]
+pub async fn rebuild_index(
+    app: AppHandle,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    rebuild_index_inner(&app, &id, state.inner()).await
+}
+
+/// `rebuild_index` 的逻辑实现（命令与集成测试复用）。
+///
+/// 封装 `retry_index_inner`，语义上表示「重建索引」而非「重试失败」。
+/// 适用于 Indexed 状态文档的主动重建。
+pub async fn rebuild_index_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    doc_id: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    retry_index_inner(app, doc_id, state).await
 }

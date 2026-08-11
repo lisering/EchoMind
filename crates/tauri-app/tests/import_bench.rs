@@ -54,6 +54,9 @@ async fn bench_real_import_phases() {
         ImportOutcome::SkippedDuplicate(_) => {
             panic!("测试文件应首次导入");
         }
+        ImportOutcome::NameConflict { .. } => {
+            panic!("测试文件应首次导入，不应同名冲突");
+        }
     };
     let t_import = t0.elapsed();
 

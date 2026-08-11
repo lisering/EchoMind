@@ -541,3 +541,55 @@ pub async fn get_document_preview_inner(
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+// ------------------------------------------------------------------
+// 文档原文导出（REQ-EXP-004）
+// ------------------------------------------------------------------
+
+/// 导出文档原始文件副本（REQ-EXP-004）。
+///
+/// 将数据目录中的文档副本复制到用户指定的目标路径。
+/// 导出的文件与导入时完全一致（字节级一致）。
+///
+/// # 参数
+/// - `doc_id`: 文档 ID
+/// - `dest_path`: 目标保存路径（由前端 Tauri save 对话框获取）
+#[tauri::command]
+pub async fn export_document_original(
+    doc_id: String,
+    dest_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    export_document_original_inner(&doc_id, &dest_path, state.inner()).await
+}
+
+/// `export_document_original` 的逻辑实现（命令与集成测试复用）。
+///
+/// 查找文档 → 获取 file_path → 复制到 dest_path。
+/// 文档不存在返回 Err；文件副本不存在返回 Err。
+pub async fn export_document_original_inner(
+    doc_id: &str,
+    dest_path: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let doc = docs
+        .into_iter()
+        .find(|d| d.id == doc_id)
+        .ok_or_else(|| format!("文档不存在: {doc_id}"))?;
+
+    let src = &doc.file_path;
+    if !std::path::Path::new(src).exists() {
+        return Err(format!("文档副本文件不存在: {src}"));
+    }
+
+    tokio::fs::copy(src, dest_path)
+        .await
+        .map_err(|e| format!("导出文件失败: {e}"))?;
+
+    Ok(())
+}

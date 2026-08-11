@@ -921,3 +921,108 @@ pub async fn set_generation_params_inner(
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+// ============================================================
+// REQ-VEC-011 分块参数可视化配置
+// ============================================================
+
+/// 分块参数（REQ-VEC-011）。
+///
+/// 持久化到 settings 表 `vec.chunk_size` 和 `vec.chunk_overlap`。
+/// 新导入文档使用此参数分块；已索引文档不受影响。
+/// 范围：chunk_size 128-2048（默认 256），overlap 0-256（默认 32）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChunkParams {
+    /// 分块 token 窗口（128-2048，默认 256）
+    pub chunk_size: usize,
+    /// 重叠 token 数（0-256，默认 32，必须 < chunk_size）
+    pub overlap: usize,
+}
+
+impl Default for ChunkParams {
+    fn default() -> Self {
+        Self {
+            chunk_size: echomind_core::import::DEFAULT_CHUNK_TOKENS,
+            overlap: echomind_core::splitter::DEFAULT_OVERLAP_TOKENS,
+        }
+    }
+}
+
+impl ChunkParams {
+    /// 校验参数范围，超出范围时返回错误。
+    pub fn validate(&self) -> Result<(), String> {
+        if self.chunk_size < 128 || self.chunk_size > 2048 {
+            return Err(format!(
+                "VALIDATION: 分块大小必须在 128-2048 范围内（当前 {}）",
+                self.chunk_size
+            ));
+        }
+        if self.overlap > 256 {
+            return Err(format!(
+                "VALIDATION: 重叠大小必须在 0-256 范围内（当前 {}）",
+                self.overlap
+            ));
+        }
+        if self.overlap >= self.chunk_size {
+            return Err(format!(
+                "VALIDATION: 重叠大小必须小于分块大小（overlap={} >= chunk_size={}）",
+                self.overlap, self.chunk_size
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// 获取分块参数（REQ-VEC-011）。
+#[tauri::command]
+pub async fn get_chunk_params(state: State<'_, AppState>) -> Result<ChunkParams, String> {
+    get_chunk_params_inner(state.inner()).await
+}
+
+/// 获取分块参数逻辑（命令与集成测试复用）。
+pub async fn get_chunk_params_inner(state: &AppState) -> Result<ChunkParams, String> {
+    let chunk_size = state
+        .storage
+        .get_setting("vec.chunk_size")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(echomind_core::import::DEFAULT_CHUNK_TOKENS);
+    let overlap = state
+        .storage
+        .get_setting("vec.chunk_overlap")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(echomind_core::splitter::DEFAULT_OVERLAP_TOKENS);
+    Ok(ChunkParams {
+        chunk_size,
+        overlap,
+    })
+}
+
+/// 设置分块参数（REQ-VEC-011）。
+///
+/// 参数变更后新导入文档使用新参数；已索引文档不受影响（需手动重建索引）。
+#[tauri::command]
+pub async fn set_chunk_params(
+    params: ChunkParams,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    set_chunk_params_inner(params, state.inner()).await
+}
+
+/// 设置分块参数逻辑（命令与集成测试复用）。
+pub async fn set_chunk_params_inner(params: ChunkParams, state: &AppState) -> Result<(), String> {
+    params.validate()?;
+    state
+        .storage
+        .set_setting("vec.chunk_size", &params.chunk_size.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting("vec.chunk_overlap", &params.overlap.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))
+}

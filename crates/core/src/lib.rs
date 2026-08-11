@@ -276,6 +276,18 @@ pub trait Storage: Send + Sync {
     /// 按内容指纹查找文档（REQ-ING-004 去重）。
     async fn find_document_by_hash(&self, hash: &str) -> anyhow::Result<Option<Document>>;
 
+    /// 按文件名查找文档（REQ-ING-012 同名不同内容检测）。
+    ///
+    /// 在文档列表中查找 `file_path` 以 `-{name}` 结尾的文档。
+    /// file_path 格式为 `{data_dir}/documents/{hash}-{filename}`，
+    /// 因此匹配 `-{name}` 后缀可正确识别同名文档。
+    /// 默认实现通过 `list_documents` 遍历过滤；生产实现可覆盖为 SQL LIKE 查询。
+    async fn find_document_by_name(&self, name: &str) -> anyhow::Result<Option<Document>> {
+        let docs = self.list_documents().await?;
+        let suffix = format!("-{name}");
+        Ok(docs.into_iter().find(|d| d.file_path.ends_with(&suffix)))
+    }
+
     /// 统计已入库文档总数（REQ-LIC-001 配额判定）。
     async fn count_documents(&self) -> anyhow::Result<usize>;
 
