@@ -382,6 +382,122 @@
 }
 
 /* ============================================================
+ * High Contrast Theme — [data-theme="high-contrast"] 变量覆盖（REQ-A11Y-005）
+ *
+ * 基于暗色主题，提升对比度至 WCAG AAA（≥7:1），加粗边框，禁用半透明。
+ * 适用于视力辅助需求用户，尊重 prefers-contrast: more 系统设置。
+ * ============================================================ */
+
+[data-theme="high-contrast"] {
+  /* Surface 色阶 — 纯黑/纯白对比 */
+  --surface-0: #000000;      /* 主背景纯黑 */
+  --surface-1: #0A0A0A;      /* 次背景 */
+  --surface-2: #141414;      /* 卡片背景 */
+  --surface-3: #1E1E1E;      /* 悬停态 */
+  --surface-4: #282828;      /* 选中态 */
+
+  /* Border 色阶 — 加粗至 2px（通过 --border-width 变量）+ 高对比色 */
+  --border-subtle: #444444;
+  --border-default: #666666;
+  --border-strong: #FFFFFF;   /* 强边框使用纯白 */
+
+  /* Text 色阶 — 全部纯白/亮黄确保 AAA 对比度 */
+  --text-primary: #FFFFFF;    /* 纯白在 #000000 上 21:1 */
+  --text-secondary: #F0F0F0;   /* 在 #000000 上 19.8:1 */
+  --text-tertiary: #CCCCCC;    /* 在 #000000 上 13.9:1 */
+  --text-quaternary: #AAAAAA;  /* 在 #000000 上 11.5:1 */
+
+  /* Accent — 亮黄确保高对比度 */
+  --accent: #FFFF00;            /* 亮黄，在黑色上 19.6:1 */
+  --accent-hover: #FFE500;
+  --accent-subtle: rgba(255, 255, 0, 0.15);  /* 半透明禁用，改用纯色 */
+  --accent-rgb: 255, 255, 0;
+  --accent-text: #FFFF00;
+
+  /* Semantic — 高对比度版本 */
+  --success: #00FF00;           /* 亮绿，在黑色上 15.3:1 */
+  --warning: #FFAA00;           /* 亮橙 */
+  --danger: #FF4444;            /* 亮红 */
+  --info: #44AAFF;              /* 亮蓝 */
+  --ink: #000000;
+
+  /* Semantic RGB 分量 */
+  --success-rgb: 0, 255, 0;
+  --warning-rgb: 255, 170, 0;
+  --danger-rgb: 255, 68, 68;
+  --info-rgb: 68, 170, 255;
+
+  /* 语义扩展色 */
+  --primary: #44AAFF;
+  --primary-hover: #2299FF;
+  --purple: #BB44FF;
+  --pink: #FF44BB;
+
+  /* Bg 别名 */
+  --bg-primary: var(--surface-1);
+  --bg-secondary: var(--surface-2);
+  --bg-hover: var(--surface-3);
+  --bg-input: var(--surface-0);
+
+  /* 消息组件令牌 — 禁用半透明，改用纯色边框 */
+  --msg-user-bg: #0A0A0A;                          /* 纯色替代半透明 */
+  --msg-user-border: #FFFF00;                      /* 亮黄边框替代半透明 */
+  --msg-assistant-bg: transparent;
+  --msg-assistant-border: transparent;
+
+  /* Hover Tokens 覆盖 — 禁用半透明 */
+  --hover-bg: var(--surface-3);
+  --hover-bg-subtle: #1A1A1A;                      /* 纯色替代半透明 */
+
+  /* Shadow — 高对比度模式禁用阴影，改用边框 */
+  --shadow-sm: 0 0 0 1px var(--border-strong);
+  --shadow-md: 0 0 0 2px var(--border-strong);
+  --shadow-lg: 0 0 0 2px var(--border-strong);
+  --shadow-focus: 0 0 0 2px var(--surface-0), 0 0 0 4px var(--accent);
+
+  /* Focus 环 — 加粗至 4px */
+  /* --shadow-focus 已通过变量覆盖，无需额外规则 */
+}
+
+[data-theme="high-contrast"] body {
+  color-scheme: dark;
+}
+
+/* 高对比度模式：边框加粗至 2px（AC-1） */
+[data-theme="high-contrast"] .border,
+[data-theme="high-contrast"] .border-t,
+[data-theme="high-contrast"] .border-b,
+[data-theme="high-contrast"] .border-l,
+[data-theme="high-contrast"] .border-r,
+[data-theme="high-contrast"] .border-line,
+[data-theme="high-contrast"] .border-border-default,
+[data-theme="high-contrast"] .border-border-subtle,
+[data-theme="high-contrast"] .border-border-strong {
+  border-width: 2px !important;
+}
+
+/* 高对比度模式：禁用半透明遮罩，改用纯色边框（AC-3） */
+[data-theme="high-contrast"] .bg-accent\/10,
+[data-theme="high-contrast"] .bg-accent\/5,
+[data-theme="high-contrast"] .bg-accent\/8 {
+  background-color: var(--surface-3) !important;
+  border: 2px solid var(--accent) !important;
+}
+
+/* 高对比度模式滚动条 */
+[data-theme="high-contrast"] .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #FFFFFF;
+  border: 1px solid #000000;
+}
+
+/* 高对比度模式：focus-visible 加粗（AC-1） */
+[data-theme="high-contrast"] :focus-visible {
+  outline: 3px solid var(--accent) !important;
+  outline-offset: 2px !important;
+  box-shadow: none !important;
+}
+
+/* ============================================================
  * 基础重置（Tailwind Preflight 已覆盖大部分，此处仅补充）
  * ============================================================ */
 

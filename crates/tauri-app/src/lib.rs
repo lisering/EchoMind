@@ -225,6 +225,7 @@ pub fn run() {
             // 导出功能（REQ-EXP-001）
             commands::export_conversation_markdown,
             commands::save_text_file,
+            commands::read_text_file,
             // 文件监听 + 增量同步（REQ-SYNC-001~003）
             commands::add_watched_folder,
             commands::remove_watched_folder,
@@ -255,6 +256,9 @@ pub fn run() {
             commands::set_log_level,
             commands::export_logs,
             commands::export_diagnostics,
+            // 全量数据备份与恢复（REQ-EXP-002/003）
+            commands::export_backup,
+            commands::import_backup,
             // 数据目录操作（REQ-ERR-004-AC-3）
             commands::open_data_dir,
             // Token 用量追踪与预算

@@ -1489,6 +1489,17 @@ pub async fn save_text_file_inner(path: &str, content: &str) -> Result<(), Strin
         .map_err(|e| format!("文件保存失败: {e:#}"))
 }
 
+/// 读取文本文件内容（REQ-EXP-003 辅助命令）。
+///
+/// 前端通过 Tauri dialog 的 open 对话框获取文件路径后调用本命令读取文件。
+/// 文件以 UTF-8 编码读取。
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String, String> {
+    tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| format!("文件读取失败: {e:#}"))
+}
+
 /// 记录单次对话的 token 用量到累计计数器。
 ///
 /// 在 `forward_stream` 返回后由 `chat_inner` 调用。读取 settings 表中的累计计数器，

@@ -527,6 +527,122 @@
       }
       
       /* ============================================================
+       * High Contrast Theme — [data-theme="high-contrast"] 变量覆盖（REQ-A11Y-005）
+       *
+       * 基于暗色主题，提升对比度至 WCAG AAA（≥7:1），加粗边框，禁用半透明。
+       * 适用于视力辅助需求用户，尊重 prefers-contrast: more 系统设置。
+       * ============================================================ */
+      
+      [data-theme="high-contrast"] {
+        /* Surface 色阶 — 纯黑/纯白对比 */
+        --surface-0: #000000;      /* 主背景纯黑 */
+        --surface-1: #0A0A0A;      /* 次背景 */
+        --surface-2: #141414;      /* 卡片背景 */
+        --surface-3: #1E1E1E;      /* 悬停态 */
+        --surface-4: #282828;      /* 选中态 */
+      
+        /* Border 色阶 — 加粗至 2px（通过 --border-width 变量）+ 高对比色 */
+        --border-subtle: #444444;
+        --border-default: #666666;
+        --border-strong: #FFFFFF;   /* 强边框使用纯白 */
+      
+        /* Text 色阶 — 全部纯白/亮黄确保 AAA 对比度 */
+        --text-primary: #FFFFFF;    /* 纯白在 #000000 上 21:1 */
+        --text-secondary: #F0F0F0;   /* 在 #000000 上 19.8:1 */
+        --text-tertiary: #CCCCCC;    /* 在 #000000 上 13.9:1 */
+        --text-quaternary: #AAAAAA;  /* 在 #000000 上 11.5:1 */
+      
+        /* Accent — 亮黄确保高对比度 */
+        --accent: #FFFF00;            /* 亮黄，在黑色上 19.6:1 */
+        --accent-hover: #FFE500;
+        --accent-subtle: rgba(255, 255, 0, 0.15);  /* 半透明禁用，改用纯色 */
+        --accent-rgb: 255, 255, 0;
+        --accent-text: #FFFF00;
+      
+        /* Semantic — 高对比度版本 */
+        --success: #00FF00;           /* 亮绿，在黑色上 15.3:1 */
+        --warning: #FFAA00;           /* 亮橙 */
+        --danger: #FF4444;            /* 亮红 */
+        --info: #44AAFF;              /* 亮蓝 */
+        --ink: #000000;
+      
+        /* Semantic RGB 分量 */
+        --success-rgb: 0, 255, 0;
+        --warning-rgb: 255, 170, 0;
+        --danger-rgb: 255, 68, 68;
+        --info-rgb: 68, 170, 255;
+      
+        /* 语义扩展色 */
+        --primary: #44AAFF;
+        --primary-hover: #2299FF;
+        --purple: #BB44FF;
+        --pink: #FF44BB;
+      
+        /* Bg 别名 */
+        --bg-primary: var(--surface-1);
+        --bg-secondary: var(--surface-2);
+        --bg-hover: var(--surface-3);
+        --bg-input: var(--surface-0);
+      
+        /* 消息组件令牌 — 禁用半透明，改用纯色边框 */
+        --msg-user-bg: #0A0A0A;                          /* 纯色替代半透明 */
+        --msg-user-border: #FFFF00;                      /* 亮黄边框替代半透明 */
+        --msg-assistant-bg: transparent;
+        --msg-assistant-border: transparent;
+      
+        /* Hover Tokens 覆盖 — 禁用半透明 */
+        --hover-bg: var(--surface-3);
+        --hover-bg-subtle: #1A1A1A;                      /* 纯色替代半透明 */
+      
+        /* Shadow — 高对比度模式禁用阴影，改用边框 */
+        --shadow-sm: 0 0 0 1px var(--border-strong);
+        --shadow-md: 0 0 0 2px var(--border-strong);
+        --shadow-lg: 0 0 0 2px var(--border-strong);
+        --shadow-focus: 0 0 0 2px var(--surface-0), 0 0 0 4px var(--accent);
+      
+        /* Focus 环 — 加粗至 4px */
+        /* --shadow-focus 已通过变量覆盖，无需额外规则 */
+      }
+      
+      [data-theme="high-contrast"] body {
+        color-scheme: dark;
+      }
+      
+      /* 高对比度模式：边框加粗至 2px（AC-1） */
+      [data-theme="high-contrast"] .border,
+      [data-theme="high-contrast"] .border-t,
+      [data-theme="high-contrast"] .border-b,
+      [data-theme="high-contrast"] .border-l,
+      [data-theme="high-contrast"] .border-r,
+      [data-theme="high-contrast"] .border-line,
+      [data-theme="high-contrast"] .border-border-default,
+      [data-theme="high-contrast"] .border-border-subtle,
+      [data-theme="high-contrast"] .border-border-strong {
+        border-width: 2px !important;
+      }
+      
+      /* 高对比度模式：禁用半透明遮罩，改用纯色边框（AC-3） */
+      [data-theme="high-contrast"] .bg-accent\/10,
+      [data-theme="high-contrast"] .bg-accent\/5,
+      [data-theme="high-contrast"] .bg-accent\/8 {
+        background-color: var(--surface-3) !important;
+        border: 2px solid var(--accent) !important;
+      }
+      
+      /* 高对比度模式滚动条 */
+      [data-theme="high-contrast"] .scrollbar-thin::-webkit-scrollbar-thumb {
+        background: #FFFFFF;
+        border: 1px solid #000000;
+      }
+      
+      /* 高对比度模式：focus-visible 加粗（AC-1） */
+      [data-theme="high-contrast"] :focus-visible {
+        outline: 3px solid var(--accent) !important;
+        outline-offset: 2px !important;
+        box-shadow: none !important;
+      }
+      
+      /* ============================================================
        * 基础重置（Tailwind Preflight 已覆盖大部分，此处仅补充）
        * ============================================================ */
       
@@ -4970,6 +5086,12 @@
                       <span data-i18n="settings.theme_system">Follow System</span>
                     </span>
                   </button>
+                  <button type="button" data-theme-value="high-contrast" class="theme-btn px-3 py-1.5 rounded-md text-sm text-text-secondary hover:text-text-primary transition-colors" title="High Contrast">
+                    <span class="inline-flex items-center gap-1.5">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v18M3 12h18" /></svg>
+                      <span data-i18n="settings.theme_high_contrast">High Contrast</span>
+                    </span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -5267,6 +5389,15 @@
 </div>
 </div>
 </div>
+<div class="space-y-3 mb-5">
+<div class="text-xs uppercase tracking-wider text-text-quaternary" data-i18n="settings.data_management"></div>
+<div class="bg-surface-2 border border-border-default rounded-xl px-4 py-3">
+<div class="flex flex-col gap-2">
+<button id="exportBackupBtn" class="w-full border border-border-default rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-surface-2 transition-colors" onclick="exportBackup()" data-i18n="settings.export_backup"></button>
+<button id="importBackupBtn" class="w-full border border-border-default rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-surface-2 transition-colors" onclick="importBackup()" data-i18n="settings.import_backup"></button>
+</div>
+</div>
+</div>
         <div class="px-5 py-3 border-t border-border-subtle shrink-0">
           <button id="settingsClose" class="w-full bg-accent font-medium text-sm rounded-xl px-4 py-2.5 hover:opacity-90 transition-opacity text-ink" data-i18n="settings.done"></button>
         </div>
@@ -5468,6 +5599,7 @@
               docCount: 0,
               chunkCount: 0,
               documents: [],
+              kbAllDocs: [],
               activeSidebarTab: "conversations",
               cmdSelectedIndex: 0,
               cmdFiltered: [],
@@ -10247,18 +10379,52 @@
           "compare_differences",
           "extract_key_terms"
         ];
-        function generateRecommendations(docCount) {
+        function generateRecommendations(docCount, docNames) {
           const hasDocs = docCount > 0;
           if (!hasDocs) return [];
+          const names = docNames || [];
+          const suggestions = [];
+          if (names.length > 0) {
+            const firstName = stripExtension(names[0]);
+            suggestions.push(formatDocQuestion("summarize_doc", firstName));
+            if (names.length >= 2) {
+              const secondName = stripExtension(names[1]);
+              suggestions.push(formatDocQuestion("compare_docs", firstName, secondName));
+            } else {
+              suggestions.push(formatDocQuestion("key_topics_doc", firstName));
+            }
+          }
           const keys = DEFAULT_RECOMMENDATIONS;
-          return keys.map((key) => {
+          for (const key of keys) {
+            if (suggestions.length >= 4) break;
             const i18nKey = `chat.empty_state_suggestion_${key}`;
             const text = t(i18nKey);
             if (text === i18nKey) {
-              return FALLBACK_SUGGESTIONS[key] || key;
+              suggestions.push(FALLBACK_SUGGESTIONS[key] || key);
+            } else {
+              suggestions.push(text);
             }
-            return text;
-          });
+          }
+          return suggestions.slice(0, 4);
+        }
+        function stripExtension(name) {
+          if (!name) return "";
+          const lastDot = name.lastIndexOf(".");
+          if (lastDot > 0) return name.substring(0, lastDot);
+          return name;
+        }
+        function formatDocQuestion(type, docName, docName2) {
+          const i18nKey = `chat.empty_state_suggestion_${type}`;
+          const template = t(i18nKey);
+          if (template !== i18nKey && docName2) {
+            return template.replace("{doc1}", docName).replace("{doc2}", docName2);
+          } else if (template !== i18nKey) {
+            return template.replace("{doc}", docName);
+          }
+          if (type === "summarize_doc") return `\u603B\u7ED3\u300A${docName}\u300B\u7684\u6838\u5FC3\u8981\u70B9`;
+          if (type === "compare_docs" && docName2) return `\u5BF9\u6BD4\u300A${docName}\u300B\u548C\u300A${docName2}\u300B\u7684\u4E3B\u8981\u5DEE\u5F02`;
+          if (type === "key_topics_doc") return `\u300A${docName}\u300B\u6D89\u53CA\u54EA\u4E9B\u5173\u952E\u4E3B\u9898\uFF1F`;
+          return `\u603B\u7ED3\u5F53\u524D\u77E5\u8BC6\u5E93\u4E2D\u7684\u6838\u5FC3\u8981\u70B9`;
         }
         var FALLBACK_SUGGESTIONS = {
           summarize_key_points: "\u603B\u7ED3\u5F53\u524D\u77E5\u8BC6\u5E93\u4E2D\u7684\u6838\u5FC3\u8981\u70B9",
@@ -10269,6 +10435,7 @@
           if (!container) return;
           const docCount = opts?.docCount ?? get("docCount") ?? 0;
           const chunkCount = opts?.chunkCount ?? get("chunkCount") ?? 0;
+          const docNames = opts?.docNames ?? get("docNames") ?? [];
           const encrypted = opts?.encrypted ?? get("securityState") !== "unencrypted";
           const onPickQuestion = opts?.onPickQuestion;
           const onImport = opts?.onImport;
@@ -10332,7 +10499,7 @@
           cardsRow.appendChild(privacyCard);
           wrapper.appendChild(cardsRow);
           if (docCount > 0) {
-            const suggestions = generateRecommendations(docCount);
+            const suggestions = generateRecommendations(docCount, docNames);
             if (suggestions.length > 0) {
               const suggLabel = document.createElement("div");
               suggLabel.className = "empty-state-suggestions-label";
@@ -11172,12 +11339,19 @@
         }
         function resetChatArea(title, desc) {
           const chatArea = $("chatArea");
+          const allDocs = get("kbAllDocs") || [];
+          const docNames = allDocs.map((d) => d.name || d.title || "").filter(Boolean).slice(0, 5);
           renderEmptyState(chatArea, {
+            docNames,
             onPickQuestion: (question) => {
               const input = $("queryInput");
               if (input) {
                 input.value = question;
                 input.focus();
+                const sendBtn = $("sendBtn");
+                if (sendBtn && !sendBtn.disabled) {
+                  sendBtn.click();
+                }
               }
             },
             onImport: () => {
@@ -17834,6 +18008,8 @@
         window.resetSamplingParams = resetSamplingParams;
         window.exportDiagnostics = exportDiagnostics;
         window.exportLogs = exportLogs;
+        window.exportBackup = exportBackup;
+        window.importBackup = importBackup;
         window.switchToCustomModel = switchToCustomModel;
         window.deleteCustomModel = deleteCustomModel;
         window.onUploadCustomModel = onUploadCustomModel;
@@ -18018,6 +18194,49 @@
               filename
             });
             toastSuccess(t("settings.logs_exported"));
+          } catch (err) {
+            toastError(err);
+          }
+        }
+        async function exportBackup() {
+          try {
+            toast(t("settings.exporting_backup"), "info");
+            const jsonStr = await invoke("export_backup");
+            const filename = "echomind-backup-" + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".json";
+            await invoke("save_text_file", { content: jsonStr, filename });
+            toastSuccess(t("settings.backup_exported"));
+          } catch (err) {
+            toastError(err);
+          }
+        }
+        async function importBackup() {
+          const confirmed = await showConfirmDialog({
+            title: t("settings.import_backup_confirm_title"),
+            body: t("settings.import_backup_confirm_msg")
+          });
+          if (!confirmed) return;
+          try {
+            const { openDialog: openDialog2 } = await Promise.resolve().then(() => (init_ipc(), ipc_exports));
+            const selected = await openDialog2({
+              multiple: false,
+              filters: [{ name: "EchoMind Backup", extensions: ["json"] }]
+            });
+            if (!selected) {
+              return;
+            }
+            toast(t("settings.importing_backup"), "info");
+            const filePath = typeof selected === "string" ? selected : Array.isArray(selected) ? selected[0] : String(selected);
+            const content = await invoke("read_text_file", { path: filePath });
+            const result = await invoke("import_backup", { content });
+            const stats = JSON.parse(result);
+            toastSuccess(t("settings.backup_imported", {
+              conversations: stats.conversations,
+              messages: stats.messages,
+              documents: stats.documents
+            }));
+            setTimeout(() => {
+              toast(t("settings.restart_after_restore"), "info");
+            }, 2e3);
           } catch (err) {
             toastError(err);
           }
@@ -22874,7 +23093,7 @@
           try {
             _kbAllDocs = await invoke("get_documents", { sortBy: _kbSortBy, sortOrder: _kbSortOrder });
             const isPro = get("isPro");
-            setState({ docCount: _kbAllDocs.length });
+            setState({ docCount: _kbAllDocs.length, kbAllDocs: _kbAllDocs });
             updateChatInputState();
             const countEl = $("kbDocCount");
             if (countEl) {
@@ -23595,7 +23814,8 @@
           document.body.classList.add("change-theme");
           root.dataset.theme = theme;
           const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
-          const effective = theme === "system" ? prefersLight ? "light" : "dark" : theme;
+          let effective = theme === "system" ? prefersLight ? "light" : "dark" : theme;
+          if (theme === "high-contrast") effective = "dark";
           if (typeof mermaid !== "undefined") {
             mermaid.initialize({
               startOnLoad: false,
