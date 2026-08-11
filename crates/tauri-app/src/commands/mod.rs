@@ -46,11 +46,11 @@ use echomind_models::{
     AgentStepPayload, CacheSettingsPayload, CacheStats, ChatMessage, ChatPhasePayload,
     Conversation, ConversationCost, ConversationTree, ConversationTreeNode, DocStatus,
     DocStatusPayload, Document, EmbeddingProgressPayload, EntityRelation, ExecutionResult,
-    GraphCommunity, GraphPath, GraphStats, GraphTriple, ImportProgressPayload, LlmConfig, LlmMode,
-    LlmSamplingParams, MemoryEntry, MemoryTier, MessageSearchResult, ModelInfo, PaginatedResult,
-    PendingInput, PromptTemplate, RetrievalResult, SearchResult, SessionTodo, SettingsPayload,
-    StripConfig, StripPreview, StripResult, TodoStatus, TokenUsage, TurnActiveVersion, Workflow,
-    WorkflowResult,
+    GenerationParams, GraphCommunity, GraphPath, GraphStats, GraphTriple, ImportProgressPayload,
+    LlmConfig, LlmMode, LlmSamplingParams, MemoryEntry, MemoryTier, MessageSearchResult, ModelInfo,
+    PaginatedResult, PendingInput, PromptTemplate, RagParams, RetrievalResult, SearchResult,
+    SessionTodo, SettingsPayload, StripConfig, StripPreview, StripResult, TodoStatus, TokenUsage,
+    TurnActiveVersion, Workflow, WorkflowResult,
 };
 use futures::FutureExt;
 use futures::StreamExt;

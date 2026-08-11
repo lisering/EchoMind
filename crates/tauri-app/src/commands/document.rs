@@ -1,14 +1,67 @@
 //! document 域 IPC 命令子模块（从 commands.rs 拆分，纯重构）。
 use super::*;
 
-/// 列出全部文档（知识库面板）。
+/// 列出全部文档（知识库面板，REQ-ING-008 排序支持）。
+///
+/// `sort_by`：排序字段（`imported_at` / `file_name` / `file_size`，默认 `imported_at`）
+/// `sort_order`：排序方向（`asc` / `desc`，默认 `desc`）
 #[tauri::command]
-pub async fn get_documents(state: State<'_, AppState>) -> Result<Vec<Document>, String> {
-    state
+pub async fn get_documents(
+    sort_by: Option<String>,
+    sort_order: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<Document>, String> {
+    let docs = state
         .storage
         .list_documents()
         .await
-        .map_err(|e| format!("{e:#}"))
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(sort_documents(
+        docs,
+        sort_by.as_deref(),
+        sort_order.as_deref(),
+    ))
+}
+
+/// 对文档列表排序（REQ-ING-008）。
+///
+/// `sort_by` 支持 `imported_at` / `file_name`，默认 `imported_at`。
+/// `sort_order` 支持 `asc` / `desc`，默认 `desc`。
+/// 未知 `sort_by` 值回退到 `imported_at`（白名单防注入）。
+pub fn sort_documents(
+    mut docs: Vec<Document>,
+    sort_by: Option<&str>,
+    sort_order: Option<&str>,
+) -> Vec<Document> {
+    use std::path::Path;
+    let by = sort_by.unwrap_or("imported_at");
+    let desc = sort_order.is_none_or(|o| o != "asc");
+
+    match by {
+        "file_name" => {
+            docs.sort_by(|a, b| {
+                let name_a = Path::new(&a.file_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let name_b = Path::new(&b.file_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                name_a.cmp(&name_b)
+            });
+        }
+        _ => {
+            // imported_at：按创建时间排序
+            docs.sort_by_key(|a| a.created_at);
+        }
+    }
+
+    if desc {
+        docs.reverse();
+    }
+
+    docs
 }
 
 /// 删除文档：级联清理 chunks / embeddings，并删除数据目录中的文件副本（REQ-ING-005）。
@@ -397,4 +450,67 @@ pub async fn get_kb_stats_inner(state: &AppState) -> Result<KbStats, String> {
         format_distribution,
         tags,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use echomind_models::DocStatus;
+
+    fn make_doc(id: &str, name: &str, created_at: i64) -> Document {
+        Document {
+            id: id.to_string(),
+            file_path: format!("/tmp/{name}"),
+            file_hash: format!("hash_{id}"),
+            status: DocStatus::Indexed,
+            created_at,
+            original_path: None,
+            domain: None,
+            summary: None,
+            tags: Vec::new(),
+        }
+    }
+
+    /// TC-ING-SORT-001：默认排序 created_at desc（最新在前）
+    #[test]
+    fn test_sort_default_created_at_desc() {
+        let docs = vec![
+            make_doc("1", "old.md", 1000),
+            make_doc("2", "new.md", 3000),
+            make_doc("3", "mid.md", 2000),
+        ];
+        let sorted = sort_documents(docs, None, None);
+        assert_eq!(sorted[0].id, "2"); // 3000
+        assert_eq!(sorted[1].id, "3"); // 2000
+        assert_eq!(sorted[2].id, "1"); // 1000
+    }
+
+    /// TC-ING-SORT-002：file_name asc（A-Z 字母序）
+    #[test]
+    fn test_sort_file_name_asc() {
+        let docs = vec![
+            make_doc("1", "zebra.md", 1000),
+            make_doc("2", "apple.md", 3000),
+            make_doc("3", "mango.md", 2000),
+        ];
+        let sorted = sort_documents(docs, Some("file_name"), Some("asc"));
+        assert_eq!(sorted[0].file_path, "/tmp/apple.md");
+        assert_eq!(sorted[1].file_path, "/tmp/mango.md");
+        assert_eq!(sorted[2].file_path, "/tmp/zebra.md");
+    }
+
+    /// TC-ING-SORT-003：created_at asc（最早在前）
+    #[test]
+    fn test_sort_created_at_asc() {
+        let docs = vec![
+            make_doc("1", "old.md", 1000),
+            make_doc("2", "new.md", 3000),
+            make_doc("3", "mid.md", 2000),
+        ];
+        let sorted = sort_documents(docs, Some("imported_at"), Some("asc"));
+        assert_eq!(sorted[0].id, "1"); // 1000
+        assert_eq!(sorted[1].id, "3"); // 2000
+        assert_eq!(sorted[2].id, "2"); // 3000
+    }
 }

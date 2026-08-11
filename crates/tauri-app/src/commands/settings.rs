@@ -741,3 +741,183 @@ pub async fn set_close_to_tray_inner(enabled: bool, state: &AppState) -> Result<
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+// ─── RAG 检索参数（REQ-RAG-014）────────────────────────────────────────────
+
+/// 获取 RAG 检索参数（REQ-RAG-014）。
+///
+/// 从 settings 表读取 `rag.top_k` / `rag.score_threshold` /
+/// `rag.chunk_expansion_enabled` / `rag.chunk_expansion_window`，返回 `RagParams`。
+#[tauri::command]
+pub async fn get_rag_params(state: State<'_, AppState>) -> Result<RagParams, String> {
+    get_rag_params_inner(state.inner()).await
+}
+
+/// RAG 参数读取逻辑（命令与集成测试复用）。
+pub async fn get_rag_params_inner(state: &AppState) -> Result<RagParams, String> {
+    let top_k = state
+        .storage
+        .get_setting("rag.top_k")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let score_threshold = state
+        .storage
+        .get_setting("rag.score_threshold")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let chunk_expansion_enabled = state
+        .storage
+        .get_setting("rag.chunk_expansion_enabled")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let chunk_expansion_window = state
+        .storage
+        .get_setting("rag.chunk_expansion_window")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    let mut params = RagParams::default();
+    if let Some(v) = top_k
+        && let Ok(n) = v.parse::<usize>()
+    {
+        params.top_k = n;
+    }
+    if let Some(v) = score_threshold
+        && let Ok(f) = v.parse::<f32>()
+    {
+        params.score_threshold = f;
+    }
+    if let Some(v) = chunk_expansion_enabled {
+        params.chunk_expansion_enabled = v == "true";
+    }
+    if let Some(v) = chunk_expansion_window
+        && let Ok(n) = v.parse::<usize>()
+    {
+        params.chunk_expansion_window = n;
+    }
+    Ok(params.clamped())
+}
+
+/// 设置 RAG 检索参数（REQ-RAG-014）。
+///
+/// 持久化到 settings 表，对新查询生效。
+#[tauri::command]
+pub async fn set_rag_params(params: RagParams, state: State<'_, AppState>) -> Result<(), String> {
+    set_rag_params_inner(params, state.inner()).await
+}
+
+/// RAG 参数写入逻辑（命令与集成测试复用）。
+pub async fn set_rag_params_inner(params: RagParams, state: &AppState) -> Result<(), String> {
+    let params = params.clamped();
+    state
+        .storage
+        .set_setting("rag.top_k", &params.top_k.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting("rag.score_threshold", &params.score_threshold.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting(
+            "rag.chunk_expansion_enabled",
+            if params.chunk_expansion_enabled {
+                "true"
+            } else {
+                "false"
+            },
+        )
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting(
+            "rag.chunk_expansion_window",
+            &params.chunk_expansion_window.to_string(),
+        )
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ─── LLM 生成参数（REQ-RAG-015）────────────────────────────────────────────
+
+/// 获取 LLM 生成参数（REQ-RAG-015）。
+///
+/// 从 settings 表读取 `llm.temperature` / `llm.max_tokens` / `llm.top_p`。
+#[tauri::command]
+pub async fn get_generation_params(state: State<'_, AppState>) -> Result<GenerationParams, String> {
+    get_generation_params_inner(state.inner()).await
+}
+
+/// 生成参数读取逻辑（命令与集成测试复用）。
+pub async fn get_generation_params_inner(state: &AppState) -> Result<GenerationParams, String> {
+    let temperature = state
+        .storage
+        .get_setting("llm.temperature")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let max_tokens = state
+        .storage
+        .get_setting("llm.max_tokens")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let top_p = state
+        .storage
+        .get_setting("llm.top_p")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    let mut params = GenerationParams::default();
+    if let Some(v) = temperature
+        && let Ok(f) = v.parse::<f32>()
+    {
+        params.temperature = f;
+    }
+    if let Some(v) = max_tokens
+        && let Ok(n) = v.parse::<usize>()
+    {
+        params.max_tokens = n;
+    }
+    if let Some(v) = top_p
+        && let Ok(f) = v.parse::<f32>()
+    {
+        params.top_p = f;
+    }
+    Ok(params.clamped())
+}
+
+/// 设置 LLM 生成参数（REQ-RAG-015）。
+///
+/// 持久化到 settings 表，对新查询生效。
+#[tauri::command]
+pub async fn set_generation_params(
+    params: GenerationParams,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    set_generation_params_inner(params, state.inner()).await
+}
+
+/// 生成参数写入逻辑（命令与集成测试复用）。
+pub async fn set_generation_params_inner(
+    params: GenerationParams,
+    state: &AppState,
+) -> Result<(), String> {
+    let params = params.clamped();
+    state
+        .storage
+        .set_setting("llm.temperature", &params.temperature.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting("llm.max_tokens", &params.max_tokens.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting("llm.top_p", &params.top_p.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))
+}

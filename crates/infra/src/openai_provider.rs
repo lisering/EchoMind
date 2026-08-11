@@ -22,7 +22,7 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use echomind_core::LLMProvider;
 use echomind_core::stream_parse::{SseParser, StreamItem, parse_openai_payload};
-use echomind_models::{ChatMessage, TokenUsage};
+use echomind_models::{ChatMessage, GenerationParams, TokenUsage};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 
@@ -46,6 +46,9 @@ pub struct OpenAIProvider {
     /// 调用方通过 `take_reasoning_receiver()` 取出并消费（DeepSeek R1 等推理模型的思考过程）。
     reasoning_rx:
         std::sync::Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<String>>>>,
+    /// LLM 生成参数（REQ-RAG-015）：temperature/max_tokens/top_p，经请求体传递到 API。
+    /// `None` 时使用 API 默认值（不包含在请求 JSON 中）。
+    generation_params: Option<GenerationParams>,
 }
 
 impl OpenAIProvider {
@@ -69,11 +72,20 @@ impl OpenAIProvider {
             model,
             usage_cell: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
             reasoning_rx: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+            generation_params: None,
         })
     }
 
     fn chat_completions_url(&self) -> String {
         resolve_chat_completions_url(&self.base_url)
+    }
+
+    /// 设置 LLM 生成参数（REQ-RAG-015）。
+    ///
+    /// 传入 `None` 清除自定义参数，恢复 API 默认值。
+    pub fn with_generation_params(mut self, params: Option<GenerationParams>) -> Self {
+        self.generation_params = params.map(|p| p.clamped());
+        self
     }
 
     /// 返回 token 用量句柄的 Arc clone。
@@ -292,12 +304,30 @@ impl OpenAIProvider {
         &self,
         messages: Vec<serde_json::Value>,
     ) -> anyhow::Result<BoxStream<'static, anyhow::Result<String>>> {
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.model,
             "messages": messages,
             "stream": true,
             "stream_options": {"include_usage": true},
         });
+
+        // REQ-RAG-015：条件包含生成参数（仅当用户设置了自定义值时）
+        if let Some(ref params) = self.generation_params
+            && let Some(obj) = body.as_object_mut()
+        {
+            obj.insert(
+                "temperature".to_string(),
+                serde_json::Value::from(params.temperature as f64),
+            );
+            obj.insert(
+                "max_tokens".to_string(),
+                serde_json::Value::from(params.max_tokens as u64),
+            );
+            obj.insert(
+                "top_p".to_string(),
+                serde_json::Value::from(params.top_p as f64),
+            );
+        }
 
         // 重置 usage cell（上一次对话的残留数据清空）
         // 必须使用 lock().await 而非 blocking_lock()——后者在异步上下文中会 panic：

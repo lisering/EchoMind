@@ -362,6 +362,12 @@ pub fn run() {
             // S4 v1.6: 窗口关闭行为 — 最小化到托盘设置（REQ-WIN-003）
             commands::get_close_to_tray,
             commands::set_close_to_tray,
+            // S1 v1.9: RAG 检索参数可配置（REQ-RAG-014）
+            commands::get_rag_params,
+            commands::set_rag_params,
+            // S1 v1.9: LLM 生成参数可配置（REQ-RAG-015）
+            commands::get_generation_params,
+            commands::set_generation_params,
             // S5 v1.6: 错误日志导出（REQ-ERR-005）
             commands::export_error_logs,
             // Durable Prompt Admission（B05 持久化提示接纳）

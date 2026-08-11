@@ -817,6 +817,82 @@ pub struct LlmConfig {
     pub model: String,
 }
 
+/// RAG 检索参数（REQ-RAG-014）：用户可配置的检索行为参数。
+///
+/// 所有字段经 `clamp()` 保证合法范围。设置表键：`rag.top_k` / `rag.score_threshold` /
+/// `rag.chunk_expansion_enabled` / `rag.chunk_expansion_window`。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RagParams {
+    /// 检索 top-k 值（范围 1-20，默认 8）
+    pub top_k: usize,
+    /// 最低相似度阈值（范围 0.0-1.0，默认 0.0 即不过滤）
+    pub score_threshold: f32,
+    /// Chunk Expansion 开关（默认 true，启用后扩展相邻 chunk 提供上下文）
+    pub chunk_expansion_enabled: bool,
+    /// Chunk Expansion 窗口大小（范围 0-3，默认 1，每侧扩展的相邻 chunk 数）
+    pub chunk_expansion_window: usize,
+}
+
+impl Default for RagParams {
+    fn default() -> Self {
+        Self {
+            top_k: 8,
+            score_threshold: 0.0,
+            chunk_expansion_enabled: true,
+            chunk_expansion_window: 1,
+        }
+    }
+}
+
+impl RagParams {
+    /// 将参数钳制到合法范围。
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            top_k: self.top_k.clamp(1, 20),
+            score_threshold: self.score_threshold.clamp(0.0, 1.0),
+            chunk_expansion_enabled: self.chunk_expansion_enabled,
+            chunk_expansion_window: self.chunk_expansion_window.clamp(0, 3),
+        }
+    }
+}
+
+/// LLM 生成参数（REQ-RAG-015）：用户可配置的 LLM 生成行为参数。
+///
+/// 经 `OpenAIProvider` 传递到 OpenAI 兼容 API 请求体。
+/// 设置表键：`llm.temperature` / `llm.max_tokens` / `llm.top_p`。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GenerationParams {
+    /// 采样温度（范围 0.0-2.0，默认 0.7）
+    pub temperature: f32,
+    /// 最大生成 token 数（范围 256-8192，默认 4096）
+    pub max_tokens: usize,
+    /// nucleus sampling 概率阈值（范围 0.0-1.0，默认 1.0 即不过滤）
+    pub top_p: f32,
+}
+
+impl Default for GenerationParams {
+    fn default() -> Self {
+        Self {
+            temperature: 0.7,
+            max_tokens: 4096,
+            top_p: 1.0,
+        }
+    }
+}
+
+impl GenerationParams {
+    /// 将参数钳制到合法范围。
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            temperature: self.temperature.clamp(0.0, 2.0),
+            max_tokens: self.max_tokens.clamp(256, 8192),
+            top_p: self.top_p.clamp(0.0, 1.0),
+        }
+    }
+}
+
 /// get_settings 返回载荷（REQ-UI-008；api_key 仅以脱敏形式返回，安全官要求）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsPayload {
@@ -2623,10 +2699,10 @@ impl StripConfig {
     }
 }
 
-/// Strip 操作结果（REQ-RAG-046）。
+/// Strip 操作结果（REQ-RAG-046 + DS-03 Session Strip）。
 ///
 /// 记录 strip 操作的执行结果。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StripResult {
     /// 被移除的消息数量
     pub stripped_count: usize,
@@ -2636,6 +2712,12 @@ pub struct StripResult {
     pub stripped_message_ids: Vec<String>,
     /// 估算的 token 节省量（4 字符 ≈ 1 token）
     pub estimated_tokens_saved: usize,
+    /// 生成的摘要文本（DS-03 扩展；空串表示未生成摘要）
+    #[serde(default)]
+    pub summary: String,
+    /// 保留的消息数量（DS-03 扩展）
+    #[serde(default)]
+    pub kept_count: usize,
 }
 
 impl StripResult {
@@ -2646,6 +2728,8 @@ impl StripResult {
             summary_inserted: false,
             stripped_message_ids: Vec::new(),
             estimated_tokens_saved: 0,
+            summary: String::new(),
+            kept_count: 0,
         }
     }
 }
@@ -3248,7 +3332,7 @@ mod session_todo_tests {
 #[cfg(test)]
 mod provenance_tag_tests {
     #![allow(clippy::unwrap_used)]
-    use super::ProvenanceTag;
+    use super::{GenerationParams, ProvenanceTag, RagParams, StripResult};
 
     /// TC-MODEL-PROV-001：new() 创建的 ProvenanceTag 字段正确
     #[test]
@@ -3300,5 +3384,88 @@ mod provenance_tag_tests {
         let json = serde_json::to_string(&tag).unwrap();
         let deserialized: ProvenanceTag = serde_json::from_str(&json).unwrap();
         assert_eq!(tag, deserialized);
+    }
+
+    /// TC-RAG-PARAMS-001：RagParams 默认值
+    #[test]
+    fn test_rag_params_default() {
+        let params = RagParams::default();
+        assert_eq!(params.top_k, 8);
+        assert!((params.score_threshold - 0.0).abs() < f32::EPSILON);
+        assert!(params.chunk_expansion_enabled);
+        assert_eq!(params.chunk_expansion_window, 1);
+    }
+
+    /// TC-RAG-PARAMS-002：RagParams clamp 超范围值
+    #[test]
+    fn test_rag_params_clamped() {
+        let params = RagParams {
+            top_k: 100,
+            score_threshold: -1.5,
+            chunk_expansion_enabled: false,
+            chunk_expansion_window: 10,
+        };
+        let clamped = params.clamped();
+        assert_eq!(clamped.top_k, 20);
+        assert!((clamped.score_threshold - 0.0).abs() < f32::EPSILON);
+        assert!(!clamped.chunk_expansion_enabled);
+        assert_eq!(clamped.chunk_expansion_window, 3);
+    }
+
+    /// TC-RAG-PARAMS-003：RagParams serde 往返
+    #[test]
+    fn test_rag_params_serde_roundtrip() {
+        let params = RagParams::default();
+        let json = serde_json::to_string(&params).unwrap();
+        let deserialized: RagParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(params, deserialized);
+    }
+
+    /// TC-LLM-PARAMS-001：GenerationParams 默认值
+    #[test]
+    fn test_generation_params_default() {
+        let params = GenerationParams::default();
+        assert!((params.temperature - 0.7).abs() < f32::EPSILON);
+        assert_eq!(params.max_tokens, 4096);
+        assert!((params.top_p - 1.0).abs() < f32::EPSILON);
+    }
+
+    /// TC-LLM-PARAMS-002：GenerationParams clamp 超范围值
+    #[test]
+    fn test_generation_params_clamped() {
+        let params = GenerationParams {
+            temperature: 5.0,
+            max_tokens: 100,
+            top_p: 2.5,
+        };
+        let clamped = params.clamped();
+        assert!((clamped.temperature - 2.0).abs() < f32::EPSILON);
+        assert_eq!(clamped.max_tokens, 256);
+        assert!((clamped.top_p - 1.0).abs() < f32::EPSILON);
+    }
+
+    /// TC-LLM-PARAMS-003：GenerationParams serde 往返
+    #[test]
+    fn test_generation_params_serde_roundtrip() {
+        let params = GenerationParams::default();
+        let json = serde_json::to_string(&params).unwrap();
+        let deserialized: GenerationParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(params, deserialized);
+    }
+
+    /// TC-STRIP-RESULT-001：StripResult serde 往返
+    #[test]
+    fn test_strip_result_serde_roundtrip() {
+        let result = StripResult {
+            stripped_count: 10,
+            summary_inserted: true,
+            stripped_message_ids: vec!["msg-1".to_string(), "msg-2".to_string()],
+            estimated_tokens_saved: 500,
+            summary: "用户讨论了 Rust 异步编程和 Tauri 框架".to_string(),
+            kept_count: 6,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: StripResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(result, deserialized);
     }
 }

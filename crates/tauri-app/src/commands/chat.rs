@@ -197,6 +197,9 @@ pub async fn chat_inner<R: Runtime>(
             "rag.graph_retriever_enabled",
             "rag.quality_gate_enabled",
             "rag.web_search_enabled",
+            "rag.top_k",
+            "rag.score_threshold",
+            "rag.chunk_expansion_enabled",
             "memory.enabled",
             "cache.enabled",
             "cache.ttl_secs",
@@ -208,6 +211,25 @@ pub async fn chat_inner<R: Runtime>(
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
+
+    // REQ-RAG-014：检索参数从 settings 读取（可配置）
+    let rag_top_k = settings_map
+        .get("rag.top_k")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_TOP_K)
+        .clamp(1, 20);
+    let rag_score_threshold = settings_map
+        .get("rag.score_threshold")
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    let rag_chunk_expansion_enabled = settings_map
+        .get("rag.chunk_expansion_enabled")
+        .is_none_or(|&v| v != "false");
+    debug!(
+        "RAG params: top_k={}, score_threshold={:.2}, chunk_expansion={}",
+        rag_top_k, rag_score_threshold, rag_chunk_expansion_enabled
+    );
 
     // **性能优化（秒出答案）**：查询嵌入只计算一次，复用于 L1 语义缓存、
     // L3 检索缓存和向量检索，避免 3 次冗余 ONNX 推理（省 ~100-200ms）。
@@ -646,10 +668,10 @@ pub async fn chat_inner<R: Runtime>(
                 match &query_embedding {
                     Some(emb) => {
                         retriever
-                            .retrieve_with_embedding(query, emb, DEFAULT_TOP_K)
+                            .retrieve_with_embedding(query, emb, rag_top_k)
                             .await
                     }
-                    None => retriever.retrieve(query, DEFAULT_TOP_K).await,
+                    None => retriever.retrieve(query, rag_top_k).await,
                 }
             };
             let (cr, rr) = tokio::join!(compact_fut, retrieve_fut);
@@ -662,7 +684,7 @@ pub async fn chat_inner<R: Runtime>(
             if graph_retriever_enabled && !rr.is_empty() {
                 let graph_retriever =
                     echomind_core::graph_retriever::GraphRetriever::new(state.storage.clone());
-                match graph_retriever.expand(query, DEFAULT_TOP_K).await {
+                match graph_retriever.expand(query, rag_top_k).await {
                     Ok(graph_results) if !graph_results.is_empty() => {
                         debug!(
                             "图扩展返回 {} 个关联 chunk，合并到检索结果",
@@ -695,7 +717,7 @@ pub async fn chat_inner<R: Runtime>(
                                 .unwrap_or(std::cmp::Ordering::Equal)
                         });
                         // 截取 top_k
-                        rr.truncate(DEFAULT_TOP_K * 2);
+                        rr.truncate(rag_top_k * 2);
                     }
                     Ok(_) => {
                         debug!("图扩展无结果，保持标准检索结果");
@@ -704,6 +726,10 @@ pub async fn chat_inner<R: Runtime>(
                         warn!("图扩展失败，降级为标准检索: {e:#}");
                     }
                 }
+            }
+            // REQ-RAG-014：用户可配置的分数阈值过滤
+            if rag_score_threshold > 0.0 {
+                rr.retain(|r| r.score >= rag_score_threshold);
             }
             // 写入 L3 缓存：复用预计算嵌入（不再重新 embed）
             if cache_enabled

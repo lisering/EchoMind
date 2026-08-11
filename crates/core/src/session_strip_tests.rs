@@ -359,6 +359,8 @@ fn tc_strip_010_strip_result_preview_serde_roundtrip() {
         summary_inserted: true,
         stripped_message_ids: vec!["msg-1".to_string(), "msg-2".to_string()],
         estimated_tokens_saved: 50,
+        summary: String::new(),
+        kept_count: 0,
     };
     let json = serde_json::to_string(&result).unwrap();
     let deserialized: StripResult = serde_json::from_str(&json).unwrap();
