@@ -797,6 +797,79 @@ input[type="url"],
   transform: translateX(-50%) scale(0.95);
 }
 
+/* REQ-ERR-003 离线指示器 */
+.offline-indicator {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface-3, #1C1C1E);
+  margin-top: 4px;
+}
+
+/* REQ-NAV-004 面包屑导航 */
+.breadcrumb-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.06));
+  min-height: 32px;
+}
+.breadcrumb-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.breadcrumb-item {
+  color: var(--text-secondary, #94A3B8);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+.breadcrumb-item:hover {
+  color: var(--accent, #38BDF8);
+}
+.breadcrumb-separator {
+  color: var(--text-quaternary, #8995A8);
+  font-size: 12px;
+  margin: 0 2px;
+  user-select: none;
+}
+.breadcrumb-title {
+  color: var(--text-primary, #F1F5F9);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+.breadcrumb-title:hover {
+  color: var(--accent, #38BDF8);
+}
+.breadcrumb-title-input {
+  background: var(--surface-2, #1C1C1E);
+  border: 1px solid var(--accent, #38BDF8);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--text-primary, #F1F5F9);
+  font-size: 13px;
+  outline: none;
+  max-width: 300px;
+}
+.breadcrumb-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-quaternary, #8995A8);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 
 
 /* ============================================================

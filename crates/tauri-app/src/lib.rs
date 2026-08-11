@@ -24,6 +24,10 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--silent"]),
+        ))
         .setup(|app| {
             // 系统菜单栏（精简方案：EchoMind / File / Edit / Window / Help）
             setup_menu(app)?;
@@ -400,6 +404,13 @@ pub fn run() {
             commands::set_rag_eval_settings,
             // B09 Skill 系统集成（REQ-ARCH-010 v1.8：斜杠命令面板 Skill 发现）
             commands::discover_skills,
+            // v1.13: 开机自启（REQ-WIN-004）
+            commands::get_autostart,
+            commands::set_autostart,
+            // v1.13: 应用更新检查（REQ-HELP-004）
+            commands::check_for_updates,
+            commands::get_update_check_config,
+            commands::set_update_check_enabled,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

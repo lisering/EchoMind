@@ -67,6 +67,9 @@
     "pro_badge_pro": "Pro",
     "data_local": "本地",
     "data_local_tooltip": "数据仅本地处理，不出域",
+    "offline_indicator": "离线",
+    "offline_placeholder": "离线模式 — 请检查网络连接",
+    "offline_hint": "离线模式 — 请检查网络连接",
     "brand": "灵犀",
     "collapse": "折叠侧栏",
     "expand": "展开侧栏",
@@ -1379,5 +1382,19 @@
     "exported": "错误日志已导出",
     "empty": "暂无错误日志",
     "title": "错误日志"
+  },
+  "startup_settings": {
+    "section_title": "启动与更新",
+    "autostart": "开机自启动",
+    "autostart_desc": "登录系统时自动启动灵犀",
+    "autostart_on": "已启用开机自启动",
+    "autostart_off": "已禁用开机自启动",
+    "auto_update": "自动检查更新",
+    "auto_update_desc": "每 24 小时检查 GitHub Releases 是否有新版本"
+  },
+  "breadcrumb": {
+    "new_conversation": "新对话",
+    "messages": "条消息",
+    "created": "创建于"
   }
 }

@@ -75,6 +75,8 @@ pub mod memory_store;
 /// 语义分块器：段落→句子→子句递归分割，保留代码块完整性。
 /// MMR 多样性重排（借鉴 OpenMontage corpus.py）：Maximal Marginal Relevance。
 pub mod mmr_diversifier;
+/// 性能指标采集（REQ-OBS-002）：关键操作耗时追踪。
+pub mod perf_metrics;
 /// Permission 细粒度控制（B11 Permission Rule Engine，REQ-ARCH-011）：
 /// Wildcard 匹配的 RBAC 权限规则引擎（Allow / Deny / Ask）。
 pub mod permission;
@@ -133,6 +135,8 @@ pub mod sync;
 pub mod tool_output;
 /// 轻量 RAG 链路追踪系统（S70：Cherry Studio 借鉴 — span 级耗时追踪）。
 pub mod trace;
+/// 应用更新检查（REQ-HELP-004）：GitHub Releases 版本比较。
+pub mod update_check;
 /// VLM 分级图表理解提示词（REQ-MM-005）：4 级精度策略集中定义。
 #[cfg(feature = "pro")]
 pub mod vlm_prompt;

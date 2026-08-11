@@ -1516,6 +1516,79 @@
         transform: translateX(-50%) scale(0.95);
       }
       
+      /* REQ-ERR-003 离线指示器 */
+      .offline-indicator {
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: var(--surface-3, #1C1C1E);
+        margin-top: 4px;
+      }
+      
+      /* REQ-NAV-004 面包屑导航 */
+      .breadcrumb-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 16px;
+        border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.06));
+        min-height: 32px;
+      }
+      .breadcrumb-left {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .breadcrumb-item {
+        color: var(--text-secondary, #94A3B8);
+        font-size: 13px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: color 0.15s;
+      }
+      .breadcrumb-item:hover {
+        color: var(--accent, #38BDF8);
+      }
+      .breadcrumb-separator {
+        color: var(--text-quaternary, #8995A8);
+        font-size: 12px;
+        margin: 0 2px;
+        user-select: none;
+      }
+      .breadcrumb-title {
+        color: var(--text-primary, #F1F5F9);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 300px;
+      }
+      .breadcrumb-title:hover {
+        color: var(--accent, #38BDF8);
+      }
+      .breadcrumb-title-input {
+        background: var(--surface-2, #1C1C1E);
+        border: 1px solid var(--accent, #38BDF8);
+        border-radius: 4px;
+        padding: 2px 6px;
+        color: var(--text-primary, #F1F5F9);
+        font-size: 13px;
+        outline: none;
+        max-width: 300px;
+      }
+      .breadcrumb-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-quaternary, #8995A8);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      
       
       
       /* ============================================================
@@ -4283,12 +4356,15 @@
                   <span data-i18n="sidebar.data_local">Local</span>
                 </span>
               </div>
+              <div id="offlineIndicator" class="offline-indicator hidden"></div>
             </div>
           </div>
         </aside>
 
       <!-- 右侧主区域 — Grid 第2列第2行，flex-col 垂直布局 -->
       <main class="row-start-2 col-start-2 flex flex-col min-w-0 min-h-0 overflow-hidden">
+        <!-- 面包屑导航（REQ-NAV-004） -->
+        <div id="breadcrumbBar" class="breadcrumb-bar"></div>
         <div class="flex-1 min-h-0 relative">
           <div id="chatArea" class="h-full overflow-y-auto scrollbar-thin px-5 py-3 bg-surface-0"></div>
           <div id="convNav" class="conv-nav"></div>
@@ -5366,6 +5442,7 @@
         // ui/src/ipc.js
         var ipc_exports = {};
         __export(ipc_exports, {
+          autostartApi: () => autostartApi,
           budgetApi: () => budgetApi,
           chatApi: () => chatApi,
           chunkParamsApi: () => chunkParamsApi,
@@ -5400,6 +5477,7 @@
           syncApi: () => syncApi,
           todoApi: () => todoApi,
           traceApi: () => traceApi,
+          updateCheckApi: () => updateCheckApi,
           vlmApi: () => vlmApi,
           webSearchApi: () => webSearchApi,
           windowSettingsApi: () => windowSettingsApi
@@ -5422,7 +5500,7 @@
           } catch (_) {
           }
         }
-        var llmApi, convApi, docApi, docPreviewApi, docExportApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, chunkParamsApi, syncApi, localLlmApi, graphApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, windowSettingsApi, errorLogsApi, symbolApi, webSearchApi, ragParamsApi, generationParamsApi;
+        var llmApi, convApi, docApi, docPreviewApi, docExportApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, chunkParamsApi, syncApi, localLlmApi, graphApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, windowSettingsApi, errorLogsApi, symbolApi, webSearchApi, ragParamsApi, generationParamsApi, autostartApi, updateCheckApi;
         var init_ipc = __esm({
           "ui/src/ipc.js"() {
             llmApi = {
@@ -5719,6 +5797,20 @@
               get: () => invoke("get_generation_params"),
               /** 设置 LLM 生成参数 */
               set: (params) => invoke("set_generation_params", { params })
+            };
+            autostartApi = {
+              /** 获取开机自启状态 */
+              get: () => invoke("get_autostart"),
+              /** 设置开机自启 */
+              set: (enabled) => invoke("set_autostart", { enabled })
+            };
+            updateCheckApi = {
+              /** 检查 GitHub Releases 是否有新版本 */
+              check: () => invoke("check_for_updates"),
+              /** 获取更新检查配置 */
+              getConfig: () => invoke("get_update_check_config"),
+              /** 设置自动检查开关 */
+              setEnabled: (enabled) => invoke("set_update_check_enabled", { enabled })
             };
           }
         });
@@ -16875,6 +16967,18 @@
             if (errorLogsContainer) {
               renderErrorLogsSettings(errorLogsContainer);
             }
+            const startupContainer = $("startupSettingsContainer") || (() => {
+              if (!insertAfter) return null;
+              const div = document.createElement("div");
+              div.id = "startupSettingsContainer";
+              div.className = "mt-5";
+              insertAfter.after(div);
+              insertAfter = div;
+              return div;
+            })();
+            if (startupContainer) {
+              renderStartupSettings(startupContainer);
+            }
             loadWatchedFolders();
             await loadLlmModeSetting(settings);
             await loadLocalModels();
@@ -17990,6 +18094,142 @@
           };
           row.appendChild(btn);
           container.appendChild(row);
+        }
+        async function renderStartupSettings(container) {
+          container.innerHTML = "";
+          const title = document.createElement("h4");
+          title.className = "side-label text-[11px] uppercase tracking-wider text-text-quaternary mb-3";
+          title.textContent = t("startup_settings.section_title", "Startup & Updates");
+          container.appendChild(title);
+          const autostartRow = document.createElement("div");
+          autostartRow.className = "flex items-center justify-between p-3 rounded-lg bg-surface-2 border border-border-subtle mb-2";
+          const autostartLabel = document.createElement("div");
+          autostartLabel.className = "flex-1 min-w-0";
+          const autostartLabelTitle = document.createElement("div");
+          autostartLabelTitle.className = "text-sm text-text-primary";
+          autostartLabelTitle.textContent = t("startup_settings.autostart", "Launch at startup");
+          autostartLabel.appendChild(autostartLabelTitle);
+          const autostartDesc = document.createElement("div");
+          autostartDesc.className = "text-xs text-text-quaternary mt-0.5";
+          autostartDesc.textContent = t("startup_settings.autostart_desc", "Start EchoMind automatically when you log in");
+          autostartLabel.appendChild(autostartDesc);
+          const autostartToggle = document.createElement("button");
+          autostartToggle.id = "autostartToggle";
+          autostartToggle.className = "relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0";
+          autostartToggle.setAttribute("role", "switch");
+          autostartToggle.setAttribute("aria-checked", "false");
+          const autostartKnob = document.createElement("span");
+          autostartKnob.className = "inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-1";
+          autostartToggle.appendChild(autostartKnob);
+          let autostartEnabled = false;
+          try {
+            autostartEnabled = await autostartApi.get();
+          } catch (_) {
+          }
+          if (autostartEnabled) {
+            autostartToggle.classList.add("bg-accent");
+            autostartToggle.classList.remove("bg-slate-600");
+            autostartToggle.setAttribute("aria-checked", "true");
+            autostartKnob.classList.add("translate-x-5");
+            autostartKnob.classList.remove("translate-x-1");
+          } else {
+            autostartToggle.classList.add("bg-slate-600");
+            autostartToggle.classList.remove("bg-accent");
+            autostartToggle.setAttribute("aria-checked", "false");
+            autostartKnob.classList.add("translate-x-1");
+            autostartKnob.classList.remove("translate-x-5");
+          }
+          autostartToggle.onclick = async () => {
+            const newEnabled = !autostartEnabled;
+            try {
+              await autostartApi.set(newEnabled);
+              autostartEnabled = newEnabled;
+              if (newEnabled) {
+                autostartToggle.classList.add("bg-accent");
+                autostartToggle.classList.remove("bg-slate-600");
+                autostartToggle.setAttribute("aria-checked", "true");
+                autostartKnob.classList.add("translate-x-5");
+                autostartKnob.classList.remove("translate-x-1");
+                toastSuccess(t("startup_settings.autostart_on", "Launch at startup enabled"));
+              } else {
+                autostartToggle.classList.add("bg-slate-600");
+                autostartToggle.classList.remove("bg-accent");
+                autostartToggle.setAttribute("aria-checked", "false");
+                autostartKnob.classList.add("translate-x-1");
+                autostartKnob.classList.remove("translate-x-5");
+                toastSuccess(t("startup_settings.autostart_off", "Launch at startup disabled"));
+              }
+            } catch (err) {
+              toastError(err);
+            }
+          };
+          autostartRow.appendChild(autostartLabel);
+          autostartRow.appendChild(autostartToggle);
+          container.appendChild(autostartRow);
+          const updateRow = document.createElement("div");
+          updateRow.className = "flex items-center justify-between p-3 rounded-lg bg-surface-2 border border-border-subtle";
+          const updateLabel = document.createElement("div");
+          updateLabel.className = "flex-1 min-w-0";
+          const updateLabelTitle = document.createElement("div");
+          updateLabelTitle.className = "text-sm text-text-primary";
+          updateLabelTitle.textContent = t("startup_settings.auto_update", "Check for updates automatically");
+          updateLabel.appendChild(updateLabelTitle);
+          const updateDesc = document.createElement("div");
+          updateDesc.className = "text-xs text-text-quaternary mt-0.5";
+          updateDesc.textContent = t("startup_settings.auto_update_desc", "Check GitHub Releases for new versions every 24 hours");
+          updateLabel.appendChild(updateDesc);
+          const updateToggle = document.createElement("button");
+          updateToggle.id = "autoUpdateToggle";
+          updateToggle.className = "relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0";
+          updateToggle.setAttribute("role", "switch");
+          updateToggle.setAttribute("aria-checked", "false");
+          const updateKnob = document.createElement("span");
+          updateKnob.className = "inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-1";
+          updateToggle.appendChild(updateKnob);
+          let updateEnabled = true;
+          try {
+            const config = await updateCheckApi.getConfig();
+            updateEnabled = config.auto_check;
+          } catch (_) {
+          }
+          if (updateEnabled) {
+            updateToggle.classList.add("bg-accent");
+            updateToggle.classList.remove("bg-slate-600");
+            updateToggle.setAttribute("aria-checked", "true");
+            updateKnob.classList.add("translate-x-5");
+            updateKnob.classList.remove("translate-x-1");
+          } else {
+            updateToggle.classList.add("bg-slate-600");
+            updateToggle.classList.remove("bg-accent");
+            updateToggle.setAttribute("aria-checked", "false");
+            updateKnob.classList.add("translate-x-1");
+            updateKnob.classList.remove("translate-x-5");
+          }
+          updateToggle.onclick = async () => {
+            const newEnabled = !updateEnabled;
+            try {
+              await updateCheckApi.setEnabled(newEnabled);
+              updateEnabled = newEnabled;
+              if (newEnabled) {
+                updateToggle.classList.add("bg-accent");
+                updateToggle.classList.remove("bg-slate-600");
+                updateToggle.setAttribute("aria-checked", "true");
+                updateKnob.classList.add("translate-x-5");
+                updateKnob.classList.remove("translate-x-1");
+              } else {
+                updateToggle.classList.add("bg-slate-600");
+                updateToggle.classList.remove("bg-accent");
+                updateToggle.setAttribute("aria-checked", "false");
+                updateKnob.classList.add("translate-x-1");
+                updateKnob.classList.remove("translate-x-5");
+              }
+            } catch (err) {
+              toastError(err);
+            }
+          };
+          updateRow.appendChild(updateLabel);
+          updateRow.appendChild(updateToggle);
+          container.appendChild(updateRow);
         }
         async function renderRagLlmParams(container) {
           container.innerHTML = "";
@@ -20343,6 +20583,287 @@
           });
         }
       
+        // ui/src/offline-detector.js
+        init_utils();
+        init_i18n();
+        var _initialized = false;
+        var _originalPlaceholder = null;
+        var _originalHint = null;
+        function _getOfflineIndicator() {
+          let el = $("offlineIndicator");
+          if (!el) {
+            const sidebarFooter = document.querySelector("#sidebar .mt-auto");
+            if (!sidebarFooter) return null;
+            el = document.createElement("div");
+            el.id = "offlineIndicator";
+            el.className = "offline-indicator hidden";
+            sidebarFooter.appendChild(el);
+          }
+          return el;
+        }
+        function _applyOffline() {
+          const indicator = _getOfflineIndicator();
+          if (indicator) {
+            indicator.classList.remove("hidden");
+            indicator.innerHTML = `<span class="text-amber-400 text-xs flex items-center gap-1">
+            <span>\u26A0</span>
+            <span>${t("offline.indicator", "Offline")}</span>
+          </span>`;
+          }
+          const sendBtn = $("sendBtn");
+          if (sendBtn) {
+            sendBtn.setAttribute("disabled", "");
+          }
+          const input = $("queryInput");
+          if (input) {
+            if (_originalPlaceholder === null) {
+              _originalPlaceholder = input.getAttribute("placeholder") || "";
+            }
+            input.setAttribute("placeholder", t("offline.placeholder", "Offline \u2014 check network connection"));
+          }
+          const hint = $("inputHint");
+          if (hint) {
+            if (_originalHint === null) {
+              _originalHint = hint.innerHTML;
+            }
+            hint.innerHTML = `<span class="text-amber-400">\u26A0 ${t("offline.hint", "Offline mode \u2014 please check your network connection")}</span>`;
+          }
+        }
+        function _applyOnline() {
+          const indicator = _getOfflineIndicator();
+          if (indicator) {
+            indicator.classList.add("hidden");
+            indicator.innerHTML = "";
+          }
+          const sendBtn = $("sendBtn");
+          if (sendBtn) {
+            sendBtn.removeAttribute("disabled");
+          }
+          const input = $("queryInput");
+          if (input && _originalPlaceholder !== null) {
+            input.setAttribute("placeholder", _originalPlaceholder);
+          }
+          const hint = $("inputHint");
+          if (hint && _originalHint !== null) {
+            hint.innerHTML = _originalHint;
+          }
+        }
+        function _updateUI(isOnline) {
+          if (isOnline) {
+            _applyOnline();
+          } else {
+            _applyOffline();
+          }
+        }
+        function _onOnline() {
+          _updateUI(true);
+        }
+        function _onOffline() {
+          _updateUI(false);
+        }
+        function initOfflineDetector() {
+          if (_initialized) return;
+          _initialized = true;
+          window.addEventListener("online", _onOnline);
+          window.addEventListener("offline", _onOffline);
+          _updateUI(navigator.onLine);
+        }
+      
+        // ui/src/breadcrumb.js
+        init_utils();
+        init_i18n();
+      
+        // ui/src/date-utils.js
+        init_i18n();
+        function formatDate(timestamp) {
+          if (!timestamp) return "";
+          const date = _toDate(timestamp);
+          if (!date) return "";
+          const y = date.getFullYear();
+          const m = String(date.getMonth() + 1).padStart(2, "0");
+          const d = String(date.getDate()).padStart(2, "0");
+          const h = String(date.getHours()).padStart(2, "0");
+          const min = String(date.getMinutes()).padStart(2, "0");
+          return `${y}-${m}-${d} ${h}:${min}`;
+        }
+        function formatRelativeTime(timestamp) {
+          if (!timestamp) return "";
+          const date = _toDate(timestamp);
+          if (!date) return "";
+          const now = Date.now();
+          const diffMs = now - date.getTime();
+          const diffSec = Math.floor(diffMs / 1e3);
+          const diffMin = Math.floor(diffSec / 60);
+          const diffHour = Math.floor(diffMin / 60);
+          const diffDay = Math.floor(diffHour / 24);
+          if (diffMs < 0) return formatDate(timestamp);
+          if (diffSec < 180) {
+            return t("date.just_now");
+          }
+          if (diffMin < 60) {
+            return t("date.minutes_ago", { n: diffMin });
+          }
+          if (diffHour < 24) {
+            return t("date.hours_ago", { n: diffHour });
+          }
+          if (diffDay < 7) {
+            return t("date.days_ago", { n: diffDay });
+          }
+          const y = date.getFullYear();
+          const m = String(date.getMonth() + 1).padStart(2, "0");
+          const d = String(date.getDate()).padStart(2, "0");
+          return `${y}-${m}-${d}`;
+        }
+        function formatFileSize(bytes) {
+          if (bytes === null || bytes === void 0 || bytes < 0) return "";
+          if (bytes < 1024) return `${bytes} B`;
+          const units = ["KB", "MB", "GB", "TB"];
+          let size = bytes / 1024;
+          let unitIdx = 0;
+          while (size >= 1024 && unitIdx < units.length - 1) {
+            size /= 1024;
+            unitIdx++;
+          }
+          return `${size.toFixed(1)} ${units[unitIdx]}`;
+        }
+        function formatNumber2(num) {
+          if (num === null || num === void 0) return "";
+          if (typeof num !== "number" || !isFinite(num)) return String(num);
+          return num.toLocaleString("en-US");
+        }
+        function _toDate(input) {
+          if (input instanceof Date) return input;
+          if (typeof input === "number") {
+            const ms = input < 1e12 ? input * 1e3 : input;
+            const date = new Date(ms);
+            return isNaN(date.getTime()) ? null : date;
+          }
+          if (typeof input === "string") {
+            const num = Number(input);
+            if (!isNaN(num)) return _toDate(num);
+            const date = new Date(input);
+            return isNaN(date.getTime()) ? null : date;
+          }
+          return null;
+        }
+        window.__formatDate = formatDate;
+        window.__formatRelativeTime = formatRelativeTime;
+        window.__formatFileSize = formatFileSize;
+        window.__formatNumber = formatNumber2;
+      
+        // ui/src/breadcrumb.js
+        init_ipc();
+        var _currentConvId = null;
+        var _currentConvTitle = "";
+        var _messageCount = 0;
+        var _createdAt = 0;
+        var _onRenameCallback = null;
+        var _onNavigateKbCallback = null;
+        function _renderHTML() {
+          const kbName = t("sidebar.knowledge_base", "Knowledge Base");
+          const convTitle = _currentConvTitle || t("breadcrumb.new_conversation", "New Chat");
+          const metaParts = [];
+          if (_messageCount > 0) {
+            metaParts.push(`${_messageCount} ${t("breadcrumb.messages", "messages")}`);
+          }
+          if (_createdAt > 0) {
+            metaParts.push(`${t("breadcrumb.created", "Created")} ${formatRelativeTime(_createdAt)}`);
+          }
+          const metaHTML = metaParts.length > 0 ? `<span class="breadcrumb-meta">${metaParts.join(" \xB7 ")}</span>` : "";
+          return `<div class="breadcrumb-left">
+          <span id="breadcrumbKbName" class="breadcrumb-item" role="button" tabindex="0">${kbName}</span>
+          <span class="breadcrumb-separator">\u203A</span>
+          <span id="breadcrumbConvTitle" class="breadcrumb-title" role="button" tabindex="0">${convTitle}</span>
+        </div>
+        ${metaHTML}`;
+        }
+        function _update() {
+          const bar = $("breadcrumbBar");
+          if (!bar) return;
+          bar.innerHTML = _renderHTML();
+          const kbName = $("breadcrumbKbName");
+          if (kbName) {
+            kbName.addEventListener("click", () => {
+              if (_onNavigateKbCallback) {
+                _onNavigateKbCallback();
+              }
+            });
+            kbName.addEventListener("keydown", (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                if (_onNavigateKbCallback) {
+                  _onNavigateKbCallback();
+                }
+              }
+            });
+          }
+          const convTitle = $("breadcrumbConvTitle");
+          if (convTitle) {
+            convTitle.addEventListener("click", () => {
+              _enterRenameMode();
+            });
+            convTitle.addEventListener("keydown", (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                _enterRenameMode();
+              }
+            });
+          }
+        }
+        function _enterRenameMode() {
+          const titleEl = $("breadcrumbConvTitle");
+          if (!titleEl) return;
+          const currentText = titleEl.textContent || "";
+          const input = document.createElement("input");
+          input.type = "text";
+          input.value = currentText;
+          input.className = "breadcrumb-title-input";
+          input.maxLength = 100;
+          titleEl.replaceWith(input);
+          input.focus();
+          input.select();
+          const _finishRename = async () => {
+            const newTitle = input.value.trim();
+            if (newTitle && newTitle !== currentText) {
+              if (_onRenameCallback) {
+                _onRenameCallback(newTitle);
+              } else if (_currentConvId) {
+                try {
+                  await invoke("create_conversation", { id: _currentConvId, title: newTitle });
+                } catch (_) {
+                }
+              }
+              _currentConvTitle = newTitle;
+            }
+            _update();
+          };
+          input.addEventListener("blur", _finishRename);
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              input.blur();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              _update();
+            }
+          });
+        }
+        function initBreadcrumb(callbacks = {}) {
+          _onRenameCallback = callbacks.onRename || null;
+          _onNavigateKbCallback = callbacks.onNavigateKb || null;
+          let bar = $("breadcrumbBar");
+          if (!bar) {
+            const chatHeader = document.querySelector("main .flex-1 .relative");
+            if (chatHeader) {
+              bar = document.createElement("div");
+              bar.id = "breadcrumbBar";
+              bar.className = "breadcrumb-bar";
+              chatHeader.insertBefore(bar, chatHeader.firstChild);
+            }
+          }
+          _update();
+        }
+      
         // ui/src/kb-stats.js
         init_utils();
         init_ipc();
@@ -20483,7 +21004,7 @@
         init_toast();
         var _created2 = false;
         var _panelEl2 = null;
-        function formatDate(timestamp) {
+        function formatDate2(timestamp) {
           if (!timestamp) return "-";
           const d = new Date(timestamp * 1e3);
           const year = d.getFullYear();
@@ -20554,7 +21075,7 @@
             [t("doc.preview_format") || "\u683C\u5F0F", fileExt(preview.file_path)],
             [t("doc.preview_status") || "\u72B6\u6001", statusText(preview.status)],
             [t("doc.preview_chunks") || "\u5206\u5757\u6570", String(preview.chunk_count)],
-            [t("doc.preview_imported") || "\u5BFC\u5165\u65F6\u95F4", formatDate(preview.created_at)],
+            [t("doc.preview_imported") || "\u5BFC\u5165\u65F6\u95F4", formatDate2(preview.created_at)],
             [t("doc.preview_hash") || "\u6307\u7EB9", (preview.file_hash || "").substring(0, 12) + "\u2026"]
           ];
           for (const [label, value] of metaItems) {
@@ -21042,84 +21563,6 @@
             aboutBtn.onclick = openAboutPanel;
           }
         }
-      
-        // ui/src/date-utils.js
-        init_i18n();
-        function formatDate2(timestamp) {
-          if (!timestamp) return "";
-          const date = _toDate(timestamp);
-          if (!date) return "";
-          const y = date.getFullYear();
-          const m = String(date.getMonth() + 1).padStart(2, "0");
-          const d = String(date.getDate()).padStart(2, "0");
-          const h = String(date.getHours()).padStart(2, "0");
-          const min = String(date.getMinutes()).padStart(2, "0");
-          return `${y}-${m}-${d} ${h}:${min}`;
-        }
-        function formatRelativeTime(timestamp) {
-          if (!timestamp) return "";
-          const date = _toDate(timestamp);
-          if (!date) return "";
-          const now = Date.now();
-          const diffMs = now - date.getTime();
-          const diffSec = Math.floor(diffMs / 1e3);
-          const diffMin = Math.floor(diffSec / 60);
-          const diffHour = Math.floor(diffMin / 60);
-          const diffDay = Math.floor(diffHour / 24);
-          if (diffMs < 0) return formatDate2(timestamp);
-          if (diffSec < 180) {
-            return t("date.just_now");
-          }
-          if (diffMin < 60) {
-            return t("date.minutes_ago", { n: diffMin });
-          }
-          if (diffHour < 24) {
-            return t("date.hours_ago", { n: diffHour });
-          }
-          if (diffDay < 7) {
-            return t("date.days_ago", { n: diffDay });
-          }
-          const y = date.getFullYear();
-          const m = String(date.getMonth() + 1).padStart(2, "0");
-          const d = String(date.getDate()).padStart(2, "0");
-          return `${y}-${m}-${d}`;
-        }
-        function formatFileSize(bytes) {
-          if (bytes === null || bytes === void 0 || bytes < 0) return "";
-          if (bytes < 1024) return `${bytes} B`;
-          const units = ["KB", "MB", "GB", "TB"];
-          let size = bytes / 1024;
-          let unitIdx = 0;
-          while (size >= 1024 && unitIdx < units.length - 1) {
-            size /= 1024;
-            unitIdx++;
-          }
-          return `${size.toFixed(1)} ${units[unitIdx]}`;
-        }
-        function formatNumber2(num) {
-          if (num === null || num === void 0) return "";
-          if (typeof num !== "number" || !isFinite(num)) return String(num);
-          return num.toLocaleString("en-US");
-        }
-        function _toDate(input) {
-          if (input instanceof Date) return input;
-          if (typeof input === "number") {
-            const ms = input < 1e12 ? input * 1e3 : input;
-            const date = new Date(ms);
-            return isNaN(date.getTime()) ? null : date;
-          }
-          if (typeof input === "string") {
-            const num = Number(input);
-            if (!isNaN(num)) return _toDate(num);
-            const date = new Date(input);
-            return isNaN(date.getTime()) ? null : date;
-          }
-          return null;
-        }
-        window.__formatDate = formatDate2;
-        window.__formatRelativeTime = formatRelativeTime;
-        window.__formatFileSize = formatFileSize;
-        window.__formatNumber = formatNumber2;
       
         // ui/src/session-strip.js
         init_ipc();
@@ -22150,6 +22593,13 @@
           initContextMenu();
           initSecurity();
           initDownloadManager();
+          initOfflineDetector();
+          initBreadcrumb({
+            onNavigateKb: () => {
+              const kbTab = $("kbTab");
+              if (kbTab) kbTab.click();
+            }
+          });
           const _deferInit = (fn) => {
             if (typeof requestIdleCallback === "function") {
               requestIdleCallback(fn, { timeout: 2e3 });

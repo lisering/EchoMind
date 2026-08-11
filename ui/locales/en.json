@@ -67,6 +67,9 @@
     "pro_badge_pro": "Pro",
     "data_local": "Local",
     "data_local_tooltip": "Data stays local, never leaves your device",
+    "offline_indicator": "Offline",
+    "offline_placeholder": "Offline — check network connection",
+    "offline_hint": "Offline mode — please check your network connection",
     "brand": "EchoMind",
     "collapse": "Collapse Sidebar",
     "expand": "Expand Sidebar",
@@ -1379,5 +1382,19 @@
     "exported": "Error logs exported",
     "empty": "No error logs found",
     "title": "Error Logs"
+  },
+  "startup_settings": {
+    "section_title": "Startup & Updates",
+    "autostart": "Launch at startup",
+    "autostart_desc": "Start EchoMind automatically when you log in",
+    "autostart_on": "Launch at startup enabled",
+    "autostart_off": "Launch at startup disabled",
+    "auto_update": "Check for updates automatically",
+    "auto_update_desc": "Check GitHub Releases for new versions every 24 hours"
+  },
+  "breadcrumb": {
+    "new_conversation": "New Chat",
+    "messages": "messages",
+    "created": "Created"
   }
 }

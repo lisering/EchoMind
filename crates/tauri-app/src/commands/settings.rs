@@ -1026,3 +1026,248 @@ pub async fn set_chunk_params_inner(params: ChunkParams, state: &AppState) -> Re
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+// ============================================================================
+// v1.13: 开机自启（REQ-WIN-004）
+// ============================================================================
+
+/// 获取开机自启状态。
+#[tauri::command]
+pub async fn get_autostart(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    get_autostart_inner(app, state.inner()).await
+}
+
+/// 获取开机自启状态逻辑（命令与集成测试复用）。
+pub async fn get_autostart_inner(app: tauri::AppHandle, state: &AppState) -> Result<bool, String> {
+    // 优先从 settings 表读取持久化状态
+    let persisted = state
+        .storage
+        .get_setting("app.autostart")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if let Some(val) = persisted {
+        return Ok(val == "true");
+    }
+    // 回退到 autostart 插件实际状态
+    use tauri_plugin_autostart::ManagerExt;
+    let autostart = app.autolaunch();
+    match autostart.is_enabled() {
+        Ok(enabled) => Ok(enabled),
+        Err(_) => Ok(false),
+    }
+}
+
+/// 设置开机自启。
+#[tauri::command]
+pub async fn set_autostart(
+    enabled: bool,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    set_autostart_inner(enabled, app, state.inner()).await
+}
+
+/// 设置开机自启逻辑（命令与集成测试复用）。
+pub async fn set_autostart_inner(
+    enabled: bool,
+    app: tauri::AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autostart = app.autolaunch();
+    if enabled {
+        autostart
+            .enable()
+            .map_err(|e| format!("AUTOSTART: 启用开机自启失败: {e}"))?;
+    } else {
+        autostart
+            .disable()
+            .map_err(|e| format!("AUTOSTART: 禁用开机自启失败: {e}"))?;
+    }
+    // 持久化到 settings 表
+    state
+        .storage
+        .set_setting("app.autostart", if enabled { "true" } else { "false" })
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ============================================================================
+// v1.13: 应用更新检查（REQ-HELP-004）
+// ============================================================================
+
+/// 检查 GitHub Releases 是否有新版本。
+#[tauri::command]
+pub async fn check_for_updates(
+    state: State<'_, AppState>,
+) -> Result<echomind_core::update_check::UpdateCheckResult, String> {
+    check_for_updates_inner(state.inner()).await
+}
+
+/// 检查更新逻辑（命令与集成测试复用）。
+///
+/// 24 小时内不重复检查。网络不可用时返回 has_update=false，不报错。
+///
+/// 铁律一合规：reqwest 使用 `.no_proxy()` 确保直连。
+pub async fn check_for_updates_inner(
+    state: &AppState,
+) -> Result<echomind_core::update_check::UpdateCheckResult, String> {
+    use echomind_core::update_check;
+
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    // 检查 24 小时内是否已检查过
+    let last_check = state
+        .storage
+        .get_setting("update.last_check")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    // 如果 auto_check 为 false 且 24 小时内已检查，跳过
+    let auto_check = state
+        .storage
+        .get_setting("update.auto_check")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .is_none_or(|v| v != "false");
+
+    if !auto_check && !update_check::should_check(last_check) {
+        return Ok(update_check::UpdateCheckResult {
+            has_update: false,
+            current_version: current_version.to_string(),
+            latest_version: current_version.to_string(),
+            release_notes: None,
+            download_url: None,
+        });
+    }
+
+    // 调用 GitHub Releases API（铁律一：no_proxy 直连）
+    let result = fetch_github_release(current_version).await;
+
+    // 更新最后检查时间
+    let now = update_check::current_timestamp();
+    let _ = state
+        .storage
+        .set_setting("update.last_check", &now.to_string())
+        .await;
+
+    match result {
+        Some(r) => Ok(r),
+        None => Ok(update_check::UpdateCheckResult {
+            has_update: false,
+            current_version: current_version.to_string(),
+            latest_version: current_version.to_string(),
+            release_notes: None,
+            download_url: None,
+        }),
+    }
+}
+
+/// GitHub Release 信息（反序列化 GitHub API 响应）。
+#[derive(Debug, serde::Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    body: Option<String>,
+    html_url: Option<String>,
+}
+
+/// GitHub API 请求超时（秒）。
+const GITHUB_API_TIMEOUT_SECS: u64 = 15;
+
+/// GitHub 仓库 releases API URL。
+const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/EchoMind/EchoMind/releases/latest";
+
+/// 调用 GitHub Releases API 检查新版本。
+///
+/// 网络不可用时返回 `None`，不报错。
+async fn fetch_github_release(
+    current_version: &str,
+) -> Option<echomind_core::update_check::UpdateCheckResult> {
+    use echomind_core::update_check;
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(GITHUB_API_TIMEOUT_SECS))
+        .build()
+        .ok()?;
+
+    let response = client
+        .get(GITHUB_RELEASES_API)
+        .header("User-Agent", "EchoMind-Update-Checker")
+        .send()
+        .await
+        .ok()?;
+
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let release: GitHubRelease = response.json().await.ok()?;
+
+    let latest_version = release.tag_name.trim_start_matches('v').to_string();
+    let has_update = update_check::is_newer_version(current_version, &latest_version);
+
+    Some(update_check::UpdateCheckResult {
+        has_update,
+        current_version: current_version.to_string(),
+        latest_version,
+        release_notes: release.body,
+        download_url: release.html_url,
+    })
+}
+
+/// 获取更新检查配置。
+#[tauri::command]
+pub async fn get_update_check_config(
+    state: State<'_, AppState>,
+) -> Result<echomind_core::update_check::UpdateCheckConfig, String> {
+    get_update_check_config_inner(state.inner()).await
+}
+
+/// 获取更新检查配置逻辑（命令与集成测试复用）。
+pub async fn get_update_check_config_inner(
+    state: &AppState,
+) -> Result<echomind_core::update_check::UpdateCheckConfig, String> {
+    let auto_check = state
+        .storage
+        .get_setting("update.auto_check")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .is_none_or(|v| v != "false");
+
+    let last_check = state
+        .storage
+        .get_setting("update.last_check")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    Ok(echomind_core::update_check::UpdateCheckConfig {
+        auto_check,
+        last_check,
+    })
+}
+
+/// 设置自动检查更新开关。
+#[tauri::command]
+pub async fn set_update_check_enabled(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    set_update_check_enabled_inner(enabled, state.inner()).await
+}
+
+/// 设置自动检查更新开关逻辑（命令与集成测试复用）。
+pub async fn set_update_check_enabled_inner(enabled: bool, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .set_setting("update.auto_check", if enabled { "true" } else { "false" })
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
