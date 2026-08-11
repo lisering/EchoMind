@@ -4468,6 +4468,9 @@
               <input id="docSearchInput" type="text" data-i18n-placeholder="knowledge_base.search_docs" data-i18n-aria-label="knowledge_base.search_docs" class="w-full bg-surface-2 border border-border-default rounded-lg pl-8 pr-3 py-2 text-xs outline-none focus:border-accent transition-colors text-text-primary placeholder:text-text-quaternary" />
             </div>
             <button id="kbFilterToggle" class="shrink-0 px-2.5 py-2 rounded-lg text-xs border border-border-default bg-surface-2 text-text-secondary hover:text-accent hover:border-accent transition-colors flex items-center gap-1" data-i18n="knowledge_base.filter_toggle"></button>
+            <button id="kbSortBtn" class="shrink-0 px-2.5 py-2 rounded-lg text-xs border border-border-default bg-surface-2 text-text-secondary hover:text-accent hover:border-accent transition-colors flex items-center gap-1" data-i18n-title="doc_sort_title" aria-label="Sort">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>
+            </button>
           </div>
           <!-- Collapsible filter panel (hidden by default) -->
           <div id="kbFilterPanel" class="hidden mt-2 flex gap-2">
@@ -4498,8 +4501,18 @@
               <option value="" data-i18n="knowledge_base.filter_all_tags"></option>
             </select>
           </div>
+          <!-- Collapsible sort panel (hidden by default, v1.10 REQ-ING-008) -->
+          <div id="kbSortPanel" class="hidden mt-2">
+            <select id="docSortSelect" class="w-full appearance-none bg-no-repeat bg-[right_0.625rem_center] bg-[length:0.625rem_0.625rem] bg-dropdown-arrow bg-surface-2 border border-border-default rounded-md px-2.5 py-1.5 pr-7 text-[11px] text-text-primary outline-none focus:border-accent transition-colors cursor-pointer">
+              <option value="imported_at:desc" data-i18n="doc_sort_imported_desc"></option>
+              <option value="imported_at:asc" data-i18n="doc_sort_imported_asc"></option>
+              <option value="file_name:asc" data-i18n="doc_sort_name_asc"></option>
+              <option value="file_name:desc" data-i18n="doc_sort_name_desc"></option>
+              <option value="file_size:desc" data-i18n="doc_sort_size_desc"></option>
+              <option value="file_size:asc" data-i18n="doc_sort_size_asc"></option>
+            </select>
+          </div>
         </div>
-        <!-- Document list (scrollable, infinite scroll) -->
         <div id="kbDocScroll" class="overflow-y-auto scrollbar-thin flex-1 px-2 py-2">
           <div id="docList" class="space-y-0.5"></div>
           <div id="kbScrollSentinel" class="h-1"></div>
@@ -4949,6 +4962,8 @@
               <div id="syncFolderList" class="space-y-1"></div>
             </div>
           </div>
+<!-- RAG/LLM 参数区块（REQ-RAG-014/015 v1.10） -->
+<div id="ragLlmParamsContainer" class="mt-5"></div>
 <!-- 安全防御区块 -->
 <div id="securitySettingsContainer" class="mt-5"></div>
 <!-- 记忆管理区块（S34-S43 持久化记忆系统） -->
@@ -5312,6 +5327,7 @@
           durableApi: () => durableApi,
           embedModelApi: () => embedModelApi,
           errorLogsApi: () => errorLogsApi,
+          generationParamsApi: () => generationParamsApi,
           graphApi: () => graphApi,
           importApi: () => importApi,
           invoke: () => invoke,
@@ -5326,6 +5342,7 @@
           openDialog: () => openDialog,
           openUrl: () => openUrl,
           promptTemplateApi: () => promptTemplateApi,
+          ragParamsApi: () => ragParamsApi,
           saveDialog: () => saveDialog,
           securityApi: () => securityApi,
           symbolApi: () => symbolApi,
@@ -5354,7 +5371,7 @@
           } catch (_) {
           }
         }
-        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, graphApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, windowSettingsApi, errorLogsApi, symbolApi, webSearchApi;
+        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, graphApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, windowSettingsApi, errorLogsApi, symbolApi, webSearchApi, ragParamsApi, generationParamsApi;
         var init_ipc = __esm({
           "ui/src/ipc.js"() {
             llmApi = {
@@ -5393,7 +5410,7 @@
               previewStrip: (conversationId, fromIndex, toIndex) => invoke("preview_strip", { conversationId, fromIndex, toIndex })
             };
             docApi = {
-              list: () => invoke("get_documents"),
+              list: (sortBy, sortOrder) => invoke("get_documents", { sortBy, sortOrder }),
               delete: (id) => invoke("delete_document", { id }),
               retry: (id) => invoke("retry_index", { id }),
               import: (paths) => invoke("import_files", { paths }),
@@ -5621,6 +5638,18 @@
             webSearchApi = {
               /** 执行网页搜索并融合到 RAG 结果中 */
               search: (query) => invoke("web_search", { query })
+            };
+            ragParamsApi = {
+              /** 获取 RAG 检索参数 */
+              get: () => invoke("get_rag_params"),
+              /** 设置 RAG 检索参数 */
+              set: (params) => invoke("set_rag_params", { params })
+            };
+            generationParamsApi = {
+              /** 获取 LLM 生成参数 */
+              get: () => invoke("get_generation_params"),
+              /** 设置 LLM 生成参数 */
+              set: (params) => invoke("set_generation_params", { params })
             };
           }
         });
@@ -11686,6 +11715,12 @@
               if (panel) panel.classList.toggle("hidden");
             };
           }
+          if ($("kbSortBtn")) {
+            $("kbSortBtn").onclick = () => {
+              const panel = $("kbSortPanel");
+              if (panel) panel.classList.toggle("hidden");
+            };
+          }
           if ($("docSearchInput")) {
             $("docSearchInput").addEventListener("input", () => {
               if (_kbSearchTimer) clearTimeout(_kbSearchTimer);
@@ -16402,6 +16437,10 @@
             $("settingsModal").classList.remove("hidden");
             loadModelCacheInfo();
             loadCustomModels();
+            const ragLlmContainer = $("ragLlmParamsContainer");
+            if (ragLlmContainer) {
+              renderRagLlmParams(ragLlmContainer);
+            }
             const secContainer = $("securitySettingsContainer");
             if (secContainer) {
               secContainer.innerHTML = "";
@@ -17619,6 +17658,224 @@
           };
           row.appendChild(btn);
           container.appendChild(row);
+        }
+        async function renderRagLlmParams(container) {
+          container.innerHTML = "";
+          let ragParams = null;
+          let llmParams = null;
+          try {
+            [ragParams, llmParams] = await Promise.all([
+              ragParamsApi.get(),
+              generationParamsApi.get()
+            ]);
+          } catch {
+            container.innerHTML = '<p class="text-xs text-text-quaternary">' + t("params_load_error") + "</p>";
+            return;
+          }
+          const ragTitle = document.createElement("div");
+          ragTitle.className = "text-xs uppercase tracking-wider text-text-quaternary mb-2";
+          ragTitle.textContent = t("rag_params_section");
+          container.appendChild(ragTitle);
+          const ragBox = document.createElement("div");
+          ragBox.className = "bg-surface-2 border border-border-default rounded-xl px-4 py-3 space-y-4";
+          ragBox.appendChild(_makeSlider({
+            id: "ragTopKSlider",
+            label: t("rag_params_top_k"),
+            desc: t("rag_params_top_k_desc"),
+            min: 1,
+            max: 20,
+            step: 1,
+            value: ragParams.top_k,
+            display: (v) => String(v)
+          }));
+          ragBox.appendChild(_makeSlider({
+            id: "ragThresholdSlider",
+            label: t("rag_params_threshold"),
+            desc: t("rag_params_threshold_desc"),
+            min: 0,
+            max: 1,
+            step: 0.05,
+            value: ragParams.score_threshold,
+            display: (v) => v.toFixed(2)
+          }));
+          const expansionToggle = _makeToggle(
+            t("rag_params_expansion"),
+            t("rag_params_expansion_desc"),
+            ragParams.chunk_expansion_enabled
+          );
+          expansionToggle.querySelector("button").id = "ragExpansionToggle";
+          ragBox.appendChild(expansionToggle);
+          ragBox.appendChild(_makeSlider({
+            id: "ragExpansionWindowSlider",
+            label: t("rag_params_expansion_window"),
+            desc: t("rag_params_expansion_window_desc"),
+            min: 0,
+            max: 3,
+            step: 1,
+            value: ragParams.chunk_expansion_window,
+            display: (v) => String(v)
+          }));
+          container.appendChild(ragBox);
+          const llmTitle = document.createElement("div");
+          llmTitle.className = "text-xs uppercase tracking-wider text-text-quaternary mb-2 mt-5";
+          llmTitle.textContent = t("llm_params_section");
+          container.appendChild(llmTitle);
+          const llmBox = document.createElement("div");
+          llmBox.className = "bg-surface-2 border border-border-default rounded-xl px-4 py-3 space-y-4";
+          llmBox.appendChild(_makeSlider({
+            id: "llmTemperatureSlider",
+            label: t("llm_params_temperature"),
+            desc: t("llm_params_temperature_desc"),
+            min: 0,
+            max: 2,
+            step: 0.1,
+            value: llmParams.temperature,
+            display: (v) => v.toFixed(1)
+          }));
+          llmBox.appendChild(_makeNumberInput({
+            id: "llmMaxTokensInput",
+            label: t("llm_params_max_tokens"),
+            desc: t("llm_params_max_tokens_desc"),
+            min: 256,
+            max: 8192,
+            step: 64,
+            value: llmParams.max_tokens
+          }));
+          llmBox.appendChild(_makeSlider({
+            id: "llmTopPSlider",
+            label: t("llm_params_top_p"),
+            desc: t("llm_params_top_p_desc"),
+            min: 0,
+            max: 1,
+            step: 0.05,
+            value: llmParams.top_p,
+            display: (v) => v.toFixed(2)
+          }));
+          container.appendChild(llmBox);
+          const saveBtn = document.createElement("button");
+          saveBtn.className = "w-full mt-3 border border-accent/40 rounded-lg px-3 py-2 text-sm text-accent hover:bg-accent/10 transition-colors";
+          saveBtn.textContent = t("params_save_success") === "\u53C2\u6570\u5DF2\u4FDD\u5B58" ? "\u4FDD\u5B58\u53C2\u6570" : "Save Parameters";
+          saveBtn.id = "ragLlmParamsSaveBtn";
+          saveBtn.onclick = async () => {
+            try {
+              const topK = parseInt(document.getElementById("ragTopKSlider")?.value || "8", 10);
+              const threshold = parseFloat(document.getElementById("ragThresholdSlider")?.value || "0");
+              const expansionEnabled = document.getElementById("ragExpansionToggle")?.getAttribute("aria-checked") === "true";
+              const expansionWindow = parseInt(document.getElementById("ragExpansionWindowSlider")?.value || "1", 10);
+              const temperature = parseFloat(document.getElementById("llmTemperatureSlider")?.value || "0.7");
+              const maxTokens = parseInt(document.getElementById("llmMaxTokensInput")?.value || "4096", 10);
+              const topP = parseFloat(document.getElementById("llmTopPSlider")?.value || "1.0");
+              await ragParamsApi.set({
+                top_k: topK,
+                score_threshold: threshold,
+                chunk_expansion_enabled: expansionEnabled,
+                chunk_expansion_window: expansionWindow
+              });
+              await generationParamsApi.set({
+                temperature,
+                max_tokens: maxTokens,
+                top_p: topP
+              });
+              toastSuccess(t("params_save_success"));
+            } catch (err) {
+              toastError(t("params_save_error") + ": " + String(err));
+            }
+          };
+          container.appendChild(saveBtn);
+        }
+        function _makeSlider({ id, label, desc, min, max, step, value, display }) {
+          const wrapper = document.createElement("div");
+          wrapper.className = "space-y-1";
+          const header = document.createElement("div");
+          header.className = "flex items-center justify-between";
+          const labelEl = document.createElement("span");
+          labelEl.className = "text-sm text-text-secondary";
+          labelEl.textContent = label;
+          header.appendChild(labelEl);
+          const valueEl = document.createElement("span");
+          valueEl.className = "text-xs text-text-quaternary font-mono";
+          valueEl.textContent = display(value);
+          valueEl.id = id + "Value";
+          header.appendChild(valueEl);
+          wrapper.appendChild(header);
+          const slider = document.createElement("input");
+          slider.type = "range";
+          slider.id = id;
+          slider.min = String(min);
+          slider.max = String(max);
+          slider.step = String(step);
+          slider.value = String(value);
+          slider.className = "w-full accent-sky-400 cursor-pointer";
+          slider.oninput = () => {
+            valueEl.textContent = display(parseFloat(slider.value));
+          };
+          wrapper.appendChild(slider);
+          if (desc) {
+            const descEl = document.createElement("p");
+            descEl.className = "text-[11px] text-text-quaternary";
+            descEl.textContent = desc;
+            wrapper.appendChild(descEl);
+          }
+          return wrapper;
+        }
+        function _makeNumberInput({ id, label, desc, min, max, step, value }) {
+          const wrapper = document.createElement("div");
+          wrapper.className = "space-y-1";
+          const labelEl = document.createElement("span");
+          labelEl.className = "text-sm text-text-secondary";
+          labelEl.textContent = label;
+          wrapper.appendChild(labelEl);
+          const input = document.createElement("input");
+          input.type = "number";
+          input.id = id;
+          input.min = String(min);
+          input.max = String(max);
+          input.step = String(step);
+          input.value = String(value);
+          input.className = "w-full bg-surface-1 border border-border-default rounded-lg px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent transition-colors";
+          wrapper.appendChild(input);
+          if (desc) {
+            const descEl = document.createElement("p");
+            descEl.className = "text-[11px] text-text-quaternary";
+            descEl.textContent = desc;
+            wrapper.appendChild(descEl);
+          }
+          return wrapper;
+        }
+        function _makeToggle(label, desc, checked) {
+          const wrapper = document.createElement("div");
+          wrapper.className = "flex items-center justify-between";
+          const left = document.createElement("div");
+          left.className = "space-y-0.5";
+          const labelEl = document.createElement("span");
+          labelEl.className = "text-sm text-text-secondary";
+          labelEl.textContent = label;
+          left.appendChild(labelEl);
+          if (desc) {
+            const descEl = document.createElement("p");
+            descEl.className = "text-[11px] text-text-quaternary";
+            descEl.textContent = desc;
+            left.appendChild(descEl);
+          }
+          wrapper.appendChild(left);
+          const toggle = document.createElement("button");
+          toggle.className = "relative inline-flex h-6 w-11 items-center rounded-full transition-colors " + (checked ? "bg-accent" : "bg-slate-600");
+          toggle.setAttribute("aria-checked", String(checked));
+          toggle.setAttribute("role", "switch");
+          const knob = document.createElement("span");
+          knob.className = "inline-block h-4 w-4 transform rounded-full bg-white transition-transform " + (checked ? "translate-x-5" : "translate-x-1");
+          toggle.appendChild(knob);
+          toggle.onclick = () => {
+            const isChecked = toggle.getAttribute("aria-checked") === "true";
+            const newState = !isChecked;
+            toggle.setAttribute("aria-checked", String(newState));
+            toggle.classList.toggle("bg-accent", newState);
+            toggle.classList.toggle("bg-slate-600", !newState);
+            knob.classList.toggle("translate-x-5", newState);
+            knob.classList.toggle("translate-x-1", !newState);
+          };
+          wrapper.appendChild(toggle);
+          return wrapper;
         }
       
         // ui/src/main.js
@@ -20974,9 +21231,11 @@
           Pending: "bg-slate-400",
           Failed: "bg-red-400"
         };
+        var _kbSortBy = null;
+        var _kbSortOrder = null;
         async function loadDocuments() {
           try {
-            _kbAllDocs = await invoke("get_documents");
+            _kbAllDocs = await invoke("get_documents", { sortBy: _kbSortBy, sortOrder: _kbSortOrder });
             const isPro = get("isPro");
             setState({ docCount: _kbAllDocs.length });
             updateChatInputState();
@@ -21386,6 +21645,20 @@
           initSidebar();
           setReloadDocsCallback(loadDocuments);
           setFilterChangeCallback(applyKbFilters);
+          if ($("docSortSelect")) {
+            $("docSortSelect").addEventListener("change", async () => {
+              const val = $("docSortSelect").value;
+              if (val) {
+                const [by, order] = val.split(":");
+                _kbSortBy = by;
+                _kbSortOrder = order;
+              } else {
+                _kbSortBy = null;
+                _kbSortOrder = null;
+              }
+              await loadDocuments();
+            });
+          }
           restoreSidebarState();
           initSearchPopup(loadConversation);
           initCommandPalette(getCommands());
