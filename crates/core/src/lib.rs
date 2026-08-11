@@ -1410,9 +1410,41 @@ pub trait Storage: Send + Sync {
     ) -> anyhow::Result<()> {
         Ok(())
     }
-}
 
-/// 大模型端口（对应 REQ-RAG-001/007）：token 级流式输出。
+    // ------------------------------------------------------------------
+    // 导入历史记录（REQ-ING-011）
+    // ------------------------------------------------------------------
+
+    /// 写入一条导入历史记录。
+    ///
+    /// 记录每次导入操作的时间戳、文件名、格式、结果（成功/失败/跳过）。
+    /// 历史记录上限 100 条，超过自动淘汰最旧记录。
+    async fn add_import_log(
+        &self,
+        _file_name: &str,
+        _format: &str,
+        _result: &str,
+        _error_message: Option<&str>,
+        _file_size: Option<i64>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 查询导入历史记录（最近 100 条，按时间倒序）。
+    ///
+    /// 可选按结果筛选（success / failed / skipped）。
+    async fn get_import_logs(
+        &self,
+        _result_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<echomind_models::ImportLogEntry>> {
+        Ok(Vec::new())
+    }
+
+    /// 清空导入历史记录。
+    async fn clear_import_logs(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
 pub trait LLMProvider: Send + Sync {
     /// 发起流式对话；返回的流在首个 token 到达前即应建立，逐 token 产出增量文本。
     async fn chat_stream(

@@ -1640,6 +1640,27 @@ pub struct BudgetStats {
     pub remaining: f64,
 }
 
+/// 导入历史记录条目（REQ-ING-011）。
+///
+/// 记录每次导入操作的时间戳、文件名、格式、结果（成功/失败/跳过）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportLogEntry {
+    /// 记录 ID
+    pub id: i64,
+    /// Unix 时间戳（秒）
+    pub timestamp: i64,
+    /// 文件名
+    pub file_name: String,
+    /// 文件格式（扩展名）
+    pub format: String,
+    /// 导入结果：success / failed / skipped
+    pub result: String,
+    /// 失败原因（仅 result=failed 时有值）
+    pub error_message: Option<String>,
+    /// 文件大小（字节）
+    pub file_size: Option<i64>,
+}
+
 /// 速率限制统计。
 ///
 /// 记录主体在滑动窗口内的请求频率统计。

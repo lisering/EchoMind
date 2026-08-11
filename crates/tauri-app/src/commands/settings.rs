@@ -1271,3 +1271,30 @@ pub async fn set_update_check_enabled_inner(enabled: bool, state: &AppState) -> 
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+// ------------------------------------------------------------------
+// 导入历史记录（REQ-ING-011）
+// ------------------------------------------------------------------
+
+/// 查询导入历史记录（最近 100 条，按时间倒序）。
+#[tauri::command]
+pub async fn get_import_history(
+    result_filter: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<echomind_models::ImportLogEntry>, String> {
+    state
+        .storage
+        .get_import_logs(result_filter.as_deref())
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 清空导入历史记录。
+#[tauri::command]
+pub async fn clear_import_history(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .storage
+        .clear_import_logs()
+        .await
+        .map_err(|e| format!("{e:#}"))
+}

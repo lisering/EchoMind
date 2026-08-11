@@ -137,6 +137,7 @@ pub fn run() {
             commands::set_turn_active_version,
             commands::get_turn_active_versions,
             commands::delete_conversation,
+            commands::rename_conversation,
             commands::abort_chat,
             commands::abort_import,
             commands::test_llm_connection,
@@ -239,6 +240,7 @@ pub fn run() {
             commands::set_clipboard_config,
             commands::get_audit_logs,
             commands::clear_audit_logs,
+            commands::export_audit_report,
             commands::check_password_strength,
             // 安全态势分层（Q05 借鉴 QM SecurityPosture）
             commands::set_security_posture,
@@ -411,6 +413,9 @@ pub fn run() {
             commands::check_for_updates,
             commands::get_update_check_config,
             commands::set_update_check_enabled,
+            // REQ-ING-011：导入历史记录
+            commands::get_import_history,
+            commands::clear_import_history,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

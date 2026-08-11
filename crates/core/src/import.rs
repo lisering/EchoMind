@@ -211,7 +211,13 @@ impl<S: Storage> ImportService<S> {
 
         // 内容指纹去重（REQ-ING-004）
         if self.storage.find_document_by_hash(&hash).await?.is_some() {
-            return Ok(ImportOutcome::SkippedDuplicate(Self::file_name(&canonical)));
+            // REQ-ING-011：记录跳过的导入
+            let file_name = Self::file_name(&canonical);
+            let _ = self
+                .storage
+                .add_import_log(&file_name, &ext, "skipped", Some("duplicate content"), None)
+                .await;
+            return Ok(ImportOutcome::SkippedDuplicate(file_name));
         }
 
         // 同名不同内容检测（REQ-ING-012）
@@ -228,19 +234,24 @@ impl<S: Storage> ImportService<S> {
         let dest = self
             .data_dir
             .join("documents")
-            .join(format!("{hash}-{}", Self::file_name(&canonical)));
+            .join(format!("{hash}-{}", file_name));
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .with_context(|| format!("创建数据目录失败: {}", parent.display()))?;
         }
         // GB 级文件优化：内核级拷贝副本（零用户态内存），替代 read+write
-        tokio::fs::copy(&canonical, &dest)
+        let file_size = tokio::fs::copy(&canonical, &dest)
             .await
             .with_context(|| format!("写入数据目录失败: {}", dest.display()))?;
 
         let doc = Document::new(dest.to_string_lossy().into_owned(), hash);
         self.storage.add_document(&doc).await?;
+        // REQ-ING-011：记录成功的导入
+        let _ = self
+            .storage
+            .add_import_log(&file_name, &ext, "success", None, Some(file_size as i64))
+            .await;
         Ok(ImportOutcome::Imported(doc))
     }
 

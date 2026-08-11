@@ -321,6 +321,28 @@ input[type="url"],
 }
 
 /* ============================================================
+ * v1.14：文档列表键盘导航样式（REQ-KB-004）
+ * ============================================================ */
+
+/* 键盘选中项高亮 */
+.kb-keyboard-selected {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: -2px;
+  background: var(--accent-dim, rgba(59, 130, 246, 0.08)) !important;
+}
+
+/* 多选模式下被选中的文档 */
+.kb-keyboard-checked {
+  background: var(--accent-dim, rgba(59, 130, 246, 0.12)) !important;
+}
+
+/* 文档列表区域聚焦时显示焦点指示 */
+#kbDocScroll:focus-visible {
+  outline: 1px solid var(--accent, #3b82f6);
+  outline-offset: -1px;
+}
+
+/* ============================================================
  * 安全防御 UI 样式 — 锁屏遮罩 / 加密设置 / 审计日志
  * ============================================================ */
 

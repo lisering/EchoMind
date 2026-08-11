@@ -292,6 +292,29 @@ pub async fn delete_conversation_inner(id: &str, state: &AppState) -> Result<(),
     Ok(())
 }
 
+/// 重命名会话（REQ-IX-001：右键菜单「重命名」功能）。
+#[tauri::command]
+pub async fn rename_conversation(
+    id: String,
+    title: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    rename_conversation_inner(&id, &title, state.inner()).await
+}
+
+/// 重命名会话逻辑（命令与集成测试复用）。
+pub async fn rename_conversation_inner(
+    id: &str,
+    title: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    state
+        .storage
+        .update_conversation_title(id, title)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// 停止生成：触发指定会话的中断令牌，流循环立即 break 并中止网络拉取。
 ///
 /// 本地 LLM 模式（Pro）下额外调用 `LocalLlmEngine::abort()`，使 mistral.rs

@@ -353,6 +353,19 @@ CREATE TABLE IF NOT EXISTS budget_records (
     cost_usd REAL NOT NULL,
     model_name TEXT NOT NULL
 );
+
+-- 导入历史记录表（REQ-ING-011）：
+-- 记录每次导入操作的时间戳、文件名、格式、结果（成功/失败/跳过）。
+-- 上限 100 条，超过自动淘汰最旧记录。
+CREATE TABLE IF NOT EXISTS import_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    file_name TEXT NOT NULL,
+    format TEXT NOT NULL,
+    result TEXT NOT NULL,
+    error_message TEXT,
+    file_size INTEGER
+);
 ";
 
 /// 索引定义（在表创建与迁移完成后执行）。
@@ -388,6 +401,7 @@ CREATE INDEX IF NOT EXISTS idx_scratch_logs_date ON scratch_logs(date);
 CREATE INDEX IF NOT EXISTS idx_scratch_logs_created ON scratch_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_budget_records_principal ON budget_records(principal);
 CREATE INDEX IF NOT EXISTS idx_budget_records_timestamp ON budget_records(timestamp);
+CREATE INDEX IF NOT EXISTS idx_import_logs_timestamp ON import_logs(timestamp);
 ";
 
 /// FTS5 全文索引虚拟表（混合检索关键词通道，REQ-RAG-010）。
@@ -4656,6 +4670,103 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
     async fn set_budget_limit(&self, principal: &str, daily_limit_usd: f64) -> anyhow::Result<()> {
         let key = format!("budget.daily_limit_usd.{}", principal);
         self.set_setting(&key, &daily_limit_usd.to_string()).await
+    }
+
+    // ------------------------------------------------------------------
+    // 导入历史记录（REQ-ING-011）
+    // ------------------------------------------------------------------
+
+    async fn add_import_log(
+        &self,
+        file_name: &str,
+        format: &str,
+        result: &str,
+        error_message: Option<&str>,
+        file_size: Option<i64>,
+    ) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let file_name = file_name.to_string();
+        let format = format.to_string();
+        let result = result.to_string();
+        let error_message = error_message.map(|s| s.to_string());
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let now = chrono::Utc::now().timestamp();
+            conn.execute(
+                "INSERT INTO import_logs (timestamp, file_name, format, result, error_message, file_size) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![now, &file_name, &format, &result, &error_message, file_size],
+            )?;
+            // 淘汰最旧记录（保留最近 100 条）
+            conn.execute(
+                "DELETE FROM import_logs WHERE id NOT IN (SELECT id FROM import_logs ORDER BY id DESC LIMIT 100)",
+                [],
+            )?;
+            Ok::<_, anyhow::Error>(())
+        })
+        .await??;
+        Ok(())
+    }
+
+    async fn get_import_logs(
+        &self,
+        result_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<echomind_models::ImportLogEntry>> {
+        let pool = self.pool.clone();
+        let filter = result_filter.map(|s| s.to_string());
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let mut entries = Vec::new();
+            if let Some(ref f) = filter {
+                let mut stmt = conn.prepare(
+                    "SELECT id, timestamp, file_name, format, result, error_message, file_size FROM import_logs WHERE result = ?1 ORDER BY id DESC LIMIT 100",
+                )?;
+                let rows = stmt.query_map(rusqlite::params![f], |row| {
+                    Ok(echomind_models::ImportLogEntry {
+                        id: row.get(0)?,
+                        timestamp: row.get(1)?,
+                        file_name: row.get(2)?,
+                        format: row.get(3)?,
+                        result: row.get(4)?,
+                        error_message: row.get(5)?,
+                        file_size: row.get(6)?,
+                    })
+                })?;
+                for row in rows {
+                    entries.push(row?);
+                }
+            } else {
+                let mut stmt = conn.prepare(
+                    "SELECT id, timestamp, file_name, format, result, error_message, file_size FROM import_logs ORDER BY id DESC LIMIT 100",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok(echomind_models::ImportLogEntry {
+                        id: row.get(0)?,
+                        timestamp: row.get(1)?,
+                        file_name: row.get(2)?,
+                        format: row.get(3)?,
+                        result: row.get(4)?,
+                        error_message: row.get(5)?,
+                        file_size: row.get(6)?,
+                    })
+                })?;
+                for row in rows {
+                    entries.push(row?);
+                }
+            }
+            Ok(entries)
+        })
+        .await?
+    }
+
+    async fn clear_import_logs(&self) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            conn.execute("DELETE FROM import_logs", [])?;
+            Ok::<_, anyhow::Error>(())
+        })
+        .await??;
+        Ok(())
     }
 }
 

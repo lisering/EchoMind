@@ -1040,6 +1040,28 @@
       }
       
       /* ============================================================
+       * v1.14：文档列表键盘导航样式（REQ-KB-004）
+       * ============================================================ */
+      
+      /* 键盘选中项高亮 */
+      .kb-keyboard-selected {
+        outline: 2px solid var(--accent, #3b82f6);
+        outline-offset: -2px;
+        background: var(--accent-dim, rgba(59, 130, 246, 0.08)) !important;
+      }
+      
+      /* 多选模式下被选中的文档 */
+      .kb-keyboard-checked {
+        background: var(--accent-dim, rgba(59, 130, 246, 0.12)) !important;
+      }
+      
+      /* 文档列表区域聚焦时显示焦点指示 */
+      #kbDocScroll:focus-visible {
+        outline: 1px solid var(--accent, #3b82f6);
+        outline-offset: -1px;
+      }
+      
+      /* ============================================================
        * 安全防御 UI 样式 — 锁屏遮罩 / 加密设置 / 审计日志
        * ============================================================ */
       
@@ -5458,6 +5480,7 @@
           generationParamsApi: () => generationParamsApi,
           graphApi: () => graphApi,
           importApi: () => importApi,
+          importHistoryApi: () => importHistoryApi,
           invoke: () => invoke,
           kbStatsApi: () => kbStatsApi,
           kvCacheApi: () => kvCacheApi,
@@ -5500,7 +5523,7 @@
           } catch (_) {
           }
         }
-        var llmApi, convApi, docApi, docPreviewApi, docExportApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, chunkParamsApi, syncApi, localLlmApi, graphApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, windowSettingsApi, errorLogsApi, symbolApi, webSearchApi, ragParamsApi, generationParamsApi, autostartApi, updateCheckApi;
+        var llmApi, convApi, docApi, docPreviewApi, docExportApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, chunkParamsApi, syncApi, localLlmApi, graphApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, windowSettingsApi, errorLogsApi, symbolApi, webSearchApi, ragParamsApi, generationParamsApi, autostartApi, updateCheckApi, importHistoryApi;
         var init_ipc = __esm({
           "ui/src/ipc.js"() {
             llmApi = {
@@ -5523,6 +5546,8 @@
               /** 从指定消息创建新分支（REQ-RAG-039） */
               branchFromMessage: (conversationId, messageId, newContent) => invoke("branch_from_message", { conversationId, messageId, newContent }),
               delete: (id) => invoke("delete_conversation", { id }),
+              /** 重命名会话（REQ-IX-001：右键菜单重命名） */
+              rename: (id, title) => invoke("rename_conversation", { id, title }),
               /** 分页获取会话列表（大列表性能优化） */
               listPaginated: (offset, limit, workspaceId) => invoke("get_conversations_paginated", { offset, limit, workspaceId }),
               /** 分页获取消息列表（长对话性能优化） */
@@ -5688,6 +5713,8 @@
               clearPanicWipePassword: () => invoke("clear_panic_wipe_password"),
               isPanicWipeEnabled: () => invoke("is_panic_wipe_enabled"),
               clearAuditLogs: () => invoke("clear_audit_logs"),
+              /** 导出审计报告（Markdown/JSON） */
+              exportAuditReport: (format) => invoke("export_audit_report", { format }),
               setClipboardConfig: (enabled, clearAfterSecs) => invoke("set_clipboard_config", { enabled, clearAfterSecs }),
               setSecurityPosture: (posture) => invoke("set_security_posture", { posture }),
               getSecurityPosture: () => invoke("get_security_posture"),
@@ -5811,6 +5838,12 @@
               getConfig: () => invoke("get_update_check_config"),
               /** 设置自动检查开关 */
               setEnabled: (enabled) => invoke("set_update_check_enabled", { enabled })
+            };
+            importHistoryApi = {
+              /** 查询导入历史（可选按结果筛选） */
+              list: (resultFilter) => invoke("get_import_history", resultFilter ? { resultFilter } : {}),
+              /** 清空导入历史 */
+              clear: () => invoke("clear_import_history")
             };
           }
         });
@@ -18580,12 +18613,25 @@
         init_i18n();
         init_toast();
         init_ipc();
+        init_state();
         var _visible = false;
         function initContextMenu() {
           const menu = $("ctxMenu");
           if (!menu) return;
           document.addEventListener("contextmenu", (e) => {
             const target = e.target;
+            const convItem = target.closest("[data-conv-id]");
+            if (convItem) {
+              e.preventDefault();
+              _showConvMenu(e.clientX, e.clientY, convItem.dataset.convId || "", convItem.dataset.convTitle || "");
+              return;
+            }
+            const msgBlock = target.closest(".msg-block");
+            if (msgBlock) {
+              e.preventDefault();
+              _showMsgMenu(e.clientX, e.clientY, msgBlock);
+              return;
+            }
             const docItem = target.closest("[data-doc-name]");
             if (docItem) {
               e.preventDefault();
@@ -18639,20 +18685,13 @@
             items.push(_item("reclassifyDoc", t("ctx.reclassify_doc", "\u91CD\u5206\u7C7B\u6587\u6863"), "", true));
             items.push(_separator());
             items.push(_item("rebuildIndex", t("ctx.rebuild_index", "\u91CD\u5EFA\u7D22\u5F15"), "", true));
+            items.push(_separator());
+            items.push(_item("deleteDoc", t("ctx.delete_doc", "\u5220\u9664\u6587\u6863"), "", true));
           }
           menu.innerHTML = items.join("");
           menu.dataset.docName = docName;
           menu.dataset.docId = docId;
-          menu.classList.add("visible");
-          const mw = menu.offsetWidth;
-          const mh = menu.offsetHeight;
-          const vw = window.innerWidth;
-          const vh = window.innerHeight;
-          if (x + mw > vw - 4) x = vw - mw - 4;
-          if (y + mh > vh - 4) y = vh - mh - 4;
-          menu.style.left = Math.max(4, x) + "px";
-          menu.style.top = Math.max(4, y) + "px";
-          _visible = true;
+          _positionMenu(menu, x, y);
         }
         function _showSourceMenu(x, y, chunkContent) {
           const menu = $("ctxMenu");
@@ -18661,31 +18700,13 @@
           items.push(_item("copyChunk", t("ctx.copy_chunk"), "", true));
           menu.innerHTML = items.join("");
           menu.dataset.chunkContent = chunkContent;
-          menu.classList.add("visible");
-          const mw = menu.offsetWidth;
-          const mh = menu.offsetHeight;
-          const vw = window.innerWidth;
-          const vh = window.innerHeight;
-          if (x + mw > vw - 4) x = vw - mw - 4;
-          if (y + mh > vh - 4) y = vh - mh - 4;
-          menu.style.left = Math.max(4, x) + "px";
-          menu.style.top = Math.max(4, y) + "px";
-          _visible = true;
+          _positionMenu(menu, x, y);
         }
         function _showMenu(x, y, ctx) {
           const menu = $("ctxMenu");
           if (!menu) return;
           menu.innerHTML = _buildItems(ctx);
-          menu.classList.add("visible");
-          const mw = menu.offsetWidth;
-          const mh = menu.offsetHeight;
-          const vw = window.innerWidth;
-          const vh = window.innerHeight;
-          if (x + mw > vw - 4) x = vw - mw - 4;
-          if (y + mh > vh - 4) y = vh - mh - 4;
-          menu.style.left = Math.max(4, x) + "px";
-          menu.style.top = Math.max(4, y) + "px";
-          _visible = true;
+          _positionMenu(menu, x, y);
         }
         function _hideMenu() {
           if (!_visible) return;
@@ -18712,6 +18733,165 @@
         }
         async function _executeAction(action) {
           const menu = $("ctxMenu");
+          if (action === "convRename") {
+            const convId = menu?.dataset.convId || "";
+            const convItem = document.querySelector(`[data-conv-id="${convId}"]`);
+            if (convItem) {
+              const titleSpan = convItem.querySelector("span.truncate");
+              if (titleSpan) {
+                titleSpan.setAttribute("contenteditable", "true");
+                titleSpan.focus();
+                document.execCommand("selectAll", false);
+                const finishRename = async () => {
+                  titleSpan.removeAttribute("contenteditable");
+                  const newTitle = titleSpan.textContent?.trim() || "";
+                  if (newTitle && convId) {
+                    try {
+                      await convApi.rename(convId, newTitle);
+                      toastSuccess(t("ctx.rename_success", "\u91CD\u547D\u540D\u6210\u529F"));
+                    } catch (err) {
+                      toastError(err);
+                    }
+                  }
+                  titleSpan.removeEventListener("blur", finishRename);
+                  titleSpan.removeEventListener("keydown", onRenameKey);
+                };
+                const onRenameKey = (e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    titleSpan.blur();
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    titleSpan.blur();
+                  }
+                };
+                titleSpan.addEventListener("blur", finishRename);
+                titleSpan.addEventListener("keydown", onRenameKey);
+              }
+            }
+            return;
+          }
+          if (action === "convDelete") {
+            const convId = menu?.dataset.convId || "";
+            const convTitle = menu?.dataset.convTitle || "";
+            if (!convId) return;
+            const confirmed = await showConfirmDialog({
+              title: t("ctx.delete_conv_title", "\u5220\u9664\u4F1A\u8BDD"),
+              body: t("ctx.delete_conv_confirm", { name: convTitle }) || `\u786E\u5B9A\u5220\u9664\u300C${convTitle}\u300D\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002`,
+              confirmText: t("common.delete", "\u5220\u9664"),
+              cancelText: t("common.cancel", "\u53D6\u6D88"),
+              danger: true
+            });
+            if (!confirmed) return;
+            try {
+              await convApi.delete(convId);
+              toastSuccess(t("ctx.delete_conv_success", "\u4F1A\u8BDD\u5DF2\u5220\u9664"));
+              document.dispatchEvent(new CustomEvent("ctx-refresh-conversations"));
+            } catch (err) {
+              toastError(err);
+            }
+            return;
+          }
+          if (action === "convExport") {
+            const convId = menu?.dataset.convId || "";
+            const convTitle = menu?.dataset.convTitle || "conversation";
+            if (!convId) return;
+            try {
+              const md = await convApi.exportMarkdown(convId);
+              if (!md) {
+                toastError(t("ctx.export_conv_empty", "\u5BF9\u8BDD\u5185\u5BB9\u4E3A\u7A7A"));
+                return;
+              }
+              const destPath = await saveDialog({
+                defaultPath: convTitle + ".md",
+                title: t("ctx.export_conv_title", "\u5BFC\u51FA\u4F1A\u8BDD")
+              });
+              if (!destPath) return;
+              await convApi.saveTextFile(destPath, md);
+              toastSuccess(t("ctx.export_conv_success", "\u5BFC\u51FA\u6210\u529F"));
+            } catch (err) {
+              toastError(err);
+            }
+            return;
+          }
+          if (action === "msgCopyFull") {
+            const rawMd = menu?.dataset.msgRawMd || "";
+            const ok = await copyToClipboard(rawMd);
+            if (ok) toast(t("chat.copied_to_clipboard"), "success");
+            else toastError(t("chat.copy_failed"));
+            return;
+          }
+          if (action === "msgCopyPlain") {
+            const plainText = menu?.dataset.msgPlain || "";
+            const ok = await copyToClipboard(plainText.trim());
+            if (ok) toast(t("chat.copied_to_clipboard"), "success");
+            else toastError(t("chat.copy_failed"));
+            return;
+          }
+          if (action === "msgRegenerate") {
+            const query = menu?.dataset.msgQuery || "";
+            if (!query) return;
+            const input = $("queryInput");
+            if (input) {
+              input.value = query;
+            }
+            document.dispatchEvent(new CustomEvent("ctx-regenerate"));
+            return;
+          }
+          if (action === "msgDelete") {
+            const msgId = menu?.dataset.msgId || "";
+            const convId = get("currentConversationId") || "";
+            if (!msgId || !convId) return;
+            const confirmed = await showConfirmDialog({
+              title: t("ctx.delete_msg_title", "\u5220\u9664\u6D88\u606F"),
+              body: t("ctx.delete_msg_confirm", "\u786E\u5B9A\u5220\u9664\u6B64\u6D88\u606F\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002"),
+              confirmText: t("common.delete", "\u5220\u9664"),
+              cancelText: t("common.cancel", "\u53D6\u6D88"),
+              danger: true
+            });
+            if (!confirmed) return;
+            try {
+              await convApi.deleteMessage(convId, msgId);
+              const msgBlock = document.querySelector(`[data-msg-id="${msgId}"]`);
+              if (msgBlock) {
+                if (msgBlock.classList.contains("msg-user")) {
+                  const next = msgBlock.nextElementSibling;
+                  if (next && next.classList.contains("msg-assistant")) next.remove();
+                }
+                if (msgBlock.classList.contains("msg-assistant")) {
+                  const prev = msgBlock.previousElementSibling;
+                  if (prev && prev.classList.contains("msg-user")) prev.remove();
+                }
+                msgBlock.remove();
+              }
+              toastSuccess(t("ctx.delete_msg_success", "\u6D88\u606F\u5DF2\u5220\u9664"));
+            } catch (err) {
+              toastError(err);
+            }
+            return;
+          }
+          if (action === "deleteDoc") {
+            const docId = menu?.dataset.docId || "";
+            const docName = menu?.dataset.docName || "";
+            if (!docId) return;
+            const confirmed = await showConfirmDialog({
+              title: t("ctx.delete_doc_title", "\u5220\u9664\u6587\u6863"),
+              body: t("ctx.delete_doc_confirm", { name: docName }) || `\u786E\u5B9A\u5220\u9664\u300C${docName}\u300D\uFF1F\u6B64\u64CD\u4F5C\u5C06\u7EA7\u8054\u5220\u9664\u6240\u6709\u5206\u5757\u548C\u5411\u91CF\u6570\u636E\uFF0C\u4E0D\u53EF\u64A4\u9500\u3002`,
+              confirmText: t("common.delete", "\u5220\u9664"),
+              cancelText: t("common.cancel", "\u53D6\u6D88"),
+              danger: true
+            });
+            if (!confirmed) return;
+            try {
+              await docApi.delete(docId);
+              toastSuccess(t("ctx.delete_doc_success", "\u6587\u6863\u5DF2\u5220\u9664"));
+              document.dispatchEvent(new CustomEvent("ctx-refresh-documents"));
+            } catch (err) {
+              toastError(err);
+            }
+            return;
+          }
           if (action === "copyDocName") {
             const docName = menu?.dataset.docName || "";
             copyToClipboard(docName).then((ok) => {
@@ -18811,6 +18991,244 @@
         function _hasSelection() {
           const sel = window.getSelection();
           return !!sel && sel.toString().trim().length > 0;
+        }
+        function _showConvMenu(x, y, convId, convTitle) {
+          const menu = $("ctxMenu");
+          if (!menu) return;
+          const items = [];
+          items.push(_item("convRename", t("ctx.rename_conv", "\u91CD\u547D\u540D"), "", true));
+          items.push(_separator());
+          items.push(_item("convExport", t("ctx.export_conv", "\u5BFC\u51FA\u4E3A Markdown"), "", true));
+          items.push(_separator());
+          items.push(_item("convDelete", t("ctx.delete_conv", "\u5220\u9664"), "", true));
+          menu.innerHTML = items.join("");
+          menu.dataset.convId = convId;
+          menu.dataset.convTitle = convTitle;
+          _positionMenu(menu, x, y);
+        }
+        function _showMsgMenu(x, y, msgBlock) {
+          const menu = $("ctxMenu");
+          if (!menu) return;
+          const isAssistant = msgBlock.classList.contains("msg-assistant");
+          const isUser = msgBlock.classList.contains("msg-user");
+          const isStreaming2 = get("streaming") || false;
+          let rawMd = "";
+          let plainText = "";
+          if (isAssistant) {
+            const mdEl = msgBlock.querySelector(".md");
+            rawMd = mdEl?.dataset.rawMarkdown || mdEl?.textContent || "";
+            if (mdEl) {
+              const clone = mdEl.cloneNode(true);
+              clone.querySelectorAll(".code-header, .copy-btn, .code-lang").forEach((el) => el.remove());
+              plainText = clone.textContent || "";
+            }
+          } else if (isUser) {
+            rawMd = msgBlock.dataset.fullText || msgBlock.querySelector(".msg-user-content")?.textContent || "";
+            plainText = rawMd;
+          }
+          const msgId = msgBlock.dataset.msgId || "";
+          const query = msgBlock.dataset.query || "";
+          const items = [];
+          items.push(_item("msgCopyFull", t("ctx.copy_full", "\u590D\u5236\u5168\u6587"), "\u2318C", rawMd.length > 0));
+          if (isAssistant) {
+            items.push(_item("msgCopyPlain", t("ctx.copy_plain", "\u590D\u5236\u7EAF\u6587\u672C"), "", plainText.length > 0));
+          }
+          if (isAssistant && !isStreaming2 && query) {
+            items.push(_separator());
+            items.push(_item("msgRegenerate", t("ctx.regenerate", "\u91CD\u65B0\u751F\u6210"), "", true));
+          }
+          if (!isStreaming2 && msgId) {
+            items.push(_separator());
+            items.push(_item("msgDelete", t("ctx.delete_msg", "\u5220\u9664\u6D88\u606F"), "", true));
+          }
+          menu.innerHTML = items.join("");
+          menu.dataset.msgRawMd = rawMd;
+          menu.dataset.msgPlain = plainText;
+          menu.dataset.msgId = msgId;
+          menu.dataset.msgQuery = query;
+          _positionMenu(menu, x, y);
+        }
+        function _positionMenu(menu, x, y) {
+          menu.classList.add("visible");
+          const mw = menu.offsetWidth;
+          const mh = menu.offsetHeight;
+          const vw = window.innerWidth;
+          const vh = window.innerHeight;
+          if (x + mw > vw - 4) x = vw - mw - 4;
+          if (y + mh > vh - 4) y = vh - mh - 4;
+          menu.style.left = Math.max(4, x) + "px";
+          menu.style.top = Math.max(4, y) + "px";
+          _visible = true;
+        }
+      
+        // ui/src/doc-keyboard.js
+        init_utils();
+        init_i18n();
+        init_toast();
+        init_ipc();
+        var _kbSelIdx = -1;
+        var _multiSelectMode2 = false;
+        var _selectedIds = /* @__PURE__ */ new Set();
+        function initDocKeyboard(handlers = {}) {
+          const docList = $("docList");
+          if (!docList) return;
+          const kbScroll = $("kbDocScroll");
+          if (kbScroll && !kbScroll.hasAttribute("tabindex")) {
+            kbScroll.setAttribute("tabindex", "0");
+          }
+          docList.addEventListener("keydown", (e) => {
+            const focused = document.activeElement;
+            const inDocList = focused === kbScroll || focused && focused.closest("#docList");
+            if (!inDocList) return;
+            const items = _getDocItems();
+            if (items.length === 0) return;
+            switch (e.key) {
+              case "ArrowDown":
+                e.preventDefault();
+                _moveSelection(e.shiftKey ? 1 : 1, e.shiftKey);
+                break;
+              case "ArrowUp":
+                e.preventDefault();
+                _moveSelection(-1, e.shiftKey);
+                break;
+              case "Enter":
+                e.preventDefault();
+                _openPreview();
+                break;
+              case "Delete":
+              case "Backspace":
+                e.preventDefault();
+                _deleteSelected(handlers);
+                break;
+              case "a":
+              case "A":
+                if (e.metaKey || e.ctrlKey) {
+                  e.preventDefault();
+                  _selectAll();
+                }
+                break;
+              case "Escape":
+                e.preventDefault();
+                _clearSelection();
+                break;
+            }
+          });
+          docList.addEventListener("click", (e) => {
+            const item = e.target.closest("[data-doc-id]");
+            if (item) {
+              const items = _getDocItems();
+              _kbSelIdx = items.indexOf(item);
+              _updateSelectionUI();
+            }
+          });
+        }
+        function _getDocItems() {
+          const docList = $("docList");
+          if (!docList) return [];
+          return Array.from(docList.querySelectorAll("[data-doc-id]"));
+        }
+        function _moveSelection(delta, shiftKey) {
+          const items = _getDocItems();
+          if (items.length === 0) return;
+          if (_kbSelIdx < 0 || _kbSelIdx >= items.length) {
+            _kbSelIdx = delta > 0 ? 0 : items.length - 1;
+          } else {
+            _kbSelIdx = Math.max(0, Math.min(items.length - 1, _kbSelIdx + delta));
+          }
+          if (shiftKey && _multiSelectMode2) {
+            const itemId = items[_kbSelIdx]?.dataset.docId;
+            if (itemId) _selectedIds.add(itemId);
+          } else if (!shiftKey) {
+            _selectedIds.clear();
+          }
+          _updateSelectionUI();
+          _scrollToSelected(items[_kbSelIdx]);
+        }
+        function _updateSelectionUI() {
+          const items = _getDocItems();
+          items.forEach((item, idx) => {
+            const isSelected = idx === _kbSelIdx;
+            const isChecked = _selectedIds.has(item.dataset.docId);
+            if (isSelected) {
+              item.classList.add("kb-keyboard-selected");
+              item.setAttribute("aria-selected", "true");
+            } else {
+              item.classList.remove("kb-keyboard-selected");
+              item.removeAttribute("aria-selected");
+            }
+            if (isChecked) {
+              item.classList.add("kb-keyboard-checked");
+            } else {
+              item.classList.remove("kb-keyboard-checked");
+            }
+          });
+        }
+        function _scrollToSelected(item) {
+          if (!item) return;
+          const scrollContainer = $("kbDocScroll");
+          if (!scrollContainer) return;
+          const itemRect = item.getBoundingClientRect();
+          const containerRect = scrollContainer.getBoundingClientRect();
+          if (itemRect.top < containerRect.top) {
+            scrollContainer.scrollTop -= containerRect.top - itemRect.top;
+          } else if (itemRect.bottom > containerRect.bottom) {
+            scrollContainer.scrollTop += itemRect.bottom - containerRect.bottom;
+          }
+        }
+        function _openPreview() {
+          const items = _getDocItems();
+          if (_kbSelIdx < 0 || _kbSelIdx >= items.length) return;
+          const item = items[_kbSelIdx];
+          if (!item) return;
+          const docName = item.dataset.docName || "";
+          const docId = item.dataset.docId || "";
+          document.dispatchEvent(new CustomEvent("doc-preview-requested", {
+            detail: { docId, docName }
+          }));
+        }
+        async function _deleteSelected(handlers) {
+          const items = _getDocItems();
+          if (_kbSelIdx < 0 || _kbSelIdx >= items.length) return;
+          const item = items[_kbSelIdx];
+          if (!item) return;
+          const docId = item.dataset.docId || "";
+          const docName = item.dataset.docName || "";
+          if (!docId) return;
+          const confirmed = await showConfirmDialog({
+            title: t("ctx.delete_doc_title", "\u5220\u9664\u6587\u6863"),
+            body: t("ctx.delete_doc_confirm", { name: docName }) || `\u786E\u5B9A\u5220\u9664\u300C${docName}\u300D\uFF1F\u6B64\u64CD\u4F5C\u5C06\u7EA7\u8054\u5220\u9664\u6240\u6709\u5206\u5757\u548C\u5411\u91CF\u6570\u636E\uFF0C\u4E0D\u53EF\u64A4\u9500\u3002`,
+            confirmText: t("common.delete", "\u5220\u9664"),
+            cancelText: t("common.cancel", "\u53D6\u6D88"),
+            danger: true
+          });
+          if (!confirmed) return;
+          try {
+            await docApi.delete(docId);
+            toastSuccess(t("ctx.delete_doc_success", "\u6587\u6863\u5DF2\u5220\u9664"));
+            _kbSelIdx = -1;
+            if (handlers.onRefresh) handlers.onRefresh();
+            else document.dispatchEvent(new CustomEvent("ctx-refresh-documents"));
+          } catch (err) {
+            toastError(err);
+          }
+        }
+        function _selectAll() {
+          const items = _getDocItems();
+          if (items.length === 0) return;
+          _multiSelectMode2 = true;
+          _selectedIds.clear();
+          items.forEach((item) => {
+            const id = item.dataset.docId;
+            if (id) _selectedIds.add(id);
+          });
+          _updateSelectionUI();
+          toast(t("ctx.all_selected", `\u5DF2\u9009 ${items.length} \u4E2A\u6587\u6863`), "info");
+        }
+        function _clearSelection() {
+          _kbSelIdx = -1;
+          _selectedIds.clear();
+          _multiSelectMode2 = false;
+          _updateSelectionUI();
         }
       
         // ui/src/graph-viewer.js
@@ -22089,6 +22507,8 @@
               const item = document.createElement("div");
               const active = c.id === get("currentConversationId");
               item.className = `group flex items-center justify-between px-3 py-2.5 rounded-xl text-sm cursor-pointer ${active ? "bg-accent/15 text-accent" : "text-slate-300 hover:bg-white/5"}`;
+              item.dataset.convId = c.id;
+              item.dataset.convTitle = c.title || "";
               const title = document.createElement("span");
               title.className = "truncate";
               title.textContent = c.title;
@@ -22591,6 +23011,22 @@
           if ($("importCancelBtn")) initImportCancel();
           initConvNav();
           initContextMenu();
+          window.__echomindSend = send;
+          document.addEventListener("ctx-refresh-conversations", async () => {
+            await loadConversations();
+          });
+          document.addEventListener("ctx-refresh-documents", async () => {
+            await loadDocuments();
+          });
+          document.addEventListener("ctx-regenerate", () => {
+            const sendFn = window.__echomindSend;
+            if (typeof sendFn === "function") sendFn();
+          });
+          initDocKeyboard({
+            onRefresh: async () => {
+              await loadDocuments();
+            }
+          });
           initSecurity();
           initDownloadManager();
           initOfflineDetector();
