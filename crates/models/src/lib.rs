@@ -593,6 +593,8 @@ pub struct Conversation {
     pub title: String,
     /// 创建时间（Unix 秒级时间戳）
     pub created_at: i64,
+    /// 用户自定义排序序号（REQ-IX-002 拖拽排序；0 = 按创建时间倒序默认排序）
+    pub sort_order: i64,
 }
 
 impl Conversation {
@@ -600,6 +602,7 @@ impl Conversation {
     pub fn new(workspace_id: String, title: String) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
+            sort_order: 0,
             workspace_id,
             title,
             created_at: chrono::Utc::now().timestamp(),
@@ -613,6 +616,7 @@ impl Conversation {
             workspace_id,
             title,
             created_at: chrono::Utc::now().timestamp(),
+            sort_order: 0,
         }
     }
 }

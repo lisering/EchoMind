@@ -177,7 +177,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
     title TEXT NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -701,6 +702,18 @@ impl SqliteStorage {
     /// - **列名变更/列移除**（embeddings.embedding→vector、chunks.session_id）：
     ///   使用 CREATE-COPY-DROP-RENAME 模式，先建新表、拷贝数据、删旧表、改名。
     fn migrate_schema(conn: &rusqlite::Connection) -> anyhow::Result<()> {
+        // ── conversations 表：sort_order 列在 v1.16 新增（REQ-IX-002 拖拽排序）──
+        if Self::table_exists(conn, "conversations")?
+            && !Self::has_column(conn, "conversations", "sort_order")?
+        {
+            info!("schema 迁移：conversations 表缺少 sort_order 列，执行 ALTER TABLE ADD COLUMN");
+            conn.execute(
+                "ALTER TABLE conversations ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .context("迁移失败：conversations 表添加 sort_order 列失败")?;
+        }
+
         // ── documents 表：status_reason 列在 Phase 4+ 新增 ──
         // ALTER TABLE ADD COLUMN 安全，旧行 status_reason = NULL
         if Self::table_exists(conn, "documents")?
@@ -1779,6 +1792,18 @@ Ok(())
         .await
     }
 
+    async fn count_embeddings(&self) -> anyhow::Result<usize> {
+        let pool = self.pool.clone();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM embeddings", [], |row| row.get(0))
+                .context("统计向量数失败")?;
+            Ok(count as usize)
+        })
+        .await
+    }
+
     async fn cleanup_zombies(&self) -> anyhow::Result<usize> {
         let pool = self.pool.clone();
         run_db(move || {
@@ -1873,8 +1898,8 @@ Ok(())
         run_db(move || {
             let conn = pool.get().context("获取数据库连接失败")?;
             conn.execute(
-                "INSERT OR IGNORE INTO conversations (id, workspace_id, title, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![c.id, c.workspace_id, c.title, c.created_at],
+                "INSERT OR IGNORE INTO conversations (id, workspace_id, title, created_at, sort_order) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![c.id, c.workspace_id, c.title, c.created_at, c.sort_order],
             )
             .context("写入会话失败")?;
             Ok(())
@@ -1888,7 +1913,7 @@ Ok(())
         run_db(move || {
             let conn = pool.get().context("获取数据库连接失败")?;
             let mut stmt = conn.prepare(
-                "SELECT id, workspace_id, title, created_at FROM conversations WHERE workspace_id = ?1 ORDER BY created_at DESC, rowid DESC",
+                "SELECT id, workspace_id, title, created_at, sort_order FROM conversations WHERE workspace_id = ?1 ORDER BY sort_order ASC, created_at DESC, rowid DESC",
             )?;
             let rows = stmt.query_map(params![workspace_id], |row| {
                 Ok(Conversation {
@@ -1896,6 +1921,7 @@ Ok(())
                     workspace_id: row.get(1)?,
                     title: row.get(2)?,
                     created_at: row.get(3)?,
+                    sort_order: row.get(4)?,
                 })
             })?;
             let mut out = Vec::new();
@@ -1918,7 +1944,7 @@ Ok(())
         run_db(move || {
             let conn = pool.get().context("获取数据库连接失败")?;
             let mut stmt = conn.prepare(
-                "SELECT id, workspace_id, title, created_at FROM conversations WHERE workspace_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT ?2 OFFSET ?3",
+                "SELECT id, workspace_id, title, created_at, sort_order FROM conversations WHERE workspace_id = ?1 ORDER BY sort_order ASC, created_at DESC, rowid DESC LIMIT ?2 OFFSET ?3",
             )?;
             let rows = stmt.query_map(params![workspace_id, limit as i64, offset as i64], |row| {
                 Ok(Conversation {
@@ -1926,6 +1952,7 @@ Ok(())
                     workspace_id: row.get(1)?,
                     title: row.get(2)?,
                     created_at: row.get(3)?,
+                    sort_order: row.get(4)?,
                 })
             })?;
             let mut out = Vec::new();
@@ -1975,7 +2002,7 @@ Ok(())
         run_db(move || {
             let conn = pool.get().context("获取数据库连接失败")?;
             let mut stmt = conn.prepare(
-                "SELECT id, workspace_id, title, created_at FROM conversations WHERE id = ?1",
+                "SELECT id, workspace_id, title, created_at, sort_order FROM conversations WHERE id = ?1",
             )?;
             let mut rows = stmt.query_map(params![id], |row| {
                 Ok(Conversation {
@@ -1983,6 +2010,7 @@ Ok(())
                     workspace_id: row.get(1)?,
                     title: row.get(2)?,
                     created_at: row.get(3)?,
+                    sort_order: row.get(4)?,
                 })
             })?;
             match rows.next() {
@@ -2004,6 +2032,29 @@ Ok(())
                 params![title, id],
             )
             .context("更新会话标题失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn reorder_conversations(&self, ordered_ids: &[String]) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let ids: Vec<(String, i64)> = ordered_ids
+            .iter()
+            .enumerate()
+            .map(|(idx, id)| (id.clone(), (idx as i64) + 1))
+            .collect();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let tx = conn.unchecked_transaction()?;
+            for (id, sort_order) in &ids {
+                tx.execute(
+                    "UPDATE conversations SET sort_order = ?1 WHERE id = ?2",
+                    params![sort_order, id],
+                )
+                .context("更新会话排序失败")?;
+            }
+            tx.commit().context("提交会话排序事务失败")?;
             Ok(())
         })
         .await

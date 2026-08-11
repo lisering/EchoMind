@@ -122,6 +122,8 @@
     "retrieving_kb": "Retrieving knowledge base…",
     "aborted": "Generation aborted",
     "aborted_badge": "⏹ Aborted",
+    "sr_generating": "Generating answer...",
+    "sr_answer_complete": "Answer complete",
     "watchdog_timeout": "Conversation timed out: backend unresponsive. Please check your network connection and retry. For first-time use behind a firewall, initialize the embedding engine manually in Settings.",
     "audit_aborted": "Audit aborted",
     "context_collapsed": "{count} messages collapsed (click to expand, not sent to LLM)",
@@ -1311,10 +1313,16 @@
     "empty": "No data",
     "doc_count": "Documents",
     "chunk_count": "Chunks",
+    "vector_count": "Vectors",
     "storage_size": "Storage",
     "domain_distribution": "Domain Distribution",
     "format_distribution": "Format Distribution",
-    "tag_heatmap": "Tag Heatmap"
+    "tag_heatmap": "Tag Heatmap",
+    "status_distribution": "Index Status",
+    "status_pending": "Pending",
+    "status_processing": "Processing",
+    "status_indexed": "Indexed",
+    "status_failed": "Failed"
   },
   "help": {
     "title": "Help",

@@ -772,3 +772,26 @@ pub async fn delete_message_inner(
         .map_err(|e| format!("{e:#}"))?;
     Ok(count)
 }
+
+/// 批量更新会话排序（REQ-IX-002 拖拽排序持久化）。
+///
+/// 接收有序的会话 ID 列表，按列表顺序设置递增 sort_order。
+#[tauri::command]
+pub async fn reorder_conversations(
+    ordered_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    reorder_conversations_inner(ordered_ids, state.inner()).await
+}
+
+/// `reorder_conversations` 的逻辑实现（命令与集成测试复用）。
+pub async fn reorder_conversations_inner(
+    ordered_ids: Vec<String>,
+    state: &AppState,
+) -> Result<(), String> {
+    state
+        .storage
+        .reorder_conversations(&ordered_ids)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}

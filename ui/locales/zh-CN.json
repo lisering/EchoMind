@@ -122,6 +122,8 @@
     "retrieving_kb": "正在检索知识库…",
     "aborted": "生成已中断",
     "aborted_badge": "⏹ 已中断",
+    "sr_generating": "正在生成回答...",
+    "sr_answer_complete": "回答完成",
     "watchdog_timeout": "对话超时：后端长时间无响应，请检查网络连接后重试。如在境内首次使用，请先在设置中手动初始化向量化引擎。",
     "audit_aborted": "审计已中断",
     "context_collapsed": "{count} 条历史已折叠（点击展开查看，不发送给 LLM）",
@@ -1311,10 +1313,16 @@
     "empty": "暂无数据",
     "doc_count": "文档数",
     "chunk_count": "分块数",
+    "vector_count": "向量数",
     "storage_size": "存储大小",
     "domain_distribution": "领域分布",
     "format_distribution": "格式分布",
-    "tag_heatmap": "标签热图"
+    "tag_heatmap": "标签热图",
+    "status_distribution": "索引状态",
+    "status_pending": "待索引",
+    "status_processing": "索引中",
+    "status_indexed": "已索引",
+    "status_failed": "失败"
   },
   "help": {
     "title": "帮助",

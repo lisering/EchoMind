@@ -298,6 +298,13 @@ pub trait Storage: Send + Sync {
     /// 统计已入库分块总数（REQ-OBS-002 诊断信息导出）。
     async fn count_chunks(&self) -> anyhow::Result<usize>;
 
+    /// 统计已入库向量总数（REQ-VEC-010 索引统计仪表盘）。
+    ///
+    /// 默认实现返回 0；生产实现覆盖为 SQL COUNT。
+    async fn count_embeddings(&self) -> anyhow::Result<usize> {
+        Ok(0)
+    }
+
     /// 崩溃恢复（REQ-DB-001）：将上次会话遗留的 Processing 僵尸文档置为 Failed，返回清理条数。
     async fn cleanup_zombies(&self) -> anyhow::Result<usize>;
 
@@ -361,6 +368,14 @@ pub trait Storage: Send + Sync {
 
     /// 更新会话标题（首轮问答后自动提取）。
     async fn update_conversation_title(&self, id: &str, title: &str) -> anyhow::Result<()>;
+
+    /// 批量更新会话排序（REQ-IX-002 拖拽排序持久化）。
+    ///
+    /// 接收有序的会话 ID 列表，按列表顺序为每个会话设置递增的 `sort_order`。
+    /// 排序后 `list_conversations` 返回结果按 `sort_order ASC, created_at DESC` 排序。
+    async fn reorder_conversations(&self, _ordered_ids: &[String]) -> anyhow::Result<()> {
+        Ok(())
+    }
 
     /// 写入一条消息。
     async fn add_message(&self, conversation_id: &str, message: &ChatMessage)

@@ -138,6 +138,8 @@ pub fn run() {
             commands::get_turn_active_versions,
             commands::delete_conversation,
             commands::rename_conversation,
+            // 会话拖拽排序（REQ-IX-002）
+            commands::reorder_conversations,
             commands::abort_chat,
             commands::abort_import,
             commands::test_llm_connection,

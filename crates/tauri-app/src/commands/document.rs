@@ -364,13 +364,15 @@ pub async fn filter_documents_by_tag_inner(
         .map_err(|e| format!("{e:#}"))
 }
 
-/// 知识库统计仪表盘数据（REQ-KB-003 v1.5）。
+/// 知识库统计仪表盘数据（REQ-KB-003 v1.5 + REQ-VEC-010 v1.16 增强）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct KbStats {
     /// 文档总数
     pub doc_count: usize,
     /// 分块总数
     pub chunk_count: usize,
+    /// 向量总数（REQ-VEC-010 v1.16 新增）
+    pub vector_count: usize,
     /// 数据库文件大小（字节）
     pub db_size_bytes: u64,
     /// 领域分布（领域名, 文档数）
@@ -379,6 +381,8 @@ pub struct KbStats {
     pub format_distribution: Vec<(String, usize)>,
     /// 标签热图（标签名, 文档数）
     pub tags: Vec<(String, usize)>,
+    /// 索引状态分布（状态名, 文档数）（REQ-VEC-010 v1.16 新增）
+    pub status_distribution: Vec<(String, usize)>,
 }
 
 /// 获取知识库统计仪表盘数据（REQ-KB-003 v1.5）。
@@ -405,6 +409,14 @@ pub async fn get_kb_stats_inner(state: &AppState) -> Result<KbStats, String> {
         .map_err(|e| format!("{e:#}"))
         .unwrap_or(0);
 
+    // 向量总数（REQ-VEC-010 v1.16 新增）
+    let vector_count = state
+        .storage
+        .count_embeddings()
+        .await
+        .map_err(|e| format!("{e:#}"))
+        .unwrap_or(0);
+
     // 数据库文件大小
     let db_path = state.data_dir.join("echomind.db");
     let db_size_bytes = tokio::fs::metadata(&db_path)
@@ -415,6 +427,7 @@ pub async fn get_kb_stats_inner(state: &AppState) -> Result<KbStats, String> {
     // 领域分布
     let mut domain_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut format_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut status_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for doc in &docs {
         let domain = doc.domain.clone().unwrap_or_else(|| "general".to_string());
         *domain_map.entry(domain).or_insert(0) += 1;
@@ -425,6 +438,15 @@ pub async fn get_kb_stats_inner(state: &AppState) -> Result<KbStats, String> {
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_else(|| "unknown".to_string());
         *format_map.entry(ext).or_insert(0) += 1;
+
+        // 索引状态分布（REQ-VEC-010 v1.16 新增）
+        let status_label = match &doc.status {
+            echomind_models::DocStatus::Pending => "pending",
+            echomind_models::DocStatus::Processing => "processing",
+            echomind_models::DocStatus::Indexed => "indexed",
+            echomind_models::DocStatus::Failed(_) => "failed",
+        };
+        *status_map.entry(status_label.to_string()).or_insert(0) += 1;
     }
 
     // 排序：按计数降序
@@ -433,6 +455,13 @@ pub async fn get_kb_stats_inner(state: &AppState) -> Result<KbStats, String> {
 
     let mut format_distribution: Vec<(String, usize)> = format_map.into_iter().collect();
     format_distribution.sort_by_key(|b| std::cmp::Reverse(b.1));
+
+    // 索引状态分布（固定顺序：pending → processing → indexed → failed）
+    let status_order = ["pending", "processing", "indexed", "failed"];
+    let status_distribution: Vec<(String, usize)> = status_order
+        .iter()
+        .map(|s| (s.to_string(), *status_map.get(*s).unwrap_or(&0)))
+        .collect();
 
     // 标签热图
     let tags = state
@@ -445,10 +474,12 @@ pub async fn get_kb_stats_inner(state: &AppState) -> Result<KbStats, String> {
     Ok(KbStats {
         doc_count,
         chunk_count,
+        vector_count,
         db_size_bytes,
         domain_distribution,
         format_distribution,
         tags,
+        status_distribution,
     })
 }
 
