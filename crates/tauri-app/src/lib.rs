@@ -295,6 +295,8 @@ pub fn run() {
             // 文档摘要自动生成（REQ-ING-019 导入时 LLM 生成摘要）
             commands::get_document_summary,
             commands::regenerate_summary,
+            // 文档内容预览（REQ-ING-010）
+            commands::get_document_preview,
             // 代码符号引擎（REQ-RAG-031 代码感知 RAG）
             commands::search_symbols,
             commands::get_symbols_for_chunk,
@@ -349,6 +351,8 @@ pub fn run() {
             commands::strip_messages,
             commands::strip_keeping_recent,
             commands::preview_strip,
+            // 单条消息删除（REQ-RAG-013）
+            commands::delete_message,
             // Contextual Retrieval 上下文增强嵌入（REQ-RAG-041）
             commands::set_contextual_retrieval,
             commands::rebuild_contextual_embeddings,

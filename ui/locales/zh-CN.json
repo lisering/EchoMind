@@ -2,7 +2,8 @@
   "common": {
     "close": "关闭",
     "cancel": "取消",
-    "confirm": "确认"
+    "confirm": "确认",
+    "delete": "删除"
   },
   "app": {
     "name": "EchoMind",
@@ -74,6 +75,26 @@
     "conversations": "会话",
     "import_files": "导入文件"
   },
+  "doc": {
+    "preview_title": "文档预览",
+    "preview_loading": "加载中…",
+    "preview_not_found": "文档不存在",
+    "preview_error": "预览加载失败",
+    "preview_filename": "文件名",
+    "preview_format": "格式",
+    "preview_status": "状态",
+    "preview_chunks": "分块数",
+    "preview_imported": "导入时间",
+    "preview_hash": "指纹",
+    "preview_summary": "摘要",
+    "preview_content": "内容预览（前 500 字）",
+    "preview_no_content": "（无内容）",
+    "preview_chunk_list": "分块列表",
+    "status_indexed": "已索引",
+    "status_processing": "处理中",
+    "status_pending": "待处理",
+    "status_failed": "失败"
+  },
   "chat": {
     "placeholder_title": "向你的知识库提问",
     "placeholder_desc": "回答仅基于本地数据与你自己配置的模型。点击左下角 ＋ 或直接把文件拖进来，开始构建知识库。",
@@ -107,6 +128,10 @@
     "copied_to_clipboard": "已复制到剪贴板",
     "copy_failed": "复制失败",
     "regenerate": "重新生成",
+    "delete_message": "删除",
+    "delete_user_confirm": "将同时删除对应的 AI 回答，确定删除？",
+    "delete_assistant_confirm": "确定删除这条消息？",
+    "deleted": "已删除",
     "sources_count": " 个引用来源",
     "ai_disclaimer": "内容由 AI 生成，请仔细甄别",
     "toggle_hybrid": "混合搜索",

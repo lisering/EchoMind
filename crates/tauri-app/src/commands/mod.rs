@@ -45,12 +45,12 @@ use echomind_infra::sqlite_storage::SqliteStorage;
 use echomind_models::{
     AgentStepPayload, CacheSettingsPayload, CacheStats, ChatMessage, ChatPhasePayload,
     Conversation, ConversationCost, ConversationTree, ConversationTreeNode, DocStatus,
-    DocStatusPayload, Document, EmbeddingProgressPayload, EntityRelation, ExecutionResult,
-    GenerationParams, GraphCommunity, GraphPath, GraphStats, GraphTriple, ImportProgressPayload,
-    LlmConfig, LlmMode, LlmSamplingParams, MemoryEntry, MemoryTier, MessageSearchResult, ModelInfo,
-    PaginatedResult, PendingInput, PromptTemplate, RagParams, RetrievalResult, SearchResult,
-    SessionTodo, SettingsPayload, StripConfig, StripPreview, StripResult, TodoStatus, TokenUsage,
-    TurnActiveVersion, Workflow, WorkflowResult,
+    DocStatusPayload, Document, DocumentPreview, EmbeddingProgressPayload, EntityRelation,
+    ExecutionResult, GenerationParams, GraphCommunity, GraphPath, GraphStats, GraphTriple,
+    ImportProgressPayload, LlmConfig, LlmMode, LlmSamplingParams, MemoryEntry, MemoryTier,
+    MessageSearchResult, ModelInfo, PaginatedResult, PendingInput, PromptTemplate, RagParams,
+    RetrievalResult, SearchResult, SessionTodo, SettingsPayload, StripConfig, StripPreview,
+    StripResult, TodoStatus, TokenUsage, TurnActiveVersion, Workflow, WorkflowResult,
 };
 use futures::FutureExt;
 use futures::StreamExt;

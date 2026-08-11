@@ -5323,6 +5323,7 @@
           convApi: () => convApi,
           docApi: () => docApi,
           docExtApi: () => docExtApi,
+          docPreviewApi: () => docPreviewApi,
           downloadApi: () => downloadApi,
           durableApi: () => durableApi,
           embedModelApi: () => embedModelApi,
@@ -5371,7 +5372,7 @@
           } catch (_) {
           }
         }
-        var llmApi, convApi, docApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, graphApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, windowSettingsApi, errorLogsApi, symbolApi, webSearchApi, ragParamsApi, generationParamsApi;
+        var llmApi, convApi, docApi, docPreviewApi, chatApi, licenseApi, modelApi, vlmApi, embedModelApi, syncApi, localLlmApi, graphApi, kvCacheApi, downloadApi, importApi, securityApi, promptTemplateApi, traceApi, budgetApi, memoryExtApi, durableApi, todoApi, docExtApi, kbStatsApi, windowSettingsApi, errorLogsApi, symbolApi, webSearchApi, ragParamsApi, generationParamsApi;
         var init_ipc = __esm({
           "ui/src/ipc.js"() {
             llmApi = {
@@ -5407,7 +5408,9 @@
               /** Session Strip: keep last N messages (REQ-RAG-046) */
               stripKeepingRecent: (conversationId, keepLastN, replaceWithSummary, summaryText) => invoke("strip_keeping_recent", { conversationId, keepLastN, replaceWithSummary, summaryText }),
               /** Session Strip: preview messages to be stripped (REQ-RAG-046) */
-              previewStrip: (conversationId, fromIndex, toIndex) => invoke("preview_strip", { conversationId, fromIndex, toIndex })
+              previewStrip: (conversationId, fromIndex, toIndex) => invoke("preview_strip", { conversationId, fromIndex, toIndex }),
+              /** 删除单条消息（REQ-RAG-013：user 消息连带删除下一条 assistant） */
+              deleteMessage: (conversationId, messageId) => invoke("delete_message", { conversationId, messageId })
             };
             docApi = {
               list: (sortBy, sortOrder) => invoke("get_documents", { sortBy, sortOrder }),
@@ -5419,6 +5422,10 @@
               removeTag: (docId, tag) => invoke("remove_document_tag", { docId, tag }),
               listAllTags: () => invoke("list_all_tags"),
               filterByTag: (tag) => invoke("filter_documents_by_tag", { tag })
+            };
+            docPreviewApi = {
+              /** 获取文档预览数据（元数据 + 前 500 字 + chunk 列表） */
+              getPreview: (docId) => invoke("get_document_preview", { docId })
             };
             chatApi = {
               send: (query, history, conversationId) => invoke("chat", { query, history, conversationId }),
@@ -10103,6 +10110,169 @@
           };
         }
       
+        // ui/src/confirm-dialog.js
+        init_i18n();
+      
+        // ui/src/zindex.js
+        var Z_INDEX = {
+          /** 主界面（侧栏 + 聊天区 + 输入区） */
+          BASE: 0,
+          /** 启动向导 */
+          WIZARD: 40,
+          /** 用户主动打开的主面板：设置 / 付费墙 / 代码执行 / Dream / 符号搜索 / 工作流 / 分支树 */
+          PANEL_1: 50,
+          /** 叠加在 PANEL_1 之上的确认弹窗：confirm-dialog / VLM 确认 */
+          PANEL_2: 55,
+          /** Toast 通知 */
+          TOAST: 60,
+          /** 下载管理器 */
+          PANEL_3: 65,
+          /** DB 错误 Modal */
+          PANEL_4: 70,
+          /** 搜索弹框 / 下载恢复 */
+          PANEL_5: 75,
+          /** 命令面板（最高用户交互层） */
+          COMMAND_PALETTE: 80,
+          /** 知识图谱全屏查看器（沉浸式，独立层级） */
+          GRAPH_VIEWER: 90,
+          /** 审计日志面板（安全相关，独立层级） */
+          AUDIT_LOG: 95,
+          /** 锁屏遮罩（最高安全优先级，不可被任何面板遮挡） */
+          LOCK_OVERLAY: 99999
+        };
+        function zClass(value) {
+          if ([0, 10, 20, 30, 40, 50].includes(value)) {
+            return `z-${value}`;
+          }
+          return `z-[${value}]`;
+        }
+      
+        // ui/src/confirm-dialog.js
+        var _activeDialog = null;
+        var _activeResolve = null;
+        var _enableTimer = null;
+        var _activeTrap = null;
+        var ANTI_MISTOUCH_DELAY = 500;
+        function _closeDialog(result) {
+          if (_enableTimer !== null) {
+            clearTimeout(_enableTimer);
+            _enableTimer = null;
+          }
+          removePanel("confirm-dialog");
+          if (_activeTrap) {
+            _activeTrap.deactivate();
+            _activeTrap = null;
+          }
+          if (_activeDialog) {
+            document.removeEventListener("keydown", _onKeyDown);
+            _activeDialog.remove();
+            _activeDialog = null;
+          }
+          if (_activeResolve) {
+            const resolve = _activeResolve;
+            _activeResolve = null;
+            resolve(result);
+          }
+        }
+        function _onKeyDown(e) {
+          if (!_activeDialog) return;
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            _closeDialog(false);
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            e.stopPropagation();
+            const confirmBtn = _activeDialog.querySelector('[data-role="confirm"]');
+            if (confirmBtn && !confirmBtn.disabled) {
+              _closeDialog(true);
+            }
+          }
+        }
+        function showConfirmDialog(opts = {}) {
+          const { title = "", body = "", confirmText, cancelText, danger = true } = opts;
+          if (_activeDialog) {
+            _closeDialog(false);
+          }
+          return new Promise((resolve) => {
+            _activeResolve = resolve;
+            const overlay = document.createElement("div");
+            overlay.id = "confirmDialog";
+            overlay.className = `fixed inset-0 ${zClass(Z_INDEX.PANEL_2)} bg-surface-0/95 backdrop-blur-sm flex items-center justify-center`;
+            overlay.setAttribute("role", "alertdialog");
+            overlay.setAttribute("aria-modal", "true");
+            overlay.setAttribute("aria-labelledby", "confirmDialogTitle");
+            overlay.setAttribute("aria-describedby", "confirmDialogBody");
+            overlay.addEventListener("click", (e) => {
+              if (e.target === overlay) {
+                _closeDialog(false);
+              }
+            });
+            const confirmLabel = confirmText || t("common.confirm") || "\u786E\u8BA4";
+            const cancelLabel = cancelText || t("common.cancel") || "\u53D6\u6D88";
+            const confirmBtnClass = danger ? "flex-1 bg-red-500/15 text-red-300 border border-red-400/40 rounded-xl px-4 py-3 text-sm hover:bg-red-500/25 transition-colors disabled:opacity-40" : "flex-1 bg-accent/15 text-accent border border-accent/30 rounded-xl px-4 py-3 text-sm hover:bg-accent/25 transition-colors disabled:opacity-40";
+            const container = document.createElement("div");
+            container.className = "w-full max-w-sm mx-4 bg-surface-1 border border-border-strong rounded-lg p-6";
+            if (danger) {
+              const icon = document.createElement("div");
+              icon.className = "text-3xl mb-2 text-amber-400";
+              icon.textContent = "\u26A0\uFE0F";
+              container.appendChild(icon);
+            }
+            const titleEl = document.createElement("p");
+            titleEl.id = "confirmDialogTitle";
+            titleEl.className = "text-lg font-semibold text-text-primary mb-2";
+            titleEl.textContent = title;
+            container.appendChild(titleEl);
+            if (body) {
+              const bodyEl = document.createElement("p");
+              bodyEl.id = "confirmDialogBody";
+              bodyEl.className = "text-sm text-text-secondary leading-relaxed mb-4";
+              bodyEl.innerHTML = body;
+              container.appendChild(bodyEl);
+            } else {
+              const spacer = document.createElement("div");
+              spacer.className = "mb-4";
+              container.appendChild(spacer);
+            }
+            const btnRow = document.createElement("div");
+            btnRow.className = "flex gap-3";
+            const cancelBtn = document.createElement("button");
+            cancelBtn.className = "flex-1 border border-border-default rounded-xl px-4 py-3 text-sm text-text-secondary hover:bg-white/5 transition-colors";
+            cancelBtn.textContent = cancelLabel;
+            cancelBtn.setAttribute("data-role", "cancel");
+            cancelBtn.addEventListener("click", () => _closeDialog(false));
+            const confirmBtn = document.createElement("button");
+            confirmBtn.className = confirmBtnClass;
+            confirmBtn.textContent = confirmLabel;
+            confirmBtn.setAttribute("data-role", "confirm");
+            confirmBtn.disabled = true;
+            confirmBtn.addEventListener("click", () => {
+              if (!confirmBtn.disabled) {
+                _closeDialog(true);
+              }
+            });
+            btnRow.appendChild(cancelBtn);
+            btnRow.appendChild(confirmBtn);
+            container.appendChild(btnRow);
+            overlay.appendChild(container);
+            document.body.appendChild(overlay);
+            _activeDialog = overlay;
+            document.addEventListener("keydown", _onKeyDown, true);
+            _activeTrap = createFocusTrap(overlay);
+            _activeTrap.activate();
+            pushPanel({ id: "confirm-dialog", close: () => _closeDialog(false), element: overlay, label: "Confirm Dialog" });
+            _enableTimer = setTimeout(() => {
+              if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.focus();
+              }
+              _enableTimer = null;
+            }, ANTI_MISTOUCH_DELAY);
+          });
+        }
+        window.showConfirmDialog = showConfirmDialog;
+      
         // ui/src/voice-input.js
         init_utils();
         init_toast();
@@ -10977,6 +11147,45 @@
             };
             bar.appendChild(regenBtn);
           }
+          if (!get("streaming") && !get("auditingDocId")) {
+            const msgId = blockEl.dataset.msgId;
+            const convId = get("currentConversationId");
+            if (msgId && convId) {
+              const delBtn = document.createElement("button");
+              delBtn.className = "msg-action-btn p-1.5 rounded-md text-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors duration-fast";
+              delBtn.title = t("chat.delete_message") || "\u5220\u9664";
+              delBtn.setAttribute("aria-label", t("chat.delete_message") || "\u5220\u9664");
+              delBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+              delBtn.onclick = async () => {
+                const isUser = role === "user";
+                const confirmMsg = isUser ? t("chat.delete_user_confirm") || "\u5C06\u540C\u65F6\u5220\u9664\u5BF9\u5E94\u7684 AI \u56DE\u7B54\uFF0C\u786E\u5B9A\u5220\u9664\uFF1F" : t("chat.delete_assistant_confirm") || "\u786E\u5B9A\u5220\u9664\u8FD9\u6761\u6D88\u606F\uFF1F";
+                const confirmed = await showConfirmDialog({
+                  title: t("chat.delete_message") || "\u5220\u9664\u6D88\u606F",
+                  body: confirmMsg,
+                  confirmText: t("common.delete") || "\u5220\u9664",
+                  cancelText: t("common.cancel") || "\u53D6\u6D88",
+                  danger: true
+                });
+                if (!confirmed) return;
+                try {
+                  await convApi.deleteMessage(convId, msgId);
+                  if (isUser) {
+                    const actionsBar = blockEl.nextElementSibling;
+                    const assistantBlock = actionsBar?.nextElementSibling;
+                    if (actionsBar && actionsBar.dataset.role === "user-actions") actionsBar.remove();
+                    if (assistantBlock && assistantBlock.classList.contains("md-block")) assistantBlock.remove();
+                    blockEl.remove();
+                  } else {
+                    blockEl.remove();
+                  }
+                  toast(t("chat.deleted") || "\u5DF2\u5220\u9664", "success");
+                } catch (err) {
+                  toastError(err instanceof Error ? err.message : String(err));
+                }
+              };
+              bar.appendChild(delBtn);
+            }
+          }
         }
         function scrollToBottom() {
           const area = $("chatArea");
@@ -11061,171 +11270,6 @@
         init_ipc();
         init_i18n();
         init_toast();
-      
-        // ui/src/confirm-dialog.js
-        init_i18n();
-      
-        // ui/src/zindex.js
-        var Z_INDEX = {
-          /** 主界面（侧栏 + 聊天区 + 输入区） */
-          BASE: 0,
-          /** 启动向导 */
-          WIZARD: 40,
-          /** 用户主动打开的主面板：设置 / 付费墙 / 代码执行 / Dream / 符号搜索 / 工作流 / 分支树 */
-          PANEL_1: 50,
-          /** 叠加在 PANEL_1 之上的确认弹窗：confirm-dialog / VLM 确认 */
-          PANEL_2: 55,
-          /** Toast 通知 */
-          TOAST: 60,
-          /** 下载管理器 */
-          PANEL_3: 65,
-          /** DB 错误 Modal */
-          PANEL_4: 70,
-          /** 搜索弹框 / 下载恢复 */
-          PANEL_5: 75,
-          /** 命令面板（最高用户交互层） */
-          COMMAND_PALETTE: 80,
-          /** 知识图谱全屏查看器（沉浸式，独立层级） */
-          GRAPH_VIEWER: 90,
-          /** 审计日志面板（安全相关，独立层级） */
-          AUDIT_LOG: 95,
-          /** 锁屏遮罩（最高安全优先级，不可被任何面板遮挡） */
-          LOCK_OVERLAY: 99999
-        };
-        function zClass(value) {
-          if ([0, 10, 20, 30, 40, 50].includes(value)) {
-            return `z-${value}`;
-          }
-          return `z-[${value}]`;
-        }
-      
-        // ui/src/confirm-dialog.js
-        var _activeDialog = null;
-        var _activeResolve = null;
-        var _enableTimer = null;
-        var _activeTrap = null;
-        var ANTI_MISTOUCH_DELAY = 500;
-        function _closeDialog(result) {
-          if (_enableTimer !== null) {
-            clearTimeout(_enableTimer);
-            _enableTimer = null;
-          }
-          removePanel("confirm-dialog");
-          if (_activeTrap) {
-            _activeTrap.deactivate();
-            _activeTrap = null;
-          }
-          if (_activeDialog) {
-            document.removeEventListener("keydown", _onKeyDown);
-            _activeDialog.remove();
-            _activeDialog = null;
-          }
-          if (_activeResolve) {
-            const resolve = _activeResolve;
-            _activeResolve = null;
-            resolve(result);
-          }
-        }
-        function _onKeyDown(e) {
-          if (!_activeDialog) return;
-          if (e.key === "Escape") {
-            e.preventDefault();
-            e.stopPropagation();
-            _closeDialog(false);
-          } else if (e.key === "Enter") {
-            e.preventDefault();
-            e.stopPropagation();
-            const confirmBtn = _activeDialog.querySelector('[data-role="confirm"]');
-            if (confirmBtn && !confirmBtn.disabled) {
-              _closeDialog(true);
-            }
-          }
-        }
-        function showConfirmDialog(opts = {}) {
-          const { title = "", body = "", confirmText, cancelText, danger = true } = opts;
-          if (_activeDialog) {
-            _closeDialog(false);
-          }
-          return new Promise((resolve) => {
-            _activeResolve = resolve;
-            const overlay = document.createElement("div");
-            overlay.id = "confirmDialog";
-            overlay.className = `fixed inset-0 ${zClass(Z_INDEX.PANEL_2)} bg-surface-0/95 backdrop-blur-sm flex items-center justify-center`;
-            overlay.setAttribute("role", "alertdialog");
-            overlay.setAttribute("aria-modal", "true");
-            overlay.setAttribute("aria-labelledby", "confirmDialogTitle");
-            overlay.setAttribute("aria-describedby", "confirmDialogBody");
-            overlay.addEventListener("click", (e) => {
-              if (e.target === overlay) {
-                _closeDialog(false);
-              }
-            });
-            const confirmLabel = confirmText || t("common.confirm") || "\u786E\u8BA4";
-            const cancelLabel = cancelText || t("common.cancel") || "\u53D6\u6D88";
-            const confirmBtnClass = danger ? "flex-1 bg-red-500/15 text-red-300 border border-red-400/40 rounded-xl px-4 py-3 text-sm hover:bg-red-500/25 transition-colors disabled:opacity-40" : "flex-1 bg-accent/15 text-accent border border-accent/30 rounded-xl px-4 py-3 text-sm hover:bg-accent/25 transition-colors disabled:opacity-40";
-            const container = document.createElement("div");
-            container.className = "w-full max-w-sm mx-4 bg-surface-1 border border-border-strong rounded-lg p-6";
-            if (danger) {
-              const icon = document.createElement("div");
-              icon.className = "text-3xl mb-2 text-amber-400";
-              icon.textContent = "\u26A0\uFE0F";
-              container.appendChild(icon);
-            }
-            const titleEl = document.createElement("p");
-            titleEl.id = "confirmDialogTitle";
-            titleEl.className = "text-lg font-semibold text-text-primary mb-2";
-            titleEl.textContent = title;
-            container.appendChild(titleEl);
-            if (body) {
-              const bodyEl = document.createElement("p");
-              bodyEl.id = "confirmDialogBody";
-              bodyEl.className = "text-sm text-text-secondary leading-relaxed mb-4";
-              bodyEl.innerHTML = body;
-              container.appendChild(bodyEl);
-            } else {
-              const spacer = document.createElement("div");
-              spacer.className = "mb-4";
-              container.appendChild(spacer);
-            }
-            const btnRow = document.createElement("div");
-            btnRow.className = "flex gap-3";
-            const cancelBtn = document.createElement("button");
-            cancelBtn.className = "flex-1 border border-border-default rounded-xl px-4 py-3 text-sm text-text-secondary hover:bg-white/5 transition-colors";
-            cancelBtn.textContent = cancelLabel;
-            cancelBtn.setAttribute("data-role", "cancel");
-            cancelBtn.addEventListener("click", () => _closeDialog(false));
-            const confirmBtn = document.createElement("button");
-            confirmBtn.className = confirmBtnClass;
-            confirmBtn.textContent = confirmLabel;
-            confirmBtn.setAttribute("data-role", "confirm");
-            confirmBtn.disabled = true;
-            confirmBtn.addEventListener("click", () => {
-              if (!confirmBtn.disabled) {
-                _closeDialog(true);
-              }
-            });
-            btnRow.appendChild(cancelBtn);
-            btnRow.appendChild(confirmBtn);
-            container.appendChild(btnRow);
-            overlay.appendChild(container);
-            document.body.appendChild(overlay);
-            _activeDialog = overlay;
-            document.addEventListener("keydown", _onKeyDown, true);
-            _activeTrap = createFocusTrap(overlay);
-            _activeTrap.activate();
-            pushPanel({ id: "confirm-dialog", close: () => _closeDialog(false), element: overlay, label: "Confirm Dialog" });
-            _enableTimer = setTimeout(() => {
-              if (confirmBtn) {
-                confirmBtn.disabled = false;
-                confirmBtn.focus();
-              }
-              _enableTimer = null;
-            }, ANTI_MISTOUCH_DELAY);
-          });
-        }
-        window.showConfirmDialog = showConfirmDialog;
-      
-        // ui/src/sidebar.js
         var BOTTOM_ANCHOR_THRESHOLD = 100;
         var _toggleSeq = 0;
         var _anchorRafId = 0;
@@ -20253,11 +20297,245 @@
           }
         }
       
+        // ui/src/doc-preview.js
+        init_utils();
+        init_ipc();
+        init_i18n();
+        init_toast();
+        var _created3 = false;
+        var _panelEl3 = null;
+        function formatDate(timestamp) {
+          if (!timestamp) return "-";
+          const d = new Date(timestamp * 1e3);
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, "0");
+          const day = String(d.getDate()).padStart(2, "0");
+          const hour = String(d.getHours()).padStart(2, "0");
+          const min = String(d.getMinutes()).padStart(2, "0");
+          return `${year}-${month}-${day} ${hour}:${min}`;
+        }
+        function fileName(filePath) {
+          if (!filePath) return "-";
+          const parts = filePath.replace(/\\/g, "/").split("/");
+          return parts[parts.length - 1] || filePath;
+        }
+        function fileExt(filePath) {
+          const name = fileName(filePath);
+          const dot = name.lastIndexOf(".");
+          return dot >= 0 ? name.substring(dot + 1).toUpperCase() : "-";
+        }
+        function statusText(status) {
+          const key = `doc.status_${status}`;
+          const text = t(key);
+          return text !== key ? text : status;
+        }
+        function createPanelSkeleton() {
+          const overlay = document.createElement("div");
+          overlay.className = `fixed inset-0 flex items-center justify-center ${zClass(Z_INDEX.MODAL)}`;
+          overlay.style.backgroundColor = "rgba(0,0,0,0.5)";
+          overlay.setAttribute("role", "dialog");
+          overlay.setAttribute("aria-modal", "true");
+          overlay.setAttribute("aria-labelledby", "docPreviewTitle");
+          const panel = document.createElement("div");
+          panel.className = "bg-surface-1 border border-line rounded-2xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col overflow-hidden";
+          const header = document.createElement("div");
+          header.className = "flex items-center justify-between px-6 py-4 border-b border-line";
+          const title = document.createElement("h2");
+          title.id = "docPreviewTitle";
+          title.className = "text-lg font-semibold text-text-primary";
+          title.textContent = t("doc.preview_title") || "\u6587\u6863\u9884\u89C8";
+          header.appendChild(title);
+          const closeBtn = document.createElement("button");
+          closeBtn.className = "text-text-tertiary hover:text-text-primary transition-colors text-xl px-2";
+          closeBtn.textContent = "\xD7";
+          closeBtn.setAttribute("aria-label", t("common.close") || "\u5173\u95ED");
+          closeBtn.onclick = closeDocPreview;
+          header.appendChild(closeBtn);
+          panel.appendChild(header);
+          const body = document.createElement("div");
+          body.id = "docPreviewBody";
+          body.className = "flex-1 overflow-y-auto px-6 py-4 space-y-4";
+          panel.appendChild(body);
+          const loading = document.createElement("div");
+          loading.id = "docPreviewLoading";
+          loading.className = "text-text-tertiary text-center py-8";
+          loading.textContent = t("doc.preview_loading") || "\u52A0\u8F7D\u4E2D\u2026";
+          body.appendChild(loading);
+          overlay.appendChild(panel);
+          return overlay;
+        }
+        function renderPreviewContent(preview) {
+          const body = document.getElementById("docPreviewBody");
+          if (!body) return;
+          body.innerHTML = "";
+          const metaSection = document.createElement("div");
+          metaSection.className = "grid grid-cols-2 gap-3 text-sm";
+          const metaItems = [
+            [t("doc.preview_filename") || "\u6587\u4EF6\u540D", fileName(preview.file_path)],
+            [t("doc.preview_format") || "\u683C\u5F0F", fileExt(preview.file_path)],
+            [t("doc.preview_status") || "\u72B6\u6001", statusText(preview.status)],
+            [t("doc.preview_chunks") || "\u5206\u5757\u6570", String(preview.chunk_count)],
+            [t("doc.preview_imported") || "\u5BFC\u5165\u65F6\u95F4", formatDate(preview.created_at)],
+            [t("doc.preview_hash") || "\u6307\u7EB9", (preview.file_hash || "").substring(0, 12) + "\u2026"]
+          ];
+          for (const [label, value] of metaItems) {
+            const item = document.createElement("div");
+            item.className = "flex flex-col gap-1";
+            const labelEl = document.createElement("span");
+            labelEl.className = "text-text-tertiary text-xs";
+            labelEl.textContent = label;
+            const valueEl = document.createElement("span");
+            valueEl.className = "text-text-secondary font-mono text-xs break-all";
+            valueEl.textContent = value;
+            item.appendChild(labelEl);
+            item.appendChild(valueEl);
+            metaSection.appendChild(item);
+          }
+          body.appendChild(metaSection);
+          if (preview.summary) {
+            const summaryDiv = document.createElement("div");
+            summaryDiv.className = "space-y-1";
+            const summaryLabel = document.createElement("div");
+            summaryLabel.className = "text-text-tertiary text-xs font-semibold";
+            summaryLabel.textContent = t("doc.preview_summary") || "\u6458\u8981";
+            summaryDiv.appendChild(summaryLabel);
+            const summaryText = document.createElement("div");
+            summaryText.className = "text-text-secondary text-sm leading-relaxed";
+            summaryText.textContent = preview.summary;
+            summaryDiv.appendChild(summaryText);
+            body.appendChild(summaryDiv);
+          }
+          if (preview.tags && preview.tags.length > 0) {
+            const tagsDiv = document.createElement("div");
+            tagsDiv.className = "flex flex-wrap gap-2";
+            for (const tag of preview.tags) {
+              const tagEl = document.createElement("span");
+              tagEl.className = "px-2 py-0.5 rounded text-xs bg-accent/10 text-accent border border-accent/20";
+              tagEl.textContent = tag;
+              tagsDiv.appendChild(tagEl);
+            }
+            body.appendChild(tagsDiv);
+          }
+          const contentSection = document.createElement("div");
+          contentSection.className = "space-y-1";
+          const contentLabel = document.createElement("div");
+          contentLabel.className = "text-text-tertiary text-xs font-semibold";
+          contentLabel.textContent = t("doc.preview_content") || "\u5185\u5BB9\u9884\u89C8\uFF08\u524D 500 \u5B57\uFF09";
+          contentSection.appendChild(contentLabel);
+          const contentText = document.createElement("div");
+          contentText.className = "text-text-secondary text-sm leading-relaxed bg-surface-2 rounded-lg p-3 max-h-48 overflow-y-auto whitespace-pre-wrap";
+          contentText.textContent = preview.content_preview || t("doc.preview_no_content") || "\uFF08\u65E0\u5185\u5BB9\uFF09";
+          contentSection.appendChild(contentText);
+          body.appendChild(contentSection);
+          if (preview.chunks && preview.chunks.length > 0) {
+            const chunkSection = document.createElement("div");
+            chunkSection.className = "space-y-2";
+            const chunkLabel = document.createElement("div");
+            chunkLabel.className = "text-text-tertiary text-xs font-semibold";
+            chunkLabel.textContent = t("doc.preview_chunk_list") || `\u5206\u5757\u5217\u8868\uFF08${preview.chunks.length} \u4E2A\uFF09`;
+            chunkSection.appendChild(chunkLabel);
+            for (const chunk of preview.chunks) {
+              const chunkItem = document.createElement("details");
+              chunkItem.className = "rounded-lg border border-line";
+              const summary = document.createElement("summary");
+              summary.className = "cursor-pointer px-3 py-2 text-xs text-text-secondary select-none hover:bg-white/5";
+              summary.textContent = `#${chunk.sequence} \xB7 ${chunk.token_count} tokens`;
+              chunkItem.appendChild(summary);
+              const chunkContent = document.createElement("div");
+              chunkContent.className = "px-3 pb-2 text-xs text-text-tertiary whitespace-pre-wrap";
+              chunkContent.textContent = chunk.content_preview;
+              chunkItem.appendChild(chunkContent);
+              chunkSection.appendChild(chunkItem);
+            }
+            body.appendChild(chunkSection);
+          }
+        }
+        async function openDocPreview(docId) {
+          if (_created3) {
+            closeDocPreview();
+          }
+          _panelEl3 = createPanelSkeleton();
+          document.body.appendChild(_panelEl3);
+          _created3 = true;
+          pushPanel({ id: "doc-preview", close: closeDocPreview, element: _panelEl3, label: "Doc Preview" });
+          try {
+            const preview = await docPreviewApi.getPreview(docId);
+            if (!preview) {
+              const body = document.getElementById("docPreviewBody");
+              if (body) {
+                body.innerHTML = "";
+                const err = document.createElement("div");
+                err.className = "text-text-tertiary text-center py-8";
+                err.textContent = t("doc.preview_not_found") || "\u6587\u6863\u4E0D\u5B58\u5728";
+                body.appendChild(err);
+              }
+              return;
+            }
+            renderPreviewContent(preview);
+          } catch (err) {
+            toastError(
+              `${t("doc.preview_error") || "\u9884\u89C8\u52A0\u8F7D\u5931\u8D25"}: ${err instanceof Error ? err.message : String(err)}`
+            );
+            closeDocPreview();
+          }
+        }
+        function closeDocPreview() {
+          if (_panelEl3 && _panelEl3.parentNode) {
+            _panelEl3.parentNode.removeChild(_panelEl3);
+          }
+          _panelEl3 = null;
+          _created3 = false;
+          removePanel("doc-preview");
+        }
+      
+        // ui/src/skeleton.js
+        var _timers = /* @__PURE__ */ new Map();
+        var SKELETON_CLASS = "skeleton-container";
+        function createSkeletonItem(type) {
+          const item = document.createElement("div");
+          item.className = "flex items-center gap-2 px-3 py-2";
+          const nameBlock = document.createElement("div");
+          nameBlock.className = "h-3 rounded bg-white/5 animate-pulse";
+          nameBlock.style.width = type === "doc" ? "120px" : "160px";
+          item.appendChild(nameBlock);
+          const badgeBlock = document.createElement("div");
+          badgeBlock.className = "h-3 w-10 rounded bg-white/5 animate-pulse";
+          item.appendChild(badgeBlock);
+          return item;
+        }
+        function showSkeleton(container, type = "doc", count = 4) {
+          if (!container) return;
+          hideSkeleton(container);
+          const timer = setTimeout(() => {
+            if (container.children.length > 0) return;
+            const skeleton = document.createElement("div");
+            skeleton.className = SKELETON_CLASS;
+            for (let i = 0; i < count; i++) {
+              skeleton.appendChild(createSkeletonItem(type));
+            }
+            container.appendChild(skeleton);
+          }, 200);
+          const key = container.id || `container-${Date.now()}`;
+          _timers.set(key, timer);
+        }
+        function hideSkeleton(container) {
+          if (!container) return;
+          const key = container.id || "";
+          if (key && _timers.has(key)) {
+            clearTimeout(_timers.get(key));
+            _timers.delete(key);
+          }
+          const skeleton = container.querySelector(`.${SKELETON_CLASS}`);
+          if (skeleton) {
+            skeleton.remove();
+          }
+        }
+      
         // ui/src/help-panel.js
         init_utils();
         init_i18n();
-        var _created3 = false;
-        var _panelEl3 = null;
+        var _created4 = false;
+        var _panelEl4 = null;
         var _activeTab = "quickstart";
         var TABS = [
           { id: "quickstart", labelKey: "help.tab_quickstart" },
@@ -20373,7 +20651,7 @@
           }
         }
         function _ensurePanel3() {
-          if (_created3 && _panelEl3 && _panelEl3.isConnected) return _panelEl3;
+          if (_created4 && _panelEl4 && _panelEl4.isConnected) return _panelEl4;
           const overlay = document.createElement("div");
           overlay.id = "helpPanelOverlay";
           overlay.className = `fixed inset-0 bg-black/50 flex items-center justify-center ${zClass(Z_INDEX.PANEL_1)}`;
@@ -20417,8 +20695,8 @@
             if (e.target === overlay) closeHelpPanel();
           });
           document.body.appendChild(overlay);
-          _panelEl3 = overlay;
-          _created3 = true;
+          _panelEl4 = overlay;
+          _created4 = true;
           return overlay;
         }
         function _switchTab(tabId) {
@@ -20448,16 +20726,16 @@
         }
         function closeHelpPanel() {
           removePanel("help-panel");
-          if (_panelEl3) {
-            _panelEl3.classList.add("hidden");
+          if (_panelEl4) {
+            _panelEl4.classList.add("hidden");
           }
         }
       
         // ui/src/about-panel.js
         init_utils();
         init_i18n();
-        var _created4 = false;
-        var _panelEl4 = null;
+        var _created5 = false;
+        var _panelEl5 = null;
         function _renderAboutContent() {
           const version = _getAppVersion();
           const buildDate = _getBuildDate();
@@ -20527,7 +20805,7 @@
           return "";
         }
         function _ensurePanel4() {
-          if (_created4 && _panelEl4 && _panelEl4.isConnected) return _panelEl4;
+          if (_created5 && _panelEl5 && _panelEl5.isConnected) return _panelEl5;
           const overlay = document.createElement("div");
           overlay.id = "aboutPanelOverlay";
           overlay.className = `fixed inset-0 bg-black/50 flex items-center justify-center ${zClass(Z_INDEX.PANEL_1)}`;
@@ -20560,8 +20838,8 @@
             if (e.target === overlay) closeAboutPanel();
           });
           document.body.appendChild(overlay);
-          _panelEl4 = overlay;
-          _created4 = true;
+          _panelEl5 = overlay;
+          _created5 = true;
           return overlay;
         }
         function openAboutPanel() {
@@ -20575,8 +20853,8 @@
         }
         function closeAboutPanel() {
           removePanel("about-panel");
-          if (_panelEl4) {
-            _panelEl4.classList.add("hidden");
+          if (_panelEl5) {
+            _panelEl5.classList.add("hidden");
           }
         }
         function initAboutPanel() {
@@ -20588,7 +20866,7 @@
       
         // ui/src/date-utils.js
         init_i18n();
-        function formatDate(timestamp) {
+        function formatDate2(timestamp) {
           if (!timestamp) return "";
           const date = _toDate(timestamp);
           if (!date) return "";
@@ -20609,7 +20887,7 @@
           const diffMin = Math.floor(diffSec / 60);
           const diffHour = Math.floor(diffMin / 60);
           const diffDay = Math.floor(diffHour / 24);
-          if (diffMs < 0) return formatDate(timestamp);
+          if (diffMs < 0) return formatDate2(timestamp);
           if (diffSec < 180) {
             return t("date.just_now");
           }
@@ -20659,7 +20937,7 @@
           }
           return null;
         }
-        window.__formatDate = formatDate;
+        window.__formatDate = formatDate2;
         window.__formatRelativeTime = formatRelativeTime;
         window.__formatFileSize = formatFileSize;
         window.__formatNumber = formatNumber2;
@@ -21160,8 +21438,11 @@
           return t(bucket);
         }
         async function loadConversations() {
+          const convBox = $("convList");
+          if (convBox) showSkeleton(convBox, "conv", 4);
           const list = await invoke("get_conversations", { workspaceId: WORKSPACE });
           const box = $("convList");
+          if (box) hideSkeleton(box);
           box.innerHTML = "";
           if (list.length === 0) {
             const empty = document.createElement("div");
@@ -21234,6 +21515,8 @@
         var _kbSortBy = null;
         var _kbSortOrder = null;
         async function loadDocuments() {
+          const docList = $("docList");
+          if (docList) showSkeleton(docList, "doc", 4);
           try {
             _kbAllDocs = await invoke("get_documents", { sortBy: _kbSortBy, sortOrder: _kbSortOrder });
             const isPro = get("isPro");
@@ -21246,6 +21529,8 @@
             applyKbFilters();
           } catch (err) {
             toastError(err);
+          } finally {
+            if (docList) hideSkeleton(docList);
           }
         }
         function applyKbFilters() {
@@ -21328,9 +21613,10 @@
           dot.title = t("knowledge_base." + labelKey);
           item.appendChild(dot);
           const left = document.createElement("span");
-          left.className = "truncate flex-1 text-text-primary";
+          left.className = "truncate flex-1 text-text-primary cursor-pointer hover:text-accent transition-colors";
           left.textContent = name;
           left.title = d.file_path;
+          left.onclick = () => openDocPreview(d.id);
           item.appendChild(left);
           if (d.tags && d.tags.length > 0 && !multiSelect) {
             const tagContainer = document.createElement("span");
@@ -21352,6 +21638,15 @@
           }
           const actions = document.createElement("span");
           actions.className = "shrink-0 flex items-center gap-0.5";
+          const previewBtn = document.createElement("button");
+          previewBtn.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
+          previewBtn.textContent = "\u{1F441}";
+          previewBtn.title = t("doc.preview_title") || "\u9884\u89C8";
+          previewBtn.onclick = (ev) => {
+            ev.stopPropagation();
+            openDocPreview(d.id);
+          };
+          actions.appendChild(previewBtn);
           const sumToggle = document.createElement("button");
           sumToggle.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
           sumToggle.textContent = "\u{1F4DD}";

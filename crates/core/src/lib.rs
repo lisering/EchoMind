@@ -201,10 +201,10 @@ pub mod wiki_link_parser;
 pub mod workflow;
 
 use echomind_models::{
-    ChatMessage, Chunk, CodeExecutorConfig, CodeSymbol, Conversation, DocStatus, Document,
-    EntityRelation, ExecutionResult, MemoryEntry, MemoryTier, MessageSearchResult, PendingInput,
-    Proposition, RetrievalResult, ScratchLogEntry, SessionTodo, SummaryNode, SymbolKind,
-    TodoStatus, TurnActiveVersion, WikiLink,
+    ChatMessage, Chunk, ChunkPreview, CodeExecutorConfig, CodeSymbol, Conversation, DocStatus,
+    Document, DocumentPreview, EntityRelation, ExecutionResult, MemoryEntry, MemoryTier,
+    MessageSearchResult, PendingInput, Proposition, RetrievalResult, ScratchLogEntry, SessionTodo,
+    SummaryNode, SymbolKind, TodoStatus, TurnActiveVersion, WikiLink,
 };
 use futures::stream::BoxStream;
 
@@ -455,6 +455,73 @@ pub trait Storage: Send + Sync {
 
     /// 列出文档全部分块（按 sequence 正序，嵌入写入链路用，REQ-VEC-003）。
     async fn list_chunks(&self, doc_id: &str) -> anyhow::Result<Vec<Chunk>>;
+
+    /// 获取文档内容预览（REQ-ING-010）。
+    ///
+    /// 返回文档元数据 + 前 500 字内容预览 + chunk 列表（每个含 sequence + 前 200 字）。
+    /// 默认实现通过 `list_chunks` 拼接内容预览；生产实现可覆盖为单次 SQL 查询。
+    async fn get_document_preview(&self, doc_id: &str) -> anyhow::Result<Option<DocumentPreview>> {
+        // 查找文档
+        let docs = self.list_documents().await?;
+        let doc = docs.into_iter().find(|d| d.id == doc_id);
+        let Some(doc) = doc else { return Ok(None) };
+
+        // 获取 chunks
+        let chunks = self.list_chunks(doc_id).await?;
+        let chunk_count = chunks.len();
+
+        // 拼接前 500 字内容预览
+        let mut content_preview = String::new();
+        for chunk in &chunks {
+            if content_preview.len() >= 500 {
+                break;
+            }
+            if !content_preview.is_empty() {
+                content_preview.push(' ');
+            }
+            content_preview.push_str(&chunk.content);
+        }
+        // 截断到 500 字（按字符边界）
+        let preview_chars: Vec<char> = content_preview.chars().collect();
+        let limit = 500.min(preview_chars.len());
+        content_preview = preview_chars[..limit].iter().collect();
+        if chunk_count > 0 && content_preview.len() >= 500 {
+            content_preview.push('…');
+        }
+
+        // 构建 chunk 预览列表（每个前 200 字）
+        let chunk_previews: Vec<ChunkPreview> = chunks
+            .iter()
+            .map(|chunk| {
+                let cp_chars: Vec<char> = chunk.content.chars().collect();
+                let cp_limit = 200.min(cp_chars.len());
+                let mut cp: String = cp_chars[..cp_limit].iter().collect();
+                if cp_chars.len() > 200 {
+                    cp.push('…');
+                }
+                ChunkPreview {
+                    id: chunk.id.clone(),
+                    sequence: chunk.sequence,
+                    content_preview: cp,
+                    token_count: chunk.token_count,
+                }
+            })
+            .collect();
+
+        Ok(Some(DocumentPreview {
+            id: doc.id,
+            file_path: doc.file_path,
+            status: doc.status,
+            created_at: doc.created_at,
+            domain: doc.domain,
+            summary: doc.summary,
+            tags: doc.tags,
+            file_hash: doc.file_hash,
+            content_preview,
+            chunks: chunk_previews,
+            chunk_count,
+        }))
+    }
 
     /// 删除指定文档的全部分块与向量（保留文档记录，REQ-VEC-005 重试索引用）。
     /// 外键级联自动清理 embeddings；文档记录本身不受影响。

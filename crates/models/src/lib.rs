@@ -129,6 +129,52 @@ impl Chunk {
     }
 }
 
+/// 文档内容预览（REQ-ING-010）。
+///
+/// 包含文档元数据、前 500 字内容预览、以及 chunk 列表（每个 chunk 含 sequence + 前 200 字内容）。
+/// 用于文档管理面板中点击文档名时弹出预览面板。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentPreview {
+    /// 文档 ID
+    pub id: String,
+    /// 文件路径
+    pub file_path: String,
+    /// 索引状态
+    pub status: DocStatus,
+    /// 创建时间（Unix 秒级时间戳）
+    pub created_at: i64,
+    /// 文档领域分类（如有）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub domain: Option<String>,
+    /// 文档摘要（如有）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub summary: Option<String>,
+    /// 用户标签
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// 内容指纹
+    pub file_hash: String,
+    /// 前 500 字内容预览（从 chunks 拼接）
+    pub content_preview: String,
+    /// Chunk 列表（每个含 sequence + 前 200 字内容）
+    pub chunks: Vec<ChunkPreview>,
+    /// Chunk 总数
+    pub chunk_count: usize,
+}
+
+/// Chunk 预览项（REQ-ING-010）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkPreview {
+    /// 分块 ID
+    pub id: String,
+    /// 文档内顺序号
+    pub sequence: usize,
+    /// 前 200 字内容
+    pub content_preview: String,
+    /// token 计数
+    pub token_count: usize,
+}
+
 /// 检索命中结果（对应 REQ-RAG-002 引用回溯）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetrievalResult {

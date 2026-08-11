@@ -690,3 +690,62 @@ pub async fn preview_strip_inner(
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+// ------------------------------------------------------------------
+// 单条消息删除（REQ-RAG-013）
+// ------------------------------------------------------------------
+
+/// 删除单条消息（REQ-RAG-013）。
+///
+/// 若 `message_id` 为 user 消息，则连带删除下一条 assistant 消息（保持问答对完整性）。
+/// 若为 assistant 消息，仅删除该条。
+#[tauri::command]
+pub async fn delete_message(
+    conversation_id: String,
+    message_id: String,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    delete_message_inner(&conversation_id, &message_id, state.inner()).await
+}
+
+/// `delete_message` 的逻辑实现（命令与集成测试复用）。
+///
+/// 返回实际删除的消息数（1 或 2）。
+pub async fn delete_message_inner(
+    conversation_id: &str,
+    message_id: &str,
+    state: &AppState,
+) -> Result<usize, String> {
+    // 获取会话全部消息，找到目标消息
+    let messages = state
+        .storage
+        .list_messages(conversation_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 找到目标消息索引
+    let target_idx = messages
+        .iter()
+        .position(|m| m.id.as_deref() == Some(message_id))
+        .ok_or_else(|| format!("消息不存在: {message_id}"))?;
+
+    let target = &messages[target_idx];
+    let mut ids_to_delete = vec![message_id.to_string()];
+
+    // 若为 user 消息，查找下一条 assistant 消息一并删除
+    if target.role == "user"
+        && let Some(next) = messages.get(target_idx + 1)
+        && next.role == "assistant"
+        && let Some(ref next_id) = next.id
+    {
+        ids_to_delete.push(next_id.clone());
+    }
+
+    let count = ids_to_delete.len();
+    state
+        .storage
+        .delete_messages_by_ids(conversation_id, &ids_to_delete)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(count)
+}

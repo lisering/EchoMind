@@ -514,3 +514,30 @@ mod tests {
         assert_eq!(sorted[2].id, "2"); // 3000
     }
 }
+
+// ------------------------------------------------------------------
+// 文档内容预览（REQ-ING-010）
+// ------------------------------------------------------------------
+
+/// 获取文档内容预览（REQ-ING-010）。
+///
+/// 返回文档元数据 + 前 500 字内容预览 + chunk 列表。
+#[tauri::command]
+pub async fn get_document_preview(
+    doc_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<DocumentPreview>, String> {
+    get_document_preview_inner(&doc_id, state.inner()).await
+}
+
+/// `get_document_preview` 的逻辑实现（命令与集成测试复用）。
+pub async fn get_document_preview_inner(
+    doc_id: &str,
+    state: &AppState,
+) -> Result<Option<DocumentPreview>, String> {
+    state
+        .storage
+        .get_document_preview(doc_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
