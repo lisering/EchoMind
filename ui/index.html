@@ -10820,7 +10820,7 @@
           piiEl.classList.toggle("pii-on", status.piiEnabled);
           piiEl.classList.toggle("pii-off", !status.piiEnabled);
           const piiIcon = document.createElement("span");
-          piiIcon.textContent = "\u{1F6E1}\uFE0F";
+          piiIcon.innerHTML = icon("shield", "sm");
           const piiText = document.createElement("span");
           piiText.textContent = text.pii;
           piiEl.appendChild(piiIcon);
@@ -11528,7 +11528,7 @@
           pill.classList.remove("hidden");
           const iconEl = document.getElementById("modelPillIcon");
           const nameEl = document.getElementById("modelPillName");
-          if (iconEl) iconEl.textContent = mode === "local" ? "\u{1F4BB}" : "\u2601\uFE0F";
+          if (iconEl) iconEl.innerHTML = mode === "local" ? icon("keyboard", "sm") : icon("cloud", "sm");
           let displayName = model;
           if (mode === "local") {
             const parts = model.split("/");
@@ -13021,7 +13021,7 @@
           const list = $("cmdList");
           list.innerHTML = "";
           if (filtered.length === 0) {
-            list.innerHTML = '<div class="px-4 py-8 text-center text-sm text-text-quaternary"><div class="text-3xl mb-2 opacity-30">\u{1F50D}</div>' + t("command_palette.no_results") + "</div>";
+            list.innerHTML = '<div class="px-4 py-8 text-center text-sm text-text-quaternary"><div class="mb-2 opacity-30 flex justify-center">' + icon("search", "lg") + "</div>" + t("command_palette.no_results") + "</div>";
             return;
           }
           let idx = 0;
@@ -14322,7 +14322,7 @@
                 <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
               </svg>
             </div>
-            <h2 class="text-xl font-semibold m-0 mb-2 text-text-primary" data-i18n="security.lock_title">\u{1F512} EchoMind \u5DF2\u9501\u5B9A</h2>
+            <h2 class="text-xl font-semibold m-0 mb-2 text-text-primary" data-i18n="security.lock_title">EchoMind \u5DF2\u9501\u5B9A</h2>
             <p class="text-sm text-text-tertiary m-0 mb-8 leading-normal" data-i18n="security.lock_subtitle">\u8F93\u5165\u5BC6\u7801\u4EE5\u89E3\u9501\u5E76\u8BBF\u95EE\u4F60\u7684\u77E5\u8BC6\u5E93</p>
             <div class="w-full mb-3">
               <input type="password" id="lockPasswordInput" class="w-full px-4 py-3 text-[15px] border border-border-strong rounded-[10px] bg-bg-input text-text-primary outline-none transition-colors box-border focus:border-info focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]"
@@ -14467,7 +14467,7 @@
                 <span class="text-xs text-text-tertiary leading-tight" data-i18n="security.encryption_desc">SQLCipher AES-256 \u900F\u660E\u52A0\u5BC6\uFF0C\u4FDD\u62A4\u6587\u6863\u548C\u5411\u91CF\u6570\u636E</span>
               </div>
               <div class="shrink-0 ml-4">
-                ${isEnc ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-[rgba(var(--success-rgb),0.12)] text-success">\u{1F512} ${t("security.encrypted", "\u5DF2\u52A0\u5BC6")}</span>` : `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-[rgba(100,116,139,0.12)] text-text-quaternary">${t("security.not_encrypted", "\u672A\u52A0\u5BC6")}</span>`}
+                ${isEnc ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-[rgba(var(--success-rgb),0.12)] text-success">${icon("lock", "sm")} ${t("security.encrypted", "\u5DF2\u52A0\u5BC6")}</span>` : `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-[rgba(100,116,139,0.12)] text-text-quaternary">${t("security.not_encrypted", "\u672A\u52A0\u5BC6")}</span>`}
               </div>
             </div>
       
@@ -14783,7 +14783,7 @@
           dialog.className = `fixed inset-0 ${zClass(Z_INDEX.AUDIT_LOG)} flex items-center justify-center bg-black/50 backdrop-blur-[4px]`;
           dialog.innerHTML = `
           <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[480px] w-[90%] max-h-[85vh] overflow-y-auto">
-            <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="security.encrypt_title">\u{1F512} \u542F\u7528\u6570\u636E\u5E93\u52A0\u5BC6</h3>
+            <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="security.encrypt_title">\u542F\u7528\u6570\u636E\u5E93\u52A0\u5BC6</h3>
             <div class="px-7 py-5">
               <p class="text-sm text-text-secondary leading-normal m-0 mb-5" data-i18n="security.encrypt_desc">
                 \u8BBE\u7F6E\u4E00\u4E2A\u5F3A\u5BC6\u7801\uFF0C\u7528\u4E8E\u52A0\u5BC6\u4F60\u7684\u6570\u636E\u5E93\u3002\u6240\u6709\u6587\u6863\u3001\u5411\u91CF\u3001\u5BF9\u8BDD\u8BB0\u5F55\u5C06\u4F7F\u7528 AES-256 \u52A0\u5BC6\u3002
@@ -14802,7 +14802,7 @@
               </div>
               <div id="encPwdStrength" class="text-xs font-medium mt-1.5 min-h-[18px]"></div>
               <p class="text-[13px] text-warning bg-[rgba(var(--warning-rgb),0.08)] px-3.5 py-2.5 rounded-lg mt-3 leading-normal" data-i18n="security.encrypt_warning">
-                \u26A0\uFE0F \u5BC6\u7801\u4E22\u5931\u5C06\u65E0\u6CD5\u6062\u590D\u6570\u636E\u3002\u8BF7\u59A5\u5584\u4FDD\u7BA1\u5BC6\u7801\u3002
+                \u5BC6\u7801\u4E22\u5931\u5C06\u65E0\u6CD5\u6062\u590D\u6570\u636E\u3002\u8BF7\u59A5\u5584\u4FDD\u7BA1\u5BC6\u7801\u3002
               </p>
               <p id="encError" class="text-[13px] text-danger min-h-[18px] mt-2"></p>
             </div>
@@ -14906,7 +14906,7 @@
           panel.className = "modal-overlay";
           panel.innerHTML = `
           <div class="modal-card modal-card--wide">
-            <h3 class="modal-title" data-i18n="security.audit_log_title">\u{1F4CB} \u5B89\u5168\u5BA1\u8BA1\u65E5\u5FD7</h3>
+            <h3 class="modal-title" data-i18n="security.audit_log_title">\u5B89\u5168\u5BA1\u8BA1\u65E5\u5FD7</h3>
             <div class="modal-body">
               <div id="auditLogContent" class="audit-log-container">
                 <p class="loading-text" data-i18n="security.loading">\u52A0\u8F7D\u4E2D\u2026</p>
@@ -14983,12 +14983,12 @@
             const result = await securityApi.verifyAuditChain();
             if (result.valid) {
               toast(
-                t("security.audit_valid", "\u2705 \u5BA1\u8BA1\u65E5\u5FD7\u5B8C\u6574\uFF0C\u672A\u68C0\u6D4B\u5230\u7BE1\u6539") + ` (${result.count} ${t("security.audit_entries", "\u6761\u8BB0\u5F55")})`,
+                t("security.audit_valid", "\u5BA1\u8BA1\u65E5\u5FD7\u5B8C\u6574\uFF0C\u672A\u68C0\u6D4B\u5230\u7BE1\u6539") + ` (${result.count} ${t("security.audit_entries", "\u6761\u8BB0\u5F55")})`,
                 "success"
               );
             } else {
               toast(
-                t("security.audit_invalid", "\u26A0\uFE0F \u5BA1\u8BA1\u65E5\u5FD7\u53EF\u80FD\u5DF2\u88AB\u7BE1\u6539") + ` (${t("security.audit_broken_at", "\u7B2C")} ${result.broken_at} ${t("security.audit_entry", "\u6761")})`,
+                t("security.audit_invalid", "\u5BA1\u8BA1\u65E5\u5FD7\u53EF\u80FD\u5DF2\u88AB\u7BE1\u6539") + ` (${t("security.audit_broken_at", "\u7B2C")} ${result.broken_at} ${t("security.audit_entry", "\u6761")})`,
                 "error"
               );
             }
@@ -15031,20 +15031,20 @@
           if (isEncrypted() && !isLocked()) {
             commands.push({
               id: "lock-app",
-              label: t("security.cmd_lock", "\u{1F512} \u9501\u5B9A\u5E94\u7528"),
+              label: t("security.cmd_lock", "\u9501\u5B9A\u5E94\u7528"),
               group: "security",
               action: lockApp
             });
           }
           commands.push({
             id: "view-audit-log",
-            label: t("security.cmd_audit_log", "\u{1F4CB} \u67E5\u770B\u5BA1\u8BA1\u65E5\u5FD7"),
+            label: t("security.cmd_audit_log", "\u67E5\u770B\u5BA1\u8BA1\u65E5\u5FD7"),
             group: "security",
             action: showAuditLogPanel
           });
           commands.push({
             id: "verify-audit",
-            label: t("security.cmd_verify_audit", "\u2705 \u9A8C\u8BC1\u5BA1\u8BA1\u5B8C\u6574\u6027"),
+            label: t("security.cmd_verify_audit", "\u9A8C\u8BC1\u5BA1\u8BA1\u5B8C\u6574\u6027"),
             group: "security",
             action: verifyAuditChain
           });
@@ -17304,7 +17304,7 @@
             deviceKind = await localLlmApi.getDeviceKind();
           } catch (_) {
           }
-          const deviceIcon = deviceKind === "Metal" ? "\u{1F34E}" : deviceKind === "CUDA" ? "\u{1F7E2}" : "\u{1F4BB}";
+          const deviceIcon = deviceKind === "Metal" ? icon("check", "sm") : deviceKind === "CUDA" ? icon("check", "sm") : icon("keyboard", "sm");
           const deviceLabel = deviceKind === "Metal" ? "Apple Metal" : deviceKind === "CUDA" ? "NVIDIA CUDA" : "CPU";
           const deviceColor = deviceKind === "CPU" ? "text-text-tertiary" : "text-success";
           container.innerHTML = `
