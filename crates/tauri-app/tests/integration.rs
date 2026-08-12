@@ -45,7 +45,6 @@ use echomind_tauri_app::commands::{
     delete_custom_model_inner, list_custom_models_inner, upload_custom_embedding_model_inner,
 };
 use echomind_tauri_app::state::AppState;
-use echomind_tauri_app::stores::config_store::ALPHA_ALL_FEATURES_FREE;
 use ed25519_dalek::Signer;
 use futures::StreamExt;
 use std::sync::Arc;
@@ -342,12 +341,14 @@ fn make_valid_license() -> String {
 
 /// TC-LIC-003 免费版配额拦截：已有 50 个文件，导入第 51 个返回 LIMIT_REACHED（REQ-LIC-002-AC-1）。
 ///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：全功能免费，配额不限制，导入应成功。
-/// 后期稳定后（ALPHA_ALL_FEATURES_FREE = false）：恢复配额限制。
+/// v1.20.0 起：Alpha 阶段结束，配额限制正式生效。
 #[tokio::test]
 async fn tc_lic_003_free_tier_quota_blocked() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    // 确认为免费版
+    assert!(!get_pro_status_inner(&state).await, "测试前提：免费版");
 
     // 预填充 50 个文档（直接写入 storage，跳过导入管线）
     for i in 0..50 {
@@ -364,38 +365,25 @@ async fn tc_lic_003_free_tier_quota_blocked() {
 
     let result = import_files_inner(&handle, &[extra.to_string_lossy().into_owned()], &state).await;
 
-    if ALPHA_ALL_FEATURES_FREE {
-        // Alpha 阶段：全功能免费，配额不限制
-        assert!(
-            result.is_ok(),
-            "Alpha 阶段配额不限制，导入应成功，实际: {:?}",
-            result.err()
-        );
-    } else {
-        let err = result.err().unwrap_or_default();
-        assert!(
-            err.contains("LIMIT_REACHED"),
-            "配额触顶应返回 LIMIT_REACHED 错误，实际: {err}"
-        );
-    }
+    let err = result.err().unwrap_or_default();
+    assert!(
+        err.contains("LIMIT_REACHED"),
+        "配额触顶应返回 LIMIT_REACHED 错误，实际: {err}"
+    );
 }
 
 /// TC-LIC-004 Pro 门控格式付费门（REQ-LIC-002-AC-2）。
 ///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：所有格式均可导入，无 PRO_REQUIRED 错误。
-/// 后期稳定后（ALPHA_ALL_FEATURES_FREE = false）：恢复专业格式付费门。
+/// v1.20.0 起：Alpha 阶段结束，Free 用户导入 Pro 门控格式应返回 PRO_REQUIRED。
 #[tokio::test]
-async fn tc_lic_004_pro_gated_formats_alpha_all_free() {
+async fn tc_lic_004_pro_gated_formats_blocked() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
     let app = tauri::test::mock_app();
     let handle = app.handle().clone();
 
-    // Alpha 阶段：is_pro 自动激活，所有格式均可导入
-    assert!(
-        *state.is_pro().read().await,
-        "Alpha 阶段 is_pro 应自动激活为 true"
-    );
+    // 确认为免费版
+    assert!(!*state.is_pro().read().await, "测试前提：免费版");
 
     for ext in ["pdf", "docx", "pptx", "epub", "xlsx", "csv"] {
         let fname = format!("test.{ext}");
@@ -404,19 +392,17 @@ async fn tc_lic_004_pro_gated_formats_alpha_all_free() {
 
         let result =
             import_files_inner(&handle, &[file.to_string_lossy().into_owned()], &state).await;
+        let err = result.err().unwrap_or_default();
         assert!(
-            result.is_ok(),
-            "Alpha 阶段 .{ext} 导入应成功，实际: {:?}",
-            result.err()
+            err.contains("PRO_REQUIRED"),
+            "Free 用户 .{ext} 导入应返回 PRO_REQUIRED，实际: {err}"
         );
     }
 }
 
 /// TC-LIC-005 激活 Pro 并跨重启持久化（REQ-LIC-001-AC-3）。
 ///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：is_pro 初始即为 true（自动激活），
-/// activate_pro 仍应成功，重启后仍为 true。
-/// 后期稳定后：初始为 false，激活后变 true，重启后恢复 true。
+/// v1.20.0 起：初始为 false，激活后变 true，重启后恢复 true。
 #[tokio::test]
 async fn tc_lic_005_activate_pro_persists_across_restart() {
     let dir = TempDir::new().unwrap();
@@ -425,15 +411,7 @@ async fn tc_lic_005_activate_pro_persists_across_restart() {
     // 第一次会话：激活 Pro
     {
         let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        if ALPHA_ALL_FEATURES_FREE {
-            // Alpha 阶段：初始即为 Pro
-            assert!(
-                get_pro_status_inner(&state).await,
-                "Alpha 阶段初始状态应为 Pro"
-            );
-        } else {
-            assert!(!get_pro_status_inner(&state).await, "初始状态应为免费版");
-        }
+        assert!(!get_pro_status_inner(&state).await, "初始状态应为免费版");
 
         let result = activate_pro_inner(&license, &state).await;
         assert!(
@@ -454,8 +432,7 @@ async fn tc_lic_005_activate_pro_persists_across_restart() {
 
 /// TC-LIC-005b 无效 License 被拒绝（REQ-LIC-001-AC-2/AC-4）。
 ///
-/// Alpha 阶段：is_pro 初始即为 true，无效 License 被拒绝后仍保持 true。
-/// 后期稳定后：初始为 false，拒绝后仍为 false。
+/// v1.20.0 起：初始为 false，拒绝后仍为 false。
 #[tokio::test]
 async fn tc_lic_005b_invalid_license_rejected() {
     let dir = TempDir::new().unwrap();
@@ -464,18 +441,10 @@ async fn tc_lic_005b_invalid_license_rejected() {
     let result = activate_pro_inner("invalid-license-string", &state).await;
     assert!(result.is_err(), "无效 License 必须被拒绝");
 
-    if ALPHA_ALL_FEATURES_FREE {
-        // Alpha 阶段：is_pro 始终为 true
-        assert!(
-            get_pro_status_inner(&state).await,
-            "Alpha 阶段 is_pro 始终为 true"
-        );
-    } else {
-        assert!(
-            !get_pro_status_inner(&state).await,
-            "拒绝后状态不得变为 Pro"
-        );
-    }
+    assert!(
+        !get_pro_status_inner(&state).await,
+        "拒绝后状态不得变为 Pro"
+    );
 }
 
 // ================== Phase 8.5：混沌测试（REQ-CHAOS-001~007） ==================
@@ -2444,10 +2413,6 @@ async fn tc_audit_010_empty_doc_no_chunks_handling() {
 /// TC-LIC-006 License 停用（REQ-LIC-004-AC-1）：
 /// 停用后 is_pro 回落为 false，settings 表 license.is_pro 变为 "false"；
 /// 重建 AppState（模拟重启）后仍为 false（持久化验证）。
-///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：deactivate_pro 设置运行态为 false，
-/// 但重建 AppState 后 load_is_pro 会重新自动激活为 true。
-/// 后期稳定后：停用后运行态和持久化均为 false，重启后仍为 false。
 #[tokio::test]
 async fn tc_lic_006_deactivate_pro() {
     let dir = TempDir::new().unwrap();
@@ -2474,18 +2439,10 @@ async fn tc_lic_006_deactivate_pro() {
 
     // 重建 AppState（模拟重启），验证 is_pro 状态
     let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    if ALPHA_ALL_FEATURES_FREE {
-        // Alpha 阶段：load_is_pro 自动激活，重启后仍为 true
-        assert!(
-            get_pro_status_inner(&restarted).await,
-            "Alpha 阶段重启后自动激活 Pro"
-        );
-    } else {
-        assert!(
-            !get_pro_status_inner(&restarted).await,
-            "重启后应为免费版（持久化生效）"
-        );
-    }
+    assert!(
+        !get_pro_status_inner(&restarted).await,
+        "重启后应为免费版（持久化生效）"
+    );
 }
 
 // ==================================================================
@@ -5887,67 +5844,39 @@ async fn tc_edge_002_super_long_query_chat() {
 
 /// TC-EDGE-003: Free 版本文档数达到 50 上限时拒绝导入。
 ///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：全功能免费，无配额限制。
-/// 后期稳定后：Free 版 50 文档上限。
+/// v1.20.0 起：Alpha 阶段结束，Free 版 50 文档上限正式生效。
 #[tokio::test]
 async fn tc_edge_003_free_tier_50_doc_limit() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
-    if ALPHA_ALL_FEATURES_FREE {
-        // Alpha 阶段：全功能免费，无配额限制
-        // 确认是 Pro 状态
-        assert!(*state.is_pro().read().await, "Alpha 阶段 is_pro 应为 true");
+    // 确保是 Free 版本
+    assert!(!*state.is_pro().read().await, "测试前提：Free 版本");
 
-        // 直接写入 50 个文档到数据库
-        for i in 0..50 {
-            let doc = Document::new(format!("/tmp/test-{i}.md"), format!("hash-{i}"));
-            state.storage.add_document(&doc).await.unwrap();
-        }
-
-        // 尝试导入第 51 个文档 → 应成功（Alpha 阶段无限制）
-        let test_file = dir.path().join("doc-51.md");
-        std::fs::write(&test_file, "第 51 个文档内容").unwrap();
-
-        let app = tauri::test::mock_app();
-        let handle = app.handle().clone();
-        let result =
-            import_files_inner(&handle, &[test_file.to_string_lossy().to_string()], &state).await;
-
-        assert!(
-            result.is_ok(),
-            "Alpha 阶段 50 文档上限不限制，导入应成功，实际: {:?}",
-            result.err()
-        );
-    } else {
-        // 确保是 Free 版本
-        assert!(!*state.is_pro().read().await, "测试前提：Free 版本");
-
-        // 直接写入 50 个文档到数据库（绕过 import_files 的限制检查）
-        for i in 0..50 {
-            let doc = Document::new(format!("/tmp/test-{i}.md"), format!("hash-{i}"));
-            state.storage.add_document(&doc).await.unwrap();
-        }
-
-        // 验证已有 50 个文档
-        let docs = state.storage.list_documents().await.unwrap();
-        assert_eq!(docs.len(), 50, "应已有 50 个文档");
-
-        // 尝试导入第 51 个文档 → 应被拒绝
-        let test_file = dir.path().join("doc-51.md");
-        std::fs::write(&test_file, "第 51 个文档内容").unwrap();
-
-        let app = tauri::test::mock_app();
-        let handle = app.handle().clone();
-        let result =
-            import_files_inner(&handle, &[test_file.to_string_lossy().to_string()], &state).await;
-
-        let err = result.err().unwrap_or_default();
-        assert!(
-            err.contains("50") || err.contains("配额") || err.contains("quota"),
-            "Free 版本 50 文档上限应拒绝导入第 51 个，实际: {err}"
-        );
+    // 直接写入 50 个文档到数据库（绕过 import_files 的限制检查）
+    for i in 0..50 {
+        let doc = Document::new(format!("/tmp/test-{i}.md"), format!("hash-{i}"));
+        state.storage.add_document(&doc).await.unwrap();
     }
+
+    // 验证已有 50 个文档
+    let docs = state.storage.list_documents().await.unwrap();
+    assert_eq!(docs.len(), 50, "应已有 50 个文档");
+
+    // 尝试导入第 51 个文档 → 应被拒绝
+    let test_file = dir.path().join("doc-51.md");
+    std::fs::write(&test_file, "第 51 个文档内容").unwrap();
+
+    let app = tauri::test::mock_app();
+    let handle = app.handle().clone();
+    let result =
+        import_files_inner(&handle, &[test_file.to_string_lossy().to_string()], &state).await;
+
+    let err = result.err().unwrap_or_default();
+    assert!(
+        err.contains("50") || err.contains("配额") || err.contains("quota"),
+        "Free 版本 50 文档上限应拒绝导入第 51 个，实际: {err}"
+    );
 }
 
 // ================== v1.0 发布准备：并发安全测试 ==================
@@ -6052,19 +5981,14 @@ async fn tc_conc_002_concurrent_import_and_chat() {
 
 /// TC-PRO-GATE-001: Free 版本 is_pro = false，Pro 功能不可用。
 ///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：is_pro 自动激活为 true。
-/// 后期稳定后：is_pro = false。
+/// v1.20.0 起：is_pro = false。
 #[tokio::test]
 async fn tc_pro_gate_001_free_tier_pro_disabled() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
     let pro_status = get_pro_status_inner(&state).await;
-    if ALPHA_ALL_FEATURES_FREE {
-        assert!(pro_status, "Alpha 阶段 is_pro 应自动激活为 true");
-    } else {
-        assert!(!pro_status, "Free 版本 is_pro 必须为 false");
-    }
+    assert!(!pro_status, "Free 版本 is_pro 必须为 false");
 }
 
 /// TC-PRO-GATE-002: activate_pro + deactivate_pro 生命周期。
@@ -6192,11 +6116,7 @@ async fn tc_pro_gate_004_local_mode_free_still_not_pro() {
 
     // 验证 Pro 状态
     let pro_status = get_pro_status_inner(&state).await;
-    if ALPHA_ALL_FEATURES_FREE {
-        assert!(pro_status, "Alpha 阶段 is_pro 始终为 true");
-    } else {
-        assert!(!pro_status, "设置 local 模式后仍应为 Free 模式");
-    }
+    assert!(!pro_status, "设置 local 模式后仍应为 Free 模式");
 }
 
 // ============================================================
@@ -6405,98 +6325,64 @@ async fn tc_vec_custom_004_delete_custom_model() {
 ///
 /// 验证：AC-5 — Free 用户无法使用自定义模型上传功能。
 ///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：全功能免费，上传应成功（或文件格式验证失败）。
-/// 后期稳定后：Free 用户上传/列出/删除均返回 PRO_REQUIRED 错误。
+/// v1.20.0 起：Free 用户上传/列出/删除均返回 PRO_REQUIRED 错误。
 #[tokio::test]
 async fn tc_vec_custom_005_free_user_rejected() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
-    if ALPHA_ALL_FEATURES_FREE {
-        // Alpha 阶段：全功能免费，is_pro 始终为 true
-        assert!(*state.is_pro().read().await, "Alpha 阶段 is_pro 应为 true");
+    // 确保是 Free 模式（不激活 Pro）
+    let is_pro = *state.is_pro().read().await;
+    assert!(!is_pro, "测试初始状态应为 Free 模式");
 
-        // Alpha 阶段上传不会被 PRO_REQUIRED 拦截
-        // （具体上传行为取决于文件验证，此处仅验证不返回 PRO_REQUIRED）
-        #[cfg(feature = "pro")]
-        {
-            let onnx_path = create_fake_onnx_file(&dir, "model.onnx");
-            let tokenizer_paths = create_fake_tokenizer_files(&dir);
-            let tokenizer_str: Vec<String> = tokenizer_paths
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
+    // Free 用户上传应被拒绝
+    #[cfg(feature = "pro")]
+    {
+        // 创建测试文件（仅在 Pro 编译时需要）
+        let onnx_path = create_fake_onnx_file(&dir, "model.onnx");
+        let tokenizer_paths = create_fake_tokenizer_files(&dir);
+        let tokenizer_str: Vec<String> = tokenizer_paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
 
-            let result = upload_custom_embedding_model_inner(
-                "test-model".to_string(),
-                onnx_path.to_string_lossy().to_string(),
-                tokenizer_str,
-                &state,
-            )
-            .await;
+        let result = upload_custom_embedding_model_inner(
+            "test-model".to_string(),
+            onnx_path.to_string_lossy().to_string(),
+            tokenizer_str.clone(),
+            &state,
+        )
+        .await;
+        assert!(result.is_err(), "Free 用户上传应被拒绝");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("PRO_REQUIRED"),
+            "错误应包含 PRO_REQUIRED 前缀: {err}"
+        );
+    }
 
-            // 不应返回 PRO_REQUIRED 错误（可能因文件验证失败，但不是 Pro 门控）
-            if let Err(ref e) = result {
-                assert!(
-                    !e.contains("PRO_REQUIRED"),
-                    "Alpha 阶段不应返回 PRO_REQUIRED 错误，实际: {e}"
-                );
-            }
-        }
-    } else {
-        // 确保是 Free 模式（不激活 Pro）
-        let is_pro = *state.is_pro().read().await;
-        assert!(!is_pro, "测试初始状态应为 Free 模式");
+    // Free 用户列出模型应被拒绝
+    #[cfg(feature = "pro")]
+    {
+        let result = list_custom_models_inner(&state).await;
+        assert!(result.is_err(), "Free 用户列出自定义模型应被拒绝");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("PRO_REQUIRED"),
+            "错误应包含 PRO_REQUIRED 前缀: {err}"
+        );
+    }
 
-        // Free 用户上传应被拒绝
-        #[cfg(feature = "pro")]
-        {
-            // 创建测试文件（仅在 Pro 编译时需要）
-            let onnx_path = create_fake_onnx_file(&dir, "model.onnx");
-            let tokenizer_paths = create_fake_tokenizer_files(&dir);
-            let tokenizer_str: Vec<String> = tokenizer_paths
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
-
-            let result = upload_custom_embedding_model_inner(
-                "test-model".to_string(),
-                onnx_path.to_string_lossy().to_string(),
-                tokenizer_str.clone(),
-                &state,
-            )
-            .await;
-            assert!(result.is_err(), "Free 用户上传应被拒绝");
-            let err = result.unwrap_err();
-            assert!(
-                err.contains("PRO_REQUIRED"),
-                "错误应包含 PRO_REQUIRED 前缀: {err}"
-            );
-        }
-
-        // Free 用户列出模型应被拒绝
-        #[cfg(feature = "pro")]
-        {
-            let result = list_custom_models_inner(&state).await;
-            assert!(result.is_err(), "Free 用户列出自定义模型应被拒绝");
-            let err = result.unwrap_err();
-            assert!(
-                err.contains("PRO_REQUIRED"),
-                "错误应包含 PRO_REQUIRED 前缀: {err}"
-            );
-        }
-
-        // Free 用户删除模型应被拒绝
-        #[cfg(feature = "pro")]
-        {
-            let result = delete_custom_model_inner("test-model".to_string(), &state).await;
-            assert!(result.is_err(), "Free 用户删除自定义模型应被拒绝");
-            let err = result.unwrap_err();
-            assert!(
-                err.contains("PRO_REQUIRED"),
-                "错误应包含 PRO_REQUIRED 前缀: {err}"
-            );
-        }
+    // Free 用户删除模型应被拒绝
+    #[cfg(feature = "pro")]
+    {
+        let result = delete_custom_model_inner("test-model".to_string(), &state).await;
+        assert!(result.is_err(), "Free 用户删除自定义模型应被拒绝");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("PRO_REQUIRED"),
+            "错误应包含 PRO_REQUIRED 前缀: {err}"
+        );
     }
 }
 
