@@ -94,6 +94,7 @@ mod security;
 mod settings;
 mod sync;
 mod trace;
+mod workspace;
 
 // ============================================================================
 // pub use 重导出（保持 lib.rs generate_handler! 不变）
@@ -114,6 +115,7 @@ pub use security::*;
 pub use settings::*;
 pub use sync::*;
 pub use trace::*;
+pub use workspace::*;
 
 // ============================================================================
 // 共享类型 / 常量 / 辅助函数（各子模块通过 super::* 访问）

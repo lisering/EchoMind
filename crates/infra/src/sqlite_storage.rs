@@ -152,7 +152,14 @@ created_at INTEGER NOT NULL,
 original_path TEXT,
 domain TEXT,
 summary TEXT,
-tags TEXT NOT NULL DEFAULT '[]'
+tags TEXT NOT NULL DEFAULT '[]',
+workspace_id TEXT NOT NULL DEFAULT 'default'
+);
+
+CREATE TABLE IF NOT EXISTS workspaces (
+id TEXT PRIMARY KEY,
+name TEXT NOT NULL,
+created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -449,7 +456,7 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages WHEN new.c
 END;
 ";
 
-const DOC_COLS: &str = "id, file_path, file_hash, status, status_reason, created_at, original_path, domain, summary, tags";
+const DOC_COLS: &str = "id, file_path, file_hash, status, status_reason, created_at, original_path, domain, summary, tags, workspace_id";
 
 /// AES-256-GCM 随机数 nonce 长度（96 bit）
 const NONCE_LEN: usize = 12;
@@ -869,8 +876,47 @@ impl SqliteStorage {
             .context("迁移失败：documents 表添加 tags 列失败")?;
         }
 
+        // ── documents 表：workspace_id 列在 REQ-WS-001 新增 ──
+        // ALTER TABLE ADD COLUMN 添加；旧文档 workspace_id = 'default'（默认工作空间）
+        if Self::table_exists(conn, "documents")?
+            && !Self::has_column(conn, "documents", "workspace_id")?
+        {
+            info!("schema 迁移：documents 表缺少 workspace_id 列，执行 ALTER TABLE ADD COLUMN");
+            conn.execute(
+                "ALTER TABLE documents ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
+                [],
+            )
+            .context("迁移失败：documents 表添加 workspace_id 列失败")?;
+        }
+
+        // ── workspaces 表：REQ-WS-001 多知识库元数据表 ──
+        // 创建表（如不存在），并插入默认工作空间行（幂等）
+        if !Self::table_exists(conn, "workspaces")? {
+            info!("schema 迁移：创建 workspaces 表");
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS workspaces (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                );",
+            )
+            .context("迁移失败：创建 workspaces 表失败")?;
+        }
+        // 插入默认工作空间（幂等，旧库已有 default 数据但无 workspaces 表行）
+        conn.execute(
+            "INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?1, ?2, ?3)",
+            params!["default", "Default", chrono::Utc::now().timestamp()],
+        )
+        .context("迁移失败：插入默认工作空间失败")?;
+
+        // ── documents 表：workspace_id 索引（REQ-WS-001 数据隔离查询加速）──
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_id)",
+            [],
+        )
+        .context("迁移失败：创建 idx_documents_workspace 索引失败")?;
+
         // ── entities 表：旧版 schema 可能缺少 chunk_id 列 ──
-        // entities 是派生索引表（可从文档重新抽取），schema 不兼容时直接重建。
         if Self::table_exists(conn, "entities")? && !Self::has_column(conn, "entities", "chunk_id")?
         {
             info!("schema 迁移：entities 表 schema 不兼容（缺少 chunk_id 列），重建表");
@@ -933,7 +979,7 @@ impl SqliteStorage {
 
     /// 安全：表名白名单校验，防止 PRAGMA table_info SQL 注入。
     fn validate_table_name(table: &str) -> anyhow::Result<()> {
-        const KNOWN_TABLES: [&str; 18] = [
+        const KNOWN_TABLES: [&str; 19] = [
             "documents",
             "chunks",
             "embeddings",
@@ -952,6 +998,7 @@ impl SqliteStorage {
             "scratch_logs",
             "idempotency_records",
             "budget_records",
+            "workspaces",
         ];
         if !KNOWN_TABLES.contains(&table) {
             bail!("未知表名（不在白名单中）: {table}");
@@ -1121,6 +1168,8 @@ fn row_to_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
     // tags 列存储为 JSON 数组字符串（如 `["法律","重要"]`）
     let tags_json: String = row.get(9).unwrap_or_else(|_| "[]".to_string());
     let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+    // workspace_id 列（REQ-WS-001，索引 10）
+    let workspace_id: String = row.get(10).unwrap_or_else(|_| "default".to_string());
     Ok(Document {
         id: row.get(0)?,
         file_path: row.get(1)?,
@@ -1131,6 +1180,7 @@ fn row_to_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
         domain: row.get(7)?,
         summary: row.get(8)?,
         tags,
+        workspace_id,
     })
 }
 
@@ -1392,7 +1442,7 @@ impl Storage for SqliteStorage {
             let conn = pool.get().context("获取数据库连接失败")?;
             conn.execute(
 &format!(
-"INSERT OR REPLACE INTO documents ({DOC_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
+"INSERT OR REPLACE INTO documents ({DOC_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
             ),
             params![
                 doc.id,
@@ -1405,6 +1455,7 @@ impl Storage for SqliteStorage {
                 doc.domain,
                 doc.summary,
                 serde_json::to_string(&doc.tags).unwrap_or_else(|_| "[]".to_string()),
+                doc.workspace_id,
 ],
 )
             .context("写入文档失败")?;
@@ -1990,6 +2041,167 @@ Ok(())
             conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])
                 .context("删除会话失败")?;
             Ok(())
+        })
+        .await
+    }
+
+    // ========================================================================
+    // 工作空间管理（REQ-WS-001/003 多知识库）
+    // ========================================================================
+
+    async fn create_workspace(&self, workspace: &echomind_models::Workspace) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let ws = workspace.clone();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?1, ?2, ?3)",
+                params![ws.id, ws.name, ws.created_at],
+            )
+            .context("写入工作空间失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn list_workspaces(&self) -> anyhow::Result<Vec<echomind_models::Workspace>> {
+        let pool = self.pool.clone();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let mut stmt = conn.prepare(
+                "SELECT id, name, created_at FROM workspaces ORDER BY created_at ASC, rowid ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(echomind_models::Workspace {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    created_at: row.get(2)?,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    async fn rename_workspace(&self, id: &str, name: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        let name = name.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let affected = conn
+                .execute(
+                    "UPDATE workspaces SET name = ?1 WHERE id = ?2",
+                    params![name, id],
+                )
+                .context("重命名工作空间失败")?;
+            if affected == 0 {
+                bail!("工作空间不存在: {id}");
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    async fn delete_workspace(&self, id: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let tx = conn.unchecked_transaction()?;
+
+            // 1. 删除该工作空间的全部文档（级联清理 chunks/embeddings/entities 等）
+            tx.execute(
+                "DELETE FROM documents WHERE workspace_id = ?1",
+                params![&id],
+            )
+            .context("删除工作空间文档失败")?;
+
+            // 2. 删除该工作空间的全部会话（级联清理 messages）
+            tx.execute(
+                "DELETE FROM conversations WHERE workspace_id = ?1",
+                params![&id],
+            )
+            .context("删除工作空间会话失败")?;
+
+            // 3. 删除工作空间元数据行
+            tx.execute("DELETE FROM workspaces WHERE id = ?1", params![&id])
+                .context("删除工作空间元数据失败")?;
+
+            tx.commit().context("提交工作空间删除事务失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn get_workspace_stats(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<echomind_models::WorkspaceStats> {
+        let pool = self.pool.clone();
+        let id = id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let doc_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM documents WHERE workspace_id = ?1",
+                    params![&id],
+                    |row| row.get(0),
+                )
+                .context("统计工作空间文档数失败")?;
+            let conv_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM conversations WHERE workspace_id = ?1",
+                    params![&id],
+                    |row| row.get(0),
+                )
+                .context("统计工作空间会话数失败")?;
+            Ok(echomind_models::WorkspaceStats {
+                document_count: doc_count as usize,
+                conversation_count: conv_count as usize,
+            })
+        })
+        .await
+    }
+
+    async fn count_documents_in_workspace(&self, workspace_id: &str) -> anyhow::Result<usize> {
+        let pool = self.pool.clone();
+        let workspace_id = workspace_id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM documents WHERE workspace_id = ?1",
+                    params![&workspace_id],
+                    |row| row.get(0),
+                )
+                .context("统计工作空间文档数失败")?;
+            Ok(count as usize)
+        })
+        .await
+    }
+
+    async fn list_documents_in_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> anyhow::Result<Vec<Document>> {
+        let pool = self.pool.clone();
+        let workspace_id = workspace_id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {DOC_COLS} FROM documents WHERE workspace_id = ?1 ORDER BY created_at DESC, rowid DESC"
+            ))?;
+            let rows = stmt.query_map(params![&workspace_id], row_to_document)?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
         })
         .await
     }

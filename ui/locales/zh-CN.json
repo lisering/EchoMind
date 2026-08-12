@@ -1451,5 +1451,24 @@
     "new_conversation": "新对话",
     "messages": "条消息",
     "created": "创建于"
+  },
+  "workspace": {
+    "default": "默认知识库",
+    "selector_title": "切换知识库",
+    "create_new": "新建知识库",
+    "create_title": "新建知识库",
+    "create_placeholder": "输入知识库名称",
+    "create_failed": "创建知识库失败",
+    "switched": "已切换到「{name}」",
+    "switch_failed": "切换知识库失败",
+    "renamed": "已重命名为「{name}」",
+    "rename_failed": "重命名失败",
+    "delete": "删除",
+    "delete_title": "删除知识库",
+    "delete_confirm": "确定删除「{name}」？将删除 {docs} 个文档和 {conversations} 个会话，此操作不可撤销。",
+    "delete_failed": "删除知识库失败",
+    "deleted": "已删除知识库「{name}」",
+    "cannot_delete_last": "至少保留一个知识库",
+    "cannot_delete_default": "默认知识库不可删除"
   }
 }

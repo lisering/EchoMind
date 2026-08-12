@@ -4600,6 +4600,20 @@
               <img src="logo.png" alt="EchoMind" class="w-6 h-6 shrink-0 side-label" />
               <span class="font-semibold tracking-wide text-text-primary" data-i18n="sidebar.brand">EchoMind</span>
             </div>
+            <!-- 知识库选择器（REQ-WS-001 AC-1） -->
+            <div class="px-3 pb-2">
+              <div id="workspaceSelector" class="relative">
+                <button id="workspaceToggle" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-3 border border-border-subtle hover:border-border-default transition-colors text-sm text-text-primary" data-i18n-title="workspace.selector_title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-tertiary"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                  <span id="workspaceName" class="flex-1 truncate text-left" data-i18n="workspace.default">Default</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-quaternary"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <!-- 下拉菜单 -->
+                <div id="workspaceDropdown" class="hidden absolute left-0 right-0 top-full mt-1 rounded-lg bg-surface-2 border border-border-default shadow-lg z-50 max-h-64 overflow-y-auto scrollbar-thin">
+                  <!-- 工作空间列表由 JS 动态填充 -->
+                </div>
+              </div>
+            </div>
             <!-- 新对话 -->
             <div class="px-3 pb-2">
 <button id="newChatBtn" class="w-full text-sm bg-accent/10 text-accent border border-accent/30 rounded-lg px-3 py-2 hover:bg-accent/20 transition-colors flex items-center gap-2 justify-center">
@@ -5717,7 +5731,7 @@
             return false;
           }
         }
-        var DOC_STATUS_STYLE, PRESETS, WORKSPACE;
+        var DOC_STATUS_STYLE, PRESETS;
         var init_utils = __esm({
           "ui/src/utils.js"() {
             DOC_STATUS_STYLE = {
@@ -5738,7 +5752,6 @@
               ollama: { label: "Ollama", base_url: "http://localhost:11434", model: "llama3.1", keyUrl: "https://ollama.com/library", needKey: false, descKey: "presets.ollama_desc" },
               custom: { label: "Custom", base_url: "", model: "", keyUrl: "", needKey: true, descKey: "presets.custom_desc" }
             };
-            WORKSPACE = "default";
           }
         });
       
@@ -11859,6 +11872,310 @@
         // ui/src/sidebar.js
         init_utils();
         init_ipc();
+      
+        // ui/src/workspace.js
+        init_utils();
+        init_ipc();
+        init_i18n();
+        init_toast();
+        var _currentWorkspaceId = "default";
+        var _currentWorkspaceName = "Default";
+        var _dropdownOpen = false;
+        function getCurrentWorkspaceId() {
+          return _currentWorkspaceId;
+        }
+        var _onSwitchWorkspace = async () => {
+        };
+        function setSwitchWorkspaceCallback(fn) {
+          _onSwitchWorkspace = fn || (async () => {
+          });
+        }
+        async function initWorkspaceSelector() {
+          const toggle = $("workspaceToggle");
+          if (!toggle) return;
+          toggle.addEventListener("click", (e) => {
+            e.stopPropagation();
+            toggleDropdown();
+          });
+          document.addEventListener("click", (e) => {
+            const selector = $("workspaceSelector");
+            if (selector && !selector.contains(e.target) && _dropdownOpen) {
+              closeDropdown();
+            }
+          });
+          try {
+            _currentWorkspaceId = await invoke("get_current_workspace");
+            const workspaces = await invoke("list_workspaces");
+            const current = workspaces.find((ws) => ws.id === _currentWorkspaceId);
+            if (current) {
+              _currentWorkspaceName = current.name;
+            }
+          } catch (_) {
+          }
+          updateWorkspaceDisplay();
+        }
+        async function loadWorkspaceList() {
+          const dropdown = $("workspaceDropdown");
+          if (!dropdown) return;
+          dropdown.innerHTML = "";
+          let workspaces = [];
+          try {
+            workspaces = await invoke("list_workspaces");
+          } catch (_) {
+            return;
+          }
+          for (const ws of workspaces) {
+            const item = document.createElement("div");
+            item.className = `flex items-center gap-2 px-3 py-2 cursor-pointer text-sm transition-colors hover:bg-accent/10 ${ws.id === _currentWorkspaceId ? "bg-accent/15 text-accent" : "text-text-secondary"}`;
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "flex-1 truncate workspace-name";
+            nameSpan.textContent = ws.name;
+            nameSpan.dataset.wsId = ws.id;
+            nameSpan.dataset.wsName = ws.name;
+            nameSpan.addEventListener("dblclick", (e) => {
+              e.stopPropagation();
+              startRename(nameSpan, ws);
+            });
+            nameSpan.addEventListener("click", (e) => {
+              e.stopPropagation();
+            });
+            item.addEventListener("click", (e) => {
+              if (e.target.closest(".ws-action-btn")) return;
+              if (ws.id !== _currentWorkspaceId) {
+                switchWorkspace(ws.id, ws.name);
+              }
+              closeDropdown();
+            });
+            item.appendChild(nameSpan);
+            if (ws.id !== "default" && workspaces.length > 1) {
+              const delBtn = document.createElement("button");
+              delBtn.className = "ws-action-btn shrink-0 w-5 h-5 flex items-center justify-center rounded text-text-quaternary hover:text-error transition-colors";
+              delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+              delBtn.title = t("workspace.delete");
+              delBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                confirmDeleteWorkspace(ws);
+              });
+              item.appendChild(delBtn);
+            }
+            if (ws.id === _currentWorkspaceId) {
+              const check = document.createElement("span");
+              check.className = "shrink-0 text-accent";
+              check.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+              item.appendChild(check);
+            }
+            dropdown.appendChild(item);
+          }
+          const createBtn = document.createElement("div");
+          createBtn.className = "flex items-center gap-2 px-3 py-2 cursor-pointer text-sm border-t border-border-subtle text-accent hover:bg-accent/10 transition-colors";
+          createBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
+          createBtn.appendChild(document.createTextNode(t("workspace.create_new")));
+          createBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            showCreateDialog();
+          });
+          dropdown.appendChild(createBtn);
+        }
+        function toggleDropdown() {
+          if (_dropdownOpen) {
+            closeDropdown();
+          } else {
+            openDropdown().catch(() => {
+            });
+          }
+        }
+        async function openDropdown() {
+          const dropdown = $("workspaceDropdown");
+          if (!dropdown) return;
+          await loadWorkspaceList();
+          dropdown.classList.remove("hidden");
+          _dropdownOpen = true;
+        }
+        function closeDropdown() {
+          const dropdown = $("workspaceDropdown");
+          if (dropdown) dropdown.classList.add("hidden");
+          _dropdownOpen = false;
+        }
+        function updateWorkspaceDisplay() {
+          const nameEl = $("workspaceName");
+          if (nameEl) {
+            nameEl.textContent = _currentWorkspaceName;
+          }
+        }
+        async function switchWorkspace(id, name) {
+          try {
+            await invoke("switch_workspace", { workspaceId: id });
+            _currentWorkspaceId = id;
+            _currentWorkspaceName = name;
+            updateWorkspaceDisplay();
+            await _onSwitchWorkspace();
+            toast(t("workspace.switched", { name }), "info");
+          } catch (err) {
+            toastError(t("workspace.switch_failed") + ": " + String(err));
+          }
+        }
+        async function showCreateDialog() {
+          closeDropdown();
+          const name = await showTextInputDialog(
+            t("workspace.create_title"),
+            t("workspace.create_placeholder")
+          );
+          if (!name || !name.trim()) return;
+          try {
+            const id = await invoke("create_workspace", { name: name.trim() });
+            await switchWorkspace(id, name.trim());
+            openDropdown();
+          } catch (err) {
+            toastError(t("workspace.create_failed") + ": " + String(err));
+          }
+        }
+        function startRename(nameSpan, ws) {
+          const input = document.createElement("input");
+          input.type = "text";
+          input.value = ws.name;
+          input.className = "flex-1 bg-transparent outline-none text-sm text-text-primary border-b border-accent";
+          input.maxLength = 100;
+          nameSpan.replaceWith(input);
+          input.focus();
+          input.select();
+          const finishRename = async () => {
+            const newName = input.value.trim();
+            if (!newName || newName === ws.name) {
+              input.replaceWith(nameSpan);
+              return;
+            }
+            try {
+              await invoke("rename_workspace", { id: ws.id, name: newName });
+              if (ws.id === _currentWorkspaceId) {
+                _currentWorkspaceName = newName;
+                updateWorkspaceDisplay();
+              }
+              loadWorkspaceList();
+              toast(t("workspace.renamed", { name: newName }), "info");
+            } catch (err) {
+              toastError(t("workspace.rename_failed") + ": " + String(err));
+              input.replaceWith(nameSpan);
+            }
+          };
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              finishRename();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              input.replaceWith(nameSpan);
+            }
+          });
+          input.addEventListener("blur", finishRename);
+        }
+        async function confirmDeleteWorkspace(ws) {
+          closeDropdown();
+          let workspaces = [];
+          try {
+            workspaces = await invoke("list_workspaces");
+          } catch (_) {
+            return;
+          }
+          if (workspaces.length <= 1) {
+            toastError(t("workspace.cannot_delete_last"));
+            return;
+          }
+          if (ws.id === "default") {
+            toastError(t("workspace.cannot_delete_default"));
+            return;
+          }
+          let stats = { document_count: 0, conversation_count: 0 };
+          try {
+            stats = await invoke("get_workspace_stats", { id: ws.id });
+          } catch (_) {
+          }
+          const ok = await showConfirmDialog({
+            title: t("workspace.delete_title"),
+            body: t("workspace.delete_confirm", {
+              name: ws.name,
+              docs: stats.document_count,
+              conversations: stats.conversation_count
+            }),
+            confirmText: t("workspace.delete"),
+            danger: true
+          });
+          if (!ok) return;
+          try {
+            await invoke("delete_workspace", { id: ws.id });
+            if (ws.id === _currentWorkspaceId) {
+              _currentWorkspaceId = "default";
+              const defaultWs = workspaces.find((w) => w.id === "default");
+              _currentWorkspaceName = defaultWs ? defaultWs.name : "Default";
+              updateWorkspaceDisplay();
+              await _onSwitchWorkspace();
+            }
+            toast(t("workspace.deleted", { name: ws.name }), "info");
+            openDropdown();
+          } catch (err) {
+            toastError(t("workspace.delete_failed") + ": " + String(err));
+          }
+        }
+        function showTextInputDialog(title, placeholder) {
+          return new Promise((resolve) => {
+            const overlay = document.createElement("div");
+            overlay.className = "fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[20vh]";
+            overlay.setAttribute("role", "dialog");
+            overlay.setAttribute("aria-modal", "true");
+            const dialog = document.createElement("div");
+            dialog.className = "w-[400px] max-w-[90vw] rounded-xl bg-surface-1 border border-border-default shadow-2xl p-5";
+            dialog.addEventListener("click", (e) => e.stopPropagation());
+            const titleEl = document.createElement("div");
+            titleEl.className = "text-sm font-medium text-text-primary mb-3";
+            titleEl.textContent = title;
+            dialog.appendChild(titleEl);
+            const input = document.createElement("input");
+            input.type = "text";
+            input.placeholder = placeholder;
+            input.className = "w-full bg-surface-2 border border-border-default rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary outline-none focus:border-accent";
+            dialog.appendChild(input);
+            const btnRow = document.createElement("div");
+            btnRow.className = "flex justify-end gap-2 mt-4";
+            const cancelBtn = document.createElement("button");
+            cancelBtn.className = "px-3 py-1.5 text-sm rounded-lg text-text-secondary hover:bg-surface-3 transition-colors";
+            cancelBtn.textContent = t("common.cancel");
+            cancelBtn.addEventListener("click", () => {
+              overlay.remove();
+              resolve(null);
+            });
+            const okBtn = document.createElement("button");
+            okBtn.className = "px-3 py-1.5 text-sm rounded-lg bg-accent text-white hover:bg-accent/80 transition-colors";
+            okBtn.textContent = t("common.ok");
+            okBtn.addEventListener("click", () => {
+              const val = input.value.trim();
+              overlay.remove();
+              resolve(val || null);
+            });
+            btnRow.appendChild(cancelBtn);
+            btnRow.appendChild(okBtn);
+            dialog.appendChild(btnRow);
+            overlay.appendChild(dialog);
+            document.body.appendChild(overlay);
+            overlay.addEventListener("click", () => {
+              overlay.remove();
+              resolve(null);
+            });
+            input.focus();
+            input.addEventListener("keydown", (e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                const val = input.value.trim();
+                overlay.remove();
+                resolve(val || null);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                overlay.remove();
+                resolve(null);
+              }
+            });
+          });
+        }
+      
+        // ui/src/sidebar.js
         init_i18n();
         init_toast();
         var BOTTOM_ANCHOR_THRESHOLD = 100;
@@ -12158,7 +12475,7 @@
             _renderMessageSearchPage(box);
             return;
           }
-          const list = await invoke("get_conversations", { workspaceId: WORKSPACE });
+          const list = await invoke("get_conversations", { workspaceId: getCurrentWorkspaceId() });
           const lowerTerm = term.toLowerCase();
           _searchFiltered = lowerTerm ? list.filter((c) => (c.title || "").toLowerCase().includes(lowerTerm)) : list;
           if (_searchFiltered.length === 0) {
@@ -23169,7 +23486,7 @@
             console.warn("get_turn_active_versions IPC \u5931\u8D25:", err);
           }
           setState({ currentConversationId: id, history: messages, isNewConversation: false });
-          const convList = await invoke("get_conversations", { workspaceId: WORKSPACE });
+          const convList = await invoke("get_conversations", { workspaceId: getCurrentWorkspaceId() });
           const conv = convList.find((c) => c.id === id);
           _updateWindowTitle(conv?.title);
           resetFeedbackTracking();
@@ -23366,7 +23683,7 @@
         async function loadConversations() {
           const convBox = $("convList");
           if (convBox) showSkeleton(convBox, "conv", 4);
-          const list = await invoke("get_conversations", { workspaceId: WORKSPACE });
+          const list = await invoke("get_conversations", { workspaceId: getCurrentWorkspaceId() });
           const box = $("convList");
           if (box) hideSkeleton(box);
           box.innerHTML = "";
@@ -23772,7 +24089,7 @@
         }
         async function initConversations() {
           try {
-            const list = await invoke("get_conversations", { workspaceId: WORKSPACE });
+            const list = await invoke("get_conversations", { workspaceId: getCurrentWorkspaceId() });
             if (list.length === 0) await newChat();
             else await loadConversation(list[0].id);
             await loadDocuments();
@@ -23890,6 +24207,12 @@
             });
           }
           restoreSidebarState();
+          setSwitchWorkspaceCallback(async () => {
+            await loadConversations();
+            await loadDocuments();
+          });
+          initWorkspaceSelector().catch(() => {
+          });
           initSearchPopup(loadConversation);
           initCommandPalette(getCommands());
           initGlobalSearch({

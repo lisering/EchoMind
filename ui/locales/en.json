@@ -1451,5 +1451,24 @@
     "new_conversation": "New Chat",
     "messages": "messages",
     "created": "Created"
+  },
+  "workspace": {
+    "default": "Default",
+    "selector_title": "Switch knowledge base",
+    "create_new": "New Workspace",
+    "create_title": "Create Workspace",
+    "create_placeholder": "Enter workspace name",
+    "create_failed": "Failed to create workspace",
+    "switched": "Switched to \"{name}\"",
+    "switch_failed": "Failed to switch workspace",
+    "renamed": "Renamed to \"{name}\"",
+    "rename_failed": "Failed to rename",
+    "delete": "Delete",
+    "delete_title": "Delete Workspace",
+    "delete_confirm": "Delete \"{name}\"? This will remove {docs} documents and {conversations} conversations. This cannot be undone.",
+    "delete_failed": "Failed to delete workspace",
+    "deleted": "Deleted workspace \"{name}\"",
+    "cannot_delete_last": "At least one workspace must remain",
+    "cannot_delete_default": "Default workspace cannot be deleted"
   }
 }

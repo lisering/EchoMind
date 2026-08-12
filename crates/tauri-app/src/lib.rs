@@ -422,6 +422,14 @@ pub fn run() {
             // REQ-ING-011：导入历史记录
             commands::get_import_history,
             commands::clear_import_history,
+            // 多知识库管理（REQ-WS-001/003 多知识库创建与切换/重命名与删除）
+            commands::create_workspace,
+            commands::list_workspaces,
+            commands::switch_workspace,
+            commands::get_current_workspace,
+            commands::rename_workspace,
+            commands::delete_workspace,
+            commands::get_workspace_stats,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

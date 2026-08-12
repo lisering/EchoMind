@@ -5,6 +5,13 @@
 
 use serde::{Deserialize, Serialize};
 
+/// 默认工作空间 ID（REQ-WS-001）。
+///
+/// 旧文档和未指定工作空间的文档自动归属此工作空间。
+fn default_workspace_id() -> String {
+    "default".to_string()
+}
+
 /// 文档索引状态机：`Pending → Processing → Indexed / Failed(reason)`
 /// 对应 REQ-VEC-004 的生命周期定义。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +65,12 @@ pub struct Document {
     /// 支持按标签筛选文档列表。
     #[serde(default)]
     pub tags: Vec<String>,
+    /// 工作空间标识（REQ-WS-001 多知识库）。
+    ///
+    /// 默认为 `"default"`。多知识库模式下通过此字段隔离不同知识库的文档。
+    /// 旧数据迁移时自动设为 `"default"`。
+    #[serde(default = "default_workspace_id")]
+    pub workspace_id: String,
 }
 
 impl Document {
@@ -73,6 +86,7 @@ impl Document {
             domain: None,
             summary: None,
             tags: Vec::new(),
+            workspace_id: default_workspace_id(),
         }
     }
 
@@ -97,6 +111,7 @@ impl Document {
             domain: None,
             summary: None,
             tags: Vec::new(),
+            workspace_id: default_workspace_id(),
         }
     }
 }
@@ -619,6 +634,51 @@ impl Conversation {
             sort_order: 0,
         }
     }
+}
+
+/// 知识库/工作空间（REQ-WS-001 多知识库创建与切换）。
+///
+/// 每个工作空间拥有独立的文档集和会话列表，通过 `workspace_id` 字段隔离。
+/// 默认工作空间 ID 为 `"default"`，用户可创建多个自定义知识库。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    /// 工作空间唯一标识（UUID v4 或 `"default"`）
+    pub id: String,
+    /// 知识库显示名称
+    pub name: String,
+    /// 创建时间（Unix 秒级时间戳）
+    pub created_at: i64,
+}
+
+impl Workspace {
+    /// 创建新工作空间：自动生成 UUID 与时间戳。
+    pub fn new(name: String) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            created_at: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    /// 以指定 ID 构造（用于默认工作空间 `"default"`）。
+    pub fn with_id(id: String, name: String) -> Self {
+        Self {
+            id,
+            name,
+            created_at: chrono::Utc::now().timestamp(),
+        }
+    }
+}
+
+/// 工作空间数据量预览（REQ-WS-003 删除前确认对话框）。
+///
+/// 删除工作空间前查询将级联清理的数据量，前端展示给用户确认。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceStats {
+    /// 文档数量
+    pub document_count: usize,
+    /// 会话数量
+    pub conversation_count: usize,
 }
 
 /// 对话全文搜索结果（REQ-RAG-040）。

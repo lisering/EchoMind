@@ -500,6 +500,7 @@ mod tests {
             domain: None,
             summary: None,
             tags: Vec::new(),
+            workspace_id: "default".to_string(),
         }
     }
 

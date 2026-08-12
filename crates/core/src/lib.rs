@@ -354,6 +354,77 @@ pub trait Storage: Send + Sync {
         Ok(self.list_conversations(workspace_id).await?.len())
     }
 
+    // ========================================================================
+    // 工作空间管理（REQ-WS-001 多知识库创建与切换）
+    // ========================================================================
+
+    /// 创建工作空间（REQ-WS-001）。
+    ///
+    /// 插入 `workspaces` 表。重复 ID 忽略（幂等）。
+    /// 默认实现为空操作（兼容旧版 MockStorage）；生产实现必须覆盖。
+    async fn create_workspace(
+        &self,
+        _workspace: &echomind_models::Workspace,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 列出全部工作空间（按创建时间正序，REQ-WS-001 AC-1）。
+    ///
+    /// 默认实现返回单个默认工作空间（兼容旧版）；生产实现必须覆盖。
+    async fn list_workspaces(&self) -> anyhow::Result<Vec<echomind_models::Workspace>> {
+        Ok(vec![echomind_models::Workspace::with_id(
+            "default".to_string(),
+            "Default".to_string(),
+        )])
+    }
+
+    /// 重命名工作空间（REQ-WS-003 AC-1/AC-2）。
+    ///
+    /// 默认实现为空操作；生产实现必须覆盖。
+    async fn rename_workspace(&self, _id: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 删除工作空间（REQ-WS-003 AC-4 级联清理）。
+    ///
+    /// 删除指定工作空间及其全部文档、chunks、向量、会话、消息。
+    /// 默认实现为空操作；生产实现必须覆盖。
+    async fn delete_workspace(&self, _id: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 获取工作空间数据量预览（REQ-WS-003 AC-3 删除确认对话框）。
+    ///
+    /// 返回该工作空间的文档数和会话数，用于删除前确认对话框展示。
+    /// 默认实现返回零值；生产实现必须覆盖。
+    async fn get_workspace_stats(
+        &self,
+        _id: &str,
+    ) -> anyhow::Result<echomind_models::WorkspaceStats> {
+        Ok(echomind_models::WorkspaceStats {
+            document_count: 0,
+            conversation_count: 0,
+        })
+    }
+
+    /// 统计工作空间文档数（REQ-WS-001 AC-4 数据隔离）。
+    ///
+    /// 默认实现返回全部文档数；生产实现应覆盖为按 workspace_id 过滤。
+    async fn count_documents_in_workspace(&self, _workspace_id: &str) -> anyhow::Result<usize> {
+        self.count_documents().await
+    }
+
+    /// 列出工作空间文档（REQ-WS-001 AC-3 切换后同步刷新）。
+    ///
+    /// 默认实现返回全部文档；生产实现应覆盖为按 workspace_id 过滤。
+    async fn list_documents_in_workspace(
+        &self,
+        _workspace_id: &str,
+    ) -> anyhow::Result<Vec<Document>> {
+        self.list_documents().await
+    }
+
     /// 删除会话（外键级联清理其消息）。
     async fn delete_conversation(&self, id: &str) -> anyhow::Result<()>;
 
