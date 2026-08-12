@@ -2889,6 +2889,37 @@ impl StripPreview {
     }
 }
 
+/// 对话书签（REQ-RAG-047）。
+///
+/// 用户可将重要对话标记为书签，支持自定义备注。
+/// 持久化到 `conversation_bookmarks` 表。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationBookmark {
+    /// 书签所属会话 ID
+    pub conversation_id: String,
+    /// 书签备注（可选，用户自定义）
+    pub note: Option<String>,
+    /// 创建时间戳（Unix 秒）
+    pub created_at: i64,
+}
+
+impl ConversationBookmark {
+    /// 创建新书签。
+    pub fn new(conversation_id: String) -> Self {
+        Self {
+            conversation_id,
+            note: None,
+            created_at: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    /// 设置备注。
+    pub fn with_note(mut self, note: String) -> Self {
+        self.note = Some(note);
+        self
+    }
+}
+
 /// 缓存设置新增到 SettingsPayload（REQ-PERF-001）。
 ///
 /// 通过 `get_settings` 返回给前端，前端据此渲染缓存设置 UI。

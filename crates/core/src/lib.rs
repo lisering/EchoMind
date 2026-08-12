@@ -1544,6 +1544,44 @@ pub trait Storage: Send + Sync {
     async fn clear_import_logs(&self) -> anyhow::Result<()> {
         Ok(())
     }
+
+    // ------------------------------------------------------------------
+    // 对话书签（REQ-RAG-047）
+    // ------------------------------------------------------------------
+
+    /// 添加对话书签（REQ-RAG-047 AC-1/AC-2）。
+    ///
+    /// 将指定会话标记为书签，可附带备注。重复添加时更新备注。
+    /// 默认实现为空操作；生产适配器应覆盖为 SQL INSERT OR REPLACE。
+    async fn add_bookmark(
+        &self,
+        _conversation_id: &str,
+        _note: Option<&str>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 移除对话书签（REQ-RAG-047 AC-5）。
+    ///
+    /// 默认实现为空操作；生产适配器应覆盖为 SQL DELETE。
+    async fn remove_bookmark(&self, _conversation_id: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 列出全部书签（REQ-RAG-047 AC-3/AC-4）。
+    ///
+    /// 返回所有书签列表，按创建时间倒序排列。
+    /// 默认实现返回空 Vec；生产适配器应覆盖为 SQL SELECT。
+    async fn list_bookmarks(&self) -> anyhow::Result<Vec<echomind_models::ConversationBookmark>> {
+        Ok(vec![])
+    }
+
+    /// 检查指定会话是否已加书签（REQ-RAG-047 AC-2 图标显示）。
+    ///
+    /// 默认实现返回 false；生产适配器应覆盖为 SQL SELECT。
+    async fn is_bookmarked(&self, _conversation_id: &str) -> anyhow::Result<bool> {
+        Ok(false)
+    }
 }
 pub trait LLMProvider: Send + Sync {
     /// 发起流式对话；返回的流在首个 token 到达前即应建立，逐 token 产出增量文本。

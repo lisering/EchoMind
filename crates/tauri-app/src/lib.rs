@@ -140,6 +140,10 @@ pub fn run() {
             commands::rename_conversation,
             // 会话拖拽排序（REQ-IX-002）
             commands::reorder_conversations,
+            commands::add_bookmark,
+            commands::remove_bookmark,
+            commands::list_bookmarks,
+            commands::is_bookmarked,
             commands::abort_chat,
             commands::abort_import,
             commands::test_llm_connection,

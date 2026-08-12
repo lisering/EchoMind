@@ -505,7 +505,7 @@ pub async fn chat_inner<R: Runtime>(
         if bg_mode == LlmMode::Local {
             #[cfg(feature = "pro")]
             {
-                if let Some(engine) = state.local_llm().await.ok() {
+                if let Ok(engine) = state.local_llm().await {
                     // S68：schedule_background_compaction 处理 try_acquire，
                     // 返回的 future 包含 run + release（自动管理锁）。
                     // 由于 LLMProvider async fn in trait 的 future 不保证 Send，

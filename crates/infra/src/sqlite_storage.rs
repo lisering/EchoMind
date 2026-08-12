@@ -410,6 +410,14 @@ CREATE INDEX IF NOT EXISTS idx_scratch_logs_created ON scratch_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_budget_records_principal ON budget_records(principal);
 CREATE INDEX IF NOT EXISTS idx_budget_records_timestamp ON budget_records(timestamp);
 CREATE INDEX IF NOT EXISTS idx_import_logs_timestamp ON import_logs(timestamp);
+
+-- 对话书签表（REQ-RAG-047）
+CREATE TABLE IF NOT EXISTS conversation_bookmarks (
+  conversation_id TEXT PRIMARY KEY,
+  note TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_created ON conversation_bookmarks(created_at);
 ";
 
 /// FTS5 全文索引虚拟表（混合检索关键词通道，REQ-RAG-010）。
@@ -979,7 +987,7 @@ impl SqliteStorage {
 
     /// 安全：表名白名单校验，防止 PRAGMA table_info SQL 注入。
     fn validate_table_name(table: &str) -> anyhow::Result<()> {
-        const KNOWN_TABLES: [&str; 19] = [
+        const KNOWN_TABLES: [&str; 20] = [
             "documents",
             "chunks",
             "embeddings",
@@ -996,6 +1004,7 @@ impl SqliteStorage {
             "pending_inputs",
             "session_todos",
             "scratch_logs",
+            "conversation_bookmarks",
             "idempotency_records",
             "budget_records",
             "workspaces",
@@ -5053,6 +5062,91 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
         })
         .await??;
         Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // 对话书签（REQ-RAG-047）
+    // ------------------------------------------------------------------
+
+    /// 添加对话书签（REQ-RAG-047 AC-1/AC-2）。
+    async fn add_bookmark(&self, conversation_id: &str, note: Option<&str>) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let conv_id = conversation_id.to_string();
+        let note_val = note.map(|s| s.to_string());
+        let now = chrono::Utc::now().timestamp();
+        tokio::task::spawn_blocking(move || {
+let conn = pool.get()?;
+conn.execute(
+"INSERT OR REPLACE INTO conversation_bookmarks (conversation_id, note, created_at) VALUES (?1, ?2, ?3)",
+params![conv_id, note_val, now],
+)
+.context("写入 conversation_bookmarks 失败")?;
+Ok::<_, anyhow::Error>(())
+})
+.await??;
+        Ok(())
+    }
+
+    /// 移除对话书签（REQ-RAG-047 AC-5）。
+    async fn remove_bookmark(&self, conversation_id: &str) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let conv_id = conversation_id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            conn.execute(
+                "DELETE FROM conversation_bookmarks WHERE conversation_id = ?1",
+                params![conv_id],
+            )
+            .context("删除 conversation_bookmarks 失败")?;
+            Ok::<_, anyhow::Error>(())
+        })
+        .await??;
+        Ok(())
+    }
+
+    /// 列出全部书签（REQ-RAG-047 AC-3/AC-4）。
+    async fn list_bookmarks(&self) -> anyhow::Result<Vec<echomind_models::ConversationBookmark>> {
+        let pool = self.pool.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let mut stmt = conn.prepare(
+"SELECT conversation_id, note, created_at FROM conversation_bookmarks ORDER BY created_at DESC",
+).context("准备 conversation_bookmarks 查询失败")?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(echomind_models::ConversationBookmark {
+                        conversation_id: row.get(0)?,
+                        note: row.get(1)?,
+                        created_at: row.get(2)?,
+                    })
+                })
+                .context("查询 conversation_bookmarks 失败")?;
+            let mut bookmarks = Vec::new();
+            for row in rows {
+                bookmarks.push(row?);
+            }
+            Ok::<_, anyhow::Error>(bookmarks)
+        })
+        .await?
+    }
+
+    /// 检查指定会话是否已加书签（REQ-RAG-047 AC-2）。
+    async fn is_bookmarked(&self, conversation_id: &str) -> anyhow::Result<bool> {
+        let pool = self.pool.clone();
+        let conv_id = conversation_id.to_string();
+        let count: i64 = tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM conversation_bookmarks WHERE conversation_id = ?1",
+                    params![conv_id],
+                    |row| row.get(0),
+                )
+                .context("查询 conversation_bookmarks COUNT 失败")?;
+            Ok::<_, anyhow::Error>(count)
+        })
+        .await??;
+        Ok(count > 0)
     }
 }
 

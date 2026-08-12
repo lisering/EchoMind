@@ -795,3 +795,85 @@ pub async fn reorder_conversations_inner(
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+// ==================================================================
+// 对话书签（REQ-RAG-047）
+// ==================================================================
+
+/// 添加对话书签（REQ-RAG-047 AC-1/AC-2）。
+#[tauri::command]
+pub async fn add_bookmark(
+    conversation_id: String,
+    note: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    add_bookmark_inner(&conversation_id, note.as_deref(), state.inner()).await
+}
+
+/// `add_bookmark` 的逻辑实现。
+pub async fn add_bookmark_inner(
+    conversation_id: &str,
+    note: Option<&str>,
+    state: &AppState,
+) -> Result<(), String> {
+    state
+        .storage
+        .add_bookmark(conversation_id, note)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 移除对话书签（REQ-RAG-047 AC-5）。
+#[tauri::command]
+pub async fn remove_bookmark(
+    conversation_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    remove_bookmark_inner(&conversation_id, state.inner()).await
+}
+
+/// `remove_bookmark` 的逻辑实现。
+pub async fn remove_bookmark_inner(conversation_id: &str, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .remove_bookmark(conversation_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 列出全部书签（REQ-RAG-047 AC-3/AC-4）。
+#[tauri::command]
+pub async fn list_bookmarks(
+    state: State<'_, AppState>,
+) -> Result<Vec<echomind_models::ConversationBookmark>, String> {
+    list_bookmarks_inner(state.inner()).await
+}
+
+/// `list_bookmarks` 的逻辑实现。
+pub async fn list_bookmarks_inner(
+    state: &AppState,
+) -> Result<Vec<echomind_models::ConversationBookmark>, String> {
+    state
+        .storage
+        .list_bookmarks()
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 检查指定会话是否已加书签（REQ-RAG-047 AC-2）。
+#[tauri::command]
+pub async fn is_bookmarked(
+    conversation_id: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    is_bookmarked_inner(&conversation_id, state.inner()).await
+}
+
+/// `is_bookmarked` 的逻辑实现。
+pub async fn is_bookmarked_inner(conversation_id: &str, state: &AppState) -> Result<bool, String> {
+    state
+        .storage
+        .is_bookmarked(conversation_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
