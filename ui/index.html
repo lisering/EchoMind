@@ -4606,6 +4606,7 @@
                 <button id="workspaceToggle" class="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-3 border border-border-subtle hover:border-border-default transition-colors text-sm text-text-primary" data-i18n-title="workspace.selector_title">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-tertiary"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
                   <span id="workspaceName" class="flex-1 truncate text-left" data-i18n="workspace.default">Default</span>
+<span id="workspaceQuota" class="shrink-0 text-xs text-text-quaternary tabular-nums"></span>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-quaternary"><path d="m6 9 6 6 6-6"/></svg>
                 </button>
                 <!-- 下拉菜单 -->
@@ -12000,6 +12001,29 @@
           const nameEl = $("workspaceName");
           if (nameEl) {
             nameEl.textContent = _currentWorkspaceName;
+          }
+          updateQuotaDisplay();
+        }
+        async function updateQuotaDisplay() {
+          const quotaEl = $("workspaceQuota");
+          if (!quotaEl) return;
+          try {
+            const [count, limit] = await invoke("get_workspace_quota");
+            if (limit === 0) {
+              quotaEl.textContent = String(count);
+              quotaEl.classList.remove("text-warning");
+              quotaEl.classList.add("text-text-quaternary");
+            } else {
+              quotaEl.textContent = `${count}/${limit}`;
+              if (count >= limit * 0.9) {
+                quotaEl.classList.remove("text-text-quaternary");
+                quotaEl.classList.add("text-warning");
+              } else {
+                quotaEl.classList.remove("text-warning");
+                quotaEl.classList.add("text-text-quaternary");
+              }
+            }
+          } catch (_) {
           }
         }
         async function switchWorkspace(id, name) {
@@ -19706,6 +19730,7 @@
         init_toast();
         init_ipc();
         init_state();
+        init_ipc();
         var _visible = false;
         function initContextMenu() {
           const menu = $("ctxMenu");
@@ -19778,6 +19803,7 @@
             items.push(_separator());
             items.push(_item("rebuildIndex", t("ctx.rebuild_index", "\u91CD\u5EFA\u7D22\u5F15"), "", true));
             items.push(_separator());
+            items.push(_item("migrateDoc", t("ctx.migrate_doc", "\u8FC1\u79FB\u81F3\u2026"), "", true));
             items.push(_item("deleteDoc", t("ctx.delete_doc", "\u5220\u9664\u6587\u6863"), "", true));
           }
           menu.innerHTML = items.join("");
@@ -19961,6 +19987,13 @@
             } catch (err) {
               toastError(err);
             }
+            return;
+          }
+          if (action === "migrateDoc") {
+            const docId = menu?.dataset.docId || "";
+            const docName = menu?.dataset.docName || "";
+            if (!docId) return;
+            await _showMigrateDialog(docId, docName);
             return;
           }
           if (action === "deleteDoc") {
@@ -20151,6 +20184,92 @@
           menu.style.left = Math.max(4, x) + "px";
           menu.style.top = Math.max(4, y) + "px";
           _visible = true;
+        }
+        async function _showMigrateDialog(docId, docName) {
+          let workspaces = [];
+          let currentWsId = "default";
+          try {
+            workspaces = await invoke("list_workspaces");
+            currentWsId = await invoke("get_current_workspace");
+          } catch (err) {
+            toastError(String(err));
+            return;
+          }
+          const targets = workspaces.filter((ws) => ws.id !== currentWsId);
+          if (targets.length === 0) {
+            toastError(t("workspace.migrate_no_target", "\u6CA1\u6709\u53EF\u8FC1\u79FB\u7684\u76EE\u6807\u77E5\u8BC6\u5E93"));
+            return;
+          }
+          const overlay = document.createElement("div");
+          overlay.className = "fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[20vh]";
+          overlay.setAttribute("role", "dialog");
+          overlay.setAttribute("aria-modal", "true");
+          const dialog = document.createElement("div");
+          dialog.className = "w-[400px] max-w-[90vw] rounded-xl bg-surface-1 border border-border-default shadow-2xl p-5";
+          dialog.addEventListener("click", (e) => e.stopPropagation());
+          const titleEl = document.createElement("div");
+          titleEl.className = "text-sm font-medium text-text-primary mb-1";
+          titleEl.textContent = t("workspace.migrate_title", "\u8FC1\u79FB\u6587\u6863");
+          dialog.appendChild(titleEl);
+          const descEl = document.createElement("div");
+          descEl.className = "text-xs text-text-tertiary mb-3";
+          descEl.textContent = t("workspace.migrate_desc", { name: docName }) || `\u9009\u62E9\u76EE\u6807\u77E5\u8BC6\u5E93\u8FC1\u79FB\u300C${docName}\u300D`;
+          dialog.appendChild(descEl);
+          const listEl = document.createElement("div");
+          listEl.className = "space-y-1 max-h-48 overflow-y-auto scrollbar-thin";
+          for (const ws of targets) {
+            const item = document.createElement("div");
+            item.className = "flex items-center gap-2 px-3 py-2 cursor-pointer text-sm rounded-lg text-text-secondary hover:bg-accent/10 transition-colors";
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "flex-1 truncate";
+            nameSpan.textContent = ws.name;
+            item.appendChild(nameSpan);
+            try {
+              const stats = await invoke("get_workspace_stats", { id: ws.id });
+              const countEl = document.createElement("span");
+              countEl.className = "shrink-0 text-xs text-text-quaternary";
+              countEl.textContent = String(stats.document_count);
+              item.appendChild(countEl);
+            } catch (_) {
+            }
+            item.addEventListener("click", () => {
+              overlay.remove();
+              _doMigrate(docId, docName, ws.id, ws.name);
+            });
+            listEl.appendChild(item);
+          }
+          dialog.appendChild(listEl);
+          const btnRow = document.createElement("div");
+          btnRow.className = "flex justify-end mt-4";
+          const cancelBtn = document.createElement("button");
+          cancelBtn.className = "px-3 py-1.5 text-sm rounded-lg text-text-secondary hover:bg-surface-3 transition-colors";
+          cancelBtn.textContent = t("common.cancel");
+          cancelBtn.addEventListener("click", () => {
+            overlay.remove();
+          });
+          btnRow.appendChild(cancelBtn);
+          dialog.appendChild(btnRow);
+          overlay.appendChild(dialog);
+          document.body.appendChild(overlay);
+          overlay.addEventListener("click", () => {
+            overlay.remove();
+          });
+          overlay.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              overlay.remove();
+            }
+          });
+        }
+        async function _doMigrate(docId, docName, targetWsId, targetWsName) {
+          try {
+            toast(t("workspace.migrating", { name: docName }), "info");
+            await invoke("migrate_document", { docId, targetWorkspaceId: targetWsId });
+            toastSuccess(t("workspace.migrate_success", { name: docName, target: targetWsName }) || `\u5DF2\u8FC1\u79FB\u300C${docName}\u300D\u5230\u300C${targetWsName}\u300D`);
+            document.dispatchEvent(new CustomEvent("ctx-refresh-documents"));
+          } catch (err) {
+            toastError(String(err));
+          }
         }
       
         // ui/src/doc-keyboard.js

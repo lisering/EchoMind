@@ -1468,7 +1468,12 @@
     "delete_confirm": "确定删除「{name}」？将删除 {docs} 个文档和 {conversations} 个会话，此操作不可撤销。",
     "delete_failed": "删除知识库失败",
     "deleted": "已删除知识库「{name}」",
-    "cannot_delete_last": "至少保留一个知识库",
-    "cannot_delete_default": "默认知识库不可删除"
-  }
+"cannot_delete_last": "至少保留一个知识库",
+"cannot_delete_default": "默认知识库不可删除",
+"migrate_title": "迁移文档",
+"migrate_desc": "选择目标知识库迁移「{name}」",
+"migrate_no_target": "没有可迁移的目标知识库",
+"migrating": "正在迁移「{name}」…",
+"migrate_success": "已迁移「{name}」到「{target}」"
+}
 }

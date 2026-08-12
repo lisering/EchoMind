@@ -2206,6 +2206,29 @@ Ok(())
         .await
     }
 
+    /// 迁移文档到目标工作空间（REQ-WS-004 跨知识库迁移）。
+    ///
+    /// 事务 UPDATE `documents.workspace_id`，chunks / 向量等通过外键关联自动归属。
+    async fn migrate_document(
+        &self,
+        doc_id: &str,
+        target_workspace_id: &str,
+    ) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let doc_id = doc_id.to_string();
+        let target_ws = target_workspace_id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            conn.execute(
+                "UPDATE documents SET workspace_id = ?1 WHERE id = ?2",
+                params![&target_ws, &doc_id],
+            )
+            .context("迁移文档失败")?;
+            Ok(())
+        })
+        .await
+    }
+
     /// 按 ID 查找单个会话（REQ-EXP-001 导出功能）。
     /// 直接 SQL 查询，无需 workspace_id 过滤（会话 ID 全局唯一）。
     async fn get_conversation(&self, id: &str) -> anyhow::Result<Option<Conversation>> {

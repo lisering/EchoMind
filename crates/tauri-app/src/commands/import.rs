@@ -38,18 +38,24 @@ pub async fn import_files_inner<R: Runtime>(
     state: &AppState,
 ) -> Result<Vec<String>, String> {
     let is_pro = *state.is_pro().read().await;
+    // REQ-WS-002：获取当前工作空间 ID，配额按工作空间独立计算
+    let workspace_id = crate::commands::workspace::get_current_workspace_inner(state)
+        .await
+        .unwrap_or_else(|_| "default".to_string());
     // REQ-VEC-011：从 settings 表读取分块参数
     let chunk_params = crate::commands::settings::get_chunk_params_inner(state)
         .await
         .unwrap_or_default();
     let service = if chunk_params.chunk_size != echomind_core::import::DEFAULT_CHUNK_TOKENS {
-        ImportService::with_chunk_tokens(
+        let mut svc = ImportService::with_chunk_tokens(
             state.storage.clone(),
             state.data_dir.clone(),
             chunk_params.chunk_size,
-        )
+        );
+        svc.workspace_id = workspace_id.clone();
+        svc
     } else {
-        ImportService::new(state.storage.clone(), state.data_dir.clone())
+        ImportService::with_workspace(state.storage.clone(), state.data_dir.clone(), workspace_id)
     };
     let mut imported = Vec::new();
 
@@ -308,7 +314,12 @@ pub async fn replace_document_inner<R: Runtime>(
     state: &AppState,
 ) -> Result<String, String> {
     let is_pro = *state.is_pro().read().await;
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
+    // REQ-WS-002：获取当前工作空间 ID
+    let workspace_id = crate::commands::workspace::get_current_workspace_inner(state)
+        .await
+        .unwrap_or_else(|_| "default".to_string());
+    let service =
+        ImportService::with_workspace(state.storage.clone(), state.data_dir.clone(), workspace_id);
     let name = display_name(file_path);
 
     // 替换：删除旧文档 → 重新导入

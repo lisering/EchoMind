@@ -425,6 +425,20 @@ pub trait Storage: Send + Sync {
         self.list_documents().await
     }
 
+    /// 迁移文档到目标工作空间（REQ-WS-004 跨知识库迁移）。
+    ///
+    /// 仅更新 `documents.workspace_id`，chunks / 向量 / propositions 等通过
+    /// 外键关联文档 ID 自动归属新工作空间，无需额外修改。
+    ///
+    /// 默认实现为空操作（返回 Ok(())）；生产实现应覆盖为 SQL UPDATE。
+    async fn migrate_document(
+        &self,
+        _doc_id: &str,
+        _target_workspace_id: &str,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// 删除会话（外键级联清理其消息）。
     async fn delete_conversation(&self, id: &str) -> anyhow::Result<()>;
 

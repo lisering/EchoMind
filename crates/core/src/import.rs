@@ -73,6 +73,8 @@ pub struct ImportService<S: Storage> {
     max_free_files: usize,
     /// 分块 token 窗口（GB 级文档加速：大文件用 1024，小文件用 256）
     chunk_tokens: usize,
+    /// 当前工作空间 ID（REQ-WS-002 配额独立计算）
+    pub workspace_id: String,
 }
 
 impl<S: Storage> ImportService<S> {
@@ -83,6 +85,7 @@ impl<S: Storage> ImportService<S> {
             data_dir,
             max_free_files: FREE_TIER_MAX_FILES,
             chunk_tokens: DEFAULT_CHUNK_TOKENS,
+            workspace_id: "default".to_string(),
         }
     }
 
@@ -96,6 +99,20 @@ impl<S: Storage> ImportService<S> {
             data_dir,
             max_free_files: FREE_TIER_MAX_FILES,
             chunk_tokens,
+            workspace_id: "default".to_string(),
+        }
+    }
+
+    /// 以指定工作空间构造（REQ-WS-002 配额独立计算）。
+    ///
+    /// 导入的文档归属此工作空间，配额按此工作空间独立计数。
+    pub fn with_workspace(storage: S, data_dir: PathBuf, workspace_id: String) -> Self {
+        Self {
+            storage,
+            data_dir,
+            max_free_files: FREE_TIER_MAX_FILES,
+            chunk_tokens: DEFAULT_CHUNK_TOKENS,
+            workspace_id,
         }
     }
 
@@ -188,10 +205,14 @@ impl<S: Storage> ImportService<S> {
         if PRO_GATED_EXTENSIONS.contains(&ext) {
             bail!("{ERR_PRO_REQUIRED}: .{ext} 导入为 Pro 版功能，请升级后重试");
         }
-        let count = self.storage.count_documents().await?;
+        // REQ-WS-002：配额按工作空间独立计算（非全局）
+        let count = self
+            .storage
+            .count_documents_in_workspace(&self.workspace_id)
+            .await?;
         if count >= self.max_free_files {
             bail!(
-                "{ERR_LIMIT_REACHED}: 免费版最多导入 {} 个文件（当前已达上限）",
+                "{ERR_LIMIT_REACHED}: 免费版每个知识库最多导入 {} 个文件（当前已达上限）",
                 self.max_free_files
             );
         }
@@ -245,7 +266,9 @@ impl<S: Storage> ImportService<S> {
             .await
             .with_context(|| format!("写入数据目录失败: {}", dest.display()))?;
 
-        let doc = Document::new(dest.to_string_lossy().into_owned(), hash);
+        let mut doc = Document::new(dest.to_string_lossy().into_owned(), hash);
+        // REQ-WS-002：设置文档归属的工作空间
+        doc.workspace_id = self.workspace_id.clone();
         self.storage.add_document(&doc).await?;
         // REQ-ING-011：记录成功的导入
         let _ = self
@@ -324,11 +347,13 @@ impl<S: Storage> ImportService<S> {
             .await
             .with_context(|| format!("写入数据目录失败: {}", dest.display()))?;
 
-        let doc = Document::new_with_original_path(
+        let mut doc = Document::new_with_original_path(
             dest.to_string_lossy().into_owned(),
             hash,
             original_path.to_string(),
         );
+        // REQ-WS-002：设置文档归属的工作空间
+        doc.workspace_id = self.workspace_id.clone();
         self.storage.add_document(&doc).await?;
         Ok(ImportOutcome::Imported(doc))
     }

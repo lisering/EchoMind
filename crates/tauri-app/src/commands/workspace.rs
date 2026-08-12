@@ -209,3 +209,91 @@ pub async fn get_workspace_stats_inner(
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+/// 获取知识库配额用量（REQ-WS-002 AC-2 配额显示同步更新）。
+///
+/// 返回 `(当前文档数, 上限)`。Pro 版上限为 0 表示不受限。
+#[tauri::command]
+pub async fn get_workspace_quota(state: State<'_, AppState>) -> Result<(usize, usize), String> {
+    get_workspace_quota_inner(state.inner()).await
+}
+
+/// 配额查询逻辑（命令与集成测试复用）。
+pub async fn get_workspace_quota_inner(state: &AppState) -> Result<(usize, usize), String> {
+    let is_pro = *state.is_pro().read().await;
+    let workspace_id = get_current_workspace_inner(state)
+        .await
+        .unwrap_or_else(|_| DEFAULT_WORKSPACE.to_string());
+    let count = state
+        .storage
+        .count_documents_in_workspace(&workspace_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    // Pro 版不受配额限制，返回 0 表示无上限
+    let limit = if is_pro {
+        0
+    } else {
+        echomind_core::import::FREE_TIER_MAX_FILES
+    };
+    Ok((count, limit))
+}
+
+/// 迁移文档到目标知识库（REQ-WS-004 跨知识库迁移）。
+///
+/// 仅更新 `documents.workspace_id`，chunks / 向量通过外键关联自动归属。
+/// 不重新解析或嵌入。目标库配额不足时拒绝。
+#[tauri::command]
+pub async fn migrate_document(
+    doc_id: String,
+    target_workspace_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    migrate_document_inner(doc_id, target_workspace_id, state.inner()).await
+}
+
+/// 迁移文档逻辑（命令与集成测试复用）。
+pub async fn migrate_document_inner(
+    doc_id: String,
+    target_workspace_id: String,
+    state: &AppState,
+) -> Result<(), String> {
+    // 验证目标工作空间存在
+    let workspaces = state
+        .storage
+        .list_workspaces()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if !workspaces.iter().any(|ws| ws.id == target_workspace_id) {
+        return Err(format!("目标知识库不存在: {target_workspace_id}"));
+    }
+
+    // 免费版配额检查（REQ-WS-004 AC-5）
+    let is_pro = *state.is_pro().read().await;
+    if !is_pro {
+        let count = state
+            .storage
+            .count_documents_in_workspace(&target_workspace_id)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        if count >= echomind_core::import::FREE_TIER_MAX_FILES {
+            return Err(format!(
+                "LIMIT_REACHED: 目标知识库已达免费版上限（{} 个文件）",
+                echomind_core::import::FREE_TIER_MAX_FILES
+            ));
+        }
+    }
+
+    // 执行迁移
+    state
+        .storage
+        .migrate_document(&doc_id, &target_workspace_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 清空查询缓存（知识库变更）
+    if let Err(e) = state.cache.clear_all().await {
+        tracing::warn!("迁移后清空查询缓存失败: {e:#}");
+    }
+
+    Ok(())
+}

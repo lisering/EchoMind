@@ -430,6 +430,8 @@ pub fn run() {
             commands::rename_workspace,
             commands::delete_workspace,
             commands::get_workspace_stats,
+            commands::get_workspace_quota,
+            commands::migrate_document,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {
