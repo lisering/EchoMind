@@ -4761,6 +4761,20 @@
       </div>
     </div>
 
+    <!-- ============ 全局搜索（REQ-NAV-002） ============ -->
+    <div id="globalSearch" class="hidden fixed inset-0 z-[75] bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[15vh]">
+      <div class="gs-inner w-full max-w-[560px] bg-surface-1 border border-border-strong rounded-lg shadow-modal scale-in overflow-hidden flex flex-col" style="max-height: 70vh" role="dialog" aria-modal="true" aria-label="Global Search">
+        <div class="flex items-center gap-3 px-4 h-12 border-b border-border-subtle shrink-0">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-text-quaternary shrink-0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input id="globalSearchInput" type="text" data-i18n-placeholder="global_search.placeholder" autocomplete="off"
+            class="flex-1 bg-transparent outline-none text-sm text-text-primary placeholder:text-text-quaternary" role="combobox" aria-expanded="true" aria-controls="globalSearchResults" />
+          <kbd class="text-[11px] text-text-quaternary bg-surface-3 px-1.5 rounded-xs shrink-0">Esc</kbd>
+          <button id="globalSearchClose" class="modal-close-btn shrink-0" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div id="globalSearchResults" role="listbox" class="flex-1 overflow-y-auto scrollbar-thin py-1.5"></div>
+      </div>
+    </div>
+
     <!-- Toast 通道（REQ-UI-005 前置） -->
     <div id="toasts" class="fixed bottom-6 right-6 z-[60] flex flex-col gap-2 w-80" aria-live="polite" role="alert"></div>
 
@@ -12523,23 +12537,33 @@
             if (isSel) el.scrollIntoView({ block: "nearest" });
           });
         }
+        var _cmdTrap = null;
+        function _getCmdInnerEl() {
+          return $("commandPalette").querySelector(".scale-in");
+        }
         function openCommandPalette() {
           if (!$("commandPalette").classList.contains("hidden")) {
             closeCommandPalette();
             return;
           }
-          setState({ cmdPrevFocus: document.activeElement });
           $("commandPalette").classList.remove("hidden");
           $("cmdSearch").value = "";
           renderCommandList(_commands, "");
+          const inner = _getCmdInnerEl();
+          if (inner) {
+            _cmdTrap = createFocusTrap(inner);
+            _cmdTrap.activate();
+          }
           $("cmdSearch").focus();
           pushPanel({ id: "command-palette", close: closeCommandPalette, element: $("commandPalette"), label: "Command Palette" });
         }
         function closeCommandPalette() {
           removePanel("command-palette");
           $("commandPalette").classList.add("hidden");
-          const prev = get("cmdPrevFocus");
-          if (prev) prev.focus();
+          if (_cmdTrap) {
+            _cmdTrap.deactivate();
+            _cmdTrap = null;
+          }
         }
         var _commands = [];
         function initCommandPalette(commands) {
@@ -12577,6 +12601,326 @@
           if ($("cmdPaletteClose")) {
             $("cmdPaletteClose").onclick = closeCommandPalette;
           }
+        }
+      
+        // ui/src/global-search.js
+        init_utils();
+        init_i18n();
+        init_ipc();
+        var MAX_PER_GROUP = 5;
+        var SEARCH_DEBOUNCE_MS = 250;
+        var _gsTrap = null;
+        var _debounceTimer = null;
+        var _currentQuery = "";
+        var _lastSearchedQuery = "";
+        var _onLoadConversation = null;
+        var _onOpenDocPreview = null;
+        function _getGsInnerEl() {
+          return $("globalSearch")?.querySelector(".gs-inner");
+        }
+        function highlightSearchMatch(text, query) {
+          const q = query.trim().toLowerCase();
+          if (!q || !text) return _escapeHtml(text || "");
+          const escaped = _escapeHtml(text);
+          const lower = escaped.toLowerCase();
+          const pos = lower.indexOf(q.toLowerCase());
+          if (pos < 0) return escaped;
+          const posOrig = _findMatchPos(text, query);
+          if (posOrig < 0) return escaped;
+          return _escapeHtml(text.slice(0, posOrig)) + '<mark class="bg-accent/20 text-accent rounded-sm px-0.5">' + _escapeHtml(text.slice(posOrig, posOrig + query.length)) + "</mark>" + _escapeHtml(text.slice(posOrig + query.length));
+        }
+        function _findMatchPos(text, query) {
+          return text.toLowerCase().indexOf(query.toLowerCase());
+        }
+        function _escapeHtml(s) {
+          if (!s) return "";
+          return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+        function makeSnippet(content, query, maxLen = 80) {
+          if (!content) return "";
+          const pos = _findMatchPos(content, query);
+          if (pos < 0) {
+            return content.length > maxLen ? content.slice(0, maxLen) + "\u2026" : content;
+          }
+          const halfLen = Math.floor(maxLen / 2);
+          const start = Math.max(0, pos - halfLen);
+          const end = Math.min(content.length, pos + query.length + halfLen);
+          const prefix = start > 0 ? "\u2026" : "";
+          const suffix = end < content.length ? "\u2026" : "";
+          return prefix + content.slice(start, end) + suffix;
+        }
+        async function executeGlobalSearch(query) {
+          const q = query.trim().toLowerCase();
+          if (!q) {
+            return { conversations: [], documents: [], messages: [] };
+          }
+          const [conversations, documents, messageResults] = await Promise.all([
+            _searchConversations(q),
+            _searchDocuments(q),
+            _searchMessages(q)
+          ]);
+          return {
+            conversations: conversations.slice(0, MAX_PER_GROUP),
+            documents: documents.slice(0, MAX_PER_GROUP),
+            messages: messageResults.slice(0, MAX_PER_GROUP)
+          };
+        }
+        async function _searchConversations(q) {
+          try {
+            const list = await invoke("get_conversations", { workspaceId: "default" });
+            if (!Array.isArray(list)) return [];
+            return list.filter((c) => (c.title || "").toLowerCase().includes(q)).slice(0, MAX_PER_GROUP).map((c) => ({
+              type: "conversation",
+              id: c.id,
+              title: c.title || t("global_search.untitled")
+            }));
+          } catch (_) {
+            return [];
+          }
+        }
+        async function _searchDocuments(q) {
+          try {
+            const docs = await invoke("get_documents");
+            if (!Array.isArray(docs)) return [];
+            return docs.filter((d) => {
+              const name = (d.file_path || "").split("/").pop() || "";
+              return name.toLowerCase().includes(q);
+            }).slice(0, MAX_PER_GROUP).map((d) => {
+              const name = (d.file_path || "").split("/").pop() || t("global_search.untitled");
+              return {
+                type: "document",
+                id: d.id,
+                title: name
+              };
+            });
+          } catch (_) {
+            return [];
+          }
+        }
+        async function _searchMessages(q) {
+          try {
+            const results = await invoke("search_conversations", { query: q, limit: MAX_PER_GROUP * 2 });
+            if (!Array.isArray(results)) return [];
+            return results.slice(0, MAX_PER_GROUP).map((m) => ({
+              type: "message",
+              id: m.message_id || m.id || "",
+              title: m.conversation_title || t("global_search.untitled"),
+              snippet: m.content || "",
+              conversationId: m.conversation_id || "",
+              messageId: m.message_id || m.id || ""
+            }));
+          } catch (_) {
+            return [];
+          }
+        }
+        function renderSearchResults(results, query) {
+          const container = $("globalSearchResults");
+          if (!container) return;
+          container.innerHTML = "";
+          const total = results.conversations.length + results.documents.length + results.messages.length;
+          if (total === 0) {
+            const empty = document.createElement("div");
+            empty.className = "gs-empty px-4 py-10 text-center text-sm text-text-quaternary";
+            empty.innerHTML = `<div class="text-3xl mb-2 opacity-30">\u{1F50D}</div>${t("global_search.no_results")}`;
+            container.appendChild(empty);
+            return;
+          }
+          if (results.conversations.length > 0) {
+            container.appendChild(_renderGroup("conversation", results.conversations, query));
+          }
+          if (results.documents.length > 0) {
+            container.appendChild(_renderGroup("document", results.documents, query));
+          }
+          if (results.messages.length > 0) {
+            container.appendChild(_renderGroup("message", results.messages, query));
+          }
+        }
+        function _renderGroup(type, items, query) {
+          const group = document.createElement("div");
+          group.className = "gs-group";
+          const header = document.createElement("div");
+          header.className = "px-4 pt-2 pb-1 text-[11px] uppercase tracking-wider text-text-quaternary";
+          const labelKey = type === "conversation" ? "global_search.group_conversations" : type === "document" ? "global_search.group_documents" : "global_search.group_messages";
+          header.textContent = t(labelKey);
+          group.appendChild(header);
+          items.forEach((item) => {
+            const el = document.createElement("div");
+            el.className = "gs-result-item flex items-center gap-3 px-4 h-10 cursor-pointer text-sm transition-colors hover:bg-surface-3";
+            el.dataset.type = type;
+            el.dataset.id = item.id;
+            el.setAttribute("role", "option");
+            const icon = document.createElement("span");
+            icon.className = "text-base shrink-0 w-5 text-center";
+            icon.textContent = type === "conversation" ? "\u{1F4AC}" : type === "document" ? "\u{1F4C4}" : "\u2709";
+            el.appendChild(icon);
+            const text = document.createElement("div");
+            text.className = "flex-1 min-w-0";
+            const title = document.createElement("div");
+            title.className = "truncate text-text-primary";
+            title.innerHTML = highlightSearchMatch(item.title, query);
+            text.appendChild(title);
+            if (item.snippet) {
+              const snippet = document.createElement("div");
+              snippet.className = "truncate text-xs text-text-quaternary mt-0.5";
+              snippet.innerHTML = highlightSearchMatch(makeSnippet(item.snippet, query), query);
+              text.appendChild(snippet);
+            }
+            el.appendChild(text);
+            el.onclick = () => _handleResultClick(type, item);
+            group.appendChild(el);
+          });
+          return group;
+        }
+        function _handleResultClick(type, item) {
+          closeGlobalSearch();
+          if (type === "conversation" && _onLoadConversation) {
+            _onLoadConversation(item.id);
+          } else if (type === "document" && _onOpenDocPreview) {
+            _onOpenDocPreview(item.id);
+          } else if (type === "message" && _onLoadConversation && item.conversationId) {
+            _onLoadConversation(item.conversationId);
+            if (item.messageId) {
+              setTimeout(() => _scrollToMessage(item.messageId), 500);
+            }
+          }
+        }
+        function _scrollToMessage(messageId) {
+          const msgEl = document.querySelector(`[data-msg-id="${messageId}"]`);
+          if (msgEl) {
+            msgEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            msgEl.classList.add("ring-2", "ring-accent", "ring-offset-2", "ring-offset-transparent");
+            setTimeout(() => {
+              msgEl.classList.remove("ring-2", "ring-accent", "ring-offset-2", "ring-offset-transparent");
+            }, 2e3);
+          }
+        }
+        function openGlobalSearch() {
+          if (!$("globalSearch")) return;
+          if (!$("globalSearch").classList.contains("hidden")) {
+            closeGlobalSearch();
+            return;
+          }
+          $("globalSearch").classList.remove("hidden");
+          const input = $("globalSearchInput");
+          if (input) {
+            input.value = "";
+            _currentQuery = "";
+            _lastSearchedQuery = "";
+          }
+          const results = $("globalSearchResults");
+          if (results) results.innerHTML = "";
+          const inner = _getGsInnerEl();
+          if (inner) {
+            _gsTrap = createFocusTrap(inner);
+            _gsTrap.activate();
+          }
+          if (input) input.focus();
+          pushPanel({ id: "global-search", close: closeGlobalSearch, element: $("globalSearch"), label: "Global Search" });
+        }
+        function closeGlobalSearch() {
+          removePanel("global-search");
+          const panel = $("globalSearch");
+          if (panel) panel.classList.add("hidden");
+          if (_gsTrap) {
+            _gsTrap.deactivate();
+            _gsTrap = null;
+          }
+          if (_debounceTimer) {
+            clearTimeout(_debounceTimer);
+            _debounceTimer = null;
+          }
+        }
+        function initGlobalSearch(callbacks) {
+          _onLoadConversation = callbacks.onLoadConversation || null;
+          _onOpenDocPreview = callbacks.onOpenDocPreview || null;
+          const input = $("globalSearchInput");
+          if (!input) return;
+          input.addEventListener("input", (e) => {
+            _currentQuery = e.target.value;
+            if (_debounceTimer) clearTimeout(_debounceTimer);
+            _debounceTimer = setTimeout(async () => {
+              const query = _currentQuery.trim();
+              if (!query) {
+                const results = $("globalSearchResults");
+                if (results) results.innerHTML = "";
+                _lastSearchedQuery = "";
+                return;
+              }
+              if (query === _lastSearchedQuery) return;
+              _lastSearchedQuery = query;
+              const container = $("globalSearchResults");
+              if (container) {
+                container.innerHTML = `<div class="px-4 py-8 text-center text-sm text-text-quaternary">${t("global_search.searching")}</div>`;
+              }
+              try {
+                const results = await executeGlobalSearch(query);
+                renderSearchResults(results, query);
+              } catch (_) {
+                if (container) {
+                  container.innerHTML = `<div class="px-4 py-8 text-center text-sm text-text-quaternary">${t("global_search.search_error")}</div>`;
+                }
+              }
+            }, SEARCH_DEBOUNCE_MS);
+          });
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              _navigateResults(1);
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              _navigateResults(-1);
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              _executeSelected();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              closeGlobalSearch();
+            }
+          });
+          const closeBtn = $("globalSearchClose");
+          if (closeBtn) {
+            closeBtn.onclick = closeGlobalSearch;
+          }
+        }
+        function _navigateResults(direction) {
+          const items = $("globalSearchResults")?.querySelectorAll(".gs-result-item");
+          if (!items || items.length === 0) return;
+          let currentIdx = -1;
+          items.forEach((el, i) => {
+            if (el.classList.contains("bg-accent/10")) currentIdx = i;
+          });
+          let nextIdx;
+          if (currentIdx === -1) {
+            nextIdx = direction === 1 ? 0 : items.length - 1;
+          } else {
+            nextIdx = (currentIdx + direction + items.length) % items.length;
+          }
+          items.forEach((el, i) => {
+            el.classList.toggle("bg-accent/10", i === nextIdx);
+            el.classList.toggle("text-text-primary", i === nextIdx);
+            if (i === nextIdx) el.scrollIntoView({ block: "nearest" });
+          });
+        }
+        function _executeSelected() {
+          const selected = $("globalSearchResults")?.querySelector(".gs-result-item.bg-accent\\/10");
+          if (!selected) return;
+          const type = selected.dataset.type;
+          const id = selected.dataset.id;
+          if (!type || !id) return;
+          const titleEl = selected.querySelector(".truncate");
+          const title = titleEl?.textContent || "";
+          const snippetEl = selected.querySelector(".text-text-quaternary");
+          const snippet = snippetEl?.textContent || "";
+          const conversationId = selected.dataset.conversationId || "";
+          const messageId = selected.dataset.messageId || "";
+          _handleResultClick(type, {
+            id,
+            type,
+            title,
+            snippet,
+            conversationId,
+            messageId
+          });
         }
       
         // ui/src/keyboard.js
@@ -12737,6 +13081,14 @@
             keybinding: { mod: true, key: "/" },
             description: "\u663E\u793A\u5FEB\u6377\u952E\u5E2E\u52A9",
             handler: handlers.onKeyboardHelp || (() => {
+            }),
+            condition: () => isAppVisible()
+          });
+          registry.register({
+            id: "global-search",
+            keybinding: { mod: true, shift: true, key: "f" },
+            description: "\u5168\u5C40\u641C\u7D22",
+            handler: handlers.onGlobalSearch || (() => {
             }),
             condition: () => isAppVisible()
           });
@@ -12920,6 +13272,7 @@
             onToggleSidebar: handlers.onToggleSidebar,
             onCommandPalette: openCommandPalette,
             onKeyboardHelp: openKeyboardHelp,
+            onGlobalSearch: handlers.onGlobalSearch,
             isInputFocused,
             isAppVisible: () => {
               const app = $("app");
@@ -12944,6 +13297,11 @@
               const cmdPalette = $("commandPalette");
               if (cmdPalette && !cmdPalette.classList.contains("hidden")) {
                 closeCommandPalette();
+                return;
+              }
+              const globalSearch = $("globalSearch");
+              if (globalSearch && !globalSearch.classList.contains("hidden")) {
+                closeGlobalSearch();
                 return;
               }
               const vlmConfirm = $("vlmConfirm");
@@ -22762,6 +23120,7 @@
           closeWorkflowPanel();
           closeSearchPopup();
           closeCommandPalette();
+          closeGlobalSearch();
           hidePaywall();
           closeConversationTreePanel();
         }
@@ -23533,6 +23892,10 @@
           restoreSidebarState();
           initSearchPopup(loadConversation);
           initCommandPalette(getCommands());
+          initGlobalSearch({
+            onLoadConversation: (id) => loadConversation(id),
+            onOpenDocPreview: (docId) => openDocPreview(docId)
+          });
           initKeyboardHelp();
           initPaywall();
           initSettings();
@@ -23678,7 +24041,8 @@
             onClosePaywall: () => hidePaywall(),
             onCloseSettings: () => closeSettings(),
             onCloseSearchPopup: () => closeSearchPopup(),
-            onCloseGraph: () => closeGraphViewer()
+            onCloseGraph: () => closeGraphViewer(),
+            onGlobalSearch: () => openGlobalSearch()
           });
           initVoiceInput();
           initExportButtons();
