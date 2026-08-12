@@ -3495,6 +3495,85 @@
         }
       }
     </style>
+    <style data-src="icons.css">
+      /**
+       * EchoMind SVG inline 图标尺寸与状态样式（REQ-DS-004）。
+       *
+       * 尺寸三档：
+       *   .icon-sm  → 16px  — 列表项、按钮内小图标
+       *   .icon-md  → 20px  — 工具栏、面板标题
+       *   .icon-lg  → 24px  — 大按钮、空状态
+       *
+       * disabled 状态：
+       *   .icon-disabled  →  opacity: 0.4
+       *
+       * 图标继承 currentColor，与 Tailwind hover:text-accent 体系兼容。
+       * SVG 的 width/height 由 CSS 控制，不使用 HTML 属性。
+       */
+      
+      /* ============================================================
+         尺寸三档
+         ============================================================ */
+      
+      .icon-sm {
+        width: 16px;
+        height: 16px;
+        display: inline-block;
+        vertical-align: middle;
+        flex-shrink: 0;
+      }
+      
+      .icon-md {
+        width: 20px;
+        height: 20px;
+        display: inline-block;
+        vertical-align: middle;
+        flex-shrink: 0;
+      }
+      
+      .icon-lg {
+        width: 24px;
+        height: 24px;
+        display: inline-block;
+        vertical-align: middle;
+        flex-shrink: 0;
+      }
+      
+      /* ============================================================
+         disabled 状态
+         ============================================================ */
+      
+      .icon-disabled {
+        opacity: 0.4;
+        pointer-events: none;
+      }
+      
+      /* 按钮内的 SVG 继承 disabled 状态 */
+      button:disabled .icon-sm,
+      button:disabled .icon-md,
+      button:disabled .icon-lg {
+        opacity: 0.4;
+      }
+      
+      /* ============================================================
+         辅助样式
+         ============================================================ */
+      
+      /* SVG 默认填充方式：stroke 而非 fill（与 icons.js SVG_ATTRS 一致） */
+      svg.icon-sm,
+      svg.icon-md,
+      svg.icon-lg {
+        fill: none;
+      }
+      
+      /* fill 类图标（如 stop 方块）使用 fill="currentColor" */
+      svg.icon-sm[fill="currentColor"],
+      svg.icon-md[fill="currentColor"],
+      svg.icon-lg[fill="currentColor"] {
+        fill: currentColor;
+        stroke: none;
+      }
+    </style>
     <style data-src="graph-viewer.css">
       /**
        * 知识图谱可视化面板样式（REQ-RAG-027 前端图谱可视化）。
@@ -4629,7 +4708,7 @@
             <div class="mt-auto px-3 py-2.5 border-t border-border-subtle">
               <div class="flex items-center justify-between gap-2">
                 <span id="proStatusBadge" class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium bg-surface-3 text-text-tertiary border border-border-default">
-                  <span class="badge-icon text-[11px]">🔒</span>
+                  <span class="badge-icon"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
                   <span id="proStatus">Free</span>
                 </span>
                 <span class="inline-flex items-center gap-1 text-[10px] text-text-quaternary" data-i18n="sidebar.data_local" data-i18n-title="sidebar.data_local_tooltip">
@@ -4694,7 +4773,7 @@
           <!-- 模型药丸 + 提示行：同一行紧凑布局，药丸与聊天对话框左侧对齐 -->
           <div class="flex items-center justify-between gap-2 pt-1.5">
             <div id="modelPill" class="model-pill-text hidden">
-              <span id="modelPillIcon" class="model-pill-icon">☁️</span>
+              <span id="modelPillIcon" class="model-pill-icon"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0 0-9h-1.8A7 7 0 1 0 4 14"/></svg></span>
               <span id="modelPillName" class="model-pill-name"></span>
             </div>
             <div id="inputHint" class="text-[11px] text-text-quaternary flex items-center gap-2"></div>
@@ -5442,7 +5521,7 @@
         </div>
         <div class="overflow-y-auto scrollbar-thin px-5 py-4 flex-1">
           <div class="mb-3 text-center">
-            <div class="text-2xl mb-2 text-amber-400">⚠️</div>
+            <div class="mb-2 text-amber-400"><svg class="icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
           </div>
           <p class="text-sm text-text-secondary leading-relaxed mb-3" data-i18n="settings.vlm_confirm_desc"></p>
           <div class="bg-amber-400/10 border border-amber-400/30 rounded-xl px-4 py-3 text-[11px] text-amber-300/80" data-i18n="settings.vlm_confirm_warning"></div>
@@ -6020,7 +6099,7 @@
             };
             promptTemplateApi = {
               /** 创建或更新模板（返回模板 ID） */
-              save: (name, label, description, icon, promptTemplate) => invoke("save_prompt_template", { name, label, description, icon, promptTemplate }),
+              save: (name, label, description, icon2, promptTemplate) => invoke("save_prompt_template", { name, label, description, icon: icon2, promptTemplate }),
               /** 列出所有自定义模板 */
               list: () => invoke("list_prompt_templates"),
               /** 删除指定模板 */
@@ -6562,7 +6641,7 @@
           } else {
             el.textContent = t("sidebar.pro_badge_free");
             badge.className = "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium bg-surface-3 text-text-tertiary border border-border-default";
-            badge.querySelector(".badge-icon").textContent = "\u{1F512}";
+            badge.querySelector(".badge-icon").innerHTML = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
           }
         }
         async function activatePro() {
@@ -6716,10 +6795,10 @@
             const container = document.createElement("div");
             container.className = "w-full max-w-sm mx-4 bg-surface-1 border border-border-strong rounded-lg p-6";
             if (danger) {
-              const icon = document.createElement("div");
-              icon.className = "text-3xl mb-2 text-amber-400";
-              icon.textContent = "\u26A0\uFE0F";
-              container.appendChild(icon);
+              const icon2 = document.createElement("div");
+              icon2.className = "text-3xl mb-2 text-amber-400";
+              icon2.innerHTML = '<svg class="icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+              container.appendChild(icon2);
             }
             const titleEl = document.createElement("p");
             titleEl.id = "confirmDialogTitle";
@@ -7087,10 +7166,10 @@
           }
         }
         var ALERT_CONFIG = {
-          note: { icon: "\u2139\uFE0F", label: "Note" },
+          note: { icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>', label: "Note" },
           tip: { icon: "\u{1F4A1}", label: "Tip" },
           important: { icon: "\u2757", label: "Important" },
-          warning: { icon: "\u26A0\uFE0F", label: "Warning" },
+          warning: { icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>', label: "Warning" },
           caution: { icon: "\u{1F534}", label: "Caution" }
         };
         function enhanceCallouts(mdEl) {
@@ -7764,11 +7843,11 @@
             type: "kb_empty",
             patterns: ["\u77E5\u8BC6\u5E93\u4E3A\u7A7A", "knowledge base is empty", "kb is empty", "no documents"],
             titleKey: "chat.error_kb_empty_title",
-            titleFallback: "\u{1F4DA} \u77E5\u8BC6\u5E93\u4E3A\u7A7A",
+            titleFallback: "\u77E5\u8BC6\u5E93\u4E3A\u7A7A",
             reasonKey: "chat.error_kb_empty_reason",
             reasonFallback: "\u8BF7\u5148\u5BFC\u5165\u6587\u6863\u540E\u518D\u63D0\u95EE",
             actions: [
-              { action: "import_files", labelKey: "chat.error_action_import", labelFallback: "\u5BFC\u5165\u6587\u4EF6", icon: "\u{1F4C2}" }
+              { action: "import_files", labelKey: "chat.error_action_import", labelFallback: "\u5BFC\u5165\u6587\u4EF6", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>' }
               // 注意：import_files 是「导入文档」入口，图标与 plusBtn / 编辑模式上传按钮保持一致
               // （上传箭头 SVG，见 renderErrorCard 中 import_files 特判）
             ]
@@ -7777,61 +7856,61 @@
             type: "auth",
             patterns: ["401", "unauthorized", "api key", "\u8BA4\u8BC1\u5931\u8D25", "authentication"],
             titleKey: "chat.error_auth_title",
-            titleFallback: "\u{1F511} \u8BA4\u8BC1\u5931\u8D25",
+            titleFallback: "\u8BA4\u8BC1\u5931\u8D25",
             reasonKey: "chat.error_auth_reason",
             reasonFallback: "API Key \u65E0\u6548\u6216\u5DF2\u8FC7\u671F",
             actions: [
-              { action: "open_settings", labelKey: "chat.error_action_settings", labelFallback: "\u6253\u5F00\u8BBE\u7F6E", icon: "\u2699\uFE0F" },
-              { action: "switch_local", labelKey: "chat.error_action_local_mode", labelFallback: "\u5207\u6362\u672C\u5730\u6A21\u5F0F", icon: "\u{1F4BB}" }
+              { action: "open_settings", labelKey: "chat.error_action_settings", labelFallback: "\u6253\u5F00\u8BBE\u7F6E", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' },
+              { action: "switch_local", labelKey: "chat.error_action_local_mode", labelFallback: "\u5207\u6362\u672C\u5730\u6A21\u5F0F", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' }
             ]
           },
           {
             type: "rate_limit",
             patterns: ["429", "rate limit", "too many requests", "\u8BF7\u6C42\u8FC7\u5FEB"],
             titleKey: "chat.error_rate_limit_title",
-            titleFallback: "\u23F1\uFE0F \u8BF7\u6C42\u8FC7\u5FEB",
+            titleFallback: "\u8BF7\u6C42\u8FC7\u5FEB",
             reasonKey: "chat.error_rate_limit_reason",
             reasonFallback: "API \u8C03\u7528\u9891\u7387\u8D85\u9650\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5",
             actions: [
-              { action: "wait", labelKey: "chat.error_action_wait", labelFallback: "\u7B49\u5F85\u91CD\u8BD5", icon: "\u23F3" },
-              { action: "switch_model", labelKey: "chat.error_action_switch_model", labelFallback: "\u5207\u6362\u6A21\u578B", icon: "\u{1F504}" }
+              { action: "wait", labelKey: "chat.error_action_wait", labelFallback: "\u7B49\u5F85\u91CD\u8BD5", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' },
+              { action: "switch_model", labelKey: "chat.error_action_switch_model", labelFallback: "\u5207\u6362\u6A21\u578B", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>' }
             ]
           },
           {
             type: "context_overflow",
             patterns: ["context length", "\u4E0A\u4E0B\u6587\u8FC7\u957F", "token limit", "context window"],
             titleKey: "chat.error_context_overflow_title",
-            titleFallback: "\u{1F4CF} \u4E0A\u4E0B\u6587\u8FC7\u957F",
+            titleFallback: "\u4E0A\u4E0B\u6587\u8FC7\u957F",
             reasonKey: "chat.error_context_overflow_reason",
             reasonFallback: "\u5BF9\u8BDD\u5386\u53F2\u8D85\u51FA\u6A21\u578B\u4E0A\u4E0B\u6587\u7A97\u53E3",
             actions: [
-              { action: "new_chat", labelKey: "chat.error_action_new_chat", labelFallback: "\u65B0\u5EFA\u4F1A\u8BDD", icon: "\u{1F4AC}" },
-              { action: "compress_history", labelKey: "chat.error_action_compress", labelFallback: "\u538B\u7F29\u5386\u53F2", icon: "\u{1F4E6}" }
+              { action: "new_chat", labelKey: "chat.error_action_new_chat", labelFallback: "\u65B0\u5EFA\u4F1A\u8BDD", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' },
+              { action: "compress_history", labelKey: "chat.error_action_compress", labelFallback: "\u538B\u7F29\u5386\u53F2", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>' }
             ]
           },
           {
             type: "model_load",
             patterns: ["model load", "gguf", "\u6A21\u578B\u52A0\u8F7D", "local model", "mistral.rs"],
             titleKey: "chat.error_model_load_title",
-            titleFallback: "\u{1F4BB} \u672C\u5730\u6A21\u578B\u9519\u8BEF",
+            titleFallback: "\u672C\u5730\u6A21\u578B\u9519\u8BEF",
             reasonKey: "chat.error_model_load_reason",
             reasonFallback: "GGUF \u6A21\u578B\u6587\u4EF6\u52A0\u8F7D\u5931\u8D25",
             actions: [
-              { action: "check_model", labelKey: "chat.error_action_check_model", labelFallback: "\u68C0\u67E5\u6A21\u578B", icon: "\u{1F50D}" },
-              { action: "switch_cloud", labelKey: "chat.error_action_switch_cloud", labelFallback: "\u5207\u6362\u4E91\u7AEF", icon: "\u2601\uFE0F" }
+              { action: "check_model", labelKey: "chat.error_action_check_model", labelFallback: "\u68C0\u67E5\u6A21\u578B", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>' },
+              { action: "switch_cloud", labelKey: "chat.error_action_switch_cloud", labelFallback: "\u5207\u6362\u4E91\u7AEF", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0 0-9h-1.8A7 7 0 1 0 4 14"/></svg>' }
             ]
           },
           {
             type: "network",
             patterns: ["econnrefused", "timed out", "timeout", "network", "fetch failed", "connect", "\u7F51\u7EDC\u8FDE\u63A5"],
             titleKey: "chat.error_network_title",
-            titleFallback: "\u26A0\uFE0F \u7F51\u7EDC\u8FDE\u63A5\u4E2D\u65AD",
+            titleFallback: "\u7F51\u7EDC\u8FDE\u63A5\u4E2D\u65AD",
             reasonKey: "chat.error_network_reason",
             reasonFallback: "\u65E0\u6CD5\u8FDE\u63A5\u5230 API \u670D\u52A1\u5668",
             actions: [
-              { action: "retry", labelKey: "chat.error_action_retry", labelFallback: "\u91CD\u8BD5", icon: "\u{1F504}" },
-              { action: "open_settings", labelKey: "chat.error_action_settings", labelFallback: "\u68C0\u67E5\u8BBE\u7F6E", icon: "\u2699\uFE0F" },
-              { action: "switch_local", labelKey: "chat.error_action_local_mode", labelFallback: "\u672C\u5730\u6A21\u5F0F", icon: "\u{1F4BB}" }
+              { action: "retry", labelKey: "chat.error_action_retry", labelFallback: "\u91CD\u8BD5", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>' },
+              { action: "open_settings", labelKey: "chat.error_action_settings", labelFallback: "\u68C0\u67E5\u8BBE\u7F6E", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' },
+              { action: "switch_local", labelKey: "chat.error_action_local_mode", labelFallback: "\u672C\u5730\u6A21\u5F0F", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' }
             ]
           }
         ];
@@ -7839,12 +7918,12 @@
           type: "unknown",
           patterns: [],
           titleKey: "chat.error_unknown_title",
-          titleFallback: "\u26A0\uFE0F \u53D1\u751F\u4E86\u9519\u8BEF",
+          titleFallback: "\u53D1\u751F\u4E86\u9519\u8BEF",
           reasonKey: "chat.error_unknown_reason",
           reasonFallback: "\u8BF7\u91CD\u8BD5\u6216\u68C0\u67E5\u914D\u7F6E",
           actions: [
-            { action: "retry", labelKey: "chat.error_action_retry", labelFallback: "\u91CD\u8BD5", icon: "\u{1F504}" },
-            { action: "open_settings", labelKey: "chat.error_action_settings", labelFallback: "\u68C0\u67E5\u8BBE\u7F6E", icon: "\u2699\uFE0F" }
+            { action: "retry", labelKey: "chat.error_action_retry", labelFallback: "\u91CD\u8BD5", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>' },
+            { action: "open_settings", labelKey: "chat.error_action_settings", labelFallback: "\u68C0\u67E5\u8BBE\u7F6E", icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' }
           ]
         };
         function classifyError(rawMsg) {
@@ -7979,49 +8058,49 @@
             name: "summary",
             label: "chat.slash_summary",
             desc: "chat.slash_summary_desc",
-            icon: "\u{1F4DD}",
+            icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>',
             promptTemplate: "\u8BF7\u603B\u7ED3\u4EE5\u4E0B\u5185\u5BB9\u7684\u6838\u5FC3\u8981\u70B9\uFF1A{query}"
           },
           {
             name: "compare",
             label: "chat.slash_compare",
             desc: "chat.slash_compare_desc",
-            icon: "\u2696\uFE0F",
+            icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M5 21h14"/><path d="M3 8h4l2-5"/><path d="M17 8h4l-2-5"/><circle cx="7" cy="8" r="1.5"/><circle cx="17" cy="8" r="1.5"/></svg>',
             promptTemplate: "\u8BF7\u5BF9\u6BD4\u4EE5\u4E0B\u5185\u5BB9\u7684\u5F02\u540C\uFF1A{query}"
           },
           {
             name: "extract",
             label: "chat.slash_extract",
             desc: "chat.slash_extract_desc",
-            icon: "\u{1F50D}",
+            icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>',
             promptTemplate: "\u8BF7\u4ECE\u4EE5\u4E0B\u5185\u5BB9\u4E2D\u63D0\u53D6\u5173\u952E\u4FE1\u606F/\u6761\u6B3E\uFF1A{query}"
           },
           {
             name: "translate",
             label: "chat.slash_translate",
             desc: "chat.slash_translate_desc",
-            icon: "\u{1F310}",
+            icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
             promptTemplate: "\u8BF7\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\uFF1A{query}"
           },
           {
             name: "timeline",
             label: "chat.slash_timeline",
             desc: "chat.slash_timeline_desc",
-            icon: "\u{1F4C5}",
+            icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
             promptTemplate: "\u8BF7\u4ECE\u4EE5\u4E0B\u5185\u5BB9\u4E2D\u751F\u6210\u65F6\u95F4\u7EBF\uFF1A{query}"
           },
           {
             name: "mindmap",
             label: "chat.slash_mindmap",
             desc: "chat.slash_mindmap_desc",
-            icon: "\u{1F9E0}",
+            icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>',
             promptTemplate: "\u8BF7\u4ECE\u4EE5\u4E0B\u5185\u5BB9\u4E2D\u751F\u6210\u601D\u7EF4\u5BFC\u56FE\uFF08Mermaid \u683C\u5F0F\uFF09\uFF1A{query}"
           },
           {
             name: "web",
             label: "chat.slash_web",
             desc: "chat.slash_web_desc",
-            icon: "\u{1F310}",
+            icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
             promptTemplate: "\u8BF7\u7ED3\u5408\u7F51\u9875\u641C\u7D22\u7ED3\u679C\u56DE\u7B54\u4EE5\u4E0B\u95EE\u9898\uFF1A{query}"
           }
         ];
@@ -8036,7 +8115,7 @@
               name: skill.name,
               label: skill.description || `chat.slash_${skill.name}`,
               desc: skill.description || "chat.slash_skill_desc",
-              icon: "\u{1F4E6}",
+              icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
               promptTemplate: skill.content + "\n\n---\n\u7528\u6237\u95EE\u9898: {query}",
               isSkill: true
             }));
@@ -8103,9 +8182,9 @@
               item.className = "slash-command-item";
               if (index === 0) item.classList.add("slash-command-selected");
               item.dataset.cmdName = cmd.name;
-              const icon = document.createElement("span");
-              icon.className = "slash-command-icon";
-              icon.textContent = cmd.icon;
+              const icon2 = document.createElement("span");
+              icon2.className = "slash-command-icon";
+              icon2.textContent = cmd.icon;
               const text = document.createElement("div");
               text.className = "slash-command-text";
               const name = document.createElement("span");
@@ -8121,7 +8200,7 @@
               if (cmd.isSkill) {
                 const badge = document.createElement("span");
                 badge.className = "slash-command-badge";
-                badge.textContent = "\u{1F4E6}";
+                badge.innerHTML = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>';
                 badge.title = t("chat.slash_skill") || "Skill";
                 name.appendChild(badge);
               }
@@ -8130,7 +8209,7 @@
               desc.textContent = t(cmd.desc);
               text.appendChild(name);
               text.appendChild(desc);
-              item.appendChild(icon);
+              item.appendChild(icon2);
               item.appendChild(text);
               item.onclick = () => {
                 _selectedIndex = index;
@@ -8250,13 +8329,13 @@
               item.className = "doc-mention-item";
               item.dataset.docId = doc.id || "";
               item.dataset.docName = doc.name || "";
-              const icon = document.createElement("span");
-              icon.className = "doc-mention-item-icon";
-              icon.textContent = "\u{1F4C4}";
+              const icon2 = document.createElement("span");
+              icon2.className = "doc-mention-item-icon";
+              icon2.textContent = "\u{1F4C4}";
               const name = document.createElement("span");
               name.className = "doc-mention-item-name";
               name.textContent = doc.name || "";
-              item.appendChild(icon);
+              item.appendChild(icon2);
               item.appendChild(name);
               item.onclick = () => {
                 if (onSelect) onSelect(doc);
@@ -9319,7 +9398,7 @@
           <div class="conversation-tree-content">
             <div class="conversation-tree-header">
               <h3 class="conversation-tree-title"></h3>
-              <button class="conversation-tree-close" aria-label="close">\xD7</button>
+              <button class="conversation-tree-close" aria-label="close"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="conversation-tree-body">
               <div class="conversation-tree-loading"></div>
@@ -10281,7 +10360,7 @@
               if (hint) {
                 const badge = document.createElement("span");
                 badge.className = "text-slate-400";
-                badge.textContent = `\u{1F4CA} ${usage.prompt_tokens}\u2191 ${usage.completion_tokens}\u2193 = ${usage.total_tokens} tokens`;
+                badge.innerHTML = `<svg class="icon-sm inline-block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> ${usage.prompt_tokens}\u2191 ${usage.completion_tokens}\u2193 = ${usage.total_tokens} tokens`;
                 hint.replaceChildren(badge);
               }
               const totalTokens = usage.total_tokens || 0;
@@ -10402,6 +10481,107 @@
         // ui/src/empty-state.js
         init_i18n();
         init_state();
+      
+        // ui/src/icons.js
+        var SVG_ATTRS = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+        var ICON_PATHS = {
+          // ── 导航/操作 ──────────────────────────────────────────
+          /** 导入文件（上传箭头） */
+          plus: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+          /** 折叠侧栏（左箭头） */
+          collapse: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><polyline points="15 18 9 12 15 6"/></svg>`,
+          /** 展开侧栏（右箭头） */
+          expand: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><polyline points="9 18 15 12 9 6"/></svg>`,
+          /** 新对话（气泡） */
+          chat: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+          /** 设置（齿轮） */
+          settings: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+          /** 停止（方块） */
+          stop: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`,
+          /** 拖拽导入（下载箭头大） */
+          drag: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+          // ── 品牌图标 ────────────────────────────────────────────
+          /** 品牌图标（菱形） */
+          brand: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M12 2L22 12L12 22L2 12Z"/></svg>`,
+          // ── 列表操作 ────────────────────────────────────────────
+          /** 删除/关闭（×） */
+          close: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+          /** 重试（循环箭头） */
+          retry: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
+          /** 搜索/审计（放大镜） */
+          search: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
+          /** 预览（眼睛） */
+          eye: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`,
+          /** 摘要（文档+笔） */
+          summary: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>`,
+          /** 标签（#号） */
+          tag: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>`,
+          // ── 右键菜单 ────────────────────────────────────────────
+          /** 复制（剪贴板） */
+          copy: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+          /** 删除/垃圾桶 */
+          trash: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
+          // ── 状态指示 ────────────────────────────────────────────
+          /** 警告（三角感叹号） */
+          warning: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+          /** 信息（圆圈 i） */
+          info: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`,
+          /** 锁定 */
+          lock: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
+          /** 解锁 */
+          unlock: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>`,
+          /** 勾选 */
+          check: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><polyline points="20 6 9 17 4 12"/></svg>`,
+          /** 云端 */
+          cloud: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M17.5 19a4.5 4.5 0 1 0 0-9h-1.8A7 7 0 1 0 4 14"/></svg>`,
+          /** 下载 */
+          download: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+          // ── 面板/功能区 ────────────────────────────────────────
+          /** 知识库（书堆） */
+          book: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`,
+          /** 安全/防护 */
+          shield: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+          /** 审计日志（剪贴板列表） */
+          clipboard: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>`,
+          /** 键盘 */
+          keyboard: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><rect x="2" y="4" width="20" height="16" rx="2" ry="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg>`,
+          /** 图谱（节点网络） */
+          graph: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="7" x2="6" y2="17"/><line x1="12" y1="7" x2="18" y2="17"/><line x1="6" y1="19" x2="18" y2="19"/></svg>`,
+          /** 记忆（大脑） */
+          memory: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>`,
+          /** 追踪（列表） */
+          trace: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`,
+          /** 统计（柱状图） */
+          chart: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`,
+          // ── 导航辅助 ────────────────────────────────────────────
+          /** 右尖号（面包屑分隔） */
+          chevronRight: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><polyline points="9 18 15 12 9 6"/></svg>`,
+          /** 语音/麦克风 */
+          mic: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+          /** 发送（纸飞机） */
+          send: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`,
+          /** 全球/网络 */
+          globe: `<svg viewBox="0 0 24 24" ${SVG_ATTRS}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`
+        };
+        var SIZE_CLASSES = {
+          sm: "icon-sm",
+          // 16px
+          md: "icon-md",
+          // 20px
+          lg: "icon-lg"
+          // 24px
+        };
+        function icon(name, size = "sm") {
+          const svg = ICON_PATHS[name];
+          if (!svg) return "";
+          const cls = SIZE_CLASSES[size] || SIZE_CLASSES.sm;
+          return svg.replace("<svg ", `<svg class="${cls}" `);
+        }
+        function fileIcon(ext, size = "sm") {
+          return icon("summary", size);
+        }
+      
+        // ui/src/empty-state.js
         var DEFAULT_RECOMMENDATIONS = [
           "summarize_key_points",
           "compare_differences",
@@ -10472,7 +10652,7 @@
           wrapper.className = "empty-state-wrapper animate-fade-in";
           const logo = document.createElement("div");
           logo.className = "empty-state-logo";
-          logo.textContent = "\u25C8";
+          logo.innerHTML = icon("brand", "lg");
           wrapper.appendChild(logo);
           const appName = document.createElement("div");
           appName.className = "empty-state-app-name";
@@ -10488,7 +10668,7 @@
           kbCard.className = "empty-state-kb-card";
           const kbIcon = document.createElement("span");
           kbIcon.className = "empty-state-card-icon";
-          kbIcon.textContent = "\u{1F4DA}";
+          kbIcon.innerHTML = icon("book", "md");
           kbCard.appendChild(kbIcon);
           const kbLabel = document.createElement("div");
           kbLabel.className = "empty-state-card-label";
@@ -10508,7 +10688,7 @@
           privacyCard.className = "empty-state-privacy-card";
           const privacyIcon = document.createElement("span");
           privacyIcon.className = "empty-state-card-icon";
-          privacyIcon.textContent = encrypted ? "\u{1F512}" : "\u{1F513}";
+          privacyIcon.innerHTML = encrypted ? icon("lock", "md") : icon("unlock", "md");
           privacyCard.appendChild(privacyIcon);
           const privacyLabel = document.createElement("div");
           privacyLabel.className = "empty-state-card-label";
@@ -10626,7 +10806,7 @@
           }
           const encIcon = document.createElement("span");
           encIcon.className = "privacy-encryption-icon";
-          encIcon.textContent = status.encrypted ? "\u{1F512}" : "\u{1F513}";
+          encIcon.innerHTML = status.encrypted ? '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' : '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>';
           const encText = document.createElement("span");
           encText.textContent = text.encryption;
           encryptionEl.appendChild(encIcon);
@@ -10649,7 +10829,7 @@
           auditEl.className = "privacy-tag privacy-audit";
           auditEl.classList.toggle("audit-ok", status.auditEnabled);
           const auditIcon = document.createElement("span");
-          auditIcon.textContent = "\u{1F4CB}";
+          auditIcon.innerHTML = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>';
           const auditText = document.createElement("span");
           auditText.textContent = text.audit;
           auditEl.appendChild(auditIcon);
@@ -12546,13 +12726,13 @@
             const c = _searchFiltered[i];
             const item = document.createElement("div");
             item.className = `flex items-center gap-2 px-4 py-2.5 cursor-pointer text-sm transition-colors ${i === _searchSelectedIndex ? "bg-accent/15 text-accent" : "text-text-secondary hover:bg-white/5"}`;
-            const icon = document.createElement("span");
-            icon.className = "shrink-0 text-text-quaternary";
-            icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+            const icon2 = document.createElement("span");
+            icon2.className = "shrink-0 text-text-quaternary";
+            icon2.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
             const title = document.createElement("span");
             title.className = "truncate";
             title.textContent = c.title || t("backend.placeholder_title");
-            item.appendChild(icon);
+            item.appendChild(icon2);
             item.appendChild(title);
             item.onclick = () => {
               closeSearchPopup();
@@ -13062,7 +13242,7 @@
           if (total === 0) {
             const empty = document.createElement("div");
             empty.className = "gs-empty px-4 py-10 text-center text-sm text-text-quaternary";
-            empty.innerHTML = `<div class="text-3xl mb-2 opacity-30">\u{1F50D}</div>${t("global_search.no_results")}`;
+            empty.innerHTML = `<div class="mb-2 opacity-30 flex justify-center"><svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></div>${t("global_search.no_results")}`;
             container.appendChild(empty);
             return;
           }
@@ -13090,10 +13270,11 @@
             el.dataset.type = type;
             el.dataset.id = item.id;
             el.setAttribute("role", "option");
-            const icon = document.createElement("span");
-            icon.className = "text-base shrink-0 w-5 text-center";
-            icon.textContent = type === "conversation" ? "\u{1F4AC}" : type === "document" ? "\u{1F4C4}" : "\u2709";
-            el.appendChild(icon);
+            const iconEl = document.createElement("span");
+            iconEl.className = "shrink-0 w-5 flex items-center justify-center";
+            const iconType = type === "conversation" ? "chat" : type === "document" ? "summary" : "summary";
+            iconEl.innerHTML = `<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconType === "chat" ? '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' : '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>'}</svg>`;
+            el.appendChild(iconEl);
             const text = document.createElement("div");
             text.className = "flex-1 min-w-0";
             const title = document.createElement("div");
@@ -15677,7 +15858,7 @@
           dialog.style.zIndex = "9000";
           dialog.innerHTML = `
           <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[600px] w-[90%] max-h-[80vh] overflow-y-auto">
-            <h3 class="text-lg font-semibold px-6 pt-6 m-0">\u{1F4DD} Scratch \u65E5\u5FD7</h3>
+            <h3 class="text-lg font-semibold px-6 pt-6 m-0 flex items-center gap-2"><svg class="icon-md shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg> Scratch \u65E5\u5FD7</h3>
             <div class="px-6 py-4">
               ${!logs || logs.length === 0 ? `
                 <p class="text-sm text-text-quaternary text-center py-8">\u6682\u65E0 Scratch \u65E5\u5FD7</p>
@@ -15948,7 +16129,7 @@
           dialog.style.zIndex = "9000";
           dialog.innerHTML = `
           <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[700px] w-[90%] max-h-[85vh] overflow-y-auto">
-            <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="trace.list_title">\u{1F4CB} RAG \u94FE\u8DEF\u8FFD\u8E2A</h3>
+            <h3 class="text-lg font-semibold px-6 pt-6 m-0 flex items-center gap-2" data-i18n="trace.list_title"><svg class="icon-md shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg> RAG \u94FE\u8DEF\u8FFD\u8E2A</h3>
             <div class="px-6 py-4">
               ${traces.length === 0 ? `
                 <p class="text-sm text-text-quaternary text-center py-8" data-i18n="trace.no_records">\u6682\u65E0\u8FFD\u8E2A\u8BB0\u5F55</p>
@@ -15998,7 +16179,7 @@
           const time = detail.created_at ? new Date(detail.created_at).toLocaleString() : "-";
           dialog.innerHTML = `
           <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[600px] w-[90%] max-h-[85vh] overflow-y-auto">
-            <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="trace.detail_title">\u{1F50D} \u8FFD\u8E2A\u8BE6\u60C5</h3>
+            <h3 class="text-lg font-semibold px-6 pt-6 m-0 flex items-center gap-2" data-i18n="trace.detail_title"><svg class="icon-md shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> \u8FFD\u8E2A\u8BE6\u60C5</h3>
             <div class="px-6 py-4 space-y-3">
               <div>
                 <span class="text-xs text-text-quaternary" data-i18n="trace.time">\u65F6\u95F4</span>
@@ -18966,9 +19147,9 @@
               templates.forEach((tmpl) => {
                 const item = document.createElement("div");
                 item.className = "flex items-center gap-2 p-2 rounded-lg bg-surface-2 border border-border-subtle";
-                const icon = document.createElement("span");
-                icon.className = "text-lg shrink-0";
-                icon.textContent = tmpl.icon || "\u26A1";
+                const icon2 = document.createElement("span");
+                icon2.className = "text-lg shrink-0";
+                icon2.textContent = tmpl.icon || "\u26A1";
                 const info = document.createElement("div");
                 info.className = "flex-1 min-w-0";
                 const name = document.createElement("div");
@@ -19002,7 +19183,7 @@
                     toastError(err);
                   }
                 };
-                item.appendChild(icon);
+                item.appendChild(icon2);
                 item.appendChild(info);
                 item.appendChild(editBtn);
                 item.appendChild(delBtn);
@@ -19106,7 +19287,7 @@
             const name = nameInput.value.trim();
             const label = labelInput.value.trim();
             const description = descInput.value.trim();
-            const icon = iconInput.value.trim() || "\u26A1";
+            const icon2 = iconInput.value.trim() || "\u26A1";
             const promptTemplate = tmplTextarea.value.trim();
             if (!name || !label || !promptTemplate) {
               toast(t("settings.template_required") || "\u540D\u79F0\u3001\u6807\u7B7E\u548C\u6A21\u677F\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A", "error");
@@ -19121,7 +19302,7 @@
                 name,
                 label,
                 description,
-                icon,
+                icon: icon2,
                 promptTemplate
               });
               toastSuccess(existing ? t("settings.template_updated") || "\u6A21\u677F\u5DF2\u66F4\u65B0" : t("settings.template_created") || "\u6A21\u677F\u5DF2\u521B\u5EFA");
@@ -20680,7 +20861,7 @@
             <div class="graph-detail-panel" id="graphDetailPanel"></div>
             <div class="graph-tooltip" id="graphTooltip"></div>
             <div class="graph-empty-state" id="graphEmptyState" style="display:none;">
-              <div class="empty-icon">\u{1F578}\uFE0F</div>
+              <div class="empty-icon"><svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="7" x2="6" y2="17"/><line x1="12" y1="7" x2="18" y2="17"/><line x1="6" y1="19" x2="18" y2="19"/></svg></div>
               <div class="empty-text">${t("graph.empty_hint")}</div>
             </div>
           </div>
@@ -21834,11 +22015,11 @@
               return;
             }
             container.innerHTML = results.map((s) => {
-              const icon = SYMBOL_ICONS[s.kind] || "?";
+              const icon2 = SYMBOL_ICONS[s.kind] || "?";
               const color = SYMBOL_COLORS[s.kind] || "#94a3b8";
               return `
               <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface-2 cursor-pointer transition-colors" data-chunk-id="${s.chunk_id}">
-                <span class="shrink-0 w-6 h-6 flex items-center justify-center rounded text-[10px] font-mono font-bold" style="background:${color}20;color:${color}">${icon}</span>
+                <span class="shrink-0 w-6 h-6 flex items-center justify-center rounded text-[10px] font-mono font-bold" style="background:${color}20;color:${color}">${icon2}</span>
                 <div class="flex-1 min-w-0">
                   <p class="text-sm text-text-primary truncate font-mono">${s.name}</p>
                   ${s.signature ? `<p class="text-[10px] text-text-quaternary truncate font-mono">${s.signature}</p>` : ""}
@@ -22235,7 +22416,7 @@
           if (indicator) {
             indicator.classList.remove("hidden");
             indicator.innerHTML = `<span class="text-amber-400 text-xs flex items-center gap-1">
-            <span>\u26A0</span>
+            ${icon("warning", "sm")}
             <span>${t("offline.indicator", "Offline")}</span>
           </span>`;
           }
@@ -22255,7 +22436,7 @@
             if (_originalHint === null) {
               _originalHint = hint.innerHTML;
             }
-            hint.innerHTML = `<span class="text-amber-400">\u26A0 ${t("offline.hint", "Offline mode \u2014 please check your network connection")}</span>`;
+            hint.innerHTML = `<span class="text-amber-400 flex items-center gap-1">${icon("warning", "sm")} ${t("offline.hint", "Offline mode \u2014 please check your network connection")}</span>`;
           }
         }
         function _applyOnline() {
@@ -22401,7 +22582,7 @@
           const metaHTML = metaParts.length > 0 ? `<span class="breadcrumb-meta">${metaParts.join(" \xB7 ")}</span>` : "";
           return `<div class="breadcrumb-left">
           <span id="breadcrumbKbName" class="breadcrumb-item" role="button" tabindex="0">${kbName}</span>
-          <span class="breadcrumb-separator">\u203A</span>
+          <span class="breadcrumb-separator"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>
           <span id="breadcrumbConvTitle" class="breadcrumb-title" role="button" tabindex="0">${convTitle}</span>
         </div>
         ${metaHTML}`;
@@ -22500,9 +22681,9 @@
         init_toast();
         var _created = false;
         var _panelEl = null;
-        function _summaryCard(label, value, icon = "") {
+        function _summaryCard(label, value, icon2 = "") {
           return `<div class="bg-surface-2 border border-line rounded-lg p-4 flex flex-col gap-1">
-          <div class="flex items-center gap-2 text-text-tertiary text-xs uppercase tracking-wider">${icon}${label}</div>
+          <div class="flex items-center gap-2 text-text-tertiary text-xs uppercase tracking-wider">${icon2}${label}</div>
           <div class="text-2xl font-semibold text-text-primary">${value}</div>
         </div>`;
         }
@@ -22718,7 +22899,7 @@
           header.appendChild(title);
           const closeBtn = document.createElement("button");
           closeBtn.className = "text-text-tertiary hover:text-text-primary transition-colors text-xl px-2";
-          closeBtn.textContent = "\xD7";
+          closeBtn.innerHTML = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
           closeBtn.setAttribute("aria-label", t("common.close") || "\u5173\u95ED");
           closeBtn.onclick = closeDocPreview;
           header.appendChild(closeBtn);
@@ -23838,7 +24019,7 @@
               title.textContent = c.title;
               const del = document.createElement("button");
               del.className = "invisible group-hover:visible text-text-quaternary hover:text-red-400 ml-2 shrink-0 px-1";
-              del.textContent = "\xD7";
+              del.innerHTML = icon("close", "sm");
               del.title = t("chat.delete_conversation");
               del.setAttribute("aria-label", t("chat.delete_conversation"));
               del.onclick = async (ev) => {
@@ -23858,22 +24039,9 @@
         var _kbFilteredDocs = [];
         var _kbRenderedCount = 0;
         var _kbObserver = null;
-        var FILE_ICONS = {
-          md: "\u{1F4DD}",
-          txt: "\u{1F4C4}",
-          pdf: "\u{1F4D5}",
-          docx: "\u{1F4D8}",
-          html: "\u{1F310}",
-          pptx: "\u{1F4CA}",
-          epub: "\u{1F4D6}",
-          xlsx: "\u{1F4D7}",
-          csv: "\u{1F4D7}",
-          rs: "\u{1F980}",
-          ts: "\u{1F537}",
-          tsx: "\u{1F537}",
-          py: "\u{1F40D}",
-          go: "\u{1F439}"
-        };
+        function getFileIcon(ext) {
+          return fileIcon(ext, "sm");
+        }
         var STATUS_DOT_COLORS = {
           Indexed: "bg-emerald-400",
           Processing: "bg-amber-400 animate-pulse",
@@ -23972,10 +24140,10 @@
             };
             item.appendChild(checkbox);
           }
-          const icon = document.createElement("span");
-          icon.className = "shrink-0 text-sm leading-none";
-          icon.textContent = FILE_ICONS[ext] || "\u{1F4C4}";
-          item.appendChild(icon);
+          const fileIconEl = document.createElement("span");
+          fileIconEl.className = "shrink-0 leading-none";
+          fileIconEl.innerHTML = getFileIcon(ext);
+          item.appendChild(fileIconEl);
           const dot = document.createElement("span");
           dot.className = `shrink-0 w-1.5 h-1.5 rounded-full ${statusColor}`;
           dot.title = t("knowledge_base." + labelKey);
@@ -24007,8 +24175,8 @@
           const actions = document.createElement("span");
           actions.className = "shrink-0 flex items-center gap-0.5";
           const previewBtn = document.createElement("button");
-          previewBtn.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
-          previewBtn.textContent = "\u{1F441}";
+          previewBtn.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 transition-opacity";
+          previewBtn.innerHTML = icon("eye", "sm");
           previewBtn.title = t("doc.preview_title") || "\u9884\u89C8";
           previewBtn.onclick = (ev) => {
             ev.stopPropagation();
@@ -24016,8 +24184,8 @@
           };
           actions.appendChild(previewBtn);
           const sumToggle = document.createElement("button");
-          sumToggle.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
-          sumToggle.textContent = "\u{1F4DD}";
+          sumToggle.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 transition-opacity";
+          sumToggle.innerHTML = icon("summary", "sm");
           sumToggle.title = t("knowledge_base.summary_toggle");
           sumToggle.style.display = status === "Indexed" ? "" : "none";
           sumToggle.onclick = async (ev) => {
@@ -24040,8 +24208,8 @@
           };
           actions.appendChild(sumToggle);
           const retry = document.createElement("button");
-          retry.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
-          retry.textContent = "\u21BB";
+          retry.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 transition-opacity";
+          retry.innerHTML = icon("retry", "sm");
           retry.title = t("knowledge_base.retry_index");
           retry.style.display = status === "Failed" ? "" : "none";
           retry.onclick = async (ev) => {
@@ -24050,8 +24218,8 @@
           };
           actions.appendChild(retry);
           const audit = document.createElement("button");
-          audit.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
-          audit.textContent = "\u{1F50D}";
+          audit.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 transition-opacity";
+          audit.innerHTML = icon("search", "sm");
           audit.title = t("knowledge_base.audit_doc");
           audit.style.display = isPro && status === "Indexed" ? "" : "none";
           audit.onclick = async (ev) => {
@@ -24060,8 +24228,8 @@
           };
           actions.appendChild(audit);
           const tagBtn = document.createElement("button");
-          tagBtn.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity";
-          tagBtn.textContent = "#";
+          tagBtn.className = "invisible group-hover:visible text-text-quaternary hover:text-accent px-1 transition-opacity";
+          tagBtn.innerHTML = icon("tag", "sm");
           tagBtn.title = t("knowledge_base.tag_input_placeholder");
           tagBtn.onclick = (ev) => {
             ev.stopPropagation();
@@ -24073,9 +24241,9 @@
           };
           actions.appendChild(tagBtn);
           const del = document.createElement("button");
-          del.className = "invisible group-hover:visible text-text-quaternary hover:text-red-400 px-1 text-xs transition-opacity";
+          del.className = "invisible group-hover:visible text-text-quaternary hover:text-red-400 px-1 transition-opacity";
           del.dataset.action = "delete";
-          del.textContent = "\xD7";
+          del.innerHTML = icon("close", "sm");
           del.title = t("knowledge_base.delete_doc");
           del.onclick = async (ev) => {
             ev.stopPropagation();
@@ -24136,13 +24304,13 @@
           empty.className = "px-3 py-8 text-center text-xs text-text-quaternary";
           if (isEmpty) {
             empty.innerHTML = `
-            <div class="text-3xl mb-3 opacity-50">\u{1F4DA}</div>
+            <div class="mb-3 opacity-50 flex justify-center">${icon("book", "lg")}</div>
             <div class="mb-1">${t("knowledge_base.empty_title")}</div>
             <div class="text-[11px] opacity-70">${t("knowledge_base.empty_hint")}</div>
             <div class="text-[10px] opacity-50 mt-2">${t("knowledge_base.empty_formats")}</div>`;
           } else {
             empty.innerHTML = `
-            <div class="text-2xl mb-2 opacity-50">\u{1F50D}</div>
+            <div class="mb-2 opacity-50 flex justify-center">${icon("search", "md")}</div>
             <div>${t("knowledge_base.no_match")}</div>`;
           }
           box.appendChild(empty);
@@ -24218,26 +24386,26 @@
         }
         function getCommands() {
           return [
-            { group: t("command_palette.group_navigation"), icon: "\u{1F4AC}", label: t("command_palette.cmd_new_chat"), shortcut: "\u2318N", action: () => newChat() },
-            { group: t("command_palette.group_navigation"), icon: "\u{1F50D}", label: t("command_palette.cmd_search_conv"), action: () => openSearchPopup() },
-            { group: t("command_palette.group_navigation"), icon: "\uFF0B", label: t("command_palette.cmd_import"), shortcut: "\u2318O", action: () => $("plusBtn").click() },
-            { group: t("command_palette.group_navigation"), icon: "\u2699", label: t("command_palette.cmd_settings"), shortcut: "\u2318,", action: () => openSettings() },
-            { group: t("command_palette.group_navigation"), icon: "\u2039", label: t("command_palette.cmd_toggle_sidebar"), action: () => toggleSidebar() },
-            { group: t("command_palette.group_chat"), icon: "\u25A1", label: t("command_palette.cmd_focus_input"), shortcut: "\u2318L", action: () => $("queryInput").focus() },
-            { group: t("command_palette.group_chat"), icon: "\u25A0", label: t("command_palette.cmd_stop"), shortcut: "Esc", action: () => {
+            { group: t("command_palette.group_navigation"), icon: icon("chat", "sm"), label: t("command_palette.cmd_new_chat"), shortcut: "\u2318N", action: () => newChat() },
+            { group: t("command_palette.group_navigation"), icon: icon("search", "sm"), label: t("command_palette.cmd_search_conv"), action: () => openSearchPopup() },
+            { group: t("command_palette.group_navigation"), icon: icon("plus", "sm"), label: t("command_palette.cmd_import"), shortcut: "\u2318O", action: () => $("plusBtn").click() },
+            { group: t("command_palette.group_navigation"), icon: icon("settings", "sm"), label: t("command_palette.cmd_settings"), shortcut: "\u2318,", action: () => openSettings() },
+            { group: t("command_palette.group_navigation"), icon: icon("collapse", "sm"), label: t("command_palette.cmd_toggle_sidebar"), action: () => toggleSidebar() },
+            { group: t("command_palette.group_chat"), icon: icon("send", "sm"), label: t("command_palette.cmd_focus_input"), shortcut: "\u2318L", action: () => $("queryInput").focus() },
+            { group: t("command_palette.group_chat"), icon: icon("stop", "sm"), label: t("command_palette.cmd_stop"), shortcut: "Esc", action: () => {
               if (get("streaming")) onStop();
             } },
-            { group: t("command_palette.group_chat"), icon: "\u{1F5D1}", label: t("command_palette.cmd_clear_chat"), shortcut: "\u2318\u21E7\u232B", action: () => {
+            { group: t("command_palette.group_chat"), icon: icon("trash", "sm"), label: t("command_palette.cmd_clear_chat"), shortcut: "\u2318\u21E7\u232B", action: () => {
               if (!get("streaming")) newChat();
             } },
-            { group: t("command_palette.group_config"), icon: "\u{1F441}", label: t("command_palette.cmd_toggle_vlm"), action: () => {
+            { group: t("command_palette.group_config"), icon: icon("eye", "sm"), label: t("command_palette.cmd_toggle_vlm"), action: () => {
             } },
-            { group: t("command_palette.group_config"), icon: "\u2193", label: t("command_palette.cmd_download_model"), action: () => initEmbedder() },
-            { group: t("command_palette.group_license"), icon: "\u25C8", label: t("command_palette.cmd_activate_pro"), action: () => {
+            { group: t("command_palette.group_config"), icon: icon("download", "sm"), label: t("command_palette.cmd_download_model"), action: () => initEmbedder() },
+            { group: t("command_palette.group_license"), icon: icon("brand", "sm"), label: t("command_palette.cmd_activate_pro"), action: () => {
               if (!get("isPro")) showPaywall(t("paywall.reason_cmd_palette"));
             } },
-            ...getSecurityCommands().map((cmd) => ({ group: t("security.section_title", "Security"), icon: cmd.id.includes("lock") ? "\u{1F512}" : cmd.id.includes("verify") ? "\u2705" : "\u{1F4CB}", label: cmd.label, action: cmd.action })),
-            { group: t("command_palette.group_help"), icon: "\u2328", label: t("command_palette.cmd_shortcuts"), shortcut: "\u2318/", action: () => toast(t("command_palette.shortcuts_hint"), "info") }
+            ...getSecurityCommands().map((cmd) => ({ group: t("security.section_title", "Security"), icon: cmd.id.includes("lock") ? icon("lock", "sm") : cmd.id.includes("verify") ? icon("check", "sm") : icon("clipboard", "sm"), label: cmd.label, action: cmd.action })),
+            { group: t("command_palette.group_help"), icon: icon("keyboard", "sm"), label: t("command_palette.cmd_shortcuts"), shortcut: "\u2318/", action: () => toast(t("command_palette.shortcuts_hint"), "info") }
           ];
         }
         function initFullscreenDetection() {
