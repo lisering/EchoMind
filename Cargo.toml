@@ -25,3 +25,10 @@ unimplemented = "deny"
 # DevOps 基线：dev 模式下全部依赖 crate 以 opt-level 3 编译，避免重型计算库拖慢调试体验
 [profile.dev.package."*"]
 opt-level = 3
+
+# REQ-NFR-019 构建产物体积优化：Release 模式启用 Fat LTO + 符号剥离 + 单 codegen-unit
+# 减小二进制体积（macOS .dmg ≤ 50MB / Windows .msi ≤ 60MB，不含 ONNX 模型）
+[profile.release]
+lto = "fat"
+strip = true
+codegen-units = 1
