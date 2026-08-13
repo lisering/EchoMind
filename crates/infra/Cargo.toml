@@ -23,7 +23,7 @@ accelerate = ["mistralrs/accelerate"]
 echomind-core = { path = "../core" }
 echomind-models = { path = "../models" }
 anyhow = "1.0"
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1.0", features = ["sync", "time", "process", "io-util", "rt", "macros"] }
 futures = "0.3"
 # rusqlite 属体系三禁止进入 core 的具体实现，仅允许存在于本适配器层
 # bundled-sqlcipher：自带 SQLCipher 编译，AES-256 透明数据库加密

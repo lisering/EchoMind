@@ -11,7 +11,7 @@ echomind-core = { path = "../core" }
 tiktoken-rs = "0.12"
 anyhow = "1.0"
 futures = "0.3"
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1.0", features = ["sync", "rt", "macros"] }
 serde = { version = "1.0", features = ["derive"] }
 tracing = "0.1"
 

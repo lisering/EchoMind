@@ -14,7 +14,7 @@ pro = []
 echomind-models = { path = "../models" }
 echomind-prompt = { path = "../prompt" }
 anyhow = "1.0"
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1.0", features = ["sync", "time", "fs", "rt", "macros"] }
 futures = "0.3"
 # 纯计算解析/分词库（无 I/O、无网络），经架构评审准入 core（见 SRS REQ-ARCH-000）
 pulldown-cmark = { version = "0.13", default-features = false }

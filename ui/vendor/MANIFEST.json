@@ -1,10 +1,10 @@
 {
   "files": [
     {
-      "path": "mermaid.min.js",
-      "version": "11.16.0",
-      "source": "https://unpkg.com/mermaid@11.16.0/dist/mermaid.min.js",
-      "sha256": "74d7c46dabca328c2294733910a8aa1ed0c37451776e8d5295da38a2b758fb9b",
+      "path": "mermaid-custom.min.js",
+      "version": "11.16.1",
+      "source": "npm mermaid v11 ESM → esbuild tree-shaking + minify (scripts/build-mermaid.mjs)",
+      "sha256": "esbuild-generated (regenerated on each build)",
       "phase": 1,
       "req": "REQ-VIZ-001"
     },
@@ -103,10 +103,10 @@
       "req": "REQ-UI-002"
     },
     {
-      "path": "tailwindcss.js",
-      "version": "vendored",
-      "source": "https://cdn.tailwindcss.com",
-      "sha256": "vendored-pre-viz",
+      "path": "tailwind-prebuilt.css",
+      "version": "3.4.19",
+      "source": "npm tailwindcss v3 CLI 预构建 (scripts/build-ui.mjs buildTailwind)",
+      "sha256": "tailwind-CLI-generated (regenerated on each build)",
       "phase": 0,
       "req": "REQ-UI-001"
     },

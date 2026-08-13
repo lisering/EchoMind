@@ -1,0 +1,13 @@
+/*
+ * EchoMind Tailwind CSS 输入文件 — 预构建模式。
+ *
+ * 此文件仅包含 Tailwind 指令，由 CLI 处理后生成 vendor/tailwind-prebuilt.css。
+ * 不要在此文件中添加自定义 CSS — 自定义样式应在 ui/styles/*.css 中定义。
+ *
+ * 构建命令：
+ *   npx tailwindcss -i ui/styles/tailwind-input.css -o ui/vendor/tailwind-prebuilt.css --minify
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
