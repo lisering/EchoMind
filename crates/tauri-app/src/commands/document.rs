@@ -574,6 +574,22 @@ pub async fn get_document_preview_inner(
         .map_err(|e| format!("{e:#}"))
 }
 
+/// 获取文档全部分块（用于 PDF 导出，REQ-EXP-005）。
+///
+/// 返回按 sequence 排序的 chunk 列表。
+#[tauri::command]
+pub async fn get_document_chunks(
+    doc_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<echomind_models::Chunk>, String> {
+    let chunks = state
+        .storage
+        .list_chunks(&doc_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(chunks)
+}
+
 // ------------------------------------------------------------------
 // 文档原文导出（REQ-EXP-004）
 // ------------------------------------------------------------------

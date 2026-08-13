@@ -239,6 +239,10 @@ pub fn run() {
             commands::set_auto_lock_config,
             commands::lock_app,
             commands::unlock_app,
+            commands::encrypt_database,
+            commands::unlock_database,
+            commands::verify_audit_chain,
+            commands::set_pii_detection_enabled,
             commands::record_activity,
             commands::detect_pii,
             commands::set_panic_wipe_password,
@@ -317,6 +321,7 @@ pub fn run() {
             commands::regenerate_summary,
             // 文档内容预览（REQ-ING-010）
             commands::get_document_preview,
+            commands::get_document_chunks,
             // 文档原文导出（REQ-EXP-004）
             commands::export_document_original,
             // 代码符号引擎（REQ-RAG-031 代码感知 RAG）
@@ -423,6 +428,9 @@ pub fn run() {
             commands::check_for_updates,
             commands::get_update_check_config,
             commands::set_update_check_enabled,
+            // 智能模式（S5 审计 P0-1）
+            commands::set_smart_mode,
+            commands::get_smart_mode,
             // REQ-ING-011：导入历史记录
             commands::get_import_history,
             commands::clear_import_history,

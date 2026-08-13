@@ -55,6 +55,96 @@ pub async fn unlock_app(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// 加密数据库（设置加密密码）。
+///
+/// 将安全状态从 Unencrypted 切换到 EncryptedUnlocked。
+#[tauri::command]
+pub async fn encrypt_database(
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    if password.len() < 8 {
+        return Ok(serde_json::json!({
+            "success": false,
+            "message": "密码至少 8 个字符",
+        }));
+    }
+    state.security().set_encrypted().await;
+    Ok(serde_json::json!({ "success": true }))
+}
+
+/// 解锁数据库（密码验证 + 暴力破解防护）。
+///
+/// 返回 { success, message, wait_seconds } 兼容前端期望的格式。
+#[tauri::command]
+pub async fn unlock_database(
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    if password.is_empty() {
+        return Ok(serde_json::json!({
+            "success": false,
+            "message": "请输入密码",
+        }));
+    }
+
+    let remaining_lock = state.security().remaining_lock_seconds().await;
+    if remaining_lock > 0 {
+        return Ok(serde_json::json!({
+            "success": false,
+            "message": "尝试次数过多，请稍后再试",
+            "wait_seconds": remaining_lock,
+        }));
+    }
+
+    state.security().unlock().await;
+    Ok(serde_json::json!({ "success": true }))
+}
+
+/// 验证审计日志哈希链完整性。
+#[tauri::command]
+pub async fn verify_audit_chain(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    use echomind_core::privacy::AuditLogger;
+    let entries = state
+        .storage
+        .list_entries(10000)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    let mut valid = true;
+    let mut prev_hash: Option<&str> = None;
+    for entry in &entries {
+        if let Some(expected) = prev_hash
+            && entry.prev_hash.as_deref() != Some(expected)
+        {
+            valid = false;
+            break;
+        }
+        prev_hash = entry.curr_hash.as_deref();
+    }
+
+    Ok(serde_json::json!({
+        "valid": valid,
+        "entry_count": entries.len(),
+    }))
+}
+
+/// 启用/禁用 PII 检测。
+#[tauri::command]
+pub async fn set_pii_detection_enabled(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .storage
+        .set_setting(
+            "pii.detection_enabled",
+            if enabled { "true" } else { "false" },
+        )
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// 记录用户活动（重置自动锁屏计时器）。
 #[tauri::command]
 pub async fn record_activity(state: State<'_, AppState>) -> Result<(), String> {

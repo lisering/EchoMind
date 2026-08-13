@@ -1298,3 +1298,96 @@ pub async fn clear_import_history(state: State<'_, AppState>) -> Result<(), Stri
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+// ------------------------------------------------------------------
+// 智能模式（S5 审计 P0-1）
+// ------------------------------------------------------------------
+
+/// 智能模式开启时自动设置的优化项。
+const SMART_MODE_SETTINGS: &[(&str, &str)] = &[
+    ("rag.hybrid_search", "true"),
+    ("rag.rerank_enabled", "true"),
+    ("rag.hyde_enabled", "true"),
+    ("rag.graph_retriever_enabled", "true"),
+    ("rag.quality_gate_enabled", "true"),
+    ("compression.ratio", "2.0"),
+    ("rag.contextual_retrieval", "true"),
+];
+
+/// 设置智能模式开关。
+///
+/// 开启时：备份当前设置值到 `smart_mode_backup.*` 键，然后设置全部优化项。
+/// 关闭时：从 `smart_mode_backup.*` 键恢复用户手动设置值。
+#[tauri::command]
+pub async fn set_smart_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    set_smart_mode_inner(enabled, state.inner()).await
+}
+
+/// `set_smart_mode` 的逻辑实现（命令与集成测试复用）。
+pub async fn set_smart_mode_inner(enabled: bool, state: &AppState) -> Result<(), String> {
+    if enabled {
+        // 备份当前值
+        for &(key, _) in SMART_MODE_SETTINGS {
+            let current = state
+                .storage
+                .get_setting(key)
+                .await
+                .map_err(|e| format!("{e:#}"))?
+                .unwrap_or_else(|| "false".to_string());
+            let backup_key = format!("smart_mode_backup.{key}");
+            state
+                .storage
+                .set_setting(&backup_key, &current)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+        }
+        // 设置优化值
+        for &(key, val) in SMART_MODE_SETTINGS {
+            state
+                .storage
+                .set_setting(key, val)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+        }
+    } else {
+        // 恢复备份值
+        for &(key, _) in SMART_MODE_SETTINGS {
+            let backup_key = format!("smart_mode_backup.{key}");
+            let backup_val = state
+                .storage
+                .get_setting(&backup_key)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+            if let Some(val) = backup_val {
+                state
+                    .storage
+                    .set_setting(key, &val)
+                    .await
+                    .map_err(|e| format!("{e:#}"))?;
+            }
+        }
+    }
+
+    state
+        .storage
+        .set_setting("smart_mode.enabled", if enabled { "true" } else { "false" })
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 查询智能模式是否启用。
+#[tauri::command]
+pub async fn get_smart_mode(state: State<'_, AppState>) -> Result<bool, String> {
+    get_smart_mode_inner(state.inner()).await
+}
+
+/// `get_smart_mode` 的逻辑实现（命令与集成测试复用）。
+pub async fn get_smart_mode_inner(state: &AppState) -> Result<bool, String> {
+    // 默认启用（首次安装时无设置项，返回 true）
+    let val = state
+        .storage
+        .get_setting("smart_mode.enabled")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(val.is_none_or(|v| v != "false"))
+}
