@@ -161,6 +161,8 @@
     "empty_state_try_these": "💡 试试这些问题：",
     "empty_state_get_started": "💡 开始使用：",
     "empty_state_input_hint": "或在下方输入你的问题 ⏎",
+"scroll_to_top": "回到顶部",
+"scroll_to_bottom": "回到底部",
 "empty_state_suggestion_summarize_key_points": "总结当前知识库中的核心要点",
 "empty_state_suggestion_compare_differences": "对比不同文档之间的差异",
 "empty_state_suggestion_extract_key_terms": "提取所有涉及的关键术语",

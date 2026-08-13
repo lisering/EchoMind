@@ -808,15 +808,32 @@ input[type="url"],
   transform: translateX(-50%) scale(0.95);
 }
 
-/* REQ-NAV-005 「回到顶部」浮动按钮 */
+/* REQ-NAV-005 「回到顶部」浮动按钮 — 右下角小图标按钮，独立样式不继承 jump-to-latest */
 .back-to-top {
   position: absolute;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 16px;
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: background 0.2s, color 0.2s, opacity 0.2s;
+}
+.back-to-top:hover {
+  background: var(--accent);
+  color: var(--ink);
+  border-color: var(--accent);
 }
 .back-to-top:active {
-  transform: translateX(-50%) scale(0.95);
+  transform: scale(0.92);
 }
 
 /* REQ-ERR-003 离线指示器 */

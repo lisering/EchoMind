@@ -161,6 +161,8 @@
     "empty_state_try_these": "💡 Try these questions:",
     "empty_state_get_started": "💡 Getting started:",
     "empty_state_input_hint": "Or type your question below ⏎",
+"scroll_to_top": "Back to top",
+"scroll_to_bottom": "Jump to latest",
 "empty_state_suggestion_summarize_key_points": "Summarize the key points in your knowledge base",
 "empty_state_suggestion_compare_differences": "Compare differences between documents",
 "empty_state_suggestion_extract_key_terms": "Extract all key terms mentioned",
