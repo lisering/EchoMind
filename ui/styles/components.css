@@ -2590,6 +2590,29 @@ pointer-events: none;
   transition: background var(--duration-fast) var(--ease-out);
 }
 
+/* ============================================================
+ * 搜索高亮样式（P0-2：DeepSeek 风格搜索结果高亮 + 跳转闪烁）
+ * ============================================================ */
+
+/* 搜索结果中匹配文本的高亮样式（<mark> 标签） */
+mark.search-mark {
+  background: rgba(56, 189, 248, 0.25);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* 聊天区域搜索跳转后消息块的闪烁高亮 */
+.search-highlight-flash {
+  animation: search-flash 3s ease-out;
+}
+
+@keyframes search-flash {
+  0%   { background: rgba(56, 189, 248, 0.3); }
+  30%  { background: rgba(56, 189, 248, 0.15); }
+  100% { background: transparent; }
+}
+
 /* REQ-DS-006 AC-6: prefers-reduced-motion 禁用新增动效 */
 @media (prefers-reduced-motion: reduce) {
   .msg-actions,
@@ -2601,7 +2624,8 @@ pointer-events: none;
     transition: none;
   }
   .animate-modal-in,
-  .animate-toast-in {
+  .animate-toast-in,
+  .search-highlight-flash {
     animation: none;
   }
 }
