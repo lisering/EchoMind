@@ -16,7 +16,8 @@ pub(crate) use storage::{PRAGMAS, Pool, ensure_dir_0700, init_schema, load_or_cr
 // crypto 辅助函数（接收 &Aes256Gcm 参数的自由函数）
 use storage::{decrypt as crypto_decrypt, encrypt as crypto_encrypt};
 // S02 拆分：CRUD 子模块
-use storage::{conversations, documents, messages};
+// S03 拆分：新增 vectors / entities / misc 子模块
+use storage::{conversations, documents, entities, messages, misc, vectors};
 
 /// 数据库完整性检查结果（REQ-ERR-004）。
 ///
@@ -130,18 +131,16 @@ use aes_gcm::Aes256Gcm;
 use anyhow::{Context, bail};
 use echomind_core::Storage;
 use echomind_core::privacy::{AuditEntry, AuditLogger};
-use echomind_core::proposition_splitter::PropositionSplitter;
 use echomind_core::retrieval_memory::{
     MemoryRecord, QueryType, RetrievalMemoryStore, RetrievalMethod,
 };
 use echomind_models::{
     BudgetStats, ChatMessage, Chunk, CodeSymbol, Conversation, DocStatus, Document, EntityRelation,
     MemoryEntry, MemorySource, MemoryTier, MessageSearchResult, PendingInput, Proposition,
-    RetrievalResult, ScratchLogEntry, SessionTodo, SummaryNode, SymbolKind, TodoPriority,
-    TodoStatus, TurnActiveVersion, WikiLink,
+    RetrievalResult, ScratchLogEntry, SessionTodo, SummaryNode, SymbolKind, TodoStatus,
+    TurnActiveVersion, WikiLink,
 };
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::OptionalExtension;
 use rusqlite::params;
 
 // S01 拆分：PRAGMAS / SCHEMA_TABLES / SCHEMA_INDEXES / SCHEMA_FTS / SCHEMA_MESSAGES_FTS /
@@ -619,160 +618,27 @@ impl Storage for SqliteStorage {
     }
 
     async fn add_chunk(&self, chunk: &Chunk) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let chunk = chunk.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-"INSERT OR REPLACE INTO chunks (id, doc_id, content, token_count, sequence) VALUES (?1, ?2, ?3, ?4, ?5)",
-params![chunk.id, chunk.doc_id, chunk.content, chunk.token_count, chunk.sequence],
-)
-.context("写入分块失败")?;
-// Contextual BM25（REQ-PERF-005）：FTS5 索引使用文档名前缀
-let doc_name: String = conn
-    .query_row(
-        "SELECT file_path FROM documents WHERE id = ?1",
-        params![chunk.doc_id],
-        |row| row.get(0),
-    )
-    .map(|fp: String| {
-        std::path::Path::new(&fp)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or(fp)
-    })
-    .unwrap_or_else(|_| "unknown".to_string());
-let contextual_content =
-    echomind_core::retriever::build_contextual_text(&doc_name, &chunk.content);
-conn.execute(
-"INSERT INTO chunks_fts (chunk_id, doc_id, content) VALUES (?1, ?2, ?3)",
-params![chunk.id, chunk.doc_id, contextual_content],
-)
-.context("写入 FTS5 索引失败")?;
-Ok(())
-        })
-        .await
+        vectors::add_chunk(&self.pool, chunk).await?;
+        self.invalidate_vector_cache();
+        Ok(())
     }
 
-    /// 批量写入分块（单事务，性能优化）。
-    ///
-    /// 将所有 chunks 在单个事务中批量 INSERT，消除逐条写入的隐式事务开销与
-    /// `spawn_blocking` 调度次数。空 Vec 直接返回 Ok。
+    /// 批量写入分块（单事务，性能优化）。S03 拆分委托 `vectors::add_chunks_batch`。
     async fn add_chunks_batch(&self, chunks: &[Chunk]) -> anyhow::Result<()> {
-        if chunks.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        let chunks = chunks.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // Bug #1 修复：使用 with_transaction 保证错误时自动 ROLLBACK
-            with_transaction(&conn, |conn| {
-                // 预编译语句，在循环中复用参数绑定
-                let mut chunk_stmt = conn
-                    .prepare(
-                        "INSERT OR REPLACE INTO chunks (id, doc_id, content, token_count, sequence) \
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
-                    )
-                    .context("预编译 chunks 批量写入语句失败")?;
-                let mut fts_stmt = conn
-                    .prepare("INSERT INTO chunks_fts (chunk_id, doc_id, content) VALUES (?1, ?2, ?3)")
-                    .context("预编译 FTS5 批量写入语句失败")?;
-
-                // Bug #2 修复：按 doc_id 分组查询文档名，避免跨文档批次使用错误文档名
-                let mut doc_name_cache: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-                for chunk in &chunks {
-                    let doc_name = doc_name_cache.entry(chunk.doc_id.clone()).or_insert_with(|| {
-                        conn.query_row(
-                            "SELECT file_path FROM documents WHERE id = ?1",
-                            params![&chunk.doc_id],
-                            |row| row.get(0),
-                        )
-                        .map(|fp: String| {
-                            std::path::Path::new(&fp)
-                                .file_name()
-                                .map(|n| n.to_string_lossy().into_owned())
-                                .unwrap_or(fp)
-                        })
-                        .unwrap_or_else(|_| "unknown".to_string())
-                    });
-
-                    chunk_stmt
-                        .execute(params![
-                            chunk.id,
-                            chunk.doc_id,
-                            chunk.content,
-                            chunk.token_count,
-                            chunk.sequence,
-                        ])
-                        .context("批量写入 chunks 失败")?;
-                    let contextual_content =
-                        echomind_core::retriever::build_contextual_text(doc_name, &chunk.content);
-                    fts_stmt
-                        .execute(params![chunk.id, chunk.doc_id, contextual_content])
-                        .context("批量写入 FTS5 索引失败")?;
-                }
-                Ok(())
-            })
-        })
-        .await?;
-        // **性能优化**：使内存向量缓存失效
+        vectors::add_chunks_batch(&self.pool, chunks).await?;
         self.invalidate_vector_cache();
         Ok(())
     }
 
     async fn add_embedding(&self, chunk_id: &str, embedding: &[f32]) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let chunk_id = chunk_id.to_string();
-        let bytes = vec_to_bytes(embedding);
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT OR REPLACE INTO embeddings (chunk_id, vector) VALUES (?1, ?2)",
-                params![chunk_id, bytes],
-            )
-            .context("写入向量失败")?;
-            Ok(())
-        })
-        .await?;
-        // **性能优化**：使内存向量缓存失效（下次检索时自动重建）
+        vectors::add_embedding(&self.pool, chunk_id, embedding).await?;
         self.invalidate_vector_cache();
         Ok(())
     }
 
-    /// 批量写入向量（性能优化：单事务 + 仅一次缓存失效）。
-    ///
-    /// 原实现逐条调用 `add_embedding`，每次 spawn_blocking + pool.get() + INSERT +
-    /// invalidate_vector_cache。400+ chunks = 400+ 次 DB 往返 + 400+ 次缓存失效。
-    ///
-    /// 优化后：全部 embeddings 在单个事务中提交（1 次 spawn_blocking），缓存仅失效一次。
-    /// 实测 414 chunks 从 ~8s 降至 <0.1s（80x 加速）。
+    /// 批量写入向量（性能优化：单事务 + 仅一次缓存失效）。S03 拆分委托。
     async fn add_embeddings_batch(&self, embeddings: &[(String, Vec<f32>)]) -> anyhow::Result<()> {
-        if embeddings.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        // 预序列化：chunk_id + f32→bytes 转换在 spawn_blocking 外完成，
-        // 避免在阻塞线程中分配不必要的内存
-        let items: Vec<(String, Vec<u8>)> = embeddings
-            .iter()
-            .map(|(id, vec)| (id.clone(), vec_to_bytes(vec)))
-            .collect();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            with_transaction(&conn, |conn| {
-                let mut stmt = conn
-                    .prepare("INSERT OR REPLACE INTO embeddings (chunk_id, vector) VALUES (?1, ?2)")
-                    .context("预编译 embeddings 批量写入语句失败")?;
-                for (chunk_id, bytes) in &items {
-                    stmt.execute(params![chunk_id, bytes])
-                        .context("批量写入 embedding 失败")?;
-                }
-                Ok(())
-            })
-        })
-        .await?;
-        // 仅在全部写入完成后失效一次（而非每条写入各失效一次）
+        vectors::add_embeddings_batch(&self.pool, embeddings).await?;
         self.invalidate_vector_cache();
         Ok(())
     }
@@ -1219,6 +1085,20 @@ Ok(())
         messages::get_turn_active_versions(&self.pool, conversation_id.to_string()).await
     }
 
+    /// 设置消息的安全标记（Q05 安全态势分层，S03 委托）。
+    async fn set_entry_security_tainted(
+        &self,
+        message_id: &str,
+        tainted: bool,
+    ) -> anyhow::Result<()> {
+        messages::set_entry_security_tainted(&self.pool, message_id.to_string(), tainted).await
+    }
+
+    /// 查询消息的安全标记（Q05 安全态势分层，S03 委托）。
+    async fn get_entry_security_tainted(&self, message_id: &str) -> anyhow::Result<bool> {
+        messages::get_entry_security_tainted(&self.pool, message_id.to_string()).await
+    }
+
     async fn list_documents(&self) -> anyhow::Result<Vec<Document>> {
         documents::list_documents(&self.pool).await
     }
@@ -1238,47 +1118,14 @@ Ok(())
     }
 
     async fn list_chunks(&self, doc_id: &str) -> anyhow::Result<Vec<Chunk>> {
-        let pool = self.pool.clone();
-        let doc_id = doc_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, doc_id, content, token_count, sequence FROM chunks WHERE doc_id = ?1 ORDER BY sequence ASC",
-            )?;
-            let rows = stmt.query_map(params![doc_id], |row| {
-                Ok(Chunk {
-                    id: row.get(0)?,
-                    doc_id: row.get(1)?,
-                    content: row.get(2)?,
-                    token_count: row.get(3)?,
-                    sequence: row.get(4)?,
-                })
-            })?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            Ok(out)
-        })
-        .await
+        vectors::list_chunks(&self.pool, doc_id).await
     }
 
-    /// 删除指定文档的全部分块（外键级联自动清理 embeddings，REQ-VEC-005）。
-    /// 文档记录本身保留，仅清理分块与向量数据，供重试索引重建。
+    /// 删除指定文档的全部分块（S03 委托）。外键级联自动清理 embeddings。
     async fn delete_chunks_by_doc(&self, doc_id: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let doc_id = doc_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // 先清理 FTS5 索引（虚拟表不受外键级联约束，需手动）
-            conn.execute("DELETE FROM chunks_fts WHERE doc_id = ?1", params![doc_id])
-                .context("清理 FTS5 索引失败")?;
-            // 外键级联链：chunks → embeddings（PRAGMA foreign_keys = ON）
-            conn.execute("DELETE FROM chunks WHERE doc_id = ?1", params![doc_id])
-                .context("删除分块失败")?;
-            Ok(())
-        })
-        .await
+        vectors::delete_chunks_by_doc(&self.pool, doc_id).await?;
+        self.invalidate_vector_cache();
+        Ok(())
     }
 
     /// 关键词全文检索（FTS5 BM25 排序，REQ-RAG-010）。
@@ -1289,98 +1136,13 @@ Ok(())
     ///
     /// **短查询回退**：trigram 分词器需要 ≥3 字符才能提取 trigram。
     /// 对于 <3 字符的查询（如中文 2 字词），回退为 SQL LIKE 全表扫描。
+    /// 关键词全文检索（S03 委托 `vectors::keyword_search`）。
     async fn keyword_search(
         &self,
         query: &str,
         top_k: usize,
     ) -> anyhow::Result<Vec<RetrievalResult>> {
-        let trimmed = query.trim();
-        if trimmed.is_empty() || top_k == 0 {
-            return Ok(vec![]);
-        }
-        let pool = self.pool.clone();
-        let query = trimmed.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // trigram 分词器要求 ≥3 字符；短查询回退为 LIKE 全表扫描
-            if query.chars().count() < 3 {
-                let pattern = format!("%{query}%");
-                let mut stmt = conn.prepare(
-                    "SELECT c.id, c.doc_id, c.content, c.token_count, c.sequence, d.file_path
-                     FROM chunks c
-                     JOIN documents d ON d.id = c.doc_id
-                     WHERE c.content LIKE ?1
-                     LIMIT ?2",
-                )?;
-                let rows = stmt.query_map(params![pattern, top_k], |row| {
-                    let file_path: String = row.get(5)?;
-                    let doc_name = std::path::Path::new(&file_path)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| file_path.clone());
-                    Ok(RetrievalResult {
-                        chunk: Chunk {
-                            id: row.get(0)?,
-                            doc_id: row.get(1)?,
-                            content: row.get(2)?,
-                            token_count: row.get(3)?,
-                            sequence: row.get(4)?,
-                        },
-                        score: 1.0,
-                        doc_name,
-                    })
-                })?;
-                let mut results = Vec::new();
-                for row in rows {
-                    results.push(row?);
-                }
-                return Ok(results);
-            }
-            // FTS5 分词查询：将查询按空格/CJK 边界分词后逐词 OR 查询。
-            //
-            // 设计原因：之前将整个查询包裹为精确短语（"trampoline 是什么？"），
-            // 导致文档中不存在该完整短语时返回 0 条结果——即使文档中含 "trampoline"。
-            // 分词后逐词 OR 查询可让 "trampoline 是什么？" 匹配到含 "trampoline" 的 chunk。
-            //
-            // 安全：每个 token 包裹在双引号中转义，防 FTS5 操作符注入。
-            let fts_query = build_fts5_or_query(&query);
-            if fts_query.is_empty() {
-                return Ok(vec![]);
-            }
-            let mut stmt = conn.prepare(
-                "SELECT c.id, c.doc_id, c.content, c.token_count, c.sequence, d.file_path
-                 FROM chunks_fts fts
-                 JOIN chunks c ON c.id = fts.chunk_id
-                 JOIN documents d ON d.id = c.doc_id
-                 WHERE chunks_fts MATCH ?1
-                 ORDER BY bm25(chunks_fts)
-                 LIMIT ?2",
-            )?;
-            let rows = stmt.query_map(params![fts_query, top_k], |row| {
-                let file_path: String = row.get(5)?;
-                let doc_name = std::path::Path::new(&file_path)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| file_path.clone());
-                Ok(RetrievalResult {
-                    chunk: Chunk {
-                        id: row.get(0)?,
-                        doc_id: row.get(1)?,
-                        content: row.get(2)?,
-                        token_count: row.get(3)?,
-                        sequence: row.get(4)?,
-                    },
-                    score: 1.0, // 关键词匹配 score=1.0，RRF 融合时仅依赖排名
-                    doc_name,
-                })
-            })?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
-        })
-        .await
+        vectors::keyword_search(&self.pool, query, top_k).await
     }
 
     /// 对话全文搜索（REQ-RAG-040）。
@@ -1406,132 +1168,47 @@ Ok(())
     /// 命中则返回 `Some(Vec<f32>)`，未命中返回 `None`。
     /// 封装 `SqliteStorage::find_cached_embedding_sync` 为 async 接口。
     async fn lookup_embedding_cache(&self, content_hash: &str) -> anyhow::Result<Option<Vec<f32>>> {
-        let pool = self.pool.clone();
-        let hash = content_hash.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            SqliteStorage::find_cached_embedding_sync(&conn, &hash)
-        })
-        .await
+        vectors::lookup_embedding_cache(&self.pool, content_hash).await
     }
 
-    /// 将嵌入向量写入缓存。
-    ///
-    /// 封装 `SqliteStorage::cache_embedding_sync` 为 async 接口。
-    /// 使用 `INSERT OR IGNORE` — 并发场景下首次写入者胜出。
+    /// 将嵌入向量写入缓存（S03 委托）。
     async fn put_embedding_cache(
         &self,
         content_hash: &str,
         embedding: &[f32],
     ) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let hash = content_hash.to_string();
-        let emb = embedding.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            SqliteStorage::cache_embedding_sync(&conn, &hash, &emb)
-        })
-        .await
+        vectors::put_embedding_cache(&self.pool, content_hash, embedding).await
     }
 
-    /// 批量查找缓存的嵌入向量（性能优化：单次 DB 查询替代 N 次串行查询）。
-    ///
-    /// 使用临时表 + JOIN 实现批量查询，避免 SQLite 的 `IN (...)` 参数限制（SQLITE_MAX_VARIABLE_NUMBER=999）。
-    /// 返回 `(batch_index, embedding)` 列表（仅命中项），batch_index 对应输入 hashes 中的位置。
+    /// 批量查找缓存的嵌入向量（S03 委托）。
     async fn lookup_embedding_cache_batch(
         &self,
         hashes: &[String],
     ) -> anyhow::Result<Vec<(usize, Vec<f32>)>> {
-        if hashes.is_empty() {
-            return Ok(Vec::new());
-        }
-        let pool = self.pool.clone();
-        let hashes = hashes.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // 使用临时表存储待查 hashes，避免 IN 子句参数限制
-            with_transaction(&conn, |conn| {
-                conn.execute(
-                    "CREATE TEMP TABLE IF NOT EXISTS _batch_lookup (idx INTEGER PRIMARY KEY, hash TEXT NOT NULL)",
-                    [],
-                )?;
-                conn.execute("DELETE FROM _batch_lookup", [])?;
-                {
-                    let mut stmt = conn.prepare(
-                        "INSERT INTO _batch_lookup (idx, hash) VALUES (?1, ?2)",
-                    )?;
-                    for (i, hash) in hashes.iter().enumerate() {
-                        stmt.execute(params![i as i64, hash])?;
-                    }
-                }
-                Ok(())
-            })?;
-
-            let mut stmt = conn.prepare(
-                "SELECT b.idx, e.embedding
-                 FROM _batch_lookup b
-                 JOIN embeddings_cache e ON e.content_hash = b.hash",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                let idx: i64 = row.get(0)?;
-                let bytes: Vec<u8> = row.get(1)?;
-                Ok((idx as usize, bytes))
-            })?;
-            let mut hits = Vec::new();
-            for row in rows {
-                let (idx, bytes) = row?;
-                hits.push((idx, bytes_to_vec(&bytes)?));
-            }
-            // 清理临时表
-            conn.execute("DELETE FROM _batch_lookup", []).ok();
-            Ok(hits)
-        })
-        .await
+        vectors::lookup_embedding_cache_batch(&self.pool, hashes).await
     }
 
-    /// 批量写入嵌入向量缓存（性能优化：单事务批量 INSERT）。
-    ///
-    /// 全部缓存项在单个事务中提交（1 次 spawn_blocking），替代逐条写入的 N 次往返。
+    /// 批量写入嵌入向量缓存（S03 委托）。
     async fn put_embedding_cache_batch(&self, items: &[(String, Vec<f32>)]) -> anyhow::Result<()> {
-        if items.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        // 预序列化：hash + f32→bytes 转换在 spawn_blocking 外完成
-        let items: Vec<(String, Vec<u8>)> = items
-            .iter()
-            .map(|(hash, vec)| (hash.clone(), vec_to_bytes(vec)))
-            .collect();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            with_transaction(&conn, |conn| {
-                let mut stmt = conn
-                    .prepare(
-                        "INSERT OR IGNORE INTO embeddings_cache (content_hash, embedding) VALUES (?1, ?2)",
-                    )
-                    .context("预编译 embeddings_cache 批量写入语句失败")?;
-                for (hash, bytes) in &items {
-                    stmt.execute(params![hash, bytes])
-                        .context("批量写入嵌入缓存失败")?;
-                }
-                Ok(())
-            })
-        })
-        .await
+        vectors::put_embedding_cache_batch(&self.pool, items).await
     }
 
-    /// 按源文件路径精确查找文档（REQ-SYNC-002 增量同步用）。
-    ///
-    /// 使用 `idx_documents_original_path` 索引加速查询，避免全表扫描。
+    /// 按 chunk ID 查找单个 chunk（S03 委托，REQ-RAG-027 图遍历用）。
+    async fn get_chunk_by_id(&self, chunk_id: &str) -> anyhow::Result<Option<Chunk>> {
+        vectors::get_chunk_by_id(&self.pool, chunk_id).await
+    }
+
+    /// 重建 BM25 全文索引（S03 委托，REQ-PERF-005 Contextual BM25）。
+    async fn rebuild_bm25_index(&self) -> anyhow::Result<()> {
+        vectors::rebuild_bm25_index(&self.pool).await
+    }
+
+    /// 按源文件路径精确查找文档（S03 委托）。
     async fn find_document_by_original_path(&self, path: &str) -> anyhow::Result<Option<Document>> {
         documents::find_document_by_original_path(&self.pool, path.to_string()).await
     }
 
-    /// 按源文件路径前缀查找文档（REQ-SYNC-002 增量同步用）。
-    ///
-    /// 使用 `idx_documents_original_path` 索引加速 LIKE 前缀查询。
-    /// 用于同步文件夹时找出所有 `original_path` 以 `prefix` 开头的文档，
-    /// 以检测哪些文件已被删除（在文件夹中不存在但在 DB 中存在）。
+    /// 按源文件路径前缀查找文档（S03 委托）。
     async fn find_documents_by_original_path_prefix(
         &self,
         prefix: &str,
@@ -1615,1173 +1292,192 @@ Ok(())
         documents::filter_documents_by_tag(&self.pool, tag).await
     }
 
-    /// 批量写入实体索引（REQ-PERF-006 实体链接增强）。
-    ///
-    /// 导入文档时抽取实体并批量写入 `entities` 表。
-    /// 使用 `INSERT OR IGNORE` 避免重复实体导致唯一约束冲突。
+    // ========================================================================
+    // S03 拆分：以下方法委托至 storage::entities / storage::misc 子模块
+    // ========================================================================
+
+    // ---- 实体索引（REQ-PERF-006）----
     async fn add_entities(&self, entities: &[(String, String, String)]) -> anyhow::Result<()> {
-        if entities.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        let entities = entities.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // Bug #1 修复：with_transaction 保证错误时自动 ROLLBACK
-            with_transaction(&conn, |conn| {
-                let mut stmt = conn
-                    .prepare(
-                        "INSERT OR IGNORE INTO entities (id, chunk_id, entity_text, entity_type) \
-                         VALUES (?1, ?2, ?3, ?4)",
-                    )
-                    .context("预编译 entities 批量写入语句失败")?;
-                for (text, etype, chunk_id) in &entities {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    stmt.execute(params![id, chunk_id, text, etype])
-                        .context("批量写入 entities 失败")?;
-                }
-                Ok(())
-            })
-        })
-        .await
+        entities::add_entities(&self.pool, entities).await
     }
 
-    /// 实体检索（REQ-PERF-006 实体链接增强）。
-    ///
-    /// 从查询中抽取实体后，在 `entities` 表中精确匹配，
-    /// 返回包含匹配实体的 chunk 列表（按命中实体数降序排列）。
     async fn entity_search(
         &self,
         query_entities: &[String],
         top_k: usize,
     ) -> anyhow::Result<Vec<RetrievalResult>> {
-        if query_entities.is_empty() || top_k == 0 {
-            return Ok(vec![]);
-        }
-        let pool = self.pool.clone();
-        let entities = query_entities.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // 构建 IN 占位符
-            let placeholders: Vec<String> = (0..entities.len()).map(|_| "?".to_string()).collect();
-            let in_clause = placeholders.join(", ");
-            let sql = format!(
-                "SELECT c.id, c.doc_id, c.content, c.token_count, c.sequence, \
-                 d.file_path, COUNT(*) as entity_hit_count \
-                 FROM entities e \
-                 JOIN chunks c ON c.id = e.chunk_id \
-                 JOIN documents d ON d.id = c.doc_id \
-                 WHERE e.entity_text IN ({in_clause}) \
-                 GROUP BY c.id \
-                 ORDER BY entity_hit_count DESC \
-                 LIMIT ?"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let limit_val = top_k as i64;
-            let params: Vec<&dyn rusqlite::ToSql> = entities
-                .iter()
-                .map(|e| e as &dyn rusqlite::ToSql)
-                .chain(std::iter::once(&limit_val as &dyn rusqlite::ToSql))
-                .collect();
-            let rows = stmt.query_map(params.as_slice(), |row| {
-                let file_path: String = row.get(5)?;
-                let doc_name = std::path::Path::new(&file_path)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| file_path.clone());
-                Ok(RetrievalResult {
-                    chunk: Chunk {
-                        id: row.get(0)?,
-                        doc_id: row.get(1)?,
-                        content: row.get(2)?,
-                        token_count: row.get(3)?,
-                        sequence: row.get(4)?,
-                    },
-                    score: 1.0, // 实体匹配 score=1.0，RRF 融合时仅依赖排名
-                    doc_name,
-                })
-            })?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
-        })
-        .await
+        entities::entity_search(&self.pool, query_entities, top_k).await
     }
 
-    /// 重建 BM25 全文索引（REQ-PERF-005 Contextual BM25）。
-    ///
-    /// 清空 FTS5 索引后，使用 `build_contextual_text()` 拼接文档名前缀重建。
-    /// 旧数据库升级到 Contextual BM25 时由用户通过 `rebuild_bm25_index` IPC 命令触发。
-    async fn rebuild_bm25_index(&self) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // Bug #1 修复：with_transaction 保证错误时自动 ROLLBACK
-            with_transaction(&conn, |conn| {
-                // 清空旧 FTS5 索引
-                conn.execute_batch("DELETE FROM chunks_fts;")
-                    .context("清空 FTS5 索引失败")?;
-                // 使用 Contextual BM25 重建
-                conn.execute_batch(
-                    "INSERT INTO chunks_fts (chunk_id, doc_id, content)
-                     SELECT c.id, c.doc_id,
-                       '文档《' ||
-                       COALESCE(substr(d.file_path, instr(replace(d.file_path, '\\', '/'), '/') + 1), d.file_path)
-                       || '》：\n' || c.content
-                     FROM chunks c
-                     JOIN documents d ON d.id = c.doc_id;",
-                )
-                .context("重建 FTS5 索引失败")?;
-                Ok(())
-            })
-        })
-        .await
-    }
-
-    // ------------------------------------------------------------------
-    // Proposition 级原子分割（REQ-PERF-007）
-    // ------------------------------------------------------------------
-
-    /// 批量写入 proposition 索引（REQ-PERF-007）。
+    // ---- Proposition（REQ-PERF-007）----
     async fn add_propositions(&self, propositions: &[Proposition]) -> anyhow::Result<()> {
-        if propositions.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        let props = propositions.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // Bug #1 修复：with_transaction 保证错误时自动 ROLLBACK
-            with_transaction(&conn, |conn| {
-                let mut stmt = conn
-                    .prepare(
-                        "INSERT OR REPLACE INTO propositions (id, chunk_id, content, sequence) \
-                         VALUES (?1, ?2, ?3, ?4)",
-                    )
-                    .context("预编译 propositions 批量写入语句失败")?;
-                for prop in &props {
-                    stmt.execute(params![
-                        prop.id,
-                        prop.chunk_id,
-                        prop.content,
-                        prop.sequence as i64
-                    ])
-                    .context("批量写入 propositions 失败")?;
-                }
-                Ok(())
-            })
-        })
-        .await
+        entities::add_propositions(&self.pool, propositions).await
     }
 
-    /// 批量写入 proposition 嵌入向量（REQ-PERF-007）。
     async fn add_proposition_embeddings(
         &self,
         embeddings: &[(String, Vec<f32>)],
     ) -> anyhow::Result<()> {
-        if embeddings.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        let embeddings = embeddings.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // Bug #1 修复：with_transaction 保证错误时自动 ROLLBACK
-            with_transaction(&conn, |conn| {
-                let mut stmt = conn
-                    .prepare("UPDATE propositions SET embedding = ?1 WHERE id = ?2")
-                    .context("预编译 proposition 嵌入更新语句失败")?;
-                for (id, vector) in &embeddings {
-                    let bytes = vec_to_bytes(vector);
-                    stmt.execute(params![bytes, id])
-                        .context("更新 proposition 嵌入失败")?;
-                }
-                Ok(())
-            })
-        })
-        .await
+        entities::add_proposition_embeddings(&self.pool, embeddings).await
     }
 
-    /// 列出文档的所有 proposition（REQ-PERF-007）。
     async fn list_propositions_by_doc(&self, doc_id: &str) -> anyhow::Result<Vec<Proposition>> {
-        let pool = self.pool.clone();
-        let doc_id = doc_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT p.id, p.chunk_id, p.content, p.sequence \
-                 FROM propositions p \
-                 JOIN chunks c ON c.id = p.chunk_id \
-                 WHERE c.doc_id = ?1 \
-                 ORDER BY c.sequence, p.sequence",
-            )?;
-            let rows = stmt.query_map(params![doc_id], |row| {
-                Ok(Proposition {
-                    id: row.get(0)?,
-                    chunk_id: row.get(1)?,
-                    content: row.get(2)?,
-                    sequence: row.get::<_, i64>(3)? as usize,
-                })
-            })?;
-            let mut result = Vec::new();
-            for r in rows {
-                result.push(r?);
-            }
-            Ok(result)
-        })
-        .await
+        entities::list_propositions_by_doc(&self.pool, doc_id).await
     }
 
-    /// Proposition 向量检索（REQ-PERF-007）。
-    ///
-    /// 在 proposition 嵌入表上执行 top-k 余弦相似度检索，
-    /// 返回命中的 proposition 对应的 chunk（已去重）。
     async fn proposition_search(
         &self,
         query_embedding: &[f32],
         top_k: usize,
     ) -> anyhow::Result<Vec<RetrievalResult>> {
-        if top_k == 0 {
-            return Ok(vec![]);
-        }
-        let pool = self.pool.clone();
-        let query = query_embedding.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT p.id, p.chunk_id, p.content, p.sequence, p.embedding, \
-                 c.id, c.doc_id, c.content, c.token_count, c.sequence, \
-                 d.file_path \
-                 FROM propositions p \
-                 JOIN chunks c ON c.id = p.chunk_id \
-                 JOIN documents d ON d.id = c.doc_id \
-                 WHERE p.embedding IS NOT NULL",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                let prop_id: String = row.get(0)?;
-                let prop_embedding: Vec<u8> = row.get(4)?;
-                Ok((
-                    prop_id,
-                    Chunk {
-                        id: row.get(5)?,
-                        doc_id: row.get(6)?,
-                        content: row.get(7)?,
-                        token_count: row.get(8)?,
-                        sequence: row.get::<_, i64>(9)? as usize,
-                    },
-                    row.get::<_, String>(10)?, // file_path
-                    prop_embedding,
-                ))
-            })?;
-
-            // 计算每个 proposition 的余弦相似度，取每个 chunk 的最高分
-            use std::collections::HashMap;
-            let mut best_per_chunk: HashMap<String, RetrievalResult> = HashMap::new();
-            for row in rows {
-                let (_prop_id, chunk, file_path, bytes) = row?;
-                let vector = bytes_to_vec(&bytes)?;
-                let score = cosine_similarity(&query, &vector);
-                let doc_name = Path::new(&file_path)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| file_path.clone());
-                // 每个 chunk 只保留最高分的 proposition
-                best_per_chunk
-                    .entry(chunk.id.clone())
-                    .and_modify(|existing| {
-                        if score > existing.score {
-                            existing.score = score;
-                        }
-                    })
-                    .or_insert_with(|| RetrievalResult {
-                        chunk: chunk.clone(),
-                        score,
-                        doc_name: doc_name.clone(),
-                    });
-            }
-
-            // 降序排序，截取 top_k
-            let mut all_hits: Vec<RetrievalResult> = best_per_chunk.into_values().collect();
-            all_hits.sort_by(|a, b| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            all_hits.truncate(top_k);
-            Ok(all_hits)
-        })
-        .await
+        entities::proposition_search(&self.pool, query_embedding, top_k).await
     }
 
-    /// 重建 proposition 索引（REQ-PERF-007）。
-    ///
-    /// 清空 propositions 表后，遍历所有 chunk → 分割为 proposition → 重新写入。
-    /// 注意：此操作仅重建 proposition 内容，不计算嵌入向量。
-    /// 嵌入向量需要由嵌入管线单独计算（通过 `add_proposition_embeddings`）。
     async fn rebuild_proposition_index(&self) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // Bug #1 修复：with_transaction 保证错误时自动 ROLLBACK
-            with_transaction(&conn, |conn| {
-                // 清空旧 propositions
-                conn.execute_batch("DELETE FROM propositions;")
-                    .context("清空 propositions 表失败")?;
-
-                // 查询所有 chunk + doc_name
-                let mut stmt = conn.prepare(
-                    "SELECT c.id, c.doc_id, c.content, c.sequence, d.file_path \
-                     FROM chunks c \
-                     JOIN documents d ON d.id = c.doc_id \
-                     ORDER BY c.doc_id, c.sequence",
-                )?;
-                let chunks: Vec<(String, String, String, usize, String)> = stmt
-                    .query_map([], |row| {
-                        Ok((
-                            row.get(0)?,                    // chunk_id
-                            row.get(1)?,                    // doc_id
-                            row.get(2)?,                    // content
-                            row.get::<_, i64>(3)? as usize, // sequence
-                            row.get(4)?,                    // file_path
-                        ))
-                    })?
-                    .filter_map(|r| r.ok())
-                    .collect();
-
-                // 为每个 chunk 分割 proposition 并写入
-                let mut insert_stmt = conn
-                    .prepare(
-                        "INSERT INTO propositions (id, chunk_id, content, sequence) \
-                         VALUES (?1, ?2, ?3, ?4)",
-                    )
-                    .context("预编译 proposition 写入语句失败")?;
-
-                for (chunk_id, _doc_id, content, _seq, file_path) in &chunks {
-                    let doc_name = Path::new(file_path)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| file_path.clone());
-                    let propositions = PropositionSplitter::split(content, chunk_id, &doc_name);
-                    for prop in propositions {
-                        insert_stmt
-                            .execute(params![
-                                prop.id,
-                                prop.chunk_id,
-                                prop.content,
-                                prop.sequence as i64
-                            ])
-                            .context("写入 proposition 失败")?;
-                    }
-                }
-                Ok(())
-            })
-        })
-        .await
+        entities::rebuild_proposition_index(&self.pool).await
     }
 
-    // ------------------------------------------------------------------
-    // RAPTOR 摘要树（REQ-PERF-009）
-    // ------------------------------------------------------------------
-
-    /// 批量写入摘要树节点（REQ-PERF-009）。
+    // ---- RAPTOR 摘要树（REQ-PERF-009）----
     async fn add_summary_nodes(&self, nodes: &[SummaryNode]) -> anyhow::Result<()> {
-        if nodes.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        let nodes = nodes.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // Bug #1 修复：with_transaction 保证错误时自动 ROLLBACK
-            with_transaction(&conn, |conn| {
-                let mut stmt = conn
-                    .prepare(
-                        "INSERT OR REPLACE INTO summary_nodes (id, doc_id, level, content, child_ids, embedding) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    )
-                    .context("预编译 summary_nodes 批量写入语句失败")?;
-                for node in &nodes {
-                    let child_ids_json = serde_json::to_string(&node.child_ids)
-                        .context("序列化 child_ids 失败")?;
-                    let embedding_bytes = node.embedding.as_ref().map(|v| vec_to_bytes(v));
-                    stmt.execute(params![
-                        node.id,
-                        node.doc_id,
-                        node.level as i64,
-                        node.content,
-                        child_ids_json,
-                        embedding_bytes,
-                    ])
-                    .context("批量写入 summary_nodes 失败")?;
-                }
-                Ok(())
-            })
-        })
-        .await
+        entities::add_summary_nodes(&self.pool, nodes).await
     }
 
-    /// 更新摘要节点嵌入向量（REQ-PERF-009）。
     async fn update_summary_embedding(
         &self,
         node_id: &str,
         embedding: &[f32],
     ) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let node_id = node_id.to_string();
-        let embedding = embedding.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let bytes = vec_to_bytes(&embedding);
-            conn.execute(
-                "UPDATE summary_nodes SET embedding = ?1 WHERE id = ?2",
-                params![bytes, node_id],
-            )
-            .context("更新 summary_node 嵌入失败")?;
-            Ok(())
-        })
-        .await
+        entities::update_summary_embedding(&self.pool, node_id, embedding).await
     }
 
-    /// 列出文档的所有摘要节点（REQ-PERF-009）。
     async fn list_summary_nodes(&self, doc_id: &str) -> anyhow::Result<Vec<SummaryNode>> {
-        let pool = self.pool.clone();
-        let doc_id = doc_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, doc_id, level, content, child_ids, embedding \
-                 FROM summary_nodes \
-                 WHERE doc_id = ?1 \
-                 ORDER BY level",
-            )?;
-            let rows = stmt.query_map(params![doc_id], |row| {
-                let child_ids_json: String = row.get(4)?;
-                let child_ids: Vec<String> =
-                    serde_json::from_str(&child_ids_json).unwrap_or_default();
-                let embedding_blob: Option<Vec<u8>> = row.get(5)?;
-                let embedding = embedding_blob.as_ref().and_then(|b| bytes_to_vec(b).ok());
-                Ok(SummaryNode {
-                    id: row.get(0)?,
-                    doc_id: row.get(1)?,
-                    level: row.get::<_, i64>(2)? as usize,
-                    content: row.get(3)?,
-                    child_ids,
-                    embedding,
-                })
-            })?;
-            let mut nodes = Vec::new();
-            for row in rows {
-                nodes.push(row?);
-            }
-            Ok(nodes)
-        })
-        .await
+        entities::list_summary_nodes(&self.pool, doc_id).await
     }
 
-    /// 摘要树向量检索（REQ-PERF-009）。
     async fn summary_search(
         &self,
         query_embedding: &[f32],
         top_k: usize,
     ) -> anyhow::Result<Vec<RetrievalResult>> {
-        let pool = self.pool.clone();
-        let query_vec = query_embedding.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-
-            // 全表扫描 + Rust 余弦相似度计算（与 vector_search 一致）
-            let mut stmt = conn.prepare(
-                "SELECT sn.id, sn.doc_id, sn.content, sn.child_ids, sn.embedding, d.file_path \
-                 FROM summary_nodes sn \
-                 JOIN documents d ON d.id = sn.doc_id \
-                 WHERE sn.embedding IS NOT NULL",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                let child_ids_json: String = row.get(3)?;
-                let _child_ids: Vec<String> =
-                    serde_json::from_str(&child_ids_json).unwrap_or_default();
-                let embedding_blob: Vec<u8> = row.get(4)?;
-                let doc_embedding = bytes_to_vec(&embedding_blob).unwrap_or_default();
-                let doc_name: String = row.get(5)?;
-                let content: String = row.get(2)?;
-                let node_id: String = row.get(0)?;
-                Ok((node_id, doc_name, content, doc_embedding))
-            })?;
-
-            let mut hits: Vec<RetrievalResult> = Vec::new();
-            for row in rows {
-                let (node_id, doc_name, content, doc_embedding) = row?;
-                if doc_embedding.is_empty() {
-                    continue;
-                }
-                let score = cosine_similarity(&query_vec, &doc_embedding);
-                // 摘要节点作为 "chunk" 返回（复用 RetrievalResult 结构）
-                hits.push(RetrievalResult {
-                    chunk: echomind_models::Chunk {
-                        id: node_id,
-                        doc_id: String::new(), // 摘要节点的 doc_id 不直接返回
-                        content,
-                        token_count: 0,
-                        sequence: 0,
-                    },
-                    score,
-                    doc_name,
-                });
-            }
-
-            // 降序排序，截取 top_k
-            hits.sort_by(|a, b| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            hits.truncate(top_k);
-            Ok(hits)
-        })
-        .await
+        entities::summary_search(&self.pool, query_embedding, top_k).await
     }
 
-    /// 重建摘要树索引（REQ-PERF-009）：清空 summary_nodes 表。
     async fn rebuild_summary_tree(&self) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute_batch("DELETE FROM summary_nodes;")
-                .context("清空 summary_nodes 表失败")?;
-            Ok(())
-        })
-        .await
+        entities::rebuild_summary_tree(&self.pool).await
     }
 
-    // ------------------------------------------------------------------
-    // 实体关系图谱（REQ-RAG-026 知识图谱实体关系检索）
-    // ------------------------------------------------------------------
-
-    /// 写入单条实体关系（REQ-RAG-026）。
+    // ---- 实体关系图谱（REQ-RAG-026）----
     async fn add_relation(&self, relation: &EntityRelation) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let rel = relation.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT OR IGNORE INTO entity_relations (id, subject, relation_type, object, chunk_id, confidence) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![rel.id, rel.subject, rel.relation_type, rel.object, rel.chunk_id, rel.confidence],
-            )
-            .context("写入 entity_relation 失败")?;
-            Ok(())
-        })
-        .await
+        entities::add_relation(&self.pool, relation).await
     }
 
-    /// 批量写入实体关系（REQ-RAG-026）。
     async fn add_relations_batch(&self, relations: &[EntityRelation]) -> anyhow::Result<()> {
-        if relations.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        let rels = relations.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            with_transaction(&conn, |conn| {
-                let mut stmt = conn
-                    .prepare(
-                        "INSERT OR IGNORE INTO entity_relations (id, subject, relation_type, object, chunk_id, confidence) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    )
-                    .context("预编译 entity_relations 批量写入语句失败")?;
-                for rel in &rels {
-                    stmt.execute(params![
-                        rel.id,
-                        rel.subject,
-                        rel.relation_type,
-                        rel.object,
-                        rel.chunk_id,
-                        rel.confidence,
-                    ])
-                    .context("批量写入 entity_relations 失败")?;
-                }
-                Ok(())
-            })
-        })
-        .await
+        entities::add_relations_batch(&self.pool, relations).await
     }
 
-    /// 查询指定实体参与的所有关系（REQ-RAG-026 图遍历）。
-    ///
-    /// 返回 subject 或 object 等于 `entity_text` 的所有关系。
     async fn get_relations_for_entity(
         &self,
         entity_text: &str,
     ) -> anyhow::Result<Vec<EntityRelation>> {
-        let pool = self.pool.clone();
-        let entity = entity_text.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, subject, relation_type, object, chunk_id, confidence \
-                 FROM entity_relations \
-                 WHERE subject = ?1 OR object = ?1",
-            )?;
-            let rows = stmt.query_map(params![entity], |row| {
-                Ok(EntityRelation {
-                    id: row.get(0)?,
-                    subject: row.get(1)?,
-                    relation_type: row.get(2)?,
-                    object: row.get(3)?,
-                    chunk_id: row.get(4)?,
-                    confidence: row.get(5)?,
-                })
-            })?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
-        })
-        .await
+        entities::get_relations_for_entity(&self.pool, entity_text).await
     }
 
-    /// 查询指定 chunk 的所有关系（REQ-RAG-026）。
     async fn get_relations_for_chunk(&self, chunk_id: &str) -> anyhow::Result<Vec<EntityRelation>> {
-        let pool = self.pool.clone();
-        let chunk_id = chunk_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, subject, relation_type, object, chunk_id, confidence \
-                 FROM entity_relations \
-                 WHERE chunk_id = ?1",
-            )?;
-            let rows = stmt.query_map(params![chunk_id], |row| {
-                Ok(EntityRelation {
-                    id: row.get(0)?,
-                    subject: row.get(1)?,
-                    relation_type: row.get(2)?,
-                    object: row.get(3)?,
-                    chunk_id: row.get(4)?,
-                    confidence: row.get(5)?,
-                })
-            })?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
-        })
-        .await
+        entities::get_relations_for_chunk(&self.pool, chunk_id).await
     }
 
-    /// 按主体 + 关系类型查询关系（REQ-RAG-026）。
     async fn search_by_relation(
         &self,
         subject: &str,
         relation_type: &str,
     ) -> anyhow::Result<Vec<EntityRelation>> {
-        let pool = self.pool.clone();
-        let subject = subject.to_string();
-        let rel_type = relation_type.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, subject, relation_type, object, chunk_id, confidence \
-                 FROM entity_relations \
-                 WHERE subject = ?1 AND relation_type = ?2",
-            )?;
-            let rows = stmt.query_map(params![subject, rel_type], |row| {
-                Ok(EntityRelation {
-                    id: row.get(0)?,
-                    subject: row.get(1)?,
-                    relation_type: row.get(2)?,
-                    object: row.get(3)?,
-                    chunk_id: row.get(4)?,
-                    confidence: row.get(5)?,
-                })
-            })?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
-        })
-        .await
+        entities::search_by_relation(&self.pool, subject, relation_type).await
     }
 
-    /// 按 chunk ID 查找单个 chunk（REQ-RAG-027 图遍历检索用）。
-    async fn get_chunk_by_id(&self, chunk_id: &str) -> anyhow::Result<Option<Chunk>> {
-        let pool = self.pool.clone();
-        let chunk_id = chunk_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, doc_id, content, token_count, sequence \
-                 FROM chunks WHERE id = ?1",
-            )?;
-            let mut rows = stmt.query_map(params![chunk_id], |row| {
-                Ok(Chunk {
-                    id: row.get(0)?,
-                    doc_id: row.get(1)?,
-                    content: row.get(2)?,
-                    token_count: row.get(3)?,
-                    sequence: row.get(4)?,
-                })
-            })?;
-            match rows.next() {
-                Some(row) => Ok(Some(row?)),
-                None => Ok(None),
-            }
-        })
-        .await
-    }
-
-    /// 分页查询全部实体关系（REQ-RAG-027 前端图谱可视化用）。
-    ///
-    /// 返回 `entity_relations` 表中前 `limit` 条记录（跳过 `offset` 条），
-    /// 按 `id` 排序保证分页稳定性。
     async fn list_all_relations(
         &self,
         limit: usize,
         offset: usize,
     ) -> anyhow::Result<Vec<EntityRelation>> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, subject, relation_type, object, chunk_id, confidence \
-                 FROM entity_relations \
-                 ORDER BY id \
-                 LIMIT ?1 OFFSET ?2",
-            )?;
-            let rows = stmt.query_map(params![limit as i64, offset as i64], |row| {
-                Ok(EntityRelation {
-                    id: row.get(0)?,
-                    subject: row.get(1)?,
-                    relation_type: row.get(2)?,
-                    object: row.get(3)?,
-                    chunk_id: row.get(4)?,
-                    confidence: row.get(5)?,
-                })
-            })?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
-        })
-        .await
+        entities::list_all_relations(&self.pool, limit, offset).await
     }
 
-    /// 统计实体关系总数（REQ-RAG-027 前端图谱可视化用）。
     async fn count_relations(&self) -> anyhow::Result<usize> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let count: i64 =
-                conn.query_row("SELECT COUNT(*) FROM entity_relations", [], |row| {
-                    row.get(0)
-                })?;
-            Ok(count as usize)
-        })
-        .await
+        entities::count_relations(&self.pool).await
     }
 
-    /// 批量查询实体类型（REQ-RAG-027 前端图谱可视化增强）。
-    ///
-    /// 从 `entities` 表批量查询指定实体文本列表的 `entity_type`，
-    /// 返回 `HashMap<entity_text, entity_type>` 映射。
-    /// 使用 SQL `WHERE entity_text IN (...)` 单次查询，避免 N+1 问题。
     async fn get_entity_types(
         &self,
-        entities: &[String],
+        entities_list: &[String],
     ) -> anyhow::Result<std::collections::HashMap<String, String>> {
-        if entities.is_empty() {
-            return Ok(std::collections::HashMap::new());
-        }
-        let pool = self.pool.clone();
-        let entities = entities.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // 构建 IN 占位符
-            let placeholders: Vec<String> = (0..entities.len()).map(|_| "?".to_string()).collect();
-            let in_clause = placeholders.join(", ");
-            let sql = format!(
-                "SELECT DISTINCT entity_text, entity_type FROM entities WHERE entity_text IN ({in_clause})"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let params: Vec<&dyn rusqlite::ToSql> = entities
-                .iter()
-                .map(|e| e as &dyn rusqlite::ToSql)
-                .collect();
-            let rows = stmt.query_map(params.as_slice(), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-            let mut result: std::collections::HashMap<String, String> =
-                std::collections::HashMap::new();
-            for row in rows {
-                let (text, etype) = row?;
-                result.insert(text, etype);
-            }
-            Ok(result)
-        })
-        .await
+        entities::get_entity_types(&self.pool, entities_list).await
     }
 
-    /// 获取全量实体邻接表（REQ-RAG-027 Session 5 高级分析用）。
-    ///
-    /// 一次 SQL 查询返回全量邻接表 `HashMap<entity, Vec<neighbor>>`，
-    /// 供 GraphAnalyzer 在后端内存中完成路径分析、社区检测等高级分析。
-    ///
-    /// 邻接表构建逻辑：
-    /// - 遍历 `entity_relations` 表所有记录
-    /// - 对每条 `(subject, object)` 关系，同时添加 subject→object 和 object→subject（无向图）
-    /// - 去重邻居列表（同一条边不重复添加）
     async fn get_entity_graph(
         &self,
     ) -> anyhow::Result<std::collections::HashMap<String, Vec<String>>> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare("SELECT subject, object FROM entity_relations")?;
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
-
-            let mut adjacency: std::collections::HashMap<
-                String,
-                std::collections::HashSet<String>,
-            > = std::collections::HashMap::new();
-            for row in rows {
-                let (subject, object) = row?;
-                // 无向图：双向添加
-                adjacency
-                    .entry(subject.clone())
-                    .or_default()
-                    .insert(object.clone());
-                adjacency.entry(object).or_default().insert(subject);
-            }
-
-            // HashSet → Vec 转换
-            let result: std::collections::HashMap<String, Vec<String>> = adjacency
-                .into_iter()
-                .map(|(k, v)| (k, v.into_iter().collect()))
-                .collect();
-            Ok(result)
-        })
-        .await
+        entities::get_entity_graph(&self.pool).await
     }
 
-    // ------------------------------------------------------------------
-    // 代码符号索引（REQ-RAG-031 代码感知 RAG）
-    // ------------------------------------------------------------------
-
-    /// 批量写入代码符号索引（REQ-RAG-031）。
+    // ---- 代码符号索引（REQ-RAG-031）----
     async fn add_symbols(&self, symbols: &[CodeSymbol]) -> anyhow::Result<()> {
-        if symbols.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        let syms = symbols.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            with_transaction(&conn, |conn| {
-                let mut stmt = conn
-                    .prepare(
-                        "INSERT OR REPLACE INTO code_symbols \
-                         (id, chunk_id, name, kind, language, start_line, end_line, signature) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    )
-                    .context("预编译 code_symbols 批量写入语句失败")?;
-                for sym in &syms {
-                    stmt.execute(params![
-                        sym.id,
-                        sym.chunk_id,
-                        sym.name,
-                        sym.kind.as_str(),
-                        sym.language,
-                        sym.start_line as i64,
-                        sym.end_line as i64,
-                        sym.signature
-                    ])
-                    .context("批量写入 code_symbols 失败")?;
-                }
-                Ok(())
-            })
-        })
-        .await
+        entities::add_symbols(&self.pool, symbols).await
     }
 
-    /// 按符号名精确搜索（REQ-RAG-031）。
     async fn search_by_symbol(
         &self,
         name: &str,
         kind: Option<&SymbolKind>,
     ) -> anyhow::Result<Vec<CodeSymbol>> {
-        let pool = self.pool.clone();
-        let name = name.to_string();
-        let kind_str = kind.map(SymbolKind::as_str).map(String::from);
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let (sql, kind_param): (String, Option<String>) = match &kind_str {
-                Some(k) => (
-                    "SELECT id, chunk_id, name, kind, language, start_line, end_line, signature \
-                     FROM code_symbols WHERE name = ?1 AND kind = ?2"
-                        .to_string(),
-                    Some(k.clone()),
-                ),
-                None => (
-                    "SELECT id, chunk_id, name, kind, language, start_line, end_line, signature \
-                     FROM code_symbols WHERE name = ?1"
-                        .to_string(),
-                    None,
-                ),
-            };
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params![name], |row| {
-                let kind_str: String = row.get(3)?;
-                Ok(CodeSymbol {
-                    id: row.get(0)?,
-                    chunk_id: row.get(1)?,
-                    name: row.get(2)?,
-                    kind: SymbolKind::parse_str(&kind_str),
-                    language: row.get(4)?,
-                    start_line: row.get::<_, i64>(5)? as usize,
-                    end_line: row.get::<_, i64>(6)? as usize,
-                    signature: row.get(7)?,
-                })
-            })?;
-            // 如果有 kind 过滤，在 Rust 侧过滤（避免 SQL 参数复杂性）
-            let mut result = Vec::new();
-            for row in rows {
-                let sym = row?;
-                if let Some(ref k) = kind_param
-                    && sym.kind.as_str() != k
-                {
-                    continue;
-                }
-                result.push(sym);
-            }
-            Ok(result)
-        })
-        .await
+        entities::search_by_symbol(&self.pool, name, kind).await
     }
 
-    /// 获取指定 chunk 的所有符号（REQ-RAG-031）。
     async fn get_symbols_for_chunk(&self, chunk_id: &str) -> anyhow::Result<Vec<CodeSymbol>> {
-        let pool = self.pool.clone();
-        let chunk_id = chunk_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, chunk_id, name, kind, language, start_line, end_line, signature \
-                 FROM code_symbols WHERE chunk_id = ?1 ORDER BY start_line",
-            )?;
-            let rows = stmt.query_map(params![chunk_id], |row| {
-                let kind_str: String = row.get(3)?;
-                Ok(CodeSymbol {
-                    id: row.get(0)?,
-                    chunk_id: row.get(1)?,
-                    name: row.get(2)?,
-                    kind: SymbolKind::parse_str(&kind_str),
-                    language: row.get(4)?,
-                    start_line: row.get::<_, i64>(5)? as usize,
-                    end_line: row.get::<_, i64>(6)? as usize,
-                    signature: row.get(7)?,
-                })
-            })?;
-            let mut result = Vec::new();
-            for row in rows {
-                result.push(row?);
-            }
-            Ok(result)
-        })
-        .await
+        entities::get_symbols_for_chunk(&self.pool, chunk_id).await
     }
 
-    /// 模糊搜索符号（REQ-RAG-031）。
     async fn search_symbols_fuzzy(
         &self,
         query: &str,
         limit: usize,
     ) -> anyhow::Result<Vec<CodeSymbol>> {
-        if query.is_empty() || limit == 0 {
-            return Ok(Vec::new());
-        }
-        let pool = self.pool.clone();
-        let pattern = format!("%{query}%");
-        let limit = limit as i64;
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, chunk_id, name, kind, language, start_line, end_line, signature \
-                 FROM code_symbols WHERE name LIKE ?1 LIMIT ?2",
-            )?;
-            let rows = stmt.query_map(params![pattern, limit], |row| {
-                let kind_str: String = row.get(3)?;
-                Ok(CodeSymbol {
-                    id: row.get(0)?,
-                    chunk_id: row.get(1)?,
-                    name: row.get(2)?,
-                    kind: SymbolKind::parse_str(&kind_str),
-                    language: row.get(4)?,
-                    start_line: row.get::<_, i64>(5)? as usize,
-                    end_line: row.get::<_, i64>(6)? as usize,
-                    signature: row.get(7)?,
-                })
-            })?;
-            let mut result = Vec::new();
-            for row in rows {
-                result.push(row?);
-            }
-            Ok(result)
-        })
-        .await
+        entities::search_symbols_fuzzy(&self.pool, query, limit).await
     }
 
-    // ============================================================
-    // 对话记忆系统（REQ-RAG-032）
-    // ============================================================
-
+    // ---- 对话记忆系统（REQ-RAG-032）----
     fn add_memory_entry(
         &self,
         entry: &MemoryEntry,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        let entry = entry.clone();
-        let pool = self.pool.clone();
-        async move {
-            let tier = entry.tier.as_str().to_string();
-            let source = entry.source.as_str().to_string();
-            let conv_id = entry.conversation_id.clone();
-            let id = entry.id.clone();
-            let content = entry.content.clone();
-            let created_at = entry.created_at;
-            let last_accessed = entry.last_accessed;
-            let access_count = entry.access_count as i64;
-            let importance = entry.importance;
-            tokio::task::spawn_blocking(move || {
-                let conn = pool.get().context("获取数据库连接失败")?;
-                conn.execute(
-                    "INSERT OR REPLACE INTO memory_entries \
-                     (id, tier, content, source, conversation_id, created_at, last_accessed, access_count, importance) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                    params![&id, &tier, &content, &source, &conv_id, created_at, last_accessed, access_count, importance],
-                )
-                .context("写入对话记忆失败")?;
-                Ok(())
-            })
-            .await
-            .context("对话记忆写入任务失败")?
-        }
+        misc::add_memory_entry(&self.pool, entry)
     }
 
     fn get_memory_entries(
         &self,
         tier: Option<&MemoryTier>,
     ) -> impl std::future::Future<Output = anyhow::Result<Vec<MemoryEntry>>> + Send {
-        let tier_str = tier.map(|t| t.as_str().to_string());
-        let pool = self.pool.clone();
-        async move {
-            tokio::task::spawn_blocking(move || {
-                let conn = pool.get().context("获取数据库连接失败")?;
-                let entries = if let Some(ref tier) = tier_str {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT id, tier, content, source, conversation_id, created_at, \
-                             last_accessed, access_count, importance \
-                             FROM memory_entries WHERE tier = ?1 \
-                             ORDER BY importance DESC, created_at DESC",
-                        )
-                        .context("准备查询语句失败")?;
-                    stmt.query_map(params![tier], row_to_memory_entry)
-                        .context("查询对话记忆失败")?
-                        .collect::<Result<Vec<_>, _>>()?
-                } else {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT id, tier, content, source, conversation_id, created_at, \
-                             last_accessed, access_count, importance \
-                             FROM memory_entries \
-                             ORDER BY importance DESC, created_at DESC",
-                        )
-                        .context("准备查询语句失败")?;
-                    stmt.query_map([], row_to_memory_entry)
-                        .context("查询对话记忆失败")?
-                        .collect::<Result<Vec<_>, _>>()?
-                };
-                Ok(entries)
-            })
-            .await
-            .context("对话记忆查询任务失败")?
-        }
+        misc::get_memory_entries(&self.pool, tier)
     }
 
     fn update_memory_entry(
         &self,
         entry: &MemoryEntry,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        let entry = entry.clone();
-        let pool = self.pool.clone();
-        async move {
-            let tier = entry.tier.as_str().to_string();
-            let last_accessed = entry.last_accessed;
-            let access_count = entry.access_count as i64;
-            let importance = entry.importance;
-            let id = entry.id.clone();
-            tokio::task::spawn_blocking(move || {
-                let conn = pool.get().context("获取数据库连接失败")?;
-                conn.execute(
-                    "UPDATE memory_entries SET tier = ?1, last_accessed = ?2, access_count = ?3, importance = ?4 \
-                     WHERE id = ?5",
-                    params![&tier, last_accessed, access_count, importance, &id],
-                )
-                .context("更新对话记忆失败")?;
-                Ok(())
-            })
-            .await
-            .context("对话记忆更新任务失败")?
-        }
+        misc::update_memory_entry(&self.pool, entry)
     }
 
     fn delete_memory_entry(
         &self,
         id: &str,
     ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        let id = id.to_string();
-        let pool = self.pool.clone();
-        async move {
-            tokio::task::spawn_blocking(move || {
-                let conn = pool.get().context("获取数据库连接失败")?;
-                conn.execute("DELETE FROM memory_entries WHERE id = ?1", params![&id])
-                    .context("删除对话记忆失败")?;
-                Ok(())
-            })
-            .await
-            .context("对话记忆删除任务失败")?
-        }
+        misc::delete_memory_entry(&self.pool, id)
     }
 
     fn clear_memory_entries(
         &self,
         tier: Option<&MemoryTier>,
     ) -> impl std::future::Future<Output = anyhow::Result<usize>> + Send {
-        let tier_str = tier.map(|t| t.as_str().to_string());
-        let pool = self.pool.clone();
-        async move {
-            tokio::task::spawn_blocking(move || {
-                let conn = pool.get().context("获取数据库连接失败")?;
-                let deleted = if let Some(ref tier) = tier_str {
-                    conn.execute("DELETE FROM memory_entries WHERE tier = ?1", params![tier])
-                        .context("清空对话记忆失败")?
-                } else {
-                    conn.execute("DELETE FROM memory_entries", [])
-                        .context("清空对话记忆失败")?
-                };
-                Ok(deleted)
-            })
-            .await
-            .context("对话记忆清空任务失败")?
-        }
+        misc::clear_memory_entries(&self.pool, tier)
     }
 
     fn search_memory_entries(
@@ -2789,465 +1485,92 @@ Ok(())
         query: &str,
         limit: usize,
     ) -> impl std::future::Future<Output = anyhow::Result<Vec<MemoryEntry>>> + Send {
-        let query = format!("%{query}%");
-        let limit = limit as i64;
-        let pool = self.pool.clone();
-        async move {
-            tokio::task::spawn_blocking(move || {
-                let conn = pool.get().context("获取数据库连接失败")?;
-                let mut stmt = conn
-                    .prepare(
-                        "SELECT id, tier, content, source, conversation_id, created_at, \
-                         last_accessed, access_count, importance \
-                         FROM memory_entries WHERE content LIKE ?1 \
-                         ORDER BY importance DESC LIMIT ?2",
-                    )
-                    .context("准备搜索语句失败")?;
-                let entries = stmt
-                    .query_map(params![&query, limit], row_to_memory_entry)
-                    .context("搜索对话记忆失败")?
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(entries)
-            })
-            .await
-            .context("对话记忆搜索任务失败")?
-        }
+        misc::search_memory_entries(&self.pool, query, limit)
     }
 
-    // ------------------------------------------------------------------
-    // Wiki 双向链接（REQ-ING-020 Markdown 笔记双向链接）
-    // ------------------------------------------------------------------
-
-    /// 批量写入 wiki-link 索引（REQ-ING-020）。
+    // ---- Wiki 双向链接（REQ-ING-020）----
     async fn add_wiki_links(&self, links: &[WikiLink]) -> anyhow::Result<()> {
-        if links.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        let links = links.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            with_transaction(&conn, |conn| {
-                let mut stmt = conn
-                    .prepare(
-                        "INSERT OR IGNORE INTO wiki_links (id, source_doc_id, target, chunk_id, created_at) \
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
-                    )
-                    .context("预编译 wiki_links 批量写入语句失败")?;
-                for link in &links {
-                    stmt.execute(params![link.id, link.source_doc_id, link.target, link.chunk_id, link.created_at])
-                        .context("批量写入 wiki_links 失败")?;
-                }
-                Ok(())
-            })
-        })
-        .await
+        entities::add_wiki_links(&self.pool, links).await
     }
 
-    /// 查询文档的正向链接（REQ-ING-020）。
     async fn get_forward_links(&self, doc_id: &str) -> anyhow::Result<Vec<WikiLink>> {
-        let pool = self.pool.clone();
-        let doc_id = doc_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, source_doc_id, target, chunk_id, created_at \
-                     FROM wiki_links WHERE source_doc_id = ?1 ORDER BY created_at ASC",
-                )
-                .context("准备正向链接查询语句失败")?;
-            let links = stmt
-                .query_map(params![&doc_id], |row| {
-                    Ok(WikiLink {
-                        id: row.get(0)?,
-                        source_doc_id: row.get(1)?,
-                        target: row.get(2)?,
-                        chunk_id: row.get(3)?,
-                        created_at: row.get(4)?,
-                    })
-                })
-                .context("查询正向链接失败")?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(links)
-        })
-        .await
+        entities::get_forward_links(&self.pool, doc_id).await
     }
 
-    /// 查询文档的反向链接（REQ-ING-020）。
     async fn get_backlinks(&self, doc_name: &str) -> anyhow::Result<Vec<WikiLink>> {
-        let pool = self.pool.clone();
-        let pattern = format!("%{doc_name}%");
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, source_doc_id, target, chunk_id, created_at \
-                     FROM wiki_links WHERE target LIKE ?1 ORDER BY created_at DESC",
-                )
-                .context("准备反向链接查询语句失败")?;
-            let links = stmt
-                .query_map(params![&pattern], |row| {
-                    Ok(WikiLink {
-                        id: row.get(0)?,
-                        source_doc_id: row.get(1)?,
-                        target: row.get(2)?,
-                        chunk_id: row.get(3)?,
-                        created_at: row.get(4)?,
-                    })
-                })
-                .context("查询反向链接失败")?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(links)
-        })
-        .await
+        entities::get_backlinks(&self.pool, doc_name).await
     }
 
-    // ------------------------------------------------------------------
-    // Durable Prompt Admission（B05 持久化提示接纳）
-    // ------------------------------------------------------------------
-
-    /// 接纳用户输入（B05 Durable Prompt Admission）。
+    // ---- Durable Prompt Admission（B05）----
     async fn admit_input(
         &self,
         conversation_id: &str,
         content: &str,
         delivery: &str,
     ) -> anyhow::Result<String> {
-        let input = PendingInput::new(
-            conversation_id.to_string(),
-            content.to_string(),
-            delivery.to_string(),
-        );
-        let id = input.id.clone();
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT INTO pending_inputs (id, conversation_id, content, delivery, created_at, promoted_seq) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
-                params![input.id, input.conversation_id, input.content, input.delivery, input.created_at],
-            )
-            .context("写入 pending_inputs 失败")?;
-            Ok(())
-        })
-        .await?;
-        Ok(id)
+        misc::admit_input(&self.pool, conversation_id, content, delivery).await
     }
 
-    /// 提升接纳记录为正式消息（B05 Durable Prompt Admission）。
     async fn promote_input(&self, input_id: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let input_id = input_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // 使用当前时间戳作为 promoted_seq（标记提升时刻）
-            let now = chrono::Utc::now().timestamp();
-            conn.execute(
-                "UPDATE pending_inputs SET promoted_seq = ?2 WHERE id = ?1",
-                params![&input_id, now],
-            )
-            .context("提升 pending_inputs 失败")?;
-            Ok(())
-        })
-        .await
+        misc::promote_input(&self.pool, input_id).await
     }
 
-    /// 获取会话的待处理输入列表（B05 Durable Prompt Admission）。
     async fn get_pending_inputs(&self, conversation_id: &str) -> anyhow::Result<Vec<PendingInput>> {
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, conversation_id, content, delivery, created_at, promoted_seq \
-                     FROM pending_inputs WHERE conversation_id = ?1 AND promoted_seq IS NULL \
-                     ORDER BY CASE delivery WHEN 'steer' THEN 0 ELSE 1 END, created_at ASC",
-                )
-                .context("准备待处理输入查询语句失败")?;
-            let inputs = stmt
-                .query_map(params![&conversation_id], |row| {
-                    Ok(PendingInput {
-                        id: row.get(0)?,
-                        conversation_id: row.get(1)?,
-                        content: row.get(2)?,
-                        delivery: row.get(3)?,
-                        created_at: row.get(4)?,
-                        promoted_seq: row.get(5)?,
-                    })
-                })
-                .context("查询待处理输入失败")?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(inputs)
-        })
-        .await
+        misc::get_pending_inputs(&self.pool, conversation_id).await
     }
 
-    // ------------------------------------------------------------------
-    // Scratch-Promote 记忆整合（Q01 借鉴 QM scratch-promote + consolidation）
-    // ------------------------------------------------------------------
-
-    /// 追加一条 scratch 日志条目（Q01）。
+    // ---- Scratch-Promote（Q01）----
     async fn add_scratch_log(&self, entry: &ScratchLogEntry) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let entry = entry.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT INTO scratch_logs (id, date, content, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![entry.id, entry.date, entry.content, entry.created_at],
-            )
-            .context("写入 scratch_logs 失败")?;
-            Ok(())
-        })
-        .await
+        misc::add_scratch_log(&self.pool, entry).await
     }
 
-    /// 获取 scratch 日志条目列表（Q01）。
     async fn get_scratch_logs(&self, limit: Option<usize>) -> anyhow::Result<Vec<ScratchLogEntry>> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let sql = match limit {
-                Some(n) => format!(
-                    "SELECT id, date, content, created_at FROM scratch_logs ORDER BY created_at ASC LIMIT {n}"
-                ),
-                None =>
-                    "SELECT id, date, content, created_at FROM scratch_logs ORDER BY created_at ASC"
-                        .to_string(),
-            };
-            let mut stmt = conn.prepare(&sql).context("准备 scratch_logs 查询失败")?;
-            let rows = stmt
-                .query_map([], |row| {
-                    Ok(ScratchLogEntry {
-                        id: row.get(0)?,
-                        date: row.get(1)?,
-                        content: row.get(2)?,
-                        created_at: row.get(3)?,
-                    })
-                })
-                .context("查询 scratch_logs 失败")?;
-            let mut entries = Vec::new();
-            for row in rows {
-                entries.push(row?);
-            }
-            Ok(entries)
-        })
-        .await
+        misc::get_scratch_logs(&self.pool, limit).await
     }
 
-    /// 删除指定的 scratch 日志条目（Q01）。
     async fn delete_scratch_log(&self, id: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let id = id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute("DELETE FROM scratch_logs WHERE id = ?1", params![id])
-                .context("删除 scratch_logs 失败")?;
-            Ok(())
-        })
-        .await
+        misc::delete_scratch_log(&self.pool, id).await
     }
 
-    /// 清理过期的 scratch 日志条目（Q01）。
     async fn cleanup_expired_scratch_logs(&self, before_timestamp: i64) -> anyhow::Result<usize> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let count = conn
-                .execute(
-                    "DELETE FROM scratch_logs WHERE created_at < ?1",
-                    params![before_timestamp],
-                )
-                .context("清理过期 scratch_logs 失败")?;
-            Ok(count)
-        })
-        .await
+        misc::cleanup_expired_scratch_logs(&self.pool, before_timestamp).await
     }
 
-    // ------------------------------------------------------------------
-    // 幂等性存储支持（Q07 幂等性存储）
-    // ------------------------------------------------------------------
-
-    /// 记录幂等性操作（Q07）。
+    // ---- 幂等性存储（Q07）----
     async fn record_idempotency(&self, key: &str, timestamp: i64) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let key = key.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT OR REPLACE INTO idempotency_records (key, timestamp) VALUES (?1, ?2)",
-                params![key, timestamp],
-            )
-            .context("写入 idempotency_records 失败")?;
-            Ok(())
-        })
-        .await
+        misc::record_idempotency(&self.pool, key, timestamp).await
     }
 
-    /// 列出所有幂等性记录（Q07）。
     async fn list_idempotency_records(&self) -> anyhow::Result<Vec<(String, i64)>> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn
-                .prepare("SELECT key, timestamp FROM idempotency_records ORDER BY timestamp DESC")
-                .context("准备 idempotency_records 查询失败")?;
-            let rows = stmt
-                .query_map([], |row| {
-                    let key: String = row.get(0)?;
-                    let timestamp: i64 = row.get(1)?;
-                    Ok((key, timestamp))
-                })
-                .context("查询 idempotency_records 失败")?;
-            let mut records = Vec::new();
-            for row in rows {
-                records.push(row?);
-            }
-            Ok(records)
-        })
-        .await
+        misc::list_idempotency_records(&self.pool).await
     }
 
-    /// 清理过期的幂等性记录（Q07）。
     async fn cleanup_expired_idempotency(&self, before_timestamp: i64) -> anyhow::Result<usize> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let count = conn
-                .execute(
-                    "DELETE FROM idempotency_records WHERE timestamp < ?1",
-                    params![before_timestamp],
-                )
-                .context("清理过期 idempotency_records 失败")?;
-            Ok(count)
-        })
-        .await
+        misc::cleanup_expired_idempotency(&self.pool, before_timestamp).await
     }
 
-    // ------------------------------------------------------------------
-    // Session Todo 持久化（B08 会话待办持久化）
-    // ------------------------------------------------------------------
-
-    /// 创建 Todo 项（B08 Session Todo 持久化）。
+    // ---- Session Todo（B08）----
     async fn add_session_todo(&self, todo: &SessionTodo) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let todo = todo.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT INTO session_todos (id, conversation_id, content, status, priority, position, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    todo.id,
-                    todo.conversation_id,
-                    todo.content,
-                    todo.status.as_str(),
-                    todo.priority.as_str(),
-                    todo.position,
-                    todo.created_at,
-                ],
-            )
-            .context("写入 session_todos 失败")?;
-            Ok(())
-        })
-        .await
+        misc::add_session_todo(&self.pool, todo).await
     }
 
-    /// 更新 Todo 状态（B08 Session Todo 持久化）。
     async fn update_todo_status(&self, todo_id: &str, status: &TodoStatus) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let todo_id = todo_id.to_string();
-        let status_str = status.as_str().to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "UPDATE session_todos SET status = ?2 WHERE id = ?1",
-                params![&todo_id, &status_str],
-            )
-            .context("更新 session_todos 状态失败")?;
-            Ok(())
-        })
-        .await
+        misc::update_todo_status(&self.pool, todo_id, status).await
     }
 
-    /// 获取会话的 Todo 列表（B08 Session Todo 持久化），按 position 升序排列。
     async fn get_session_todos(&self, conversation_id: &str) -> anyhow::Result<Vec<SessionTodo>> {
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, conversation_id, content, status, priority, position, created_at \
-                     FROM session_todos WHERE conversation_id = ?1 ORDER BY position ASC",
-                )
-                .context("准备 session_todos 查询语句失败")?;
-            let todos = stmt
-                .query_map(params![&conversation_id], |row| {
-                    let status_str: String = row.get(3)?;
-                    let priority_str: String = row.get(4)?;
-                    Ok(SessionTodo {
-                        id: row.get(0)?,
-                        conversation_id: row.get(1)?,
-                        content: row.get(2)?,
-                        status: TodoStatus::from_db_str(&status_str).unwrap_or(TodoStatus::Pending),
-                        priority: TodoPriority::from_db_str(&priority_str)
-                            .unwrap_or(TodoPriority::Medium),
-                        position: row.get(5)?,
-                        created_at: row.get(6)?,
-                    })
-                })
-                .context("查询 session_todos 失败")?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(todos)
-        })
-        .await
+        misc::get_session_todos(&self.pool, conversation_id).await
     }
 
-    /// 删除单个 Todo 项（B08 Session Todo 持久化）。
     async fn delete_session_todo(&self, todo_id: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let todo_id = todo_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute("DELETE FROM session_todos WHERE id = ?1", params![&todo_id])
-                .context("删除 session_todo 失败")?;
-            Ok(())
-        })
-        .await
+        misc::delete_session_todo(&self.pool, todo_id).await
     }
 
-    /// 删除会话的全部 Todo 项（B08 Session Todo 持久化）。
     async fn delete_session_todos(&self, conversation_id: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "DELETE FROM session_todos WHERE conversation_id = ?1",
-                params![&conversation_id],
-            )
-            .context("删除会话 session_todos 失败")?;
-            Ok(())
-        })
-        .await
+        misc::delete_session_todos(&self.pool, conversation_id).await
     }
 
-    // --- Security-Tainted 条目标记（Q05）---
-
-    async fn set_entry_security_tainted(
-        &self,
-        message_id: &str,
-        tainted: bool,
-    ) -> anyhow::Result<()> {
-        messages::set_entry_security_tainted(&self.pool, message_id.to_string(), tainted).await
-    }
-
-    async fn get_entry_security_tainted(&self, message_id: &str) -> anyhow::Result<bool> {
-        messages::get_entry_security_tainted(&self.pool, message_id.to_string()).await
-    }
-
+    // ---- Budget 预算追踪 ----
     async fn record_budget_usage(
         &self,
         principal: &str,
@@ -3256,31 +1579,18 @@ Ok(())
         cost_usd: f64,
         model_name: &str,
     ) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let principal = principal.to_string();
-        let model_name = model_name.to_string();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT INTO budget_records (principal, timestamp, input_tokens, output_tokens, cost_usd, model_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![principal, now, input_tokens as i64, output_tokens as i64, cost_usd, model_name],
-            )
-            .context("记录预算使用失败")?;
-            Ok(())
-        })
+        misc::record_budget_usage(
+            &self.pool,
+            principal,
+            input_tokens,
+            output_tokens,
+            cost_usd,
+            model_name,
+        )
         .await
     }
 
     async fn get_budget_stats(&self, principal: &str) -> anyhow::Result<BudgetStats> {
-        let pool = self.pool.clone();
-        let principal = principal.to_string();
-
-        // Get daily limit from settings table
         let daily_limit = self
             .get_setting("budget.daily_limit_usd")
             .await
@@ -3288,37 +1598,7 @@ Ok(())
             .flatten()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(0.0);
-
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-
-            // Calculate total spending in the last 24 hours
-            let day_ago = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64 - 86400;
-
-            let spent_today: f64 = conn
-                .query_row(
-                    "SELECT COALESCE(SUM(cost_usd), 0.0) FROM budget_records WHERE principal = ?1 AND timestamp > ?2",
-                    params![principal, day_ago],
-                    |row| row.get(0),
-                )
-                .context("查询预算统计失败")?;
-
-            let remaining = if daily_limit > 0.0 {
-                (daily_limit - spent_today).max(0.0)
-            } else {
-                f64::INFINITY
-            };
-
-            Ok(BudgetStats {
-                daily_limit,
-                spent_today,
-                remaining,
-            })
-        })
-        .await
+        misc::get_budget_stats(&self.pool, principal, daily_limit).await
     }
 
     async fn set_budget_limit(&self, principal: &str, daily_limit_usd: f64) -> anyhow::Result<()> {
@@ -3601,139 +1881,29 @@ impl AuditLogger for SqliteStorage {
 // ============================================================
 
 impl RetrievalMemoryStore for SqliteStorage {
+    /// S03 拆分委托：检索记忆 CRUD 委托至 `misc` 子模块。
     async fn get_memory(
         &self,
         query_type: QueryType,
         method: RetrievalMethod,
     ) -> anyhow::Result<Option<MemoryRecord>> {
-        let qt = query_type.as_str().to_string();
-        let m = method.as_str().to_string();
-        let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn
-                .prepare(
-                    "SELECT query_type, method, hit_count, miss_count, avg_score \
-                     FROM retrieval_memory WHERE query_type = ?1 AND method = ?2",
-                )
-                .context("准备查询语句失败")?;
-            let record = stmt
-                .query_row(params![&qt, &m], |row| {
-                    let qt_str: String = row.get(0)?;
-                    let m_str: String = row.get(1)?;
-                    Ok(MemoryRecord {
-                        query_type: QueryType::parse_str(&qt_str).unwrap_or(QueryType::Factual),
-                        method: RetrievalMethod::parse_str(&m_str)
-                            .unwrap_or(RetrievalMethod::Hybrid),
-                        hit_count: row.get::<_, i64>(2)? as u32,
-                        miss_count: row.get::<_, i64>(3)? as u32,
-                        avg_score: row.get(4)?,
-                    })
-                })
-                .optional()
-                .context("查询检索记忆失败")?;
-            Ok(record)
-        })
-        .await
-        .context("检索记忆查询任务失败")?
+        misc::get_memory(&self.pool, query_type.as_str(), method.as_str()).await
     }
 
     async fn upsert_memory(&self, record: &MemoryRecord) -> anyhow::Result<()> {
-        let qt = record.query_type.as_str().to_string();
-        let m = record.method.as_str().to_string();
-        let hit = record.hit_count as i64;
-        let miss = record.miss_count as i64;
-        let avg = record.avg_score;
-        let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT INTO retrieval_memory (query_type, method, hit_count, miss_count, avg_score) \
-                 VALUES (?1, ?2, ?3, ?4, ?5) \
-                 ON CONFLICT(query_type, method) DO UPDATE SET \
-                 hit_count = ?3, miss_count = ?4, avg_score = ?5",
-                params![&qt, &m, hit, miss, avg],
-            )
-            .context("写入检索记忆失败")?;
-            Ok(())
-        })
-        .await
-        .context("检索记忆写入任务失败")?
+        misc::upsert_memory(&self.pool, record).await
     }
 
     async fn list_memories(&self, query_type: QueryType) -> anyhow::Result<Vec<MemoryRecord>> {
-        let qt = query_type.as_str().to_string();
-        let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn
-                .prepare(
-                    "SELECT query_type, method, hit_count, miss_count, avg_score \
-                     FROM retrieval_memory WHERE query_type = ?1",
-                )
-                .context("准备查询语句失败")?;
-            let records = stmt
-                .query_map(params![&qt], |row| {
-                    let qt_str: String = row.get(0)?;
-                    let m_str: String = row.get(1)?;
-                    Ok(MemoryRecord {
-                        query_type: QueryType::parse_str(&qt_str).unwrap_or(QueryType::Factual),
-                        method: RetrievalMethod::parse_str(&m_str)
-                            .unwrap_or(RetrievalMethod::Hybrid),
-                        hit_count: row.get::<_, i64>(2)? as u32,
-                        miss_count: row.get::<_, i64>(3)? as u32,
-                        avg_score: row.get(4)?,
-                    })
-                })
-                .context("查询检索记忆列表失败")?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(records)
-        })
-        .await
-        .context("检索记忆列表任务失败")?
+        misc::list_memories(&self.pool, query_type.as_str()).await
     }
 
     async fn list_all_memories(&self) -> anyhow::Result<Vec<MemoryRecord>> {
-        let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn
-                .prepare(
-                    "SELECT query_type, method, hit_count, miss_count, avg_score \
-                     FROM retrieval_memory",
-                )
-                .context("准备查询语句失败")?;
-            let records = stmt
-                .query_map([], |row| {
-                    let qt_str: String = row.get(0)?;
-                    let m_str: String = row.get(1)?;
-                    Ok(MemoryRecord {
-                        query_type: QueryType::parse_str(&qt_str).unwrap_or(QueryType::Factual),
-                        method: RetrievalMethod::parse_str(&m_str)
-                            .unwrap_or(RetrievalMethod::Hybrid),
-                        hit_count: row.get::<_, i64>(2)? as u32,
-                        miss_count: row.get::<_, i64>(3)? as u32,
-                        avg_score: row.get(4)?,
-                    })
-                })
-                .context("查询全部检索记忆失败")?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(records)
-        })
-        .await
-        .context("检索记忆全部列表任务失败")?
+        misc::list_all_memories(&self.pool).await
     }
 
     async fn clear_all_memories(&self) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute("DELETE FROM retrieval_memory", [])
-                .context("清空检索记忆失败")?;
-            Ok(())
-        })
-        .await
-        .context("检索记忆清空任务失败")?
+        misc::clear_all_memories(&self.pool).await
     }
 }
 

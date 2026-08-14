@@ -14,6 +14,9 @@
 //! | [`documents`] | 文档表 CRUD：写入/状态/查重/统计/列表/标签/导入日志/工作空间 | S02 新增 |
 //! | [`conversations`] | 会话表 CRUD：创建/列表/分页/删除/标题/排序/工作空间/书签 | S02 新增 |
 //! | [`messages`] | 消息表 CRUD：写入/列表/分页/批量删除/编辑分页/安全标记/FTS5 | S02 新增 |
+//! | [`vectors`] | 分块/向量/嵌入缓存/FTS5 关键词检索/BM25 重建/路径查找 | S03 新增 |
+//! | [`entities`] | 实体/关系/摘要/命题/wiki 链接/代码符号 CRUD | S03 新增 |
+//! | [`misc`] | 待处理输入/scratch/幂等性/todo/budget/检索记忆 CRUD | S03 新增 |
 //!
 //! ## 可见性策略
 //!
@@ -23,9 +26,12 @@
 pub(crate) mod conversations;
 pub(crate) mod crypto;
 pub(crate) mod documents;
+pub(crate) mod entities;
 pub(crate) mod messages;
 pub(crate) mod migration;
+pub(crate) mod misc;
 pub(crate) mod schema;
+pub(crate) mod vectors;
 
 // 重导出：SqliteStorage 主文件通过 `use storage::*` 访问。
 pub(crate) use crypto::{decrypt, encrypt, ensure_dir_0700, load_or_create_cipher};
