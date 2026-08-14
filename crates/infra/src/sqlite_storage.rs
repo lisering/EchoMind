@@ -1,9 +1,33 @@
 //! SQLite 持久化适配器（REQ-DB-001）：rusqlite(bundled) + r2d2 连接池 + WAL 模式。
 //! 体系三：rusqlite 为具体实现，仅允许存在于 infra 层；
 //! rusqlite 为同步 API，全部数据库操作经 `spawn_blocking` 执行，严禁阻塞 async executor。
+//!
+//! v2.0 S01 拆分：schema 常量、migration 函数、crypto 辅助已移至 `storage/` 子模块。
+
+#[path = "storage/mod.rs"]
+pub(crate) mod storage;
 
 use std::path::Path;
 use tracing::{error, info, warn};
+
+// 重导出子模块（保持外部引用路径不变）
+pub(crate) use storage::{
+    DOC_COLS, PRAGMAS, Pool, ensure_dir_0700, init_schema, load_or_create_cipher,
+};
+// crypto 辅助函数（接收 &Aes256Gcm 参数的自由函数）
+use storage::{decrypt as crypto_decrypt, encrypt as crypto_encrypt};
+
+/// 数据库完整性检查结果（REQ-ERR-004）。
+///
+/// `PRAGMA integrity_check` 返回 `ok` 时为 [`IntegrityCheckResult::Ok`]，
+/// 否则为 [`IntegrityCheckResult::Corrupted`]，携带错误详情。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IntegrityCheckResult {
+    /// 数据库完整性正常
+    Ok,
+    /// 数据库损坏，携带 `PRAGMA integrity_check` 返回的错误消息
+    Corrupted(String),
+}
 
 // ============================================================================
 // S6: LRU 向量缓存 — 带驱逐策略的内存向量缓存
@@ -99,10 +123,10 @@ impl LruVectorCache {
 
 type VectorCache = std::sync::Arc<std::sync::RwLock<Option<LruVectorCache>>>;
 
-use aes_gcm::aead::Aead;
-use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use anyhow::{Context, anyhow, bail};
-use base64::{Engine, engine::general_purpose::STANDARD as B64};
+// S01 拆分：aes_gcm / base64 加密辅助已迁移至 `storage::crypto` 模块。
+// `Aes256Gcm` 类型仍作为 `SqliteStorage` 字段类型保留。
+use aes_gcm::Aes256Gcm;
+use anyhow::{Context, bail};
 use echomind_core::Storage;
 use echomind_core::privacy::{AuditEntry, AuditLogger};
 use echomind_core::proposition_splitter::PropositionSplitter;
@@ -119,385 +143,9 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::OptionalExtension;
 use rusqlite::params;
 
-/// 连接级 PRAGMA：WAL 模式 + 外键级联 + 写繁忙重试 + 性能调优（REQ-DB-001-AC-3）。
-///
-/// 性能参数说明（2026-07 全尺度优化）：
-/// - `cache_size = -65536`：64MB page cache（默认仅 2MB），大幅减少大库查询的磁盘 I/O。
-/// - `mmap_size = 268435456`：256MB 零拷贝内存映射，绕过 read() 系统调用。
-/// - `wal_autocheckpoint = 10000`：WAL 达到 10000 pages（~40MB）才 checkpoint，
-///   减少 GB 级导入时的 checkpoint 频率，提升写入吞吐。
-/// - `temp_store = MEMORY`：临时表和排序结果放内存，加速 FTS5 查询和复杂 JOIN。
-const PRAGMAS: &str = "
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 5000;
-PRAGMA cache_size = -65536;
-PRAGMA mmap_size = 268435456;
-PRAGMA wal_autocheckpoint = 10000;
-PRAGMA temp_store = MEMORY;
-";
-
-/// 表结构：documents / chunks / embeddings / settings / conversations / messages。
-/// 外键 ON DELETE CASCADE（REQ-ING-005 前置）。
-/// 仅含 CREATE TABLE 语句；索引在迁移完成后单独创建（防旧表 schema 不兼容崩溃）。
-const SCHEMA_TABLES: &str = "
-CREATE TABLE IF NOT EXISTS documents (
-id TEXT PRIMARY KEY,
-file_path TEXT NOT NULL,
-file_hash TEXT NOT NULL,
-status TEXT NOT NULL,
-status_reason TEXT,
-created_at INTEGER NOT NULL,
-original_path TEXT,
-domain TEXT,
-summary TEXT,
-tags TEXT NOT NULL DEFAULT '[]',
-workspace_id TEXT NOT NULL DEFAULT 'default'
-);
-
-CREATE TABLE IF NOT EXISTS workspaces (
-id TEXT PRIMARY KEY,
-name TEXT NOT NULL,
-created_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS chunks (
-    id TEXT PRIMARY KEY,
-    doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-    content TEXT NOT NULL,
-    token_count INTEGER NOT NULL,
-    sequence INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS embeddings (
-    chunk_id TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
-    vector BLOB NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS conversations (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    sort_order INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    sources TEXT,
-    reasoning TEXT,
-    turn_group TEXT NOT NULL DEFAULT '',
-    version INTEGER NOT NULL DEFAULT 1,
-    created_at INTEGER NOT NULL,
-    security_tainted INTEGER NOT NULL DEFAULT 0
-);
-
--- 嵌入缓存表（全尺度性能优化：按内容指纹去重，避免重复 ONNX 推理）
-CREATE TABLE IF NOT EXISTS embeddings_cache (
-    content_hash TEXT PRIMARY KEY,
-    embedding BLOB NOT NULL
-);
-
--- 实体索引表（REQ-PERF-006 实体链接增强）：三路 RRF 实体匹配通道
-CREATE TABLE IF NOT EXISTS entities (
-id TEXT PRIMARY KEY,
-chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
-entity_text TEXT NOT NULL,
-entity_type TEXT NOT NULL
-);
-
--- Proposition 索引表（REQ-PERF-007 Proposition 级原子分割）：
--- 将 chunk 分解为自包含的原子事实，proposition 级检索精度优于 chunk 级。
-CREATE TABLE IF NOT EXISTS propositions (
-id TEXT PRIMARY KEY,
-chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
-content TEXT NOT NULL,
-embedding BLOB,
-sequence INTEGER NOT NULL
-);
-
--- RAPTOR 摘要树表（REQ-PERF-009 多级摘要树索引）：
--- 将原始 chunks 组织为多级摘要树，提供从局部事实到全局主题的多层次检索。
-CREATE TABLE IF NOT EXISTS summary_nodes (
-id TEXT PRIMARY KEY,
-doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-level INTEGER NOT NULL,
-content TEXT NOT NULL,
-child_ids TEXT NOT NULL,
-embedding BLOB
-);
-
--- 检索记忆表（REQ-PERF-012 自进化检索记忆）：
--- 记录每种查询类型 × 检索方法的累计效果统计，自适应选择最佳策略。
-CREATE TABLE IF NOT EXISTS retrieval_memory (
-query_type TEXT NOT NULL,
-method TEXT NOT NULL,
-hit_count INTEGER DEFAULT 0,
-miss_count INTEGER DEFAULT 0,
-avg_score REAL DEFAULT 0,
-PRIMARY KEY (query_type, method)
-);
-
--- 实体关系图表（REQ-RAG-026 知识图谱实体关系检索）：
--- 存储实体间的有向关系边，供图遍历检索使用。
-CREATE TABLE IF NOT EXISTS entity_relations (
-id TEXT PRIMARY KEY,
-subject TEXT NOT NULL,
-relation_type TEXT NOT NULL,
-object TEXT NOT NULL,
-chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
-confidence REAL NOT NULL
-);
-
--- 轮次活跃版本表（分支切换状态持久化）：
--- 用户在分页器中切换查看不同编辑版本时，活跃版本号被持久化，
--- 下次加载会话时恢复到最后一次查看的版本。
-CREATE TABLE IF NOT EXISTS turn_active_versions (
-conversation_id TEXT NOT NULL,
-turn_group TEXT NOT NULL,
-active_version INTEGER NOT NULL,
-PRIMARY KEY (conversation_id, turn_group)
-);
-
--- 代码符号索引表（REQ-RAG-031 代码感知 RAG）：
--- tree-sitter AST 抽取的函数/类/结构体等符号，使代码查询能精确定位到函数定义。
-CREATE TABLE IF NOT EXISTS code_symbols (
-id TEXT PRIMARY KEY,
-chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
-name TEXT NOT NULL,
-kind TEXT NOT NULL,
-language TEXT NOT NULL,
-start_line INTEGER NOT NULL,
-end_line INTEGER NOT NULL,
-signature TEXT
-);
-
--- 对话记忆表（REQ-RAG-032 持久化记忆系统增强）：
--- 借鉴 IfAI 三层记忆 Wing/Hall/Room 空间隐喻，存储对话中提取的关键事实。
-CREATE TABLE IF NOT EXISTS memory_entries (
-id TEXT PRIMARY KEY,
-tier TEXT NOT NULL,
-content TEXT NOT NULL,
-source TEXT NOT NULL,
-conversation_id TEXT,
-created_at INTEGER NOT NULL,
-last_accessed INTEGER NOT NULL,
-access_count INTEGER NOT NULL DEFAULT 0,
-importance REAL NOT NULL DEFAULT 0.5
-);
-
--- Wiki 双向链接表（REQ-ING-020 Markdown 笔记双向链接）：
--- 存储 Markdown 文档中 [[wiki-link]] 语法的链接关系，支持正向链接和反向链接查询。
-CREATE TABLE IF NOT EXISTS wiki_links (
-id TEXT PRIMARY KEY,
-source_doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-target TEXT NOT NULL,
-chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
-created_at INTEGER NOT NULL
-);
-
--- Durable Prompt Admission 表（B05 持久化提示接纳）：
--- 存储已接纳但未提升为正式消息的用户输入。
--- delivery: 'steer'（优先中断当前生成）或 'queue'（排队等待）。
--- promoted_seq: NULL = 未提升；非 NULL = 已提升为正式消息的 seq。
-CREATE TABLE IF NOT EXISTS pending_inputs (
-id TEXT PRIMARY KEY,
-conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-content TEXT NOT NULL,
-delivery TEXT NOT NULL DEFAULT 'queue',
-created_at INTEGER NOT NULL,
-promoted_seq INTEGER
-);
-
--- Session Todo 持久化表（B08 会话待办持久化）：
--- 存储 Agent 的 Todo 列表，支持跨会话恢复。
--- status: 'pending' / 'in_progress' / 'completed'
--- priority: 'low' / 'medium' / 'high'
--- position: 排序位置（升序）
-CREATE TABLE IF NOT EXISTS session_todos (
-id TEXT PRIMARY KEY,
-conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-content TEXT NOT NULL,
-status TEXT NOT NULL DEFAULT 'pending',
-priority TEXT NOT NULL DEFAULT 'medium',
-position INTEGER NOT NULL,
-created_at INTEGER NOT NULL
-);
-
---- Scratch-Promote 记忆整合表（Q01 借鉴 QM scratch-promote）：
---- 存储临时事实，等待 LLM 审查后 promote 到长期记忆层。
---- date: YYYY-MM-DD 格式，用于按日聚合
---- created_at: Unix 秒级时间戳，用于过期清理（默认 14 天）
-CREATE TABLE IF NOT EXISTS scratch_logs (
-    id TEXT PRIMARY KEY,
-    date TEXT NOT NULL,
-    content TEXT NOT NULL,
-    created_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS idempotency_records (
-    key TEXT PRIMARY KEY,
-    timestamp INTEGER NOT NULL
-);
-
--- 预算追踪表（QM 借鉴）：
--- 记录 LLM API 使用情况，用于费用追踪和预算控制。
--- LLM_COST_PER_MTOK 环境变量控制每百万 token 价格。
-CREATE TABLE IF NOT EXISTS budget_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    principal TEXT NOT NULL,
-    timestamp INTEGER NOT NULL,
-    input_tokens INTEGER NOT NULL,
-    output_tokens INTEGER NOT NULL,
-    cost_usd REAL NOT NULL,
-    model_name TEXT NOT NULL
-);
-
--- 导入历史记录表（REQ-ING-011）：
--- 记录每次导入操作的时间戳、文件名、格式、结果（成功/失败/跳过）。
--- 上限 100 条，超过自动淘汰最旧记录。
-CREATE TABLE IF NOT EXISTS import_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp INTEGER NOT NULL,
-    file_name TEXT NOT NULL,
-    format TEXT NOT NULL,
-    result TEXT NOT NULL,
-    error_message TEXT,
-    file_size INTEGER
-);
-";
-
-/// 索引定义（在表创建与迁移完成后执行）。
-const SCHEMA_INDEXES: &str = "
-CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(file_hash);
-CREATE INDEX IF NOT EXISTS idx_documents_original_path ON documents(original_path);
-CREATE INDEX IF NOT EXISTS idx_documents_domain ON documents(domain);
-CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
-CREATE INDEX IF NOT EXISTS idx_conversations_workspace ON conversations(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_messages_turn ON messages(conversation_id, turn_group, version);
-CREATE INDEX IF NOT EXISTS idx_entities_chunk ON entities(chunk_id);
-CREATE INDEX IF NOT EXISTS idx_entities_text ON entities(entity_text);
-CREATE INDEX IF NOT EXISTS idx_propositions_chunk ON propositions(chunk_id);
-CREATE INDEX IF NOT EXISTS idx_summary_nodes_doc ON summary_nodes(doc_id);
-CREATE INDEX IF NOT EXISTS idx_summary_nodes_level ON summary_nodes(level);
-CREATE INDEX IF NOT EXISTS idx_relations_subject ON entity_relations(subject);
-CREATE INDEX IF NOT EXISTS idx_relations_object ON entity_relations(object);
-CREATE INDEX IF NOT EXISTS idx_relations_chunk ON entity_relations(chunk_id);
-CREATE INDEX IF NOT EXISTS idx_symbols_name ON code_symbols(name);
-CREATE INDEX IF NOT EXISTS idx_symbols_chunk ON code_symbols(chunk_id);
-CREATE INDEX IF NOT EXISTS idx_symbols_kind ON code_symbols(kind);
-CREATE INDEX IF NOT EXISTS idx_memory_tier ON memory_entries(tier);
-CREATE INDEX IF NOT EXISTS idx_memory_content ON memory_entries(content);
-CREATE INDEX IF NOT EXISTS idx_wiki_links_source ON wiki_links(source_doc_id);
-CREATE INDEX IF NOT EXISTS idx_wiki_links_target ON wiki_links(target);
-CREATE INDEX IF NOT EXISTS idx_wiki_links_chunk ON wiki_links(chunk_id);
-CREATE INDEX IF NOT EXISTS idx_pending_inputs_conv ON pending_inputs(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_pending_inputs_promoted ON pending_inputs(promoted_seq);
-CREATE INDEX IF NOT EXISTS idx_session_todos_conv ON session_todos(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_session_todos_position ON session_todos(conversation_id, position);
-CREATE INDEX IF NOT EXISTS idx_scratch_logs_date ON scratch_logs(date);
-CREATE INDEX IF NOT EXISTS idx_scratch_logs_created ON scratch_logs(created_at);
-CREATE INDEX IF NOT EXISTS idx_budget_records_principal ON budget_records(principal);
-CREATE INDEX IF NOT EXISTS idx_budget_records_timestamp ON budget_records(timestamp);
-CREATE INDEX IF NOT EXISTS idx_import_logs_timestamp ON import_logs(timestamp);
-
--- 对话书签表（REQ-RAG-047）
-CREATE TABLE IF NOT EXISTS conversation_bookmarks (
-  conversation_id TEXT PRIMARY KEY,
-  note TEXT,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_bookmarks_created ON conversation_bookmarks(created_at);
-";
-
-/// FTS5 全文索引虚拟表（混合检索关键词通道，REQ-RAG-010）。
-/// 使用 trigram 分词器：支持英文单词匹配 + 中日韩子串匹配。
-/// chunk_id / doc_id 为 UNINDEXED 列（仅存储用于 JOIN 回主表，不参与全文索引）。
-const SCHEMA_FTS: &str = "
-CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-    chunk_id UNINDEXED,
-    doc_id UNINDEXED,
-    content,
-    tokenize='trigram'
-);
-";
-
-/// 对话全文搜索 FTS5 虚拟表（REQ-RAG-040）。
-///
-/// 索引 messages 表的 content 列，使用 trigram 分词器（与 chunks_fts 一致）。
-/// 通过触发器自动同步 messages 表 INSERT/UPDATE/DELETE。
-/// message_id / conversation_id 为 UNINDEXED 列（仅存储用于回查，不参与全文索引）。
-const SCHEMA_MESSAGES_FTS: &str = "
-CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-    message_id UNINDEXED,
-    conversation_id UNINDEXED,
-    content,
-    tokenize='trigram'
-);
-
--- 触发器：messages INSERT → messages_fts INSERT
-CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
-    INSERT INTO messages_fts(message_id, conversation_id, content)
-    VALUES (new.id, new.conversation_id, new.content);
-END;
-
--- 触发器：messages DELETE → messages_fts DELETE
-CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
-    DELETE FROM messages_fts WHERE message_id = old.id;
-END;
-
--- 触发器：messages UPDATE(content) → messages_fts UPDATE
-CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages WHEN new.content != old.content BEGIN
-    DELETE FROM messages_fts WHERE message_id = old.id;
-    INSERT INTO messages_fts(message_id, conversation_id, content)
-    VALUES (new.id, new.conversation_id, new.content);
-END;
-";
-
-const DOC_COLS: &str = "id, file_path, file_hash, status, status_reason, created_at, original_path, domain, summary, tags, workspace_id";
-
-/// AES-256-GCM 随机数 nonce 长度（96 bit）
-const NONCE_LEN: usize = 12;
-/// 加密密钥文件名（与数据库同目录，权限 0600）
-const SECRET_KEY_FILE: &str = "secret.key";
-
-/// 审计日志表结构（防篡改哈希链）
-const SCHEMA_AUDIT_LOG: &str = "
-CREATE TABLE IF NOT EXISTS audit_log (
-    id TEXT PRIMARY KEY,
-    action TEXT NOT NULL,
-    details TEXT NOT NULL,
-    pii_count INTEGER NOT NULL DEFAULT 0,
-    timestamp INTEGER NOT NULL,
-    prev_hash TEXT,
-    curr_hash TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
-";
-
-/// 数据库完整性检查结果（REQ-ERR-004）。
-///
-/// `PRAGMA integrity_check` 返回 `ok` 时为 [`IntegrityCheckResult::Ok`]，
-/// 否则为 [`IntegrityCheckResult::Corrupted`]，携带错误详情。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IntegrityCheckResult {
-    /// 数据库完整性正常
-    Ok,
-    /// 数据库损坏，携带 `PRAGMA integrity_check` 返回的错误消息
-    Corrupted(String),
-}
-
-type Pool = r2d2::Pool<SqliteConnectionManager>;
+// S01 拆分：PRAGMAS / SCHEMA_TABLES / SCHEMA_INDEXES / SCHEMA_FTS / SCHEMA_MESSAGES_FTS /
+// DOC_COLS / NONCE_LEN / SECRET_KEY_FILE / SCHEMA_AUDIT_LOG / KNOWN_TABLES /
+// IntegrityCheckResult / Pool 已迁移至 `storage::schema` 模块。
 
 /// SQLite 存储适配器。克隆廉价（共享连接池与加密器）。
 #[derive(Clone)]
@@ -537,7 +185,7 @@ impl SqliteStorage {
             .with_context(|| format!("创建数据库目录失败: {}", data_dir.display()))?;
         // REQ-SEC-004：数据目录权限 0700（仅所有者可读写执行）
         ensure_dir_0700(data_dir)?;
-        let cipher = Self::load_or_create_cipher(data_dir)?;
+        let cipher = load_or_create_cipher(data_dir)?;
         let manager =
             SqliteConnectionManager::file(db_path).with_init(|conn| conn.execute_batch(PRAGMAS));
         let pool = Pool::builder()
@@ -556,7 +204,7 @@ impl SqliteStorage {
             vector_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
             max_vectors: 5000,
         };
-        storage.init_schema()?;
+        init_schema(&storage.pool)?;
         Ok(storage)
     }
 
@@ -575,7 +223,7 @@ impl SqliteStorage {
         std::fs::create_dir_all(data_dir)
             .with_context(|| format!("创建数据库目录失败: {}", data_dir.display()))?;
         ensure_dir_0700(data_dir)?;
-        let cipher = Self::load_or_create_cipher(data_dir)?;
+        let cipher = load_or_create_cipher(data_dir)?;
 
         // 加密模式：每个连接先执行 PRAGMA key，再执行其他 PRAGMA
         let key = pragma_key.to_string();
@@ -597,7 +245,7 @@ impl SqliteStorage {
             vector_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
             max_vectors: 5000,
         };
-        storage.init_schema()?;
+        init_schema(&storage.pool)?;
         Ok(storage)
     }
 
@@ -631,461 +279,7 @@ impl SqliteStorage {
         #[cfg(feature = "pro")]
         self.mark_hnsw_dirty();
     }
-
-    fn init_schema(&self) -> anyhow::Result<()> {
-        let conn = self.pool.get().context("获取数据库连接失败")?;
-        // 步骤 1：创建表（IF NOT EXISTS 不修改已有表结构）
-        conn.execute_batch(SCHEMA_TABLES)
-            .context("初始化数据库表结构失败")?;
-        // 步骤 2：迁移旧表 schema（修复历史版本不兼容的列缺失）
-        Self::migrate_schema(&conn)?;
-        // 步骤 3：创建索引（此时所有列已保证存在）
-        conn.execute_batch(SCHEMA_INDEXES)
-            .context("初始化数据库索引失败")?;
-        // 步骤 4：创建 FTS5 全文索引虚拟表（混合检索关键词通道）
-        conn.execute_batch(SCHEMA_FTS)
-            .context("初始化 FTS5 全文索引失败")?;
-        // 步骤 5：迁移——若 chunks 表已有数据但 chunks_fts 为空，回填全文索引
-        Self::backfill_fts_if_needed(&conn)?;
-        // 步骤 5b：创建对话全文搜索 FTS5 虚拟表 + 触发器（REQ-RAG-040）
-        conn.execute_batch(SCHEMA_MESSAGES_FTS)
-            .context("初始化对话 FTS5 全文索引失败")?;
-        // 步骤 5c：迁移——若 messages 表已有数据但 messages_fts 为空，回填全文索引
-        Self::backfill_messages_fts_if_needed(&conn)?;
-        // 步骤 6：创建审计日志表（防篡改哈希链）
-        conn.execute_batch(SCHEMA_AUDIT_LOG)
-            .context("初始化审计日志表失败")?;
-        Ok(())
-    }
-
-    /// 若 chunks 表已有数据但 chunks_fts 为空（旧数据库升级场景），回填全文索引。
-    ///
-    /// 避免旧版用户升级后 FTS5 索引为空导致关键词搜索无效。
-    fn backfill_fts_if_needed(conn: &rusqlite::Connection) -> anyhow::Result<()> {
-        let chunk_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))
-            .context("统计 chunks 数量失败")?;
-        let fts_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM chunks_fts", [], |row| row.get(0))
-            .context("统计 chunks_fts 数量失败")?;
-        if chunk_count > 0 && fts_count == 0 {
-            info!("FTS5 回填：chunks 表有 {chunk_count} 条数据但 chunks_fts 为空，执行回填");
-            // Contextual BM25（REQ-PERF-005）：FTS5 索引使用文档名前缀
-            conn.execute_batch(
-                "INSERT INTO chunks_fts (chunk_id, doc_id, content)
-                 SELECT c.id, c.doc_id, 
-                   '文档《' || 
-                   COALESCE(substr(d.file_path, instr(replace(d.file_path, '\\', '/'), '/') + 1), d.file_path)
-                   || '》：\n' || c.content
-                 FROM chunks c
-                 JOIN documents d ON d.id = c.doc_id;",
-            )
-            .context("FTS5 回填失败")?;
-        }
-        Ok(())
-    }
-
-    /// 若 messages 表已有数据但 messages_fts 为空（旧数据库升级场景），回填全文索引。
-    ///
-    /// 避免旧版用户升级后 FTS5 索引为空导致对话搜索无效。
-    fn backfill_messages_fts_if_needed(conn: &rusqlite::Connection) -> anyhow::Result<()> {
-        let msg_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
-            .context("统计 messages 数量失败")?;
-        let fts_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM messages_fts", [], |row| row.get(0))
-            .context("统计 messages_fts 数量失败")?;
-        if msg_count > 0 && fts_count == 0 {
-            info!("FTS5 回填：messages 表有 {msg_count} 条数据但 messages_fts 为空，执行回填");
-            conn.execute_batch(
-                "INSERT INTO messages_fts (message_id, conversation_id, content)
-                 SELECT id, conversation_id, content FROM messages;",
-            )
-            .context("messages_fts 回填失败")?;
-        }
-        Ok(())
-    }
-
-    /// 旧数据库 schema 迁移：增量迁移，**绝不丢弃用户数据**。
-    ///
-    /// 背景：`CREATE TABLE IF NOT EXISTS` 不会修改已有表的列结构。
-    /// 若用户从旧版本升级，表可能缺少新增列或列名变更。
-    ///
-    /// 迁移策略：
-    /// - **简单加列**（documents.status_reason、messages.conversation_id）：
-    ///   使用 `ALTER TABLE ADD COLUMN`，保留全部行数据。
-    /// - **列名变更/列移除**（embeddings.embedding→vector、chunks.session_id）：
-    ///   使用 CREATE-COPY-DROP-RENAME 模式，先建新表、拷贝数据、删旧表、改名。
-    fn migrate_schema(conn: &rusqlite::Connection) -> anyhow::Result<()> {
-        // ── conversations 表：sort_order 列在 v1.16 新增（REQ-IX-002 拖拽排序）──
-        if Self::table_exists(conn, "conversations")?
-            && !Self::has_column(conn, "conversations", "sort_order")?
-        {
-            info!("schema 迁移：conversations 表缺少 sort_order 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute(
-                "ALTER TABLE conversations ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
-                [],
-            )
-            .context("迁移失败：conversations 表添加 sort_order 列失败")?;
-        }
-
-        // ── documents 表：status_reason 列在 Phase 4+ 新增 ──
-        // ALTER TABLE ADD COLUMN 安全，旧行 status_reason = NULL
-        if Self::table_exists(conn, "documents")?
-            && !Self::has_column(conn, "documents", "status_reason")?
-        {
-            info!("schema 迁移：documents 表缺少 status_reason 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute("ALTER TABLE documents ADD COLUMN status_reason TEXT", [])
-                .context("迁移失败：documents 表添加 status_reason 列失败")?;
-        }
-
-        // ── chunks 表：旧版含 session_id 列，新版不含 ──
-        // SQLite ALTER TABLE 不支持 DROP COLUMN（3.35.0 前），
-        // 使用 CREATE-COPY-DROP-RENAME 模式保留分块数据
-        if Self::table_exists(conn, "chunks")? && Self::has_column(conn, "chunks", "session_id")? {
-            info!("schema 迁移：chunks 表含旧版 session_id 列，执行 CREATE-COPY-DROP-RENAME");
-            conn.execute_batch(
-                "CREATE TABLE chunks_new (
-                    id TEXT PRIMARY KEY,
-                    doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-                    content TEXT NOT NULL,
-                    token_count INTEGER NOT NULL,
-                    sequence INTEGER NOT NULL
-                );
-                INSERT INTO chunks_new (id, doc_id, content, token_count, sequence)
-                    SELECT id, doc_id, content, token_count, sequence FROM chunks;
-                DROP TABLE chunks;
-                ALTER TABLE chunks_new RENAME TO chunks;",
-            )
-            .context("迁移失败：chunks 表 schema 重建失败（数据已保留）")?;
-        }
-
-        // ── embeddings 表：旧版列名 embedding（非 vector），可能含 session_id/model_name ──
-        // CREATE-COPY-DROP-RENAME，保留全部向量数据
-        if Self::table_exists(conn, "embeddings")?
-            && !Self::has_column(conn, "embeddings", "vector")?
-            && Self::has_column(conn, "embeddings", "embedding")?
-        {
-            info!(
-                "schema 迁移：embeddings 表列名不匹配（embedding → vector），执行 CREATE-COPY-DROP-RENAME"
-            );
-            conn.execute_batch(
-                "CREATE TABLE embeddings_new (
-                    chunk_id TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
-                    vector BLOB NOT NULL
-                );
-                INSERT INTO embeddings_new (chunk_id, vector)
-                    SELECT chunk_id, embedding FROM embeddings;
-                DROP TABLE embeddings;
-                ALTER TABLE embeddings_new RENAME TO embeddings;",
-            )
-            .context("迁移失败：embeddings 表 schema 重建失败（向量数据已保留）")?;
-        }
-
-        // ── messages 表：conversation_id 列在 Phase 6 新增 ──
-        // ALTER TABLE ADD COLUMN 添加为 nullable；旧消息 conversation_id = NULL
-        // 应用层只通过 conversation_id 查询消息，NULL 的旧消息不会被返回
-        if Self::table_exists(conn, "messages")?
-            && !Self::has_column(conn, "messages", "conversation_id")?
-        {
-            info!("schema 迁移：messages 表缺少 conversation_id 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute("ALTER TABLE messages ADD COLUMN conversation_id TEXT", [])
-                .context("迁移失败：messages 表添加 conversation_id 列失败")?;
-        }
-
-        // ── messages 表：reasoning 列（推理思考过程持久化，P2-1 之后新增）──
-        // ALTER TABLE ADD COLUMN 添加为 nullable；旧消息 reasoning = NULL（无思考过程）
-        if Self::table_exists(conn, "messages")?
-            && !Self::has_column(conn, "messages", "reasoning")?
-        {
-            info!("schema 迁移：messages 表缺少 reasoning 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute("ALTER TABLE messages ADD COLUMN reasoning TEXT", [])
-                .context("迁移失败：messages 表添加 reasoning 列失败")?;
-        }
-
-        // ── messages 表：turn_group + version 列（用户消息编辑版本持久化）──
-        // ALTER TABLE ADD COLUMN 添加；旧消息 turn_group='' / version=1（视为无版本管理）
-        if Self::table_exists(conn, "messages")?
-            && !Self::has_column(conn, "messages", "turn_group")?
-        {
-            info!("schema 迁移：messages 表缺少 turn_group 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute(
-                "ALTER TABLE messages ADD COLUMN turn_group TEXT NOT NULL DEFAULT ''",
-                [],
-            )
-            .context("迁移失败：messages 表添加 turn_group 列失败")?;
-        }
-        if Self::table_exists(conn, "messages")? && !Self::has_column(conn, "messages", "version")?
-        {
-            info!("schema 迁移：messages 表缺少 version 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute(
-                "ALTER TABLE messages ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
-                [],
-            )
-            .context("迁移失败：messages 表添加 version 列失败")?;
-        }
-        // 索引：按 (conversation_id, turn_group, version) 查询版本树
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_messages_turn ON messages(conversation_id, turn_group, version)",
-            [],
-        )
-        .context("迁移失败：创建 idx_messages_turn 索引失败")?;
-
-        // ── messages 表：security_tainted 列（Q05 安全态势分层）──
-        // ALTER TABLE ADD COLUMN 添加；旧消息 security_tainted = 0（未标记）
-        if Self::table_exists(conn, "messages")?
-            && !Self::has_column(conn, "messages", "security_tainted")?
-        {
-            info!("schema 迁移：messages 表缺少 security_tainted 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute(
-                "ALTER TABLE messages ADD COLUMN security_tainted INTEGER NOT NULL DEFAULT 0",
-                [],
-            )
-            .context("迁移失败：messages 表添加 security_tainted 列失败")?;
-        }
-
-        // ── documents 表：original_path 列在 REQ-SYNC-002 新增 ──
-        // ALTER TABLE ADD COLUMN 添加为 nullable；旧文档 original_path = NULL
-        if Self::table_exists(conn, "documents")?
-            && !Self::has_column(conn, "documents", "original_path")?
-        {
-            info!("schema 迁移：documents 表缺少 original_path 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute("ALTER TABLE documents ADD COLUMN original_path TEXT", [])
-                .context("迁移失败：documents 表添加 original_path 列失败")?;
-        }
-
-        // ── documents 表：domain 列在 REQ-VEC-013 新增 ──
-        // ALTER TABLE ADD COLUMN 添加为 nullable；旧文档 domain = NULL（尚未分类）
-        if Self::table_exists(conn, "documents")? && !Self::has_column(conn, "documents", "domain")?
-        {
-            info!("schema 迁移：documents 表缺少 domain 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute("ALTER TABLE documents ADD COLUMN domain TEXT", [])
-                .context("迁移失败：documents 表添加 domain 列失败")?;
-        }
-
-        // ── documents 表：summary 列在 REQ-ING-019 新增 ──
-        // ALTER TABLE ADD COLUMN 添加为 nullable；旧文档 summary = NULL（尚未生成摘要）
-        if Self::table_exists(conn, "documents")?
-            && !Self::has_column(conn, "documents", "summary")?
-        {
-            info!("schema 迁移：documents 表缺少 summary 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute("ALTER TABLE documents ADD COLUMN summary TEXT", [])
-                .context("迁移失败：documents 表添加 summary 列失败")?;
-        }
-
-        // ── documents 表：tags 列在 REQ-ING-022 新增 ──
-        // ALTER TABLE ADD COLUMN 添加；旧文档 tags = '[]'（空标签数组）
-        if Self::table_exists(conn, "documents")? && !Self::has_column(conn, "documents", "tags")? {
-            info!("schema 迁移：documents 表缺少 tags 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute(
-                "ALTER TABLE documents ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
-                [],
-            )
-            .context("迁移失败：documents 表添加 tags 列失败")?;
-        }
-
-        // ── documents 表：workspace_id 列在 REQ-WS-001 新增 ──
-        // ALTER TABLE ADD COLUMN 添加；旧文档 workspace_id = 'default'（默认工作空间）
-        if Self::table_exists(conn, "documents")?
-            && !Self::has_column(conn, "documents", "workspace_id")?
-        {
-            info!("schema 迁移：documents 表缺少 workspace_id 列，执行 ALTER TABLE ADD COLUMN");
-            conn.execute(
-                "ALTER TABLE documents ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'",
-                [],
-            )
-            .context("迁移失败：documents 表添加 workspace_id 列失败")?;
-        }
-
-        // ── workspaces 表：REQ-WS-001 多知识库元数据表 ──
-        // 创建表（如不存在），并插入默认工作空间行（幂等）
-        if !Self::table_exists(conn, "workspaces")? {
-            info!("schema 迁移：创建 workspaces 表");
-            conn.execute_batch(
-                "CREATE TABLE IF NOT EXISTS workspaces (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    created_at INTEGER NOT NULL
-                );",
-            )
-            .context("迁移失败：创建 workspaces 表失败")?;
-        }
-        // 插入默认工作空间（幂等，旧库已有 default 数据但无 workspaces 表行）
-        conn.execute(
-            "INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?1, ?2, ?3)",
-            params!["default", "Default", chrono::Utc::now().timestamp()],
-        )
-        .context("迁移失败：插入默认工作空间失败")?;
-
-        // ── documents 表：workspace_id 索引（REQ-WS-001 数据隔离查询加速）──
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_id)",
-            [],
-        )
-        .context("迁移失败：创建 idx_documents_workspace 索引失败")?;
-
-        // ── entities 表：旧版 schema 可能缺少 chunk_id 列 ──
-        if Self::table_exists(conn, "entities")? && !Self::has_column(conn, "entities", "chunk_id")?
-        {
-            info!("schema 迁移：entities 表 schema 不兼容（缺少 chunk_id 列），重建表");
-            conn.execute("DROP TABLE IF EXISTS entities", [])
-                .context("迁移失败：DROP TABLE entities 失败")?;
-            conn.execute_batch(
-                "CREATE TABLE IF NOT EXISTS entities (
-                    id TEXT PRIMARY KEY,
-                    chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
-                    entity_text TEXT NOT NULL,
-                    entity_type TEXT NOT NULL
-                );",
-            )
-            .context("迁移失败：重建 entities 表失败")?;
-        }
-
-        // ── propositions 表：旧版 schema 可能缺少 chunk_id 列 ──
-        // propositions 是派生索引表（可从 chunk 重新分割），schema 不兼容时直接重建。
-        if Self::table_exists(conn, "propositions")?
-            && !Self::has_column(conn, "propositions", "chunk_id")?
-        {
-            info!("schema 迁移：propositions 表 schema 不兼容（缺少 chunk_id 列），重建表");
-            conn.execute("DROP TABLE IF EXISTS propositions", [])
-                .context("迁移失败：DROP TABLE propositions 失败")?;
-            conn.execute_batch(
-                "CREATE TABLE IF NOT EXISTS propositions (
-                    id TEXT PRIMARY KEY,
-                    chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
-                    content TEXT NOT NULL,
-                    embedding BLOB,
-                    sequence INTEGER NOT NULL
-                );",
-            )
-            .context("迁移失败：重建 propositions 表失败")?;
-        }
-
-        // ── summary_nodes 表：旧版 schema 可能缺少 doc_id 列 ──
-        // summary_nodes 是派生索引表（可从 chunk 重新构建摘要树），schema 不兼容时直接重建。
-        if Self::table_exists(conn, "summary_nodes")?
-            && !Self::has_column(conn, "summary_nodes", "doc_id")?
-        {
-            info!("schema 迁移：summary_nodes 表 schema 不兼容（缺少 doc_id 列），重建表");
-            conn.execute("DROP TABLE IF EXISTS summary_nodes", [])
-                .context("迁移失败：DROP TABLE summary_nodes 失败")?;
-            conn.execute_batch(
-                "CREATE TABLE IF NOT EXISTS summary_nodes (
-                    id TEXT PRIMARY KEY,
-                    doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-                    level INTEGER NOT NULL,
-                    content TEXT NOT NULL,
-                    child_ids TEXT NOT NULL,
-                    embedding BLOB
-                );",
-            )
-            .context("迁移失败：重建 summary_nodes 表失败")?;
-        }
-
-        Ok(())
-    }
-
-    /// 安全：表名白名单校验，防止 PRAGMA table_info SQL 注入。
-    fn validate_table_name(table: &str) -> anyhow::Result<()> {
-        const KNOWN_TABLES: [&str; 20] = [
-            "documents",
-            "chunks",
-            "embeddings",
-            "settings",
-            "conversations",
-            "messages",
-            "embeddings_cache",
-            "entities",
-            "propositions",
-            "summary_nodes",
-            "retrieval_memory",
-            "entity_relations",
-            "wiki_links",
-            "pending_inputs",
-            "session_todos",
-            "scratch_logs",
-            "conversation_bookmarks",
-            "idempotency_records",
-            "budget_records",
-            "workspaces",
-        ];
-        if !KNOWN_TABLES.contains(&table) {
-            bail!("未知表名（不在白名单中）: {table}");
-        }
-        Ok(())
-    }
-
-    /// 检查指定表是否存在。
-    fn table_exists(conn: &rusqlite::Connection, table: &str) -> anyhow::Result<bool> {
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-            params![table],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
-    }
-
-    /// 检查指定表是否包含某列（基于 PRAGMA table_info）。
-    /// 安全：SQLite PRAGMA 不支持参数绑定，先用白名单校验表名防注入。
-    fn has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> anyhow::Result<bool> {
-        Self::validate_table_name(table)?;
-        let sql = format!("PRAGMA table_info(\"{table}\")");
-        let mut stmt = conn.prepare(&sql)?;
-        let col_names: Vec<String> = stmt
-            .query_map([], |row| row.get::<_, String>(1))?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(col_names.iter().any(|c| c == column))
-    }
-
-    /// 加载或生成 AES-256-GCM 密钥（REQ-UI-008；文件权限 0600）。
-    fn load_or_create_cipher(data_dir: &Path) -> anyhow::Result<Aes256Gcm> {
-        let key_path = data_dir.join(SECRET_KEY_FILE);
-        let key_bytes: [u8; 32] = if key_path.exists() {
-            let raw = std::fs::read(&key_path)
-                .with_context(|| format!("读取密钥文件失败: {}", key_path.display()))?;
-            raw.try_into()
-                .map_err(|_| anyhow!("密钥文件损坏（长度非法）: {}", key_path.display()))?
-        } else {
-            let generated: [u8; 32] = rand::random();
-            std::fs::write(&key_path, generated)
-                .with_context(|| format!("写入密钥文件失败: {}", key_path.display()))?;
-            // REQ-SEC-004：密钥文件权限 0600（仅所有者可读写）
-            ensure_file_0600(&key_path)?;
-            generated
-        };
-        Ok(Aes256Gcm::new(aes_gcm::Key::<Aes256Gcm>::from_slice(
-            &key_bytes,
-        )))
-    }
-
-    /// AES-256-GCM 加密 → base64(nonce‖ciphertext)。
-    fn encrypt(&self, plaintext: &str) -> anyhow::Result<String> {
-        let nonce_bytes: [u8; NONCE_LEN] = rand::random();
-        let ciphertext = self
-            .cipher
-            .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_bytes())
-            .map_err(|e| anyhow!("设置项加密失败: {e}"))?;
-        let mut blob = nonce_bytes.to_vec();
-        blob.extend_from_slice(&ciphertext);
-        Ok(B64.encode(blob))
-    }
-
-    /// base64(nonce‖ciphertext) → 解密明文。
-    fn decrypt(&self, encoded: &str) -> anyhow::Result<String> {
-        let blob = B64.decode(encoded).context("设置项 base64 解码失败")?;
-        if blob.len() < NONCE_LEN {
-            bail!("设置项密文长度非法");
-        }
-        let (nonce, ciphertext) = blob.split_at(NONCE_LEN);
-        let plaintext = self
-            .cipher
-            .decrypt(Nonce::from_slice(nonce), ciphertext)
-            .map_err(|e| anyhow!("设置项解密失败（密钥不匹配或数据损坏）: {e}"))?;
-        String::from_utf8(plaintext).context("设置项明文非合法 UTF-8")
-    }
 }
-
 /// 在阻塞线程池执行数据库任务。
 async fn run_db<T>(f: impl FnOnce() -> anyhow::Result<T> + Send + 'static) -> anyhow::Result<T>
 where
@@ -1120,36 +314,6 @@ where
             Err(e)
         }
     }
-}
-
-/// 设置目录权限为 0700（仅 Unix；Windows 无此概念，自动跳过）。
-/// REQ-SEC-004：数据目录仅所有者可读写执行，防止其他用户访问敏感数据。
-#[cfg(unix)]
-fn ensure_dir_0700(dir: &Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-        .with_context(|| format!("设置目录权限 0700 失败: {}", dir.display()))
-}
-
-/// 设置目录权限为 0700（Windows 无此概念，自动跳过）。
-#[cfg(not(unix))]
-fn ensure_dir_0700(_dir: &Path) -> anyhow::Result<()> {
-    Ok(())
-}
-
-/// 设置文件权限为 0600（仅 Unix；Windows 无此概念，自动跳过）。
-/// REQ-SEC-004：敏感文件（密钥、数据库）仅所有者可读写。
-#[cfg(unix)]
-fn ensure_file_0600(file: &Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("设置文件权限 0600 失败: {}", file.display()))
-}
-
-/// 设置文件权限为 0600（Windows 无此概念，自动跳过）。
-#[cfg(not(unix))]
-fn ensure_file_0600(_file: &Path) -> anyhow::Result<()> {
-    Ok(())
 }
 
 fn status_to_row(status: &DocStatus) -> (&'static str, Option<String>) {
@@ -1878,7 +1042,7 @@ Ok(())
     }
 
     async fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()> {
-        let encrypted = self.encrypt(value)?;
+        let encrypted = crypto_encrypt(&self.cipher, value)?;
         let pool = self.pool.clone();
         let key = key.to_string();
         run_db(move || {
@@ -1907,7 +1071,7 @@ Ok(())
         })
         .await?;
         match encoded {
-            Some(v) => Ok(Some(self.decrypt(&v)?)),
+            Some(v) => Ok(Some(crypto_decrypt(&self.cipher, &v)?)),
             None => Ok(None),
         }
     }
@@ -1942,7 +1106,7 @@ Ok(())
         // 解密每个值
         let mut results = Vec::with_capacity(encoded_pairs.len());
         for (key, encoded) in encoded_pairs {
-            match self.decrypt(&encoded) {
+            match crypto_decrypt(&self.cipher, &encoded) {
                 Ok(value) => results.push((key, value)),
                 Err(e) => {
                     warn!("设置项 {key} 解密失败，跳过: {e}");
