@@ -3,6 +3,7 @@
 //! rusqlite 为同步 API，全部数据库操作经 `spawn_blocking` 执行，严禁阻塞 async executor。
 //!
 //! v2.0 S01 拆分：schema 常量、migration 函数、crypto 辅助已移至 `storage/` 子模块。
+//! v2.0 S02 拆分：文档/会话/消息表 CRUD 操作已移至 `storage::documents` / `storage::conversations` / `storage::messages`。
 
 #[path = "storage/mod.rs"]
 pub(crate) mod storage;
@@ -11,11 +12,11 @@ use std::path::Path;
 use tracing::{error, info, warn};
 
 // 重导出子模块（保持外部引用路径不变）
-pub(crate) use storage::{
-    DOC_COLS, PRAGMAS, Pool, ensure_dir_0700, init_schema, load_or_create_cipher,
-};
+pub(crate) use storage::{PRAGMAS, Pool, ensure_dir_0700, init_schema, load_or_create_cipher};
 // crypto 辅助函数（接收 &Aes256Gcm 参数的自由函数）
 use storage::{decrypt as crypto_decrypt, encrypt as crypto_encrypt};
+// S02 拆分：CRUD 子模块
+use storage::{conversations, documents, messages};
 
 /// 数据库完整性检查结果（REQ-ERR-004）。
 ///
@@ -281,7 +282,9 @@ impl SqliteStorage {
     }
 }
 /// 在阻塞线程池执行数据库任务。
-async fn run_db<T>(f: impl FnOnce() -> anyhow::Result<T> + Send + 'static) -> anyhow::Result<T>
+pub(crate) async fn run_db<T>(
+    f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
+) -> anyhow::Result<T>
 where
     T: Send + 'static,
 {
@@ -298,7 +301,7 @@ where
 ///
 /// **修复**：此辅助函数在操作成功时 `COMMIT`，失败时 `ROLLBACK`，
 /// 保证连接归还池时事务已关闭。
-fn with_transaction<F, T>(conn: &rusqlite::Connection, f: F) -> anyhow::Result<T>
+pub(crate) fn with_transaction<F, T>(conn: &rusqlite::Connection, f: F) -> anyhow::Result<T>
 where
     F: FnOnce(&rusqlite::Connection) -> anyhow::Result<T>,
 {
@@ -316,7 +319,7 @@ where
     }
 }
 
-fn status_to_row(status: &DocStatus) -> (&'static str, Option<String>) {
+pub(crate) fn status_to_row(status: &DocStatus) -> (&'static str, Option<String>) {
     match status {
         DocStatus::Pending => ("pending", None),
         DocStatus::Processing => ("processing", None),
@@ -325,7 +328,7 @@ fn status_to_row(status: &DocStatus) -> (&'static str, Option<String>) {
     }
 }
 
-fn row_to_status(status: &str, reason: Option<String>) -> DocStatus {
+pub(crate) fn row_to_status(status: &str, reason: Option<String>) -> DocStatus {
     match status {
         "pending" => DocStatus::Pending,
         "processing" => DocStatus::Processing,
@@ -335,7 +338,7 @@ fn row_to_status(status: &str, reason: Option<String>) -> DocStatus {
     }
 }
 
-fn row_to_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
+pub(crate) fn row_to_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
     let status: String = row.get(3)?;
     let reason: Option<String> = row.get(4)?;
     // tags 列存储为 JSON 数组字符串（如 `["法律","重要"]`）
@@ -375,12 +378,12 @@ fn row_to_memory_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryEntry>
 }
 
 /// f32 向量 → 小端字节（零依赖序列化）。
-fn vec_to_bytes(vector: &[f32]) -> Vec<u8> {
+pub(crate) fn vec_to_bytes(vector: &[f32]) -> Vec<u8> {
     vector.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
 /// 小端字节 → f32 向量（长度校验，绝不 Panic）。
-fn bytes_to_vec(bytes: &[u8]) -> anyhow::Result<Vec<f32>> {
+pub(crate) fn bytes_to_vec(bytes: &[u8]) -> anyhow::Result<Vec<f32>> {
     if !bytes.len().is_multiple_of(4) {
         bail!("向量字节长度非法（非 4 的倍数）: {}", bytes.len());
     }
@@ -390,7 +393,7 @@ fn bytes_to_vec(bytes: &[u8]) -> anyhow::Result<Vec<f32>> {
         .collect())
 }
 
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+pub(crate) fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
     }
@@ -608,49 +611,11 @@ impl SqliteStorage {
 
 impl Storage for SqliteStorage {
     async fn add_document(&self, doc: &Document) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let doc = doc.clone();
-        run_db(move || {
-            let (status, reason) = status_to_row(&doc.status);
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-&format!(
-"INSERT OR REPLACE INTO documents ({DOC_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
-            ),
-            params![
-                doc.id,
-                doc.file_path,
-                doc.file_hash,
-                status,
-                reason,
-                doc.created_at,
-                doc.original_path,
-                doc.domain,
-                doc.summary,
-                serde_json::to_string(&doc.tags).unwrap_or_else(|_| "[]".to_string()),
-                doc.workspace_id,
-],
-)
-            .context("写入文档失败")?;
-            Ok(())
-        })
-        .await
+        documents::add_document(&self.pool, doc.clone()).await
     }
 
     async fn update_doc_status(&self, doc_id: &str, status: DocStatus) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let doc_id = doc_id.to_string();
-        run_db(move || {
-            let (status, reason) = status_to_row(&status);
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "UPDATE documents SET status = ?1, status_reason = ?2 WHERE id = ?3",
-                params![status, reason, doc_id],
-            )
-            .context("更新文档状态失败")?;
-            Ok(())
-        })
-        .await
+        documents::update_doc_status(&self.pool, doc_id.to_string(), status).await
     }
 
     async fn add_chunk(&self, chunk: &Chunk) -> anyhow::Result<()> {
@@ -976,69 +941,23 @@ Ok(())
     }
 
     async fn find_document_by_hash(&self, hash: &str) -> anyhow::Result<Option<Document>> {
-        let pool = self.pool.clone();
-        let hash = hash.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {DOC_COLS} FROM documents WHERE file_hash = ?1 LIMIT 1"
-            ))?;
-            let mut rows = stmt.query_map(params![hash], row_to_document)?;
-            match rows.next() {
-                Some(row) => Ok(Some(row?)),
-                None => Ok(None),
-            }
-        })
-        .await
+        documents::find_document_by_hash(&self.pool, hash.to_string()).await
     }
 
     async fn count_documents(&self) -> anyhow::Result<usize> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let count: i64 = conn
-                .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))
-                .context("统计文档数失败")?;
-            Ok(count as usize)
-        })
-        .await
+        documents::count_documents(&self.pool).await
     }
 
     async fn count_chunks(&self) -> anyhow::Result<usize> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let count: i64 = conn
-                .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))
-                .context("统计分块数失败")?;
-            Ok(count as usize)
-        })
-        .await
+        documents::count_chunks(&self.pool).await
     }
 
     async fn count_embeddings(&self) -> anyhow::Result<usize> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let count: i64 = conn
-                .query_row("SELECT COUNT(*) FROM embeddings", [], |row| row.get(0))
-                .context("统计向量数失败")?;
-            Ok(count as usize)
-        })
-        .await
+        documents::count_embeddings(&self.pool).await
     }
 
     async fn cleanup_zombies(&self) -> anyhow::Result<usize> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let affected = conn.execute(
-                "UPDATE documents SET status = 'failed', status_reason = ?1 WHERE status = 'processing'",
-                params!["崩溃恢复：上次会话中断"],
-            )?;
-            Ok(affected)
-        })
-        .await
+        documents::cleanup_zombies(&self.pool).await
     }
 
     async fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()> {
@@ -1117,44 +1036,11 @@ Ok(())
     }
 
     async fn create_conversation(&self, conversation: &Conversation) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let c = conversation.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT OR IGNORE INTO conversations (id, workspace_id, title, created_at, sort_order) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![c.id, c.workspace_id, c.title, c.created_at, c.sort_order],
-            )
-            .context("写入会话失败")?;
-            Ok(())
-        })
-        .await
+        conversations::create_conversation(&self.pool, conversation.clone()).await
     }
 
     async fn list_conversations(&self, workspace_id: &str) -> anyhow::Result<Vec<Conversation>> {
-        let pool = self.pool.clone();
-        let workspace_id = workspace_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, workspace_id, title, created_at, sort_order FROM conversations WHERE workspace_id = ?1 ORDER BY sort_order ASC, created_at DESC, rowid DESC",
-            )?;
-            let rows = stmt.query_map(params![workspace_id], |row| {
-                Ok(Conversation {
-                    id: row.get(0)?,
-                    workspace_id: row.get(1)?,
-                    title: row.get(2)?,
-                    created_at: row.get(3)?,
-                    sort_order: row.get(4)?,
-                })
-            })?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            Ok(out)
-        })
-        .await
+        conversations::list_conversations(&self.pool, workspace_id.to_string()).await
     }
 
     async fn list_conversations_paginated(
@@ -1163,59 +1049,21 @@ Ok(())
         limit: usize,
         offset: usize,
     ) -> anyhow::Result<Vec<Conversation>> {
-        let pool = self.pool.clone();
-        let workspace_id = workspace_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, workspace_id, title, created_at, sort_order FROM conversations WHERE workspace_id = ?1 ORDER BY sort_order ASC, created_at DESC, rowid DESC LIMIT ?2 OFFSET ?3",
-            )?;
-            let rows = stmt.query_map(params![workspace_id, limit as i64, offset as i64], |row| {
-                Ok(Conversation {
-                    id: row.get(0)?,
-                    workspace_id: row.get(1)?,
-                    title: row.get(2)?,
-                    created_at: row.get(3)?,
-                    sort_order: row.get(4)?,
-                })
-            })?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            Ok(out)
-        })
+        conversations::list_conversations_paginated(
+            &self.pool,
+            workspace_id.to_string(),
+            limit,
+            offset,
+        )
         .await
     }
 
     async fn count_conversations(&self, workspace_id: &str) -> anyhow::Result<usize> {
-        let pool = self.pool.clone();
-        let workspace_id = workspace_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM conversations WHERE workspace_id = ?1",
-                    params![workspace_id],
-                    |row| row.get(0),
-                )
-                .context("统计会话数失败")?;
-            Ok(count as usize)
-        })
-        .await
+        conversations::count_conversations(&self.pool, workspace_id.to_string()).await
     }
 
     async fn delete_conversation(&self, id: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let id = id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // 外键级联：messages 随会话一并清理（PRAGMA foreign_keys = ON）
-            conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])
-                .context("删除会话失败")?;
-            Ok(())
-        })
-        .await
+        conversations::delete_conversation(&self.pool, id.to_string()).await
     }
 
     // ========================================================================
@@ -1223,160 +1071,37 @@ Ok(())
     // ========================================================================
 
     async fn create_workspace(&self, workspace: &echomind_models::Workspace) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let ws = workspace.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?1, ?2, ?3)",
-                params![ws.id, ws.name, ws.created_at],
-            )
-            .context("写入工作空间失败")?;
-            Ok(())
-        })
-        .await
+        conversations::create_workspace(&self.pool, workspace.clone()).await
     }
 
     async fn list_workspaces(&self) -> anyhow::Result<Vec<echomind_models::Workspace>> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, name, created_at FROM workspaces ORDER BY created_at ASC, rowid ASC",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                Ok(echomind_models::Workspace {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    created_at: row.get(2)?,
-                })
-            })?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            Ok(out)
-        })
-        .await
+        conversations::list_workspaces(&self.pool).await
     }
 
     async fn rename_workspace(&self, id: &str, name: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let id = id.to_string();
-        let name = name.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let affected = conn
-                .execute(
-                    "UPDATE workspaces SET name = ?1 WHERE id = ?2",
-                    params![name, id],
-                )
-                .context("重命名工作空间失败")?;
-            if affected == 0 {
-                bail!("工作空间不存在: {id}");
-            }
-            Ok(())
-        })
-        .await
+        conversations::rename_workspace(&self.pool, id.to_string(), name.to_string()).await
     }
 
     async fn delete_workspace(&self, id: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let id = id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let tx = conn.unchecked_transaction()?;
-
-            // 1. 删除该工作空间的全部文档（级联清理 chunks/embeddings/entities 等）
-            tx.execute(
-                "DELETE FROM documents WHERE workspace_id = ?1",
-                params![&id],
-            )
-            .context("删除工作空间文档失败")?;
-
-            // 2. 删除该工作空间的全部会话（级联清理 messages）
-            tx.execute(
-                "DELETE FROM conversations WHERE workspace_id = ?1",
-                params![&id],
-            )
-            .context("删除工作空间会话失败")?;
-
-            // 3. 删除工作空间元数据行
-            tx.execute("DELETE FROM workspaces WHERE id = ?1", params![&id])
-                .context("删除工作空间元数据失败")?;
-
-            tx.commit().context("提交工作空间删除事务失败")?;
-            Ok(())
-        })
-        .await
+        conversations::delete_workspace(&self.pool, id.to_string()).await
     }
 
     async fn get_workspace_stats(
         &self,
         id: &str,
     ) -> anyhow::Result<echomind_models::WorkspaceStats> {
-        let pool = self.pool.clone();
-        let id = id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let doc_count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM documents WHERE workspace_id = ?1",
-                    params![&id],
-                    |row| row.get(0),
-                )
-                .context("统计工作空间文档数失败")?;
-            let conv_count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM conversations WHERE workspace_id = ?1",
-                    params![&id],
-                    |row| row.get(0),
-                )
-                .context("统计工作空间会话数失败")?;
-            Ok(echomind_models::WorkspaceStats {
-                document_count: doc_count as usize,
-                conversation_count: conv_count as usize,
-            })
-        })
-        .await
+        conversations::get_workspace_stats(&self.pool, id.to_string()).await
     }
 
     async fn count_documents_in_workspace(&self, workspace_id: &str) -> anyhow::Result<usize> {
-        let pool = self.pool.clone();
-        let workspace_id = workspace_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM documents WHERE workspace_id = ?1",
-                    params![&workspace_id],
-                    |row| row.get(0),
-                )
-                .context("统计工作空间文档数失败")?;
-            Ok(count as usize)
-        })
-        .await
+        documents::count_documents_in_workspace(&self.pool, workspace_id.to_string()).await
     }
 
     async fn list_documents_in_workspace(
         &self,
         workspace_id: &str,
     ) -> anyhow::Result<Vec<Document>> {
-        let pool = self.pool.clone();
-        let workspace_id = workspace_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {DOC_COLS} FROM documents WHERE workspace_id = ?1 ORDER BY created_at DESC, rowid DESC"
-            ))?;
-            let rows = stmt.query_map(params![&workspace_id], row_to_document)?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            Ok(out)
-        })
-        .await
+        documents::list_documents_in_workspace(&self.pool, workspace_id.to_string()).await
     }
 
     /// 迁移文档到目标工作空间（REQ-WS-004 跨知识库迁移）。
@@ -1387,85 +1112,27 @@ Ok(())
         doc_id: &str,
         target_workspace_id: &str,
     ) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let doc_id = doc_id.to_string();
-        let target_ws = target_workspace_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "UPDATE documents SET workspace_id = ?1 WHERE id = ?2",
-                params![&target_ws, &doc_id],
-            )
-            .context("迁移文档失败")?;
-            Ok(())
-        })
+        documents::migrate_document(
+            &self.pool,
+            doc_id.to_string(),
+            target_workspace_id.to_string(),
+        )
         .await
     }
 
     /// 按 ID 查找单个会话（REQ-EXP-001 导出功能）。
     /// 直接 SQL 查询，无需 workspace_id 过滤（会话 ID 全局唯一）。
     async fn get_conversation(&self, id: &str) -> anyhow::Result<Option<Conversation>> {
-        let pool = self.pool.clone();
-        let id = id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, workspace_id, title, created_at, sort_order FROM conversations WHERE id = ?1",
-            )?;
-            let mut rows = stmt.query_map(params![id], |row| {
-                Ok(Conversation {
-                    id: row.get(0)?,
-                    workspace_id: row.get(1)?,
-                    title: row.get(2)?,
-                    created_at: row.get(3)?,
-                    sort_order: row.get(4)?,
-                })
-            })?;
-            match rows.next() {
-                Some(row) => Ok(Some(row?)),
-                None => Ok(None),
-            }
-        })
-        .await
+        conversations::get_conversation(&self.pool, id.to_string()).await
     }
 
     async fn update_conversation_title(&self, id: &str, title: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let id = id.to_string();
-        let title = title.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "UPDATE conversations SET title = ?1 WHERE id = ?2",
-                params![title, id],
-            )
-            .context("更新会话标题失败")?;
-            Ok(())
-        })
-        .await
+        conversations::update_conversation_title(&self.pool, id.to_string(), title.to_string())
+            .await
     }
 
     async fn reorder_conversations(&self, ordered_ids: &[String]) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let ids: Vec<(String, i64)> = ordered_ids
-            .iter()
-            .enumerate()
-            .map(|(idx, id)| (id.clone(), (idx as i64) + 1))
-            .collect();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let tx = conn.unchecked_transaction()?;
-            for (id, sort_order) in &ids {
-                tx.execute(
-                    "UPDATE conversations SET sort_order = ?1 WHERE id = ?2",
-                    params![sort_order, id],
-                )
-                .context("更新会话排序失败")?;
-            }
-            tx.commit().context("提交会话排序事务失败")?;
-            Ok(())
-        })
-        .await
+        conversations::reorder_conversations(&self.pool, ordered_ids.to_vec()).await
     }
 
     async fn add_message(
@@ -1473,86 +1140,11 @@ Ok(())
         conversation_id: &str,
         message: &ChatMessage,
     ) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        let message = message.clone();
-        run_db(move || {
-            let sources_json = match &message.sources {
-                Some(sources) => Some(serde_json::to_string(sources).context("序列化引用来源失败")?),
-                None => None,
-            };
-            let reasoning = message.reasoning.clone();
-            let turn_group = message.turn_group.clone().unwrap_or_default();
-            let version = message.version.unwrap_or(1);
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, sources, reasoning, turn_group, version, created_at, security_tainted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![
-                    uuid::Uuid::new_v4().to_string(),
-                    conversation_id,
-                    message.role,
-                    message.content,
-                    sources_json,
-                    reasoning,
-                    turn_group,
-                    version,
-                    chrono::Utc::now().timestamp(),
-                    0, // security_tainted 默认 0（未标记）
-                ],
-            )
-            .context("写入消息失败")?;
-            Ok(())
-        })
-        .await
+        messages::add_message(&self.pool, conversation_id.to_string(), message.clone()).await
     }
 
     async fn list_messages(&self, conversation_id: &str) -> anyhow::Result<Vec<ChatMessage>> {
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-                "SELECT id, role, content, sources, reasoning, turn_group, version FROM messages WHERE conversation_id = ?1 ORDER BY rowid ASC",
-            )?;
-            let rows = stmt.query_map(params![conversation_id], |row| {
-                let sources_json: Option<String> = row.get(3)?;
-                let reasoning: Option<String> = row.get(4)?;
-                let turn_group: Option<String> = row.get(5)?;
-                let version: Option<i32> = row.get(6)?;
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    sources_json,
-                    reasoning,
-                    turn_group,
-                    version,
-                ))
-            })?;
-            let mut out = Vec::new();
-            for row in rows {
-                let (id, role, content, sources_json, reasoning, turn_group, version) = row?;
-                let sources = match sources_json {
-                    Some(json) => Some(
-                        serde_json::from_str(&json).context("反序列化引用来源失败")?,
-                    ),
-                    None => None,
-                };
-                let tg = turn_group.filter(|s| !s.is_empty());
-                let ver = if tg.is_some() { Some(version.unwrap_or(1)) } else { None };
-                out.push(ChatMessage {
-                    id: Some(id),
-                    role,
-                    content,
-                    sources,
-                    reasoning,
-                    turn_group: tg,
-                    version: ver,
-                });
-            }
-            Ok(out)
-        })
-        .await
+        messages::list_messages(&self.pool, conversation_id.to_string()).await
     }
 
     async fn list_messages_paginated(
@@ -1561,76 +1153,12 @@ Ok(())
         limit: usize,
         offset: usize,
     ) -> anyhow::Result<Vec<ChatMessage>> {
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // ORDER BY rowid DESC：从最新消息向前取；结果反转恢复正序（最旧在前）
-            let mut stmt = conn.prepare(
-                "SELECT id, role, content, sources, reasoning, turn_group, version FROM messages WHERE conversation_id = ?1 ORDER BY rowid DESC LIMIT ?2 OFFSET ?3",
-            )?;
-            let rows = stmt.query_map(params![conversation_id, limit as i64, offset as i64], |row| {
-                let sources_json: Option<String> = row.get(3)?;
-                let reasoning: Option<String> = row.get(4)?;
-                let turn_group: Option<String> = row.get(5)?;
-                let version: Option<i32> = row.get(6)?;
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    sources_json,
-                    reasoning,
-                    turn_group,
-                    version,
-                ))
-            })?;
-            #[allow(clippy::type_complexity)]
-            let mut out: Vec<(String, String, String, Option<String>, Option<String>, Option<String>, Option<i32>)> = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            // 反转：DESC 查询返回最新在前，翻转为正序（最旧在前）
-            out.reverse();
-            let mut messages = Vec::with_capacity(out.len());
-            for (id, role, content, sources_json, reasoning, turn_group, version) in out {
-                let sources = match sources_json {
-                    Some(json) => Some(
-                        serde_json::from_str(&json).context("反序列化引用来源失败")?,
-                    ),
-                    None => None,
-                };
-                let tg = turn_group.filter(|s| !s.is_empty());
-                let ver = if tg.is_some() { Some(version.unwrap_or(1)) } else { None };
-                messages.push(ChatMessage {
-                    id: Some(id),
-                    role,
-                    content,
-                    sources,
-                    reasoning,
-                    turn_group: tg,
-                    version: ver,
-                });
-            }
-            Ok(messages)
-        })
-        .await
+        messages::list_messages_paginated(&self.pool, conversation_id.to_string(), limit, offset)
+            .await
     }
 
     async fn count_messages(&self, conversation_id: &str) -> anyhow::Result<usize> {
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1",
-                    params![conversation_id],
-                    |row| row.get(0),
-                )
-                .context("统计消息数失败")?;
-            Ok(count as usize)
-        })
-        .await
+        messages::count_messages(&self.pool, conversation_id.to_string()).await
     }
 
     async fn delete_messages_by_ids(
@@ -1638,32 +1166,11 @@ Ok(())
         conversation_id: &str,
         message_ids: &[String],
     ) -> anyhow::Result<usize> {
-        if message_ids.is_empty() {
-            return Ok(0);
-        }
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        let ids = message_ids.to_vec();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // 构建 IN (?, ?, ...) 占位符
-            let placeholders: Vec<String> = (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
-            let sql = format!(
-                "DELETE FROM messages WHERE conversation_id = ?1 AND id IN ({})",
-                placeholders.join(", ")
-            );
-            let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(ids.len() + 1);
-            params_vec.push(Box::new(conversation_id.clone()));
-            for id in &ids {
-                params_vec.push(Box::new(id.clone()));
-            }
-            let param_refs: Vec<&dyn rusqlite::ToSql> =
-                params_vec.iter().map(|p| p.as_ref()).collect();
-            let deleted = conn
-                .execute(&sql, param_refs.as_slice())
-                .context("批量删除消息失败")?;
-            Ok(deleted)
-        })
+        messages::delete_messages_by_ids(
+            &self.pool,
+            conversation_id.to_string(),
+            message_ids.to_vec(),
+        )
         .await
     }
 
@@ -1681,42 +1188,12 @@ Ok(())
         original_message_id: &str,
         turn_group: &str,
     ) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        let original_message_id = original_message_id.to_string();
-        let turn_group = turn_group.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            with_transaction(&conn, |conn| {
-                // 1) 升级原始 user 行（未升级或已属于同一 turn_group 均可；属于其他 turn_group 报错）
-                let user_updated = conn.execute(
-                    "UPDATE messages SET turn_group = ?1, version = 1 \
-WHERE id = ?2 AND conversation_id = ?3 AND role = 'user' \
-AND (turn_group = '' OR turn_group = ?1)",
-                    params![turn_group, original_message_id, conversation_id],
-                )?;
-                if user_updated == 0 {
-                    anyhow::bail!(
-                        "原始消息行不存在或已被其他 turn_group 占用: id={original_message_id}"
-                    );
-                }
-                // 2) 升级紧随其后的 assistant 行（若存在；原问答未生成回答时跳过）。
-                //    约束：assistant 行 rowid 必须大于 user 行，且小于下一个 user 行（同一问答对）。
-                conn.execute(
-                    "UPDATE messages SET turn_group = ?1, version = 1 \
-WHERE id = (SELECT id FROM messages WHERE conversation_id = ?2 \
-AND role = 'assistant' \
-AND (turn_group = '' OR turn_group = ?1) \
-AND rowid > (SELECT rowid FROM messages WHERE id = ?3) \
-AND rowid < COALESCE((SELECT MIN(rowid) FROM messages WHERE conversation_id = ?2 \
-AND role = 'user' AND turn_group = '' \
-AND rowid > (SELECT rowid FROM messages WHERE id = ?3)), 9223372036854775807) \
-ORDER BY rowid ASC LIMIT 1)",
-                    params![turn_group, conversation_id, original_message_id],
-                )?;
-                Ok(())
-            })
-        })
+        messages::promote_original_turn(
+            &self.pool,
+            conversation_id.to_string(),
+            original_message_id.to_string(),
+            turn_group.to_string(),
+        )
         .await
     }
 
@@ -1726,20 +1203,12 @@ ORDER BY rowid ASC LIMIT 1)",
         turn_group: &str,
         active_version: i32,
     ) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        let turn_group = turn_group.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "INSERT INTO turn_active_versions (conversation_id, turn_group, active_version) \
-VALUES (?1, ?2, ?3) \
-ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
-                params![conversation_id, turn_group, active_version],
-            )
-            .context("设置轮次活跃版本失败")?;
-            Ok(())
-        })
+        messages::set_turn_active_version(
+            &self.pool,
+            conversation_id.to_string(),
+            turn_group.to_string(),
+            active_version,
+        )
         .await
     }
 
@@ -1747,43 +1216,11 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
         &self,
         conversation_id: &str,
     ) -> anyhow::Result<Vec<TurnActiveVersion>> {
-        let pool = self.pool.clone();
-        let conversation_id = conversation_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(
-"SELECT turn_group, active_version FROM turn_active_versions WHERE conversation_id = ?1",
-)?;
-            let rows = stmt.query_map(params![conversation_id], |row| {
-                Ok(TurnActiveVersion {
-                    turn_group: row.get(0)?,
-                    active_version: row.get(1)?,
-                })
-            })?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            Ok(out)
-        })
-        .await
+        messages::get_turn_active_versions(&self.pool, conversation_id.to_string()).await
     }
 
     async fn list_documents(&self) -> anyhow::Result<Vec<Document>> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {DOC_COLS} FROM documents ORDER BY created_at DESC, rowid DESC"
-            ))?;
-            let rows = stmt.query_map([], row_to_document)?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            Ok(out)
-        })
-        .await
+        documents::list_documents(&self.pool).await
     }
 
     async fn list_documents_paginated(
@@ -1791,37 +1228,11 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
         limit: usize,
         offset: usize,
     ) -> anyhow::Result<Vec<Document>> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {DOC_COLS} FROM documents ORDER BY created_at DESC, rowid DESC LIMIT ?1 OFFSET ?2"
-            ))?;
-            let rows = stmt.query_map(params![limit as i64, offset as i64], row_to_document)?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            Ok(out)
-        })
-        .await
+        documents::list_documents_paginated(&self.pool, limit, offset).await
     }
 
     async fn delete_document(&self, doc_id: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let doc_id = doc_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // 先清理 FTS5 索引（外键级联不触发虚拟表清理，需手动）
-            conn.execute("DELETE FROM chunks_fts WHERE doc_id = ?1", params![doc_id])
-                .context("清理 FTS5 索引失败")?;
-            // 外键级联链：documents → chunks → embeddings（PRAGMA foreign_keys = ON）
-            conn.execute("DELETE FROM documents WHERE id = ?1", params![doc_id])
-                .context("删除文档失败")?;
-            Ok(())
-        })
-        .await?;
-        // **性能优化**：使内存向量缓存失效
+        documents::delete_document(&self.pool, doc_id.to_string()).await?;
         self.invalidate_vector_cache();
         Ok(())
     }
@@ -1985,80 +1396,7 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
         query: &str,
         limit: usize,
     ) -> anyhow::Result<Vec<MessageSearchResult>> {
-        let trimmed = query.trim();
-        if trimmed.is_empty() || limit == 0 {
-            return Ok(Vec::new());
-        }
-        let pool = self.pool.clone();
-        let query = trimmed.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-
-            // 短查询回退：trigram 分词器要求 ≥3 字符
-            if query.chars().count() < 3 {
-                let pattern = format!("%{query}%");
-                let mut stmt = conn.prepare(
-                    "SELECT m.id, m.conversation_id, m.role, m.content, m.created_at,
-                            COALESCE(c.title, '')
-                     FROM messages m
-                     LEFT JOIN conversations c ON c.id = m.conversation_id
-                     WHERE m.content LIKE ?1
-                     ORDER BY m.created_at DESC
-                     LIMIT ?2",
-                )?;
-                let rows = stmt.query_map(params![pattern, limit as i64], |row| {
-                    Ok(MessageSearchResult {
-                        message_id: row.get(0)?,
-                        conversation_id: row.get(1)?,
-                        conversation_title: row.get(5)?,
-                        role: row.get(2)?,
-                        content: row.get(3)?,
-                        score: 1.0,
-                        created_at: row.get(4)?,
-                    })
-                })?;
-                let mut results = Vec::new();
-                for row in rows {
-                    results.push(row?);
-                }
-                return Ok(results);
-            }
-
-            // FTS5 分词查询
-            let fts_query = build_fts5_or_query(&query);
-            if fts_query.is_empty() {
-                return Ok(Vec::new());
-            }
-            let mut stmt = conn.prepare(
-                "SELECT m.id, m.conversation_id, m.role, m.content, m.created_at,
-                        COALESCE(c.title, ''), bm25(messages_fts)
-                 FROM messages_fts fts
-                 JOIN messages m ON m.id = fts.message_id
-                 LEFT JOIN conversations c ON c.id = m.conversation_id
-                 WHERE messages_fts MATCH ?1
-                 ORDER BY bm25(messages_fts)
-                 LIMIT ?2",
-            )?;
-            let rows = stmt.query_map(params![fts_query, limit as i64], |row| {
-                let score_val: f64 = row.get(6)?;
-                Ok(MessageSearchResult {
-                    message_id: row.get(0)?,
-                    conversation_id: row.get(1)?,
-                    conversation_title: row.get(5)?,
-                    role: row.get(2)?,
-                    content: row.get(3)?,
-                    // bm25() 返回负值（越小越好），取负转为正值（越大越好）
-                    score: -score_val,
-                    created_at: row.get(4)?,
-                })
-            })?;
-            let mut results = Vec::new();
-            for row in rows {
-                results.push(row?);
-            }
-            Ok(results)
-        })
-        .await
+        messages::search_messages(&self.pool, query, limit).await
     }
 
     // ---- 嵌入缓存：按内容指纹去重（全尺度性能优化）----
@@ -2186,20 +1524,7 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
     ///
     /// 使用 `idx_documents_original_path` 索引加速查询，避免全表扫描。
     async fn find_document_by_original_path(&self, path: &str) -> anyhow::Result<Option<Document>> {
-        let pool = self.pool.clone();
-        let path = path.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {DOC_COLS} FROM documents WHERE original_path = ?1 LIMIT 1"
-            ))?;
-            let mut rows = stmt.query_map(params![path], row_to_document)?;
-            match rows.next() {
-                Some(row) => Ok(Some(row?)),
-                None => Ok(None),
-            }
-        })
-        .await
+        documents::find_document_by_original_path(&self.pool, path.to_string()).await
     }
 
     /// 按源文件路径前缀查找文档（REQ-SYNC-002 增量同步用）。
@@ -2211,23 +1536,7 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
         &self,
         prefix: &str,
     ) -> anyhow::Result<Vec<Document>> {
-        let pool = self.pool.clone();
-        let prefix = prefix.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            // LIKE 'prefix%' 可利用索引（前缀匹配），比默认实现的全表遍历高效
-            let pattern = format!("{prefix}%");
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {DOC_COLS} FROM documents WHERE original_path LIKE ?1"
-            ))?;
-            let rows = stmt.query_map(params![pattern], row_to_document)?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            Ok(out)
-        })
-        .await
+        documents::find_documents_by_original_path_prefix(&self.pool, prefix.to_string()).await
     }
 
     /// 更新文档领域分类标签（REQ-VEC-013 领域画像）。
@@ -2279,34 +1588,7 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
     /// 读取当前 tags JSON 数组 → 追加新标签（去重） → 写回。
     /// 标签为空字符串时直接返回 Ok（空标签无意义）。
     async fn add_document_tag(&self, doc_id: &str, tag: &str) -> anyhow::Result<()> {
-        let tag = tag.trim().to_string();
-        if tag.is_empty() {
-            return Ok(());
-        }
-        let pool = self.pool.clone();
-        let doc_id = doc_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let tags_json: String = conn
-                .query_row(
-                    "SELECT tags FROM documents WHERE id = ?1",
-                    params![doc_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or_else(|_| "[]".to_string());
-            let mut tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-            if !tags.iter().any(|t| t == &tag) {
-                tags.push(tag);
-                let new_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
-                conn.execute(
-                    "UPDATE documents SET tags = ?1 WHERE id = ?2",
-                    params![new_json, doc_id],
-                )
-                .context("更新文档标签失败")?;
-            }
-            Ok(())
-        })
-        .await
+        documents::add_document_tag(&self.pool, doc_id.to_string(), tag.to_string()).await
     }
 
     /// 移除文档标签（REQ-ING-022）。
@@ -2314,32 +1596,7 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
     /// 读取当前 tags JSON 数组 → 移除指定标签 → 写回。
     /// 标签不存在时幂等返回 Ok。
     async fn remove_document_tag(&self, doc_id: &str, tag: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let doc_id = doc_id.to_string();
-        let tag = tag.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let tags_json: String = conn
-                .query_row(
-                    "SELECT tags FROM documents WHERE id = ?1",
-                    params![doc_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or_else(|_| "[]".to_string());
-            let mut tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-            let before_len = tags.len();
-            tags.retain(|t| t != &tag);
-            if tags.len() != before_len {
-                let new_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
-                conn.execute(
-                    "UPDATE documents SET tags = ?1 WHERE id = ?2",
-                    params![new_json, doc_id],
-                )
-                .context("更新文档标签失败")?;
-            }
-            Ok(())
-        })
-        .await
+        documents::remove_document_tag(&self.pool, doc_id.to_string(), tag.to_string()).await
     }
 
     /// 列出所有文档标签（REQ-ING-022）。
@@ -2347,53 +1604,15 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
     /// 全表扫描 documents.tags 列，解析 JSON 数组并统计每个标签的文档数。
     /// 返回 `(tag_name, count)` 列表，按计数降序排列。
     async fn list_all_tags(&self) -> anyhow::Result<Vec<(String, usize)>> {
-        let pool = self.pool.clone();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare("SELECT tags FROM documents")?;
-            let rows = stmt.query_map([], |row| {
-                let tags_json: String = row.get(0).unwrap_or_else(|_| "[]".to_string());
-                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-                Ok(tags)
-            })?;
-            // 统计每个标签的文档数
-            let mut tag_counts: std::collections::HashMap<String, usize> =
-                std::collections::HashMap::new();
-            for row in rows {
-                let tags = row?;
-                for tag in tags {
-                    *tag_counts.entry(tag).or_insert(0) += 1;
-                }
-            }
-            // 按计数降序排列
-            let mut result: Vec<(String, usize)> = tag_counts.into_iter().collect();
-            result.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-            Ok(result)
-        })
-        .await
+        documents::list_all_tags(&self.pool).await
     }
 
     /// 按标签筛选文档（REQ-ING-022）。
     ///
     /// 使用 SQL `WHERE tags LIKE` 查询包含指定标签的文档。
-    /// LIKE 模式 `%"tag"%` 可匹配 JSON 数组中的标签值。
+    /// LIKE 模式 `"tag"` 可匹配 JSON 数组中的标签值。
     async fn filter_documents_by_tag(&self, tag: &str) -> anyhow::Result<Vec<Document>> {
-        let pool = self.pool.clone();
-        // 使用 JSON 数组中的子串匹配：匹配 `"tag"` 模式
-        let pattern = format!("\"{}\"", tag);
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {DOC_COLS} FROM documents WHERE tags LIKE ?1 ORDER BY created_at DESC, rowid DESC"
-            ))?;
-            let rows = stmt.query_map(params![format!("%{pattern}%")], row_to_document)?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(row?);
-            }
-            Ok(out)
-        })
-        .await
+        documents::filter_documents_by_tag(&self.pool, tag).await
     }
 
     /// 批量写入实体索引（REQ-PERF-006 实体链接增强）。
@@ -4022,35 +3241,11 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
         message_id: &str,
         tainted: bool,
     ) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let message_id = message_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            conn.execute(
-                "UPDATE messages SET security_tainted = ?1 WHERE id = ?2",
-                params![if tainted { 1 } else { 0 }, &message_id],
-            )
-            .context("设置 security_tainted 标记失败")?;
-            Ok(())
-        })
-        .await
+        messages::set_entry_security_tainted(&self.pool, message_id.to_string(), tainted).await
     }
 
     async fn get_entry_security_tainted(&self, message_id: &str) -> anyhow::Result<bool> {
-        let pool = self.pool.clone();
-        let message_id = message_id.to_string();
-        run_db(move || {
-            let conn = pool.get().context("获取数据库连接失败")?;
-            let tainted: i64 = conn
-                .query_row(
-                    "SELECT security_tainted FROM messages WHERE id = ?1",
-                    params![&message_id],
-                    |row| row.get(0),
-                )
-                .context("查询 security_tainted 标记失败")?;
-            Ok(tainted != 0)
-        })
-        .await
+        messages::get_entry_security_tainted(&self.pool, message_id.to_string()).await
     }
 
     async fn record_budget_usage(
@@ -4143,89 +3338,26 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
         error_message: Option<&str>,
         file_size: Option<i64>,
     ) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let file_name = file_name.to_string();
-        let format = format.to_string();
-        let result = result.to_string();
-        let error_message = error_message.map(|s| s.to_string());
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let now = chrono::Utc::now().timestamp();
-            conn.execute(
-                "INSERT INTO import_logs (timestamp, file_name, format, result, error_message, file_size) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![now, &file_name, &format, &result, &error_message, file_size],
-            )?;
-            // 淘汰最旧记录（保留最近 100 条）
-            conn.execute(
-                "DELETE FROM import_logs WHERE id NOT IN (SELECT id FROM import_logs ORDER BY id DESC LIMIT 100)",
-                [],
-            )?;
-            Ok::<_, anyhow::Error>(())
-        })
-        .await??;
-        Ok(())
+        documents::add_import_log(
+            &self.pool,
+            file_name.to_string(),
+            format.to_string(),
+            result.to_string(),
+            error_message.map(|s| s.to_string()),
+            file_size,
+        )
+        .await
     }
 
     async fn get_import_logs(
         &self,
         result_filter: Option<&str>,
     ) -> anyhow::Result<Vec<echomind_models::ImportLogEntry>> {
-        let pool = self.pool.clone();
-        let filter = result_filter.map(|s| s.to_string());
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let mut entries = Vec::new();
-            if let Some(ref f) = filter {
-                let mut stmt = conn.prepare(
-                    "SELECT id, timestamp, file_name, format, result, error_message, file_size FROM import_logs WHERE result = ?1 ORDER BY id DESC LIMIT 100",
-                )?;
-                let rows = stmt.query_map(rusqlite::params![f], |row| {
-                    Ok(echomind_models::ImportLogEntry {
-                        id: row.get(0)?,
-                        timestamp: row.get(1)?,
-                        file_name: row.get(2)?,
-                        format: row.get(3)?,
-                        result: row.get(4)?,
-                        error_message: row.get(5)?,
-                        file_size: row.get(6)?,
-                    })
-                })?;
-                for row in rows {
-                    entries.push(row?);
-                }
-            } else {
-                let mut stmt = conn.prepare(
-                    "SELECT id, timestamp, file_name, format, result, error_message, file_size FROM import_logs ORDER BY id DESC LIMIT 100",
-                )?;
-                let rows = stmt.query_map([], |row| {
-                    Ok(echomind_models::ImportLogEntry {
-                        id: row.get(0)?,
-                        timestamp: row.get(1)?,
-                        file_name: row.get(2)?,
-                        format: row.get(3)?,
-                        result: row.get(4)?,
-                        error_message: row.get(5)?,
-                        file_size: row.get(6)?,
-                    })
-                })?;
-                for row in rows {
-                    entries.push(row?);
-                }
-            }
-            Ok(entries)
-        })
-        .await?
+        documents::get_import_logs(&self.pool, result_filter.map(|s| s.to_string())).await
     }
 
     async fn clear_import_logs(&self) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            conn.execute("DELETE FROM import_logs", [])?;
-            Ok::<_, anyhow::Error>(())
-        })
-        .await??;
-        Ok(())
+        documents::clear_import_logs(&self.pool).await
     }
 
     // ------------------------------------------------------------------
@@ -4234,83 +3366,29 @@ ON CONFLICT(conversation_id, turn_group) DO UPDATE SET active_version = ?3",
 
     /// 添加对话书签（REQ-RAG-047 AC-1/AC-2）。
     async fn add_bookmark(&self, conversation_id: &str, note: Option<&str>) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let conv_id = conversation_id.to_string();
-        let note_val = note.map(|s| s.to_string());
         let now = chrono::Utc::now().timestamp();
-        tokio::task::spawn_blocking(move || {
-let conn = pool.get()?;
-conn.execute(
-"INSERT OR REPLACE INTO conversation_bookmarks (conversation_id, note, created_at) VALUES (?1, ?2, ?3)",
-params![conv_id, note_val, now],
-)
-.context("写入 conversation_bookmarks 失败")?;
-Ok::<_, anyhow::Error>(())
-})
-.await??;
-        Ok(())
+        conversations::add_bookmark(
+            &self.pool,
+            conversation_id.to_string(),
+            note.map(|s| s.to_string()),
+            now,
+        )
+        .await
     }
 
     /// 移除对话书签（REQ-RAG-047 AC-5）。
     async fn remove_bookmark(&self, conversation_id: &str) -> anyhow::Result<()> {
-        let pool = self.pool.clone();
-        let conv_id = conversation_id.to_string();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            conn.execute(
-                "DELETE FROM conversation_bookmarks WHERE conversation_id = ?1",
-                params![conv_id],
-            )
-            .context("删除 conversation_bookmarks 失败")?;
-            Ok::<_, anyhow::Error>(())
-        })
-        .await??;
-        Ok(())
+        conversations::remove_bookmark(&self.pool, conversation_id.to_string()).await
     }
 
     /// 列出全部书签（REQ-RAG-047 AC-3/AC-4）。
     async fn list_bookmarks(&self) -> anyhow::Result<Vec<echomind_models::ConversationBookmark>> {
-        let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let mut stmt = conn.prepare(
-"SELECT conversation_id, note, created_at FROM conversation_bookmarks ORDER BY created_at DESC",
-).context("准备 conversation_bookmarks 查询失败")?;
-            let rows = stmt
-                .query_map([], |row| {
-                    Ok(echomind_models::ConversationBookmark {
-                        conversation_id: row.get(0)?,
-                        note: row.get(1)?,
-                        created_at: row.get(2)?,
-                    })
-                })
-                .context("查询 conversation_bookmarks 失败")?;
-            let mut bookmarks = Vec::new();
-            for row in rows {
-                bookmarks.push(row?);
-            }
-            Ok::<_, anyhow::Error>(bookmarks)
-        })
-        .await?
+        conversations::list_bookmarks(&self.pool).await
     }
 
     /// 检查指定会话是否已加书签（REQ-RAG-047 AC-2）。
     async fn is_bookmarked(&self, conversation_id: &str) -> anyhow::Result<bool> {
-        let pool = self.pool.clone();
-        let conv_id = conversation_id.to_string();
-        let count: i64 = tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM conversation_bookmarks WHERE conversation_id = ?1",
-                    params![conv_id],
-                    |row| row.get(0),
-                )
-                .context("查询 conversation_bookmarks COUNT 失败")?;
-            Ok::<_, anyhow::Error>(count)
-        })
-        .await??;
-        Ok(count > 0)
+        conversations::is_bookmarked(&self.pool, conversation_id.to_string()).await
     }
 }
 
@@ -4328,7 +3406,7 @@ Ok::<_, anyhow::Error>(())
 ///
 /// 安全：每个 token 用双引号包裹并转义内部双引号，防止 FTS5 操作符注入
 /// （如 `*`、`NEAR`、`AND`、`OR`、`NOT` 被当作普通字符串而非操作符）。
-fn build_fts5_or_query(query: &str) -> String {
+pub(crate) fn build_fts5_or_query(query: &str) -> String {
     let mut tokens: Vec<String> = Vec::new();
 
     for segment in query.split_whitespace() {
