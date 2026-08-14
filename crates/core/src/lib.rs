@@ -13,6 +13,9 @@ pub mod agent;
 /// 文档一致性审计引擎：全量扫描式矛盾检测（REQ-AUDIT-001~005）。
 #[cfg(feature = "pro")]
 pub mod audit;
+/// 审计对 + Turn-Enclosed 模块（DH-04 借鉴 DeepSeek Harness Turn-Enclosed Audit）：
+/// 每次 turn 生成 start/end 审计对，验证完整性。
+pub mod audit_pair;
 /// 后台空闲整理引擎：重复文档检测、跨文档矛盾发现、整理建议生成。
 pub mod auto_dream;
 /// 预算追踪和速率限制（QM 借鉴）：LLM API 费用控制和请求限流。
@@ -29,6 +32,9 @@ pub mod code_executor;
 pub mod concurrency;
 /// 多代理协调引擎（REQ-RAG-025）：Research→Synthesis→Implementation→Verification 四阶段。
 pub mod coordinator;
+/// Coordinator 策略注册表（DH-03 借鉴 DeepSeek Harness SubagentRuntime Provider 注册表）：
+/// 多个协调策略共存，按名字查找，能力验证在执行前完成。
+pub mod coordinator_strategy;
 /// 领域画像自动分类（REQ-VEC-013）：16 领域嵌入质心分类。
 pub mod domain;
 /// 数据库加密模块（Argon2id 密钥派生 + SQLCipher 加密 + 暴力破解防护 + 密码强度检测）。
