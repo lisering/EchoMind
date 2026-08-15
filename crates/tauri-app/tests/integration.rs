@@ -59,8 +59,14 @@ mod chat_tests;
 mod common;
 #[path = "integration/conversation_tests.rs"]
 mod conversation_tests;
+#[path = "integration/full_pipeline.rs"]
+mod full_pipeline;
 #[path = "integration/import_tests.rs"]
 mod import_tests;
+#[path = "integration/local_llm_chain.rs"]
+mod local_llm_chain;
+#[path = "integration/security_chain.rs"]
+mod security_chain;
 #[path = "integration/security_tests.rs"]
 mod security_tests;
 
