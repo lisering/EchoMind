@@ -1,4 +1,7 @@
 //! settings 域 IPC 命令子模块（从 commands.rs 拆分，纯重构）。
+//!
+//! S09: `update_setting(key, value)` 统一设置命令 — 合并 ~20 个 set_xxx 命令为单一入口。
+//! 旧 set_xxx 命令标记 `#[deprecated]`，已从 `generate_handler!` 移除，但保留 `*_inner` 逻辑供测试复用。
 use super::*;
 
 /// 测试 LLM 连接：极简请求验证 API Key 与 URL 有效性。
@@ -1391,3 +1394,170 @@ pub async fn get_smart_mode_inner(state: &AppState) -> Result<bool, String> {
         .map_err(|e| format!("{e:#}"))?;
     Ok(val.is_none_or(|v| v != "false"))
 }
+
+// ============================================================================
+// S09: 统一设置命令 — update_setting(key, value) + get_setting(key)
+// ============================================================================
+
+/// 支持通过 `update_setting` 更新的设置键白名单。
+///
+/// 每个键映射到一个 `*_inner` 函数，实现类型解析 + 验证 + 持久化。
+/// 不在此白名单中的键返回 `ERR_VALIDATION` 错误（防止任意键注入）。
+const UPDATEABLE_KEYS: &[&str] = &[
+    "rag.hybrid_search",
+    "rag.rerank_enabled",
+    "rag.hyde_enabled",
+    "rag.agent_enabled",
+    "rag.coordinator_enabled",
+    "rag.sub_agent_enabled",
+    "vec.embedding_model",
+    "compression.ratio",
+    "rag.context_token_limit",
+    "mm.vlm_enabled",
+    "rag.progressive_injection",
+    "rag.speculative_enabled",
+    "rag.quality_gate_enabled",
+    "rag.graph_retriever_enabled",
+    "memory.enabled",
+    "rag.web_search_enabled",
+    "rag.contextual_retrieval",
+    "window.close_to_tray",
+    "ui.sidebar_collapsed",
+    "app.autostart",
+    "rag.retrieval_memory_enabled",
+    "update.auto_check",
+];
+
+/// 统一设置命令（S09 IPC 精简）。
+///
+/// 将 ~20 个 `set_xxx` 命令合并为单一入口。前端通过 `settingsApi.update(key, value)` 调用。
+/// 内部按 `key` 分发到现有 `*_inner` 函数，复用全部验证逻辑。
+///
+/// # 参数
+/// - `key`: 设置键（必须在 `UPDATEABLE_KEYS` 白名单中）
+/// - `value`: 设置值（字符串，布尔值为 `"true"`/`"false"`，数字为字符串形式）
+/// - `app`: Tauri AppHandle（仅 `app.autostart` 需要，其他键不使用）
+///
+/// # 错误
+/// - `ERR_VALIDATION`: 不支持的设置键或值类型解析失败
+/// - 其他: 底层 `*_inner` 函数返回的错误
+#[tauri::command]
+pub async fn update_setting(
+    key: String,
+    value: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    update_setting_inner(&key, &value, &app, state.inner()).await
+}
+
+/// `update_setting` 的逻辑实现（命令与集成测试复用）。
+///
+/// 按 `key` match 分发到对应的 `*_inner` 函数。
+/// 布尔值通过 `value == "true"` 判断（宽松匹配：任何非 `"true"` 的值视为 `false`）。
+pub async fn update_setting_inner(
+    key: &str,
+    value: &str,
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
+    // 白名单检查
+    if !UPDATEABLE_KEYS.contains(&key) {
+        return Err(prefix_error(
+            ERR_VALIDATION,
+            &format!("不支持的设置键: {key}（可更新的键: {UPDATEABLE_KEYS:?}）"),
+        ));
+    }
+
+    let enabled = value == "true";
+
+    match key {
+        // ── 布尔开关类 ──
+        "rag.hybrid_search" => set_hybrid_search_inner(enabled, state).await,
+        "rag.rerank_enabled" => set_rerank_enabled_inner(enabled, state).await,
+        "rag.hyde_enabled" => set_hyde_enabled_inner(enabled, state).await,
+        "rag.agent_enabled" => set_agent_enabled_inner(enabled, state).await,
+        "rag.coordinator_enabled" => set_coordinator_mode_inner(enabled, state).await,
+        "rag.sub_agent_enabled" => set_sub_agent_enabled_inner(enabled, state).await,
+        "mm.vlm_enabled" => set_vlm_enabled_inner(enabled, state).await,
+        "rag.progressive_injection" => set_progressive_injection_inner(enabled, state).await,
+        "rag.speculative_enabled" => set_speculative_enabled_inner(enabled, state).await,
+        "rag.quality_gate_enabled" => set_quality_gate_enabled_inner(enabled, state).await,
+        "rag.graph_retriever_enabled" => set_graph_retriever_enabled_inner(enabled, state).await,
+        "memory.enabled" => set_memory_enabled_inner(enabled, state).await,
+        "rag.web_search_enabled" => set_web_search_enabled_inner(enabled, state).await,
+        "rag.contextual_retrieval" => set_contextual_retrieval_inner(enabled, state).await,
+        "window.close_to_tray" => set_close_to_tray_inner(enabled, state).await,
+        "ui.sidebar_collapsed" => set_sidebar_collapsed_inner(enabled, state).await,
+        "rag.retrieval_memory_enabled" => set_retrieval_memory_enabled_inner(enabled, state).await,
+        "update.auto_check" => set_update_check_enabled_inner(enabled, state).await,
+
+        // ── 数值类（需 parse） ──
+        "compression.ratio" => {
+            let ratio = value
+                .parse::<f32>()
+                .map_err(|_| prefix_error(ERR_VALIDATION, &format!("压缩比必须为数字: {value}")))?;
+            set_compression_ratio_inner(ratio, state).await
+        }
+        "rag.context_token_limit" => {
+            let limit = value.parse::<usize>().map_err(|_| {
+                prefix_error(ERR_VALIDATION, &format!("token 限制必须为正整数: {value}"))
+            })?;
+            set_context_token_limit_inner(limit, state).await
+        }
+
+        // ── 字符串类 ──
+        "vec.embedding_model" => set_embedding_model_inner(value, state).await,
+
+        // ── 需要 AppHandle 的命令 ──
+        "app.autostart" => set_autostart_inner(enabled, app.clone(), state).await,
+
+        // 白名单检查已保证不会走到这里
+        _ => Err(prefix_error(
+            ERR_VALIDATION,
+            &format!("不支持的设置键: {key}"),
+        )),
+    }
+}
+
+/// 统一读取命令（S09 IPC 精简）。
+///
+/// 从 settings 表读取指定键的值，返回原始字符串。
+/// 复杂结构（如 `get_settings` 返回的 `SettingsPayload`）仍使用各自的专用命令。
+///
+/// # 参数
+/// - `key`: 设置键
+///
+/// # 返回
+/// 设置值的字符串形式。键不存在时返回空字符串。
+#[tauri::command]
+pub async fn get_setting(key: String, state: State<'_, AppState>) -> Result<String, String> {
+    get_setting_inner(&key, state.inner()).await
+}
+
+/// `get_setting` 的逻辑实现（命令与集成测试复用）。
+pub async fn get_setting_inner(key: &str, state: &AppState) -> Result<String, String> {
+    state
+        .storage
+        .get_setting(key)
+        .await
+        .map_err(|e| format!("{e:#}"))
+        .map(|v| v.unwrap_or_default())
+}
+
+// ============================================================================
+// S09: 已废弃的 #[tauri::command] 包装器（已从 generate_handler! 移除）
+// ============================================================================
+//
+// 以下旧 set_xxx 命令的 #[tauri::command] 包装器已从 generate_handler! 移除。
+// 它们的 *_inner 逻辑通过 update_setting 统一入口调用。
+// 前端已迁移到 settingsApi.update(key, value)。
+//
+// 被移除的命令清单（22 个）：
+//   set_hybrid_search, set_rerank_enabled, set_hyde_enabled, set_agent_enabled,
+//   set_coordinator_mode, set_sub_agent_enabled, set_embedding_model,
+//   set_compression_ratio, set_context_token_limit, set_vlm_enabled,
+//   set_progressive_injection, set_speculative_enabled, set_quality_gate_enabled,
+//   set_graph_retriever_enabled, set_memory_enabled, set_web_search_enabled,
+//   set_contextual_retrieval, set_close_to_tray, set_sidebar_collapsed,
+//   set_autostart, set_retrieval_memory_enabled, set_update_check_enabled

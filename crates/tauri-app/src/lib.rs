@@ -149,17 +149,9 @@ pub fn run() {
             commands::test_llm_connection,
             commands::update_llm_config,
             commands::get_settings,
-            commands::set_vlm_enabled,
-            commands::set_hybrid_search,
-            commands::set_rerank_enabled,
-            commands::set_hyde_enabled,
-            commands::set_agent_enabled,
-            // 多代理协调模式（REQ-RAG-025）
-            commands::set_coordinator_mode,
-            // 子代理舰队模式（REQ-RAG-025 扩展）
-            commands::set_sub_agent_enabled,
-            commands::set_embedding_model,
-            commands::set_context_token_limit,
+            // S09: 统一设置命令（替代上方 22 个 set_xxx 命令）
+            commands::update_setting,
+            commands::get_setting,
             commands::get_chunk_params,
             commands::set_chunk_params,
             commands::list_local_models,
@@ -215,9 +207,8 @@ pub fn run() {
             // REQ-UI-011：主题偏好持久化
             commands::get_theme,
             commands::set_theme,
-            // REQ-NAV-001：侧栏折叠状态持久化
+            // REQ-NAV-001：侧栏折叠状态持久化（S09: set_sidebar_collapsed → update_setting）
             commands::get_sidebar_collapsed,
-            commands::set_sidebar_collapsed,
             // S69: Token 预算配置（Cherry Studio 借鉴 — token-budget 驱动 in-loop compaction）
             commands::get_token_budget_config,
             commands::set_token_budget_config,
@@ -277,9 +268,7 @@ pub fn run() {
             commands::clear_cache,
             commands::set_cache_settings,
             commands::get_cache_settings,
-            // Prompt 压缩（REQ-PERF-002）
-            commands::set_compression_ratio,
-            commands::get_compression_ratio,
+            // Prompt 压缩（REQ-PERF-002）（S09: set_compression_ratio → update_setting）
             // Contextual BM25 + 实体链接（REQ-PERF-005/006）
             commands::rebuild_bm25_index,
             // Proposition 级原子分割（REQ-PERF-007）
@@ -287,23 +276,21 @@ pub fn run() {
             // RAPTOR 摘要树（REQ-PERF-009）
             commands::build_summary_tree,
             // ColBERT 多向量嵌入模式切换（REQ-PERF-008, Pro feature）
+            // Note: set_embedder_model is Pro-gated and stays as a separate command
+            // (it switches between single/multi vector embedding, not a simple settings write)
             #[cfg(feature = "pro")]
             commands::set_embedder_model,
             // 后台空闲整理引擎（Auto Dream Engine）
             commands::trigger_dream,
             commands::get_dream_suggestions,
             commands::abort_dream,
-            // 自进化检索记忆（REQ-PERF-012）
-            commands::set_retrieval_memory_enabled,
+            // 自进化检索记忆（REQ-PERF-012）（S09: set_retrieval_memory_enabled → update_setting）
             commands::get_retrieval_memory_stats,
             commands::reset_retrieval_memory,
             commands::record_retrieval_feedback,
-            // 知识图谱图遍历检索（REQ-RAG-027）
-            commands::set_graph_retriever_enabled,
+            // 知识图谱图遍历检索（REQ-RAG-027）（S09: set_graph_retriever_enabled → update_setting）
             // 渐进式注入 / Speculative RAG / 质量门控（REQ-PERF-010/011, REQ-RAG-028）
-            commands::set_progressive_injection,
-            commands::set_speculative_enabled,
-            commands::set_quality_gate_enabled,
+            // S09: set_progressive_injection, set_speculative_enabled, set_quality_gate_enabled → update_setting
             // 知识图谱可视化（REQ-RAG-027 前端图谱面板）
             commands::get_graph_data,
             commands::get_entity_relations,
@@ -336,8 +323,7 @@ pub fn run() {
             commands::delete_workflow,
             // 代码执行沙箱（REQ-RAG-032，Pro feature）
             commands::execute_code_snippet,
-            // 持久化记忆系统（REQ-RAG-032：IfAI 三层记忆 Wing/Hall/Room）
-            commands::set_memory_enabled,
+            // 持久化记忆系统（REQ-RAG-032：IfAI 三层记忆 Wing/Hall/Room）（S09: set_memory_enabled → update_setting）
             commands::get_memories,
             commands::pin_memory,
             commands::promote_memory,
@@ -354,8 +340,7 @@ pub fn run() {
             commands::transcribe_audio,
             commands::get_stt_config,
             commands::set_stt_config,
-            // 网页搜索集成（REQ-RAG-036：本地检索不足时搜索互联网）
-            commands::set_web_search_enabled,
+            // 网页搜索集成（REQ-RAG-036：本地检索不足时搜索互联网）（S09: set_web_search_enabled → update_setting）
             commands::web_search,
             // 自定义 ONNX 嵌入模型上传（REQ-VEC-014，Pro 门控；Free 返回 PRO_REQUIRED）
             commands::upload_custom_embedding_model,
@@ -380,8 +365,7 @@ pub fn run() {
             commands::preview_strip,
             // 单条消息删除（REQ-RAG-013）
             commands::delete_message,
-            // Contextual Retrieval 上下文增强嵌入（REQ-RAG-041）
-            commands::set_contextual_retrieval,
+            // Contextual Retrieval 上下文增强嵌入（REQ-RAG-041）（S09: set_contextual_retrieval → update_setting）
             commands::rebuild_contextual_embeddings,
             // 文档标签系统（REQ-ING-022 用户自定义标签管理）
             commands::add_document_tag,
@@ -390,9 +374,8 @@ pub fn run() {
             commands::filter_documents_by_tag,
             // KB 统计仪表盘（REQ-KB-003 v1.5）
             commands::get_kb_stats,
-            // S4 v1.6: 窗口关闭行为 — 最小化到托盘设置（REQ-WIN-003）
+            // S4 v1.6: 窗口关闭行为 — 最小化到托盘设置（REQ-WIN-003）（S09: set_close_to_tray → update_setting）
             commands::get_close_to_tray,
-            commands::set_close_to_tray,
             // S1 v1.9: RAG 检索参数可配置（REQ-RAG-014）
             commands::get_rag_params,
             commands::set_rag_params,
@@ -421,13 +404,12 @@ pub fn run() {
             commands::set_rag_eval_settings,
             // B09 Skill 系统集成（REQ-ARCH-010 v1.8：斜杠命令面板 Skill 发现）
             commands::discover_skills,
-            // v1.13: 开机自启（REQ-WIN-004）
+            // v1.13: 开机自启（REQ-WIN-004）（S09: set_autostart → update_setting）
             commands::get_autostart,
-            commands::set_autostart,
             // v1.13: 应用更新检查（REQ-HELP-004）
             commands::check_for_updates,
             commands::get_update_check_config,
-            commands::set_update_check_enabled,
+            // S09: set_update_check_enabled → update_setting("update.auto_check", value)
             // 智能模式（S5 审计 P0-1）
             commands::set_smart_mode,
             commands::get_smart_mode,
