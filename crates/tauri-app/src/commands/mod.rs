@@ -114,6 +114,8 @@ pub use rag_eval::*;
 pub use security::*;
 pub use settings::*;
 pub use sync::*;
+// trace 模块在 Release 构建中无导出项（S10 开发者工具门控），仅 Debug 注册
+#[cfg(debug_assertions)]
 pub use trace::*;
 pub use workspace::*;
 

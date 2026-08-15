@@ -612,7 +612,12 @@ pub async fn search_conversations_inner(
         .map_err(|e| format!("{e:#}"))
 }
 
+// ============================================================================
+// Session Strip（REQ-RAG-046）— S10: 开发者工具门控
+// ============================================================================
+
 /// Session Strip：按索引范围移除消息（REQ-RAG-046）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn strip_messages(
     conversation_id: String,
@@ -654,6 +659,7 @@ pub async fn strip_messages_inner(
 }
 
 /// Session Strip：保留最后 N 条消息（REQ-RAG-046）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn strip_keeping_recent(
     conversation_id: String,
@@ -692,6 +698,7 @@ pub async fn strip_keeping_recent_inner(
 }
 
 /// Session Strip：预览将被移除的消息（REQ-RAG-046）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn preview_strip(
     conversation_id: String,

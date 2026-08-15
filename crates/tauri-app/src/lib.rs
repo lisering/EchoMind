@@ -213,9 +213,14 @@ pub fn run() {
             commands::get_token_budget_config,
             commands::set_token_budget_config,
             // S70: Trace 系统（Cherry Studio 借鉴 — RAG 链路追踪）
+            // S10: 开发者工具门控 — Release 构建中不注册
+            #[cfg(debug_assertions)]
             commands::get_recent_traces,
+            #[cfg(debug_assertions)]
             commands::get_trace_detail,
+            #[cfg(debug_assertions)]
             commands::clear_traces,
+            #[cfg(debug_assertions)]
             commands::get_trace_count,
             // 导出功能（REQ-EXP-001）
             commands::export_conversation_markdown,
@@ -360,8 +365,12 @@ pub fn run() {
             // 对话全文搜索（REQ-RAG-040）
             commands::search_conversations,
             // Session Strip 会话条带化（REQ-RAG-046）
+            // S10: 开发者工具门控 — Release 构建中不注册
+            #[cfg(debug_assertions)]
             commands::strip_messages,
+            #[cfg(debug_assertions)]
             commands::strip_keeping_recent,
+            #[cfg(debug_assertions)]
             commands::preview_strip,
             // 单条消息删除（REQ-RAG-013）
             commands::delete_message,
@@ -385,22 +394,40 @@ pub fn run() {
             // S5 v1.6: 错误日志导出（REQ-ERR-005）
             commands::export_error_logs,
             // Durable Prompt Admission（B05 持久化提示接纳）
+            // S10: 开发者工具门控 — Release 构建中不注册
+            #[cfg(debug_assertions)]
             commands::admit_input,
+            #[cfg(debug_assertions)]
             commands::promote_input,
+            #[cfg(debug_assertions)]
             commands::get_pending_inputs,
             // Session Todo 持久化（B08 会话待办持久化）
+            // S10: 开发者工具门控 — Release 构建中不注册
+            #[cfg(debug_assertions)]
             commands::add_session_todo,
+            #[cfg(debug_assertions)]
             commands::update_todo_status,
+            #[cfg(debug_assertions)]
             commands::get_session_todos,
+            #[cfg(debug_assertions)]
             commands::delete_session_todo,
+            #[cfg(debug_assertions)]
             commands::delete_session_todos,
             // Q08: 预算追踪（QM 借鉴 — LLM API 费用控制和速率限制）
+            // S10: 开发者工具门控 — Release 构建中不注册
+            #[cfg(debug_assertions)]
             commands::get_budget_stats,
+            #[cfg(debug_assertions)]
             commands::set_budget_limit,
             // RAG 评估指标（REQ-RAG-045，RAGAS 风格）
+            // S10: 开发者工具门控 — Release 构建中不注册
+            #[cfg(debug_assertions)]
             commands::evaluate_rag_response,
+            #[cfg(debug_assertions)]
             commands::evaluate_rag_batch,
+            #[cfg(debug_assertions)]
             commands::get_rag_eval_settings,
+            #[cfg(debug_assertions)]
             commands::set_rag_eval_settings,
             // B09 Skill 系统集成（REQ-ARCH-010 v1.8：斜杠命令面板 Skill 发现）
             commands::discover_skills,

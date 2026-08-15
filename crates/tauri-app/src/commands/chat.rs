@@ -1711,10 +1711,14 @@ pub async fn set_token_budget_inner(budget: u64, state: &AppState) -> Result<(),
 // B05: Durable Prompt Admission — 持久化提示接纳 IPC 命令
 // ==================================================================
 
-/// 接纳用户输入（B05 Durable Prompt Admission）。
+// ============================================================================
+// Durable Prompt Admission（B05）— S10: 开发者工具门控
+// ============================================================================
+
+/// 接收待处理输入（B05 Durable Prompt Admission）。
 ///
-/// 将用户消息持久化到 `pending_inputs` 表，但不加入消息历史。
-/// 在安全边界点（如流式生成完成后）通过 `promote_input` 提升为正式消息。
+/// 将用户输入存入 `pending_inputs` 表，等待后续提升为正式消息。
+/// 投递模式 `steer` 优先中断当前生成，`queue` 排队等待。
 ///
 /// # 参数
 /// - `conversation_id`: 所属会话 ID
@@ -1723,6 +1727,7 @@ pub async fn set_token_budget_inner(budget: u64, state: &AppState) -> Result<(),
 ///
 /// # 返回
 /// 新创建的接纳记录 ID。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn admit_input(
     conversation_id: String,
@@ -1754,6 +1759,7 @@ pub async fn admit_input_inner(
 ///
 /// # 参数
 /// - `input_id`: 接纳记录 ID
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn promote_input(input_id: String, state: State<'_, AppState>) -> Result<(), String> {
     promote_input_inner(&input_id, state.inner()).await
@@ -1775,6 +1781,7 @@ pub async fn promote_input_inner(input_id: &str, state: &AppState) -> Result<(),
 ///
 /// # 参数
 /// - `conversation_id`: 所属会话 ID
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_pending_inputs(
     conversation_id: String,
@@ -1796,10 +1803,11 @@ pub async fn get_pending_inputs_inner(
 }
 
 // ============================================================================
-// Session Todo 持久化（B08 会话待办持久化，REQ-RAG-044）
+// Session Todo 持久化（B08 会话待办持久化，REQ-RAG-044）— S10: 开发者工具门控
 // ============================================================================
 
 /// 创建会话 Todo 项（REQ-RAG-044）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn add_session_todo(
     conversation_id: String,
@@ -1828,6 +1836,7 @@ pub async fn add_session_todo_inner(
 }
 
 /// 更新 Todo 状态（REQ-RAG-044）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn update_todo_status(
     todo_id: String,
@@ -1854,6 +1863,7 @@ pub async fn update_todo_status_inner(
 }
 
 /// 获取会话 Todo 列表（REQ-RAG-044）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_session_todos(
     conversation_id: String,
@@ -1875,6 +1885,7 @@ pub async fn get_session_todos_inner(
 }
 
 /// 删除单个 Todo 项（REQ-RAG-044）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn delete_session_todo(
     todo_id: String,
@@ -1893,6 +1904,7 @@ pub async fn delete_session_todo_inner(todo_id: &str, state: &AppState) -> Resul
 }
 
 /// 删除会话的全部 Todo 项（REQ-RAG-044）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn delete_session_todos(
     conversation_id: String,

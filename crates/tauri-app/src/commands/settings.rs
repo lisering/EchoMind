@@ -661,10 +661,11 @@ pub async fn set_token_budget_config_inner(
 }
 
 // ============================================================================
-// Q08: Budget Tracking (QM 借鉴 — LLM API 费用控制和速率限制)
+// Q08: Budget Tracking (QM 借鉴) — S10: 开发者工具门控
 // ============================================================================
 
 /// 获取预算统计（QM 借鉴）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_budget_stats(
     state: State<'_, AppState>,
@@ -685,6 +686,7 @@ pub async fn get_budget_stats_inner(
 }
 
 /// 设置预算限制（QM 借鉴）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn set_budget_limit(
     daily_limit_usd: f64,
