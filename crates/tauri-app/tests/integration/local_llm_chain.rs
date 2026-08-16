@@ -156,26 +156,19 @@ async fn tc_llm_chain_004_sampling_params_persists() {
             top_p: Some(0.9),
             top_k: Some(40),
             max_tokens: Some(2048),
-            repeat_penalty: Some(1.1),
+            frequency_penalty: Some(1.1),
+            presence_penalty: Some(0.5),
         };
         set_sampling_params_inner(params, &state).await.unwrap();
 
         // 验证设置已持久化
-        let stored = state
-            .storage
-            .get_setting("llm.sampling_params")
-            .await
-            .unwrap();
+        let stored = state.storage.get_setting("llm.sampling").await.unwrap();
         assert!(stored.is_some(), "采样参数应已持久化到 settings 表");
     }
 
     // 2. 重启后恢复
     let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let stored = restarted
-        .storage
-        .get_setting("llm.sampling_params")
-        .await
-        .unwrap();
+    let stored = restarted.storage.get_setting("llm.sampling").await.unwrap();
     assert!(stored.is_some(), "重启后采样参数应恢复");
     let json: serde_json::Value = serde_json::from_str(&stored.unwrap()).unwrap();
     assert_eq!(json["temperature"], 0.7, "temperature 应为 0.7");
@@ -207,7 +200,7 @@ async fn tc_llm_chain_005_kv_cache_status_query() {
     let status = result.unwrap();
     // 初始状态应有合理的默认值
     assert!(
-        status.total_entries <= 100,
+        status.file_count <= 100,
         "初始 KV Cache 条目数应很少（无已保存的 cache）"
     );
 }
@@ -292,7 +285,7 @@ async fn tc_llm_chain_007_paged_attn_persists() {
         let license = make_valid_license();
         activate_pro_inner(&license, &state).await.unwrap();
 
-        set_paged_attn_inner(true, &state).await.unwrap();
+        set_paged_attn_inner(true, 16, 512, &state).await.unwrap();
 
         // 验证持久化
         let value = state.storage.get_setting("llm.paged_attn").await.unwrap();
@@ -313,7 +306,9 @@ async fn tc_llm_chain_007_paged_attn_persists() {
     );
 
     // 设置禁用
-    set_paged_attn_inner(false, &restarted).await.unwrap();
+    set_paged_attn_inner(false, 16, 512, &restarted)
+        .await
+        .unwrap();
     let value2 = restarted
         .storage
         .get_setting("llm.paged_attn")
@@ -344,25 +339,22 @@ async fn tc_llm_chain_008_kernel_mode_persists() {
         let license = make_valid_license();
         activate_pro_inner(&license, &state).await.unwrap();
 
-        set_kernel_mode_inner("custom_gemv".to_string(), &state)
+        set_kernel_mode_inner("custom".to_string(), &state)
             .await
             .unwrap();
         let mode = get_kernel_mode_inner(&state).await.unwrap();
-        assert_eq!(mode, "custom_gemv", "KernelMode 应为 custom_gemv");
+        assert_eq!(mode, "custom", "KernelMode 应为 custom");
     }
 
     // 2. 重启后恢复
     let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
     let mode = get_kernel_mode_inner(&restarted).await.unwrap();
-    assert_eq!(
-        mode, "custom_gemv",
-        "重启后 KernelMode 应恢复为 custom_gemv"
-    );
+    assert_eq!(mode, "custom", "重启后 KernelMode 应恢复为 custom");
 
     // 3. 切换到 mistral_rs
-    set_kernel_mode_inner("mistral_rs".to_string(), &restarted)
+    set_kernel_mode_inner("mistral".to_string(), &restarted)
         .await
         .unwrap();
     let mode2 = get_kernel_mode_inner(&restarted).await.unwrap();
-    assert_eq!(mode2, "mistral_rs", "切换后 KernelMode 应为 mistral_rs");
+    assert_eq!(mode2, "mistral", "切换后 KernelMode 应为 mistral");
 }

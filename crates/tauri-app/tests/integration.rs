@@ -2307,13 +2307,15 @@ async fn tc_ipc_llm_005_set_remote() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
-    // 先设为 Local
-    set_llm_mode_inner("local".to_string(), &state)
-        .await
-        .unwrap();
-    assert_eq!(state.get_llm_mode().await, LlmMode::Local);
+    // Free 模式下 set_llm_mode("local") 应被 Pro 门控拦截
+    let result = set_llm_mode_inner("local".to_string(), &state).await;
+    assert!(result.is_err(), "Free 模式下 local 模式应被 Pro 门控拦截");
+    assert!(result.unwrap_err().contains("PRO_REQUIRED"));
 
-    // 切回 Remote
+    // 默认应为 Remote
+    assert_eq!(state.get_llm_mode().await, LlmMode::Remote);
+
+    // 设置为 Remote（应成功）
     set_llm_mode_inner("remote".to_string(), &state)
         .await
         .unwrap();
@@ -2325,18 +2327,27 @@ async fn tc_ipc_llm_005_set_remote() {
 }
 
 /// TC-IPC-LLM-006：设置 Local 模式（REQ-LLM-003 AC-4）。
+/// Free 模式下 local 模式被 Pro 门控拦截。
 #[tokio::test]
 async fn tc_ipc_llm_006_set_local() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
-    set_llm_mode_inner("local".to_string(), &state)
-        .await
-        .unwrap();
-    assert_eq!(state.get_llm_mode().await, LlmMode::Local);
+    // Free 模式下 set_llm_mode("local") 应被 Pro 门控拦截
+    let result = set_llm_mode_inner("local".to_string(), &state).await;
+    assert!(result.is_err(), "Free 模式下 local 模式应被 Pro 门控拦截");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("PRO_REQUIRED"),
+        "错误应包含 PRO_REQUIRED: {err}"
+    );
 
+    // 模式不应被修改（仍为 Remote）
+    assert_eq!(state.get_llm_mode().await, LlmMode::Remote);
+
+    // settings 表不应持久化 local
     let persisted = state.storage.get_setting("llm.mode").await.unwrap();
-    assert_eq!(persisted.as_deref(), Some("local"));
+    assert_ne!(persisted.as_deref(), Some("local"));
 }
 
 /// TC-IPC-LLM-007：无效模式返回错误（REQ-LLM-003 AC-4）。
@@ -2390,22 +2401,32 @@ async fn tc_ipc_llm_009_recommended_models() {
 }
 
 /// TC-IPC-LLM-010：set_local_model 持久化到 settings 表（REQ-LLM-003）。
+/// Free 模式下 set_local_model 被 Pro 门控拦截。
 #[tokio::test]
 async fn tc_ipc_llm_010_set_local_model_persists() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
     let filename = "qwen2.5-7b-instruct-q4_k_m.gguf";
-    set_local_model_inner(filename.to_string(), &state)
-        .await
-        .unwrap();
+    // Free 模式下 set_local_model 应被 Pro 门控拦截
+    let result = set_local_model_inner(filename.to_string(), &state).await;
+    assert!(
+        result.is_err(),
+        "Free 模式下 set_local_model 应被 Pro 门控拦截"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("PRO_REQUIRED"),
+        "错误应包含 PRO_REQUIRED: {err}"
+    );
 
-    // 持久化到 settings 表
+    // 不应持久化到 settings 表
     let persisted = state.storage.get_setting("llm.local_model").await.unwrap();
-    assert_eq!(persisted.as_deref(), Some(filename));
+    assert_ne!(persisted.as_deref(), Some(filename));
 }
 
 /// TC-IPC-LLM-011：get_settings 返回 llm_mode 和 local_model 字段（REQ-LLM-003）。
+/// Free 模式下 local 设置被 Pro 门控拦截，但 get_settings 正常返回。
 #[tokio::test]
 async fn tc_ipc_llm_011_get_settings_returns_llm_fields() {
     let dir = TempDir::new().unwrap();
@@ -2419,53 +2440,50 @@ async fn tc_ipc_llm_011_get_settings_returns_llm_fields() {
     );
     assert_eq!(settings.local_model, "", "初始 local_model 应为空串");
 
-    // 设置模式和模型
-    set_llm_mode_inner("local".to_string(), &state)
-        .await
-        .unwrap();
-    set_local_model_inner("test-model.gguf".to_string(), &state)
-        .await
-        .unwrap();
+    // Free 模式下 set_llm_mode("local") 和 set_local_model 应被 Pro 门控拦截
+    let result1 = set_llm_mode_inner("local".to_string(), &state).await;
+    assert!(result1.is_err(), "Free 模式下 local 模式应被 Pro 门控拦截");
+    let result2 = set_local_model_inner("test-model.gguf".to_string(), &state).await;
+    assert!(
+        result2.is_err(),
+        "Free 模式下 set_local_model 应被 Pro 门控拦截"
+    );
 
-    // 验证 get_settings 反映最新值
+    // 模式不应被修改（仍为 Remote 等价空串）
     let settings = get_settings_inner(&state).await.unwrap();
-    assert_eq!(settings.llm_mode, "local", "设置后 llm_mode 应为 local");
+    assert_eq!(settings.llm_mode, "", "Free 模式下 llm_mode 应不被修改");
     assert_eq!(
-        settings.local_model, "test-model.gguf",
-        "设置后 local_model 应反映选中模型"
+        settings.local_model, "",
+        "Free 模式下 local_model 应不被修改"
     );
 }
 
 /// TC-IPC-LLM-012：get_settings 重启后恢复 llm_mode 和 local_model（REQ-LLM-003）。
+/// Free 模式下 local 设置被 Pro 门控拦截，重启后仍为 remote。
 #[tokio::test]
 async fn tc_ipc_llm_012_get_settings_restore_after_restart() {
     let dir = TempDir::new().unwrap();
 
-    // 写入阶段
+    // 写入阶段：Free 模式下 set_llm_mode/set_local_model 被 Pro 门控拦截
     {
         let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        set_llm_mode_inner("local".to_string(), &state)
-            .await
-            .unwrap();
-        set_local_model_inner("persisted-model.gguf".to_string(), &state)
-            .await
-            .unwrap();
+        let r1 = set_llm_mode_inner("local".to_string(), &state).await;
+        assert!(r1.is_err(), "Free 模式下 local 模式应被 Pro 门控拦截");
+        let r2 = set_local_model_inner("persisted-model.gguf".to_string(), &state).await;
+        assert!(r2.is_err(), "Free 模式下 set_local_model 应被 Pro 门控拦截");
     }
 
-    // 重启阶段
+    // 重启阶段：仍为 Remote（未被修改）
     let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
     let settings = get_settings_inner(&restarted).await.unwrap();
-    assert_eq!(settings.llm_mode, "local", "重启后 llm_mode 应恢复为 local");
-    assert_eq!(
-        settings.local_model, "persisted-model.gguf",
-        "重启后 local_model 应恢复"
-    );
+    assert_eq!(settings.llm_mode, "", "重启后 llm_mode 应为空串（remote）");
+    assert_eq!(settings.local_model, "", "重启后 local_model 应为空串");
 
-    // 运行态也应恢复
+    // 运行态也应恢复为 Remote
     assert_eq!(
         restarted.get_llm_mode().await,
-        LlmMode::Local,
-        "重启后运行态模式应恢复为 Local"
+        LlmMode::Remote,
+        "重启后运行态模式应恢复为 Remote"
     );
 }
 
@@ -3539,27 +3557,27 @@ async fn tc_pro_gate_003_search_symbols_free_works() {
     );
 }
 
-/// TC-PRO-GATE-004: Free 模式 set_llm_mode("local") 设置成功但 is_pro 仍为 false。
-///
-/// Alpha 阶段：is_pro 自动激活为 true，set_llm_mode("local") 设置成功。
-/// 后期稳定后：set_llm_mode 设置成功，is_pro 仍为 false。
+/// TC-PRO-GATE-004: Free 模式 set_llm_mode("local") 被 Pro 门控拦截，is_pro 仍为 false。
 #[tokio::test]
 async fn tc_pro_gate_004_local_mode_free_still_not_pro() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
-    // Free 模式设置 local 模式（设置本身不应失败）
-    set_llm_mode_inner("local".to_string(), &state)
-        .await
-        .unwrap();
+    // Free 模式设置 local 模式应被 Pro 门控拦截
+    let result = set_llm_mode_inner("local".to_string(), &state).await;
+    assert!(result.is_err(), "Free 模式下 local 模式应被 Pro 门控拦截");
+    assert!(
+        result.unwrap_err().contains("PRO_REQUIRED"),
+        "错误应包含 PRO_REQUIRED"
+    );
 
-    // 验证模式已设置
+    // 验证模式未被修改（仍为 remote）
     let mode = get_llm_mode_inner(&state).await.unwrap();
-    assert_eq!(mode, "local", "llm_mode 应已设置为 local");
+    assert_eq!(mode, "remote", "llm_mode 应仍为 remote");
 
     // 验证 Pro 状态
     let pro_status = get_pro_status_inner(&state).await;
-    assert!(!pro_status, "设置 local 模式后仍应为 Free 模式");
+    assert!(!pro_status, "应仍为 Free 模式");
 }
 
 #[tokio::test]
