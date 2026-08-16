@@ -48,7 +48,13 @@ pub mod gemv_kernel;
 /// 独立于 candle-core 的 GGUF 格式解析器，支持 mmap 零拷贝读取。
 #[cfg(feature = "pro")]
 pub mod gguf_reader;
-#[cfg(feature = "pro")]
+/// HNSW 近似最近邻索引（REQ-NFR-005 + REQ-PERF-013）。
+///
+/// 基于 `hnsw_rs` crate（Malkov & Yashunin 2016/2018 论文纯 Rust 实现），
+/// 将向量检索复杂度从 O(n) 暴力扫描降至 O(log n)。
+///
+/// **已从 Pro 下沉到 Free**（REQ-PERF-013）：大知识库（>500 chunks）自动使用 HNSW，
+/// 小知识库保持全量扫描（阈值切换，无需用户配置）。
 pub mod hnsw_index;
 /// KV cache 序列化/反序列化（Phase 4 Session 24）。
 ///
@@ -112,6 +118,9 @@ mod embedder_tests;
 mod gemv_kernel_tests;
 #[cfg(all(test, feature = "pro"))]
 mod gguf_reader_tests;
+/// HNSW 向量索引下沉 Free TDD 测试（REQ-PERF-013）。
+#[cfg(test)]
+mod hnsw_free_tests;
 #[cfg(test)]
 mod hyde_rewriter_tests;
 #[cfg(all(test, feature = "pro"))]

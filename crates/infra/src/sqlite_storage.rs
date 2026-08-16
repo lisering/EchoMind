@@ -125,6 +125,16 @@ impl LruVectorCache {
 
 type VectorCache = std::sync::Arc<std::sync::RwLock<Option<LruVectorCache>>>;
 
+/// HNSW 自动启用阈值（REQ-PERF-013）。
+///
+/// 当知识库向量数 > 此阈值时，`vector_search` 自动构建并使用 HNSW 索引（O(log n)）。
+/// 向量数 ≤ 此阈值时保持全量扫描（O(n)，小数据量更快，无构建开销）。
+///
+/// 阈值 500 基于性能交叉点推算：
+/// - 500 chunks 全量扫描 ~5ms，HNSW 构建开销 ~50ms（首次查询反而更慢）
+/// - 10k chunks 全量扫描 ~160ms，HNSW 查询 ~1ms（构建一次后永久受益）
+const HNSW_AUTO_THRESHOLD: usize = 500;
+
 // S01 拆分：aes_gcm / base64 加密辅助已迁移至 `storage::crypto` 模块。
 // `Aes256Gcm` 类型仍作为 `SqliteStorage` 字段类型保留。
 use aes_gcm::Aes256Gcm;
@@ -152,13 +162,12 @@ use rusqlite::params;
 pub struct SqliteStorage {
     pool: Pool,
     cipher: Aes256Gcm,
-    /// HNSW 近似最近邻索引（REQ-NFR-005，Pro feature）。
+    /// HNSW 近似最近邻索引（REQ-NFR-005 + REQ-PERF-013）。
     /// 懒构建 + 脏标记：文档变更后置脏，下次检索自动重建。
-    /// 大知识库（>10K chunks）下将向量检索从全表扫描 O(n) 降为 O(log n)。
-    #[cfg(feature = "pro")]
+    /// 大知识库（>HNSW_AUTO_THRESHOLD chunks）下将向量检索从全表扫描 O(n) 降为 O(log n)。
+    /// **已从 Pro 下沉到 Free**（REQ-PERF-013）。
     hnsw: std::sync::Arc<std::sync::Mutex<Option<crate::hnsw_index::HnswIndex>>>,
     /// HNSW 索引是否因文档变更而失效（需要重建）。
-    #[cfg(feature = "pro")]
     hnsw_dirty: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// **性能优化（秒出答案）**：内存向量缓存。
     ///
@@ -197,9 +206,7 @@ impl SqliteStorage {
         let storage = Self {
             pool,
             cipher,
-            #[cfg(feature = "pro")]
             hnsw: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            #[cfg(feature = "pro")]
             hnsw_dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             vector_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
             max_vectors: 5000,
@@ -238,9 +245,7 @@ impl SqliteStorage {
         let storage = Self {
             pool,
             cipher,
-            #[cfg(feature = "pro")]
             hnsw: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            #[cfg(feature = "pro")]
             hnsw_dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             vector_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
             max_vectors: 5000,
@@ -271,12 +276,11 @@ impl SqliteStorage {
     /// **性能优化（秒出答案）**：使内存向量缓存失效。
     ///
     /// 在嵌入写入/删除时调用，下次 `vector_search` 自动重建缓存。
-    /// 同时使 HNSW 索引失效（Pro feature）。
+    /// 同时使 HNSW 索引失效（REQ-PERF-013）。
     fn invalidate_vector_cache(&self) {
         if let Ok(mut guard) = self.vector_cache.write() {
             *guard = None;
         }
-        #[cfg(feature = "pro")]
         self.mark_hnsw_dirty();
     }
 }
@@ -412,8 +416,7 @@ impl SqliteStorage {
     // ---- HNSW 索引支持（REQ-NFR-005 / F1-2）----
 
     /// 标记 HNSW 索引失效：分块/向量变更（导入、删除、重索引）后调用，
-    /// 下次 `vector_search` 自动全量重建。仅 Pro feature 生效。
-    #[cfg(feature = "pro")]
+    /// 下次 `vector_search` 自动全量重建（REQ-PERF-013）。
     pub fn mark_hnsw_dirty(&self) {
         self.hnsw_dirty
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -753,53 +756,76 @@ impl Storage for SqliteStorage {
         query_embedding: &[f32],
         top_k: usize,
     ) -> anyhow::Result<Vec<RetrievalResult>> {
-        #[cfg(feature = "pro")]
-        {
-            // ---- HNSW 快速路径（REQ-NFR-005，Pro feature）----
-            // 索引未构建或文档变更（dirty）→ 全量重建；否则直接搜索，
-            // 大知识库检索从全表扫描 O(n) 降为 O(log n)。
-            let use_hnsw = {
+        // ---- HNSW 快速路径（REQ-NFR-005 + REQ-PERF-013）----
+        // 已从 Pro 下沉到 Free。阈值切换：向量数 > HNSW_AUTO_THRESHOLD 用 HNSW O(log n)，
+        // 否则走内存全量扫描 O(n)（小数据量全量扫描更快，无构建开销）。
+        let use_hnsw = {
+            let idx = self.hnsw.lock().unwrap_or_else(|e| e.into_inner());
+            idx.is_some() && !self.hnsw_dirty.load(std::sync::atomic::Ordering::SeqCst)
+        };
+        if use_hnsw {
+            // 索引已构建且未脏：直接搜索
+            // use_hnsw 已确认索引存在；此处防御性匹配，None（竞态）→ 降级全表扫描
+            let search_hits = {
                 let idx = self.hnsw.lock().unwrap_or_else(|e| e.into_inner());
-                idx.is_some() && !self.hnsw_dirty.load(std::sync::atomic::Ordering::SeqCst)
+                idx.as_ref().map(|idx| {
+                    idx.search(query_embedding, top_k * 4)
+                        .into_iter()
+                        .map(|(id, dist)| (id, 1.0 - dist))
+                        .collect::<Vec<_>>()
+                })
             };
-            if use_hnsw {
-                // use_hnsw 已确认索引存在；此处防御性匹配，None（竞态）→ 降级全表扫描
-                let search_hits = {
-                    let idx = self.hnsw.lock().unwrap_or_else(|e| e.into_inner());
-                    idx.as_ref().map(|idx| {
-                        idx.search(query_embedding, top_k * 4)
-                            .into_iter()
-                            .map(|(id, dist)| (id, 1.0 - dist))
-                            .collect::<Vec<_>>()
-                    })
-                };
-                if let Some(hits) = search_hits {
-                    let (ids, scores): (Vec<String>, Vec<f32>) = hits.into_iter().unzip();
-                    if !ids.is_empty() {
-                        let mut results = self.get_chunks_by_ids(&ids).await?;
-                        for r in &mut results {
-                            if let Some(pos) = ids.iter().position(|id| id == &r.chunk.id) {
-                                r.score = scores[pos];
-                            }
+            if let Some(hits) = search_hits {
+                let (ids, scores): (Vec<String>, Vec<f32>) = hits.into_iter().unzip();
+                if !ids.is_empty() {
+                    let mut results = self.get_chunks_by_ids(&ids).await?;
+                    for r in &mut results {
+                        if let Some(pos) = ids.iter().position(|id| id == &r.chunk.id) {
+                            r.score = scores[pos];
                         }
-                        results.sort_by(|a, b| {
-                            b.score
-                                .partial_cmp(&a.score)
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        });
-                        results.truncate(top_k);
-                        return Ok(results);
                     }
+                    results.sort_by(|a, b| {
+                        b.score
+                            .partial_cmp(&a.score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    results.truncate(top_k);
+                    return Ok(results);
                 }
             }
-            // 索引缺失或脏：全量加载向量 + 构建（spawn_blocking 内 CPU 密集）并搜索
-            let vectors = self.load_all_embeddings().await?;
+        }
+
+        // ---- 阈值切换：检查向量数量决定是否构建 HNSW 索引 ----
+        // 先从缓存或 DB 加载向量，检查数量是否超过阈值
+        let cached: Option<Vec<(String, Vec<f32>)>> = {
+            let guard = self.vector_cache.read();
+            guard
+                .ok()
+                .and_then(|g| g.as_ref().map(|cache| cache.to_vec()))
+        };
+
+        let vectors: Vec<(String, Vec<f32>)> = match cached {
+            Some(v) => v,
+            None => {
+                // 缓存未命中：全量加载并填充 LRU 缓存
+                let loaded = self.load_all_embeddings().await?;
+                let cache = LruVectorCache::from_vectors(loaded, self.max_vectors);
+                let vec = cache.to_vec();
+                if let Ok(mut guard) = self.vector_cache.write() {
+                    *guard = Some(cache);
+                }
+                vec
+            }
+        };
+
+        // 阈值切换：向量数 > 阈值且索引 dirty → 构建 HNSW 索引
+        if vectors.len() > HNSW_AUTO_THRESHOLD && !vectors.is_empty() {
             // 防御：维度不匹配的向量（旧 schema 迁移遗留数据）不参与 HNSW 图构建
-            // （anndists 要求维度一致，否则构建断言崩溃）。其与任何查询的余弦相似度
-            // 均为 0.0，查询后以 0.0 分追加返回，与全表扫描路径语义一致。
             let query_dim = query_embedding.len();
-            let (matched, excluded): (Vec<_>, Vec<_>) =
-                vectors.into_iter().partition(|(_, v)| v.len() == query_dim);
+            let (matched, excluded): (Vec<_>, Vec<_>) = vectors
+                .clone()
+                .into_iter()
+                .partition(|(_, v)| v.len() == query_dim);
             let (hnsw, hnsw_dirty) = (self.hnsw.clone(), self.hnsw_dirty.clone());
             let query = query_embedding.to_vec();
             let mut built_hits = tokio::task::spawn_blocking(move || {
@@ -834,34 +860,10 @@ impl Storage for SqliteStorage {
                 results.truncate(top_k);
                 return Ok(results);
             }
-            // 空库：落入下方内存缓存 / 全表扫描路径
+            // HNSW 无结果：落入下方内存全量扫描路径（vectors 仍可用，因 HNSW 路径用 clone）
         }
 
-        // ---- 内存向量缓存快速路径（性能优化：秒出答案）----
-        // S6: 使用 LruVectorCache 带容量限制的 LRU 缓存。
-        // 首次检索时加载向量到内存，后续检索跳过 SQLite BLOB I/O + 反序列化。
-        // 注意：read guard 必须在 .await 前释放（std::sync::RwLockReadGuard 非 Send）
-        let cached: Option<Vec<(String, Vec<f32>)>> = {
-            let guard = self.vector_cache.read();
-            guard
-                .ok()
-                .and_then(|g| g.as_ref().map(|cache| cache.to_vec()))
-        };
-
-        let vectors: Vec<(String, Vec<f32>)> = match cached {
-            Some(v) => v,
-            None => {
-                // 缓存未命中：全量加载并填充 LRU 缓存
-                let loaded = self.load_all_embeddings().await?;
-                let cache = LruVectorCache::from_vectors(loaded, self.max_vectors);
-                let vec = cache.to_vec();
-                if let Ok(mut guard) = self.vector_cache.write() {
-                    *guard = Some(cache);
-                }
-                vec
-            }
-        };
-
+        // ---- 内存全量扫描路径（小知识库或 HNSW 降级）----
         // 在内存中计算余弦相似度，取 top-k
         let query_vec = query_embedding.to_vec();
         let top_k_val = top_k;

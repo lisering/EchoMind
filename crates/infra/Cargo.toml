@@ -7,8 +7,9 @@ description = "EchoMind 适配器层：SQLite 持久化与本地向量化引擎�
 
 [features]
 default = []
-## Pro 功能：PDF 渲染（pdfium）、OCR（ocrs）、VLM 视觉模型、HNSW 向量索引、本地 LLM 推理
-pro = ["dep:pdfium-render", "dep:ocrs", "dep:rten", "dep:image", "dep:hnsw_rs", "dep:mistralrs", "dep:memmap2", "dep:half", "dep:libc", "dep:tree-sitter", "dep:tree-sitter-rust", "dep:tree-sitter-typescript", "dep:tree-sitter-python", "dep:tree-sitter-go", "dep:tempfile"]
+## Pro 功能：PDF 渲染（pdfium）、OCR（ocrs）、VLM 视觉模型、本地 LLM 推理
+## 注：HNSW 向量索引已下沉到 Free（REQ-PERF-013），不再为 Pro 专属
+pro = ["dep:pdfium-render", "dep:ocrs", "dep:rten", "dep:image", "dep:mistralrs", "dep:memmap2", "dep:half", "dep:libc", "dep:tree-sitter", "dep:tree-sitter-rust", "dep:tree-sitter-typescript", "dep:tree-sitter-python", "dep:tree-sitter-go", "dep:tempfile"]
 
 ## GPU 加速（macOS Metal）——启用后 best_device(false) 自动选择 Metal 设备
 metal = ["mistralrs/metal"]
@@ -53,8 +54,9 @@ ocrs = { version = "0.12.2", optional = true }
 rten = { version = "0.24.0", optional = true }
 # 图像处理（OCR 预处理：解码、缩放、对比度增强）
 image = { version = "0.25", optional = true }
-# HNSW 近似最近邻索引（REQ-NFR-005）：纯 Rust 实现，Cosine 距离
-hnsw_rs = { version = "0.3", optional = true }
+# HNSW 近似最近邻索引（REQ-NFR-005 + REQ-PERF-013）：纯 Rust 实现，Cosine 距离
+# 已从 Pro 下沉到 Free（大知识库 O(n) → O(log n) 检索优化）
+hnsw_rs = "0.3"
 # 本地 LLM 推理引擎（REQ-LLM-003）：基于 mistral.rs 的纯 Rust 本地推理
 # v0.9.0 未发布到 crates.io（candle-core 使用 git 依赖），改用 git 源
 mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs", tag = "v0.9.0", optional = true }
