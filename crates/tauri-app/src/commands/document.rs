@@ -641,3 +641,73 @@ pub async fn export_document_original_inner(
 
     Ok(())
 }
+
+// ============================================================================
+// P1-1: 磁盘空间检查与清理（磁盘满弹性设计）
+// ============================================================================
+
+/// 获取磁盘空间信息（P1-1）。
+///
+/// 返回数据目录所在磁盘的可用空间、总空间、使用率。
+/// 前端用于在设置面板或状态栏展示磁盘空间状态。
+#[tauri::command]
+pub async fn get_disk_space_info(state: State<'_, AppState>) -> Result<String, String> {
+    get_disk_space_info_inner(state.inner()).await
+}
+
+/// `get_disk_space_info` 的逻辑实现（命令与集成测试复用）。
+pub async fn get_disk_space_info_inner(state: &AppState) -> Result<String, String> {
+    let data_dir = state.data_dir.clone();
+    let info = tokio::task::spawn_blocking(move || {
+        echomind_infra::disk_space::get_disk_space_info(&data_dir)
+    })
+    .await
+    .map_err(|e| format!("磁盘空间检查任务失败: {e:#}"))?
+    .map_err(|e| format!("{e:#}"))?;
+
+    serde_json::to_string(&info).map_err(|e| format!("序列化磁盘空间信息失败: {e}"))
+}
+
+/// 清理临时文件释放磁盘空间（P1-1）。
+///
+/// 清理数据目录下的 .partial / .tmp 文件、孤立 .meta.json、旧日志文件，
+/// 并执行 WAL checkpoint 收缩 WAL 文件。
+/// 返回释放的字节数。
+#[tauri::command]
+pub async fn cleanup_disk_space(state: State<'_, AppState>) -> Result<u64, String> {
+    cleanup_disk_space_inner(state.inner()).await
+}
+
+/// `cleanup_disk_space` 的逻辑实现（命令与集成测试复用）。
+pub async fn cleanup_disk_space_inner(state: &AppState) -> Result<u64, String> {
+    let freed = state.storage.cleanup_for_disk_space(&state.data_dir).await;
+    Ok(freed)
+}
+
+/// 检查磁盘空间是否充足（P1-1）。
+///
+/// 前端可在导入大量文档前调用此命令预检磁盘空间。
+/// `required_bytes` 为预估所需空间（字节）。
+#[tauri::command]
+pub async fn check_disk_space(
+    required_bytes: u64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    check_disk_space_inner(required_bytes, state.inner()).await
+}
+
+/// `check_disk_space` 的逻辑实现（命令与集成测试复用）。
+pub async fn check_disk_space_inner(required_bytes: u64, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .check_disk_space(required_bytes)
+        .await
+        .map_err(|e| {
+            let msg = format!("{e:#}");
+            if msg.contains("DISK_FULL") {
+                msg
+            } else {
+                format!("STORAGE: 磁盘空间检查失败: {msg}")
+            }
+        })
+}

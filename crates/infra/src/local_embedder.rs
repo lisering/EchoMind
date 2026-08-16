@@ -258,8 +258,11 @@ fn is_file_valid(path: &Path, local_name: &str) -> bool {
 /// 自定义模型的维度在加载时动态检测（`dim()` 返回 0）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmbeddingModel {
-    /// all-MiniLM-L6-v2（默认，384 维，英文通用场景）
+    /// all-MiniLM-L6-v2（384 维，英文通用场景，2023 模型）
     AllMiniLML6V2,
+    /// bge-small-en-v1.5（384 维，英文优化场景，P1-5 新增默认模型）
+    /// 检索质量优于 all-MiniLM-L6-v2，维度兼容，迁移成本低。
+    BgeSmallEnV1_5,
     /// bge-small-zh-v1.5（512 维，中文优化场景）
     BgeSmallZhV1_5,
     /// e5-small-v2（384 维，多语言场景）
@@ -277,6 +280,7 @@ impl EmbeddingModel {
     fn repo(&self) -> &'static str {
         match self {
             Self::AllMiniLML6V2 => "Xenova/all-MiniLM-L6-v2",
+            Self::BgeSmallEnV1_5 => "BAAI/bge-small-en-v1.5",
             Self::BgeSmallZhV1_5 => "BAAI/bge-small-zh-v1.5",
             Self::E5SmallV2 => "intfloat/e5-small-v2",
             Self::BgeBaseEnV1_5 => "BAAI/bge-base-en-v1.5",
@@ -288,6 +292,7 @@ impl EmbeddingModel {
     fn dir_name(&self) -> &'static str {
         match self {
             Self::AllMiniLML6V2 => "all-MiniLM-L6-v2",
+            Self::BgeSmallEnV1_5 => "bge-small-en-v1.5",
             Self::BgeSmallZhV1_5 => "bge-small-zh-v1.5",
             Self::E5SmallV2 => "e5-small-v2",
             Self::BgeBaseEnV1_5 => "bge-base-en-v1.5",
@@ -299,6 +304,7 @@ impl EmbeddingModel {
     fn onnx_file(&self) -> &'static str {
         match self {
             Self::AllMiniLML6V2 => "model_quantized.onnx",
+            Self::BgeSmallEnV1_5 => "model.onnx",
             Self::BgeSmallZhV1_5 => "model.onnx",
             Self::E5SmallV2 => "model_optimized.onnx",
             Self::BgeBaseEnV1_5 => "model.onnx",
@@ -310,6 +316,7 @@ impl EmbeddingModel {
     fn onnx_repo_path(&self) -> &'static str {
         match self {
             Self::AllMiniLML6V2 => "onnx/model_quantized.onnx",
+            Self::BgeSmallEnV1_5 => "onnx/model.onnx",
             Self::BgeSmallZhV1_5 => "onnx/model.onnx",
             Self::E5SmallV2 => "onnx/model_optimized.onnx",
             Self::BgeBaseEnV1_5 => "onnx/model.onnx",
@@ -334,6 +341,7 @@ impl EmbeddingModel {
     pub fn dim(&self) -> usize {
         match self {
             Self::AllMiniLML6V2 => 384,
+            Self::BgeSmallEnV1_5 => 384,
             Self::BgeSmallZhV1_5 => 512,
             Self::E5SmallV2 => 384,
             Self::BgeBaseEnV1_5 => 768,
@@ -731,6 +739,7 @@ impl LocalEmbedder {
 
         for model in [
             EmbeddingModel::AllMiniLML6V2,
+            EmbeddingModel::BgeSmallEnV1_5,
             EmbeddingModel::BgeSmallZhV1_5,
             EmbeddingModel::E5SmallV2,
         ] {
@@ -768,6 +777,7 @@ impl LocalEmbedder {
             if cache_dir.exists() {
                 for model in [
                     EmbeddingModel::AllMiniLML6V2,
+                    EmbeddingModel::BgeSmallEnV1_5,
                     EmbeddingModel::BgeSmallZhV1_5,
                     EmbeddingModel::E5SmallV2,
                 ] {
@@ -784,10 +794,10 @@ impl LocalEmbedder {
 
     /// 检查默认模型的下载状态（用于首启向导判断）。
     ///
-    /// 检查 `cache_dir/all-MiniLM-L6-v2/` 下 5 个必需文件是否齐全。
+    /// 检查 `cache_dir/bge-small-en-v1.5/` 下 5 个必需文件是否齐全。
     /// 如果存在 `.partial` 文件，返回 `PartialDownload` 状态。
     pub fn check_status(cache_dir: &Path) -> EmbedderStatus {
-        let model = EmbeddingModel::AllMiniLML6V2;
+        let model = EmbeddingModel::BgeSmallEnV1_5;
         let model_dir = cache_dir.join(model.dir_name());
         let files = model.files();
 

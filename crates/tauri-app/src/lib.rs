@@ -383,6 +383,10 @@ pub fn run() {
             commands::filter_documents_by_tag,
             // KB 统计仪表盘（REQ-KB-003 v1.5）
             commands::get_kb_stats,
+            // P1-1: 磁盘空间检查与清理（磁盘满弹性设计）
+            commands::get_disk_space_info,
+            commands::cleanup_disk_space,
+            commands::check_disk_space,
             // S4 v1.6: 窗口关闭行为 — 最小化到托盘设置（REQ-WIN-003）（S09: set_close_to_tray → update_setting）
             commands::get_close_to_tray,
             // S1 v1.9: RAG 检索参数可配置（REQ-RAG-014）

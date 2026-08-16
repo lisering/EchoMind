@@ -1,6 +1,11 @@
 //! EchoMind 适配器层（六边形架构 infra）：SQLite 持久化、本地向量化引擎。
 //! 本 crate 实现 `crates/core` 定义的端口 Trait，依赖方向：infra → core，严禁反转。
 
+/// 磁盘空间检查模块（P1-1）：跨平台磁盘可用空间检查 + 临时文件清理。
+///
+/// R3 复盘发现磁盘满是最大弹性缺口（评分 2/10）。本模块提供预防性检查
+/// 和自动清理，避免 SQLite 写入时遇到 SQLITE_FULL 错误。
+pub mod disk_space;
 /// DuckDuckGo Instant Answer API 适配器（REQ-RAG-036）：免费网页搜索，无需 API Key。
 pub mod duckduckgo_provider;
 /// 文件监听器（REQ-SYNC-003）：基于 notify + notify-debouncer-full 的跨平台实时文件监听。

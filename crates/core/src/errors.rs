@@ -15,6 +15,8 @@
 //! | `EMBED` | `ERR_EMBED` | 向量化失败 | toast error「向量化失败」 |
 //! | `LLM` | `ERR_LLM` | LLM 服务异常 | toast error「LLM 服务异常」 |
 //! | `STORAGE` | `ERR_STORAGE` | 存储异常 | toast error「存储异常」 |
+//! | `DISK_FULL` | `ERR_DISK_FULL` | 磁盘空间不足 | toast error「磁盘空间不足，请清理文件」 |
+//! | `RATE_LIMIT` | `ERR_RATE_LIMIT` | LLM API 限流 | toast warning「请求过于频繁，请稍后重试」 |
 //! | `VALIDATION` | `ERR_VALIDATION` | 输入校验失败 | toast warning（显示原始消息） |
 //! | `UNKNOWN` | `ERR_UNKNOWN` | 未知错误 | toast error「未知错误」 |
 
@@ -34,6 +36,16 @@ pub const ERR_EMBED: &str = "EMBED";
 pub const ERR_LLM: &str = "LLM";
 /// 存储异常前缀（REQ-ERR-001）
 pub const ERR_STORAGE: &str = "STORAGE";
+/// 磁盘空间不足前缀（P1-1：磁盘满弹性设计）。
+///
+/// 当磁盘可用空间低于阈值时，写入操作返回此前缀错误，
+/// 前端展示「磁盘空间不足，请清理文件」提示 + 引导用户清理。
+pub const ERR_DISK_FULL: &str = "DISK_FULL";
+/// LLM API 限流前缀（P1-2：429 限流分类）。
+///
+/// 当 LLM API 返回 HTTP 429 时，错误消息使用此前缀，
+/// 前端展示「请求过于频繁，请稍后重试」+ wait/switch_model 操作按钮。
+pub const ERR_RATE_LIMIT: &str = "RATE_LIMIT";
 /// 输入校验失败前缀（REQ-ERR-005）
 pub const ERR_VALIDATION: &str = "VALIDATION";
 /// 未知错误前缀（REQ-ERR-001）
@@ -87,6 +99,17 @@ pub fn classify_llm_error(err: &str) -> String {
     {
         return prefix_error(ERR_NETWORK, err);
     }
+    // 限流：HTTP 429 / rate limit / Too Many Requests
+    if err.contains("HTTP 429")
+        || err.contains("rate limit")
+        || err.contains("Rate limit")
+        || err.contains("Too Many")
+        || err.contains("too many")
+        || err.contains("quota")
+        || err.contains("Quota")
+    {
+        return prefix_error(ERR_RATE_LIMIT, err);
+    }
     // 其他 LLM 错误
     prefix_error(ERR_LLM, err)
 }
@@ -110,6 +133,8 @@ pub fn has_error_prefix(err: &str) -> bool {
         ERR_EMBED,
         ERR_LLM,
         ERR_STORAGE,
+        ERR_DISK_FULL,
+        ERR_RATE_LIMIT,
         ERR_VALIDATION,
         ERR_UNKNOWN,
     ];
@@ -137,6 +162,8 @@ mod tests {
         assert_eq!(ERR_EMBED, "EMBED");
         assert_eq!(ERR_LLM, "LLM");
         assert_eq!(ERR_STORAGE, "STORAGE");
+        assert_eq!(ERR_DISK_FULL, "DISK_FULL");
+        assert_eq!(ERR_RATE_LIMIT, "RATE_LIMIT");
         assert_eq!(ERR_VALIDATION, "VALIDATION");
         assert_eq!(ERR_UNKNOWN, "UNKNOWN");
     }
@@ -226,6 +253,54 @@ mod tests {
         assert!(has_error_prefix("VALIDATION: query too long"));
         assert!(has_error_prefix("LIMIT_REACHED: 50 files"));
         assert!(has_error_prefix("UNKNOWN: unexpected"));
+    }
+
+    // ─── classify_llm_error: 429 限流 ───
+
+    #[test]
+    fn test_classify_rate_limit_429() {
+        let result = classify_llm_error("LLM API 错误 (HTTP 429): Too Many Requests");
+        assert!(
+            result.starts_with("RATE_LIMIT:"),
+            "429 应分类为 RATE_LIMIT，实际: {result}"
+        );
+        assert!(result.contains("HTTP 429"));
+    }
+
+    #[test]
+    fn test_classify_rate_limit_text() {
+        let result = classify_llm_error("rate limit exceeded");
+        assert!(result.starts_with("RATE_LIMIT:"));
+    }
+
+    #[test]
+    fn test_classify_rate_limit_too_many() {
+        let result = classify_llm_error("Too Many Requests");
+        assert!(result.starts_with("RATE_LIMIT:"));
+    }
+
+    #[test]
+    fn test_classify_rate_limit_quota() {
+        let result = classify_llm_error("quota exceeded for this API key");
+        assert!(result.starts_with("RATE_LIMIT:"));
+    }
+
+    #[test]
+    fn test_classify_rate_limit_not_confused_with_llm() {
+        // 429 不应被分类为 LLM 前缀
+        let result = classify_llm_error("LLM API 错误 (HTTP 429): Rate limit");
+        assert!(!result.starts_with("LLM:"));
+        assert!(result.starts_with("RATE_LIMIT:"));
+    }
+
+    #[test]
+    fn test_has_error_prefix_disk_full() {
+        assert!(has_error_prefix("DISK_FULL: 磁盘空间不足"));
+    }
+
+    #[test]
+    fn test_has_error_prefix_rate_limit() {
+        assert!(has_error_prefix("RATE_LIMIT: 请求过于频繁"));
     }
 
     #[test]

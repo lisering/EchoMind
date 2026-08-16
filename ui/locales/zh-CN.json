@@ -720,6 +720,8 @@
 "parse": "文件解析失败",
 "embed": "向量化失败",
 "storage": "存储异常",
+"disk_full": "磁盘空间不足，请清理文件",
+"rate_limit": "请求过于频繁，请稍后重试",
 "unknown": "未知错误"
 },
   "backend": {

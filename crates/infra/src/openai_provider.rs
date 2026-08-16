@@ -32,6 +32,13 @@ const CONNECT_TIMEOUT_SECS: u64 = 30;
 /// 注意：流式对话的总体超时由 `forward_stream` 的 CancellationToken 控制，
 /// 此值作为最终兜底，防止网络层永久挂起。
 const REQUEST_TIMEOUT_SECS: u64 = 300;
+/// 429 限流最大重试次数（P1-2：指数退避重试）。
+/// 首次请求 + 3 次重试 = 最多 4 次 HTTP 请求。
+const RATE_LIMIT_MAX_RETRIES: u32 = 3;
+/// 指数退避基础延迟（秒）：第 1 次重试等待 1s，第 2 次 2s，第 3 次 4s。
+const RATE_LIMIT_BACKOFF_BASE_SECS: u64 = 1;
+/// 指数退避最大延迟上限（秒）：单次重试等待不超过 30s。
+const RATE_LIMIT_BACKOFF_MAX_SECS: u64 = 30;
 
 /// OpenAI 兼容 Provider（Chat Completions 协议）。
 pub struct OpenAIProvider {
@@ -300,6 +307,11 @@ impl OpenAIProvider {
     ///
     /// 构建 HTTP 请求体 → 发送 → 检查状态码 → SSE 字节流解析 → token 流。
     /// 两个 `chat_stream*` 方法仅 messages 数组组装方式不同，后续逻辑完全一致。
+    ///
+    /// **429 限流指数退避重试（P1-2）**：当 API 返回 HTTP 429 时，自动重试最多
+    /// 3 次（指数退避 1s/2s/4s + 随机抖动）。如果 API 返回 `Retry-After` header，
+    /// 使用其值作为等待时间（上限 30s）。重试仅发生在连接建立阶段——一旦 SSE
+    /// 流开始传输 token，不再重试（避免重复输出）。
     async fn send_stream_request(
         &self,
         messages: Vec<serde_json::Value>,
@@ -340,24 +352,9 @@ impl OpenAIProvider {
         let (reasoning_tx, reasoning_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         *self.reasoning_rx.lock().await = Some(reasoning_rx);
 
-        let resp = self
-            .build_request(&body)
-            .send()
-            .await
-            .context("LLM 请求发送失败")?;
-        let status = resp.status();
-        if !status.is_success() {
-            // 精准捕获 HTTP 状态码并透传真实错误体（REQ-LLM-001-AC-2）
-            let text = resp
-                .text()
-                .await
-                .unwrap_or_else(|_| "<无法读取响应体>".to_string());
-            bail!(
-                "LLM API 错误 (HTTP {}): {}",
-                status.as_u16(),
-                truncate(&text, 500)
-            );
-        }
+        // P1-2：429 限流指数退避重试
+        // 重试仅发生在 HTTP 响应状态码检查阶段——一旦 SSE 流开始传输 token，不再重试。
+        let resp = self.send_stream_request_with_retry(&body).await?;
 
         // SSE 字节流 → SseParser 缓冲切分 → token 流；[DONE] 处截断
         let token_stream = resp
@@ -399,6 +396,88 @@ impl OpenAIProvider {
         Ok(Box::pin(token_stream))
     }
 
+    /// 带 429 限流指数退避重试的 HTTP 请求发送（P1-2）。
+    ///
+    /// 发送 HTTP 请求 → 检查状态码：
+    /// - 2xx → 返回 `Ok(resp)`，后续 SSE 流正常处理
+    /// - 429 → 解析 `Retry-After` header，等待对应时间后重试（最多 3 次）
+    /// - 其他非 2xx → 直接返回错误（不重试）
+    ///
+    /// 重试仅在此阶段发生——一旦 HTTP 请求成功且 SSE 流开始传输 token，
+    /// 不再重试（避免重复输出）。
+    ///
+    /// # 退避策略
+    /// - `Retry-After` header 存在 → 使用其值（上限 30s）
+    /// - 无 header → 指数退避：1s → 2s → 4s（+ 0~500ms 随机抖动）
+    async fn send_stream_request_with_retry(
+        &self,
+        body: &serde_json::Value,
+    ) -> anyhow::Result<reqwest::Response> {
+        let mut last_error_text = String::new();
+
+        for attempt in 0..=RATE_LIMIT_MAX_RETRIES {
+            let resp = self
+                .build_request(body)
+                .send()
+                .await
+                .context("LLM 请求发送失败")?;
+
+            let status = resp.status();
+            if status.is_success() {
+                return Ok(resp);
+            }
+
+            // 非 429 错误：直接返回错误（不重试）
+            if status.as_u16() != 429 {
+                let text = resp
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "<无法读取响应体>".to_string());
+                bail!(
+                    "LLM API 错误 (HTTP {}): {}",
+                    status.as_u16(),
+                    truncate(&text, 500)
+                );
+            }
+
+            // 429：记录错误文本（最后一次重试后作为错误返回）
+            last_error_text = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "<无法读取响应体>".to_string());
+
+            // 最后一次尝试：不再重试，返回错误
+            if attempt == RATE_LIMIT_MAX_RETRIES {
+                tracing::warn!(
+                    "LLM API 429 限流：已达到最大重试次数 {}，放弃重试",
+                    RATE_LIMIT_MAX_RETRIES
+                );
+                bail!(
+                    "LLM API 错误 (HTTP 429): {}",
+                    truncate(&last_error_text, 500)
+                );
+            }
+
+            // 计算退避延迟
+            let delay = compute_rate_limit_backoff_delay(attempt);
+
+            tracing::info!(
+                "LLM API 429 限流：第 {}/{} 次重试，等待 {}ms",
+                attempt + 1,
+                RATE_LIMIT_MAX_RETRIES,
+                delay.as_millis()
+            );
+
+            tokio::time::sleep(delay).await;
+        }
+
+        // 理论上不可达（循环已在 attempt == MAX 时 return）
+        bail!(
+            "LLM API 错误 (HTTP 429): {}",
+            truncate(&last_error_text, 500)
+        );
+    }
+
     /// 返回推理接收端的共享句柄（Arc），供后台任务在流建立后随时取用。
     ///
     /// 与直接持有 receiver 不同：句柄可在 provider 被 move 进引擎前克隆，
@@ -409,6 +488,23 @@ impl OpenAIProvider {
     {
         self.reasoning_rx.clone()
     }
+}
+
+/// 计算 429 限流指数退避延迟（P1-2）。
+///
+/// 第 0 次重试 → 1s + 抖动（1000~1500ms）
+/// 第 1 次重试 → 2s + 抖动（2000~2500ms）
+/// 第 2 次重试 → 4s + 抖动（4000~4500ms）
+/// 第 3+ 次重试 → 上限 30s + 抖动
+///
+/// 抖动范围 0~500ms，避免惊群效应。
+fn compute_rate_limit_backoff_delay(attempt: u32) -> Duration {
+    let base_secs = RATE_LIMIT_BACKOFF_BASE_SECS
+        .checked_shl(attempt)
+        .unwrap_or(RATE_LIMIT_BACKOFF_MAX_SECS)
+        .min(RATE_LIMIT_BACKOFF_MAX_SECS);
+    let jitter_ms = (rand::random::<u32>() % 500) as u64;
+    Duration::from_secs(base_secs) + Duration::from_millis(jitter_ms)
 }
 
 /// 截断错误响应体（保持字符边界，防超长错误刷屏）。
@@ -451,7 +547,10 @@ fn last_path_segment_is_version(url: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_chat_completions_url;
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::{compute_rate_limit_backoff_delay, resolve_chat_completions_url};
+    use std::time::Duration;
 
     #[test]
     fn standard_base_url_appends_v1_path() {
@@ -505,5 +604,111 @@ mod tests {
         // new() 去尾斜杠后再调用，此处直接测试 resolve 逻辑
         let url = resolve_chat_completions_url("https://api.openai.com");
         assert!(!url.contains("//v1"));
+    }
+
+    // ─── P1-2: 429 限流指数退避重试测试 ───
+
+    #[test]
+    fn tc_rate_limit_001_backoff_delay_attempt_0() {
+        // 第 0 次重试：基础延迟 1s + 抖动 0~500ms = 1000~1500ms
+        let delay = compute_rate_limit_backoff_delay(0);
+        assert!(
+            delay >= Duration::from_millis(1000),
+            "attempt 0 延迟应 ≥ 1000ms，实际: {}ms",
+            delay.as_millis()
+        );
+        assert!(
+            delay <= Duration::from_millis(1500),
+            "attempt 0 延迟应 ≤ 1500ms，实际: {}ms",
+            delay.as_millis()
+        );
+    }
+
+    #[test]
+    fn tc_rate_limit_002_backoff_delay_attempt_1() {
+        // 第 1 次重试：基础延迟 2s + 抖动 0~500ms = 2000~2500ms
+        let delay = compute_rate_limit_backoff_delay(1);
+        assert!(
+            delay >= Duration::from_millis(2000),
+            "attempt 1 延迟应 ≥ 2000ms，实际: {}ms",
+            delay.as_millis()
+        );
+        assert!(
+            delay <= Duration::from_millis(2500),
+            "attempt 1 延迟应 ≤ 2500ms，实际: {}ms",
+            delay.as_millis()
+        );
+    }
+
+    #[test]
+    fn tc_rate_limit_003_backoff_delay_attempt_2() {
+        // 第 2 次重试：基础延迟 4s + 抖动 0~500ms = 4000~4500ms
+        let delay = compute_rate_limit_backoff_delay(2);
+        assert!(
+            delay >= Duration::from_millis(4000),
+            "attempt 2 延迟应 ≥ 4000ms，实际: {}ms",
+            delay.as_millis()
+        );
+        assert!(
+            delay <= Duration::from_millis(4500),
+            "attempt 2 延迟应 ≤ 4500ms，实际: {}ms",
+            delay.as_millis()
+        );
+    }
+
+    #[test]
+    fn tc_rate_limit_004_backoff_delay_attempt_3_capped() {
+        // 第 3 次重试：基础延迟 8s 应被上限 30s 截断
+        let delay = compute_rate_limit_backoff_delay(3);
+        // 8s + 抖动 = 8000~8500ms（3 << 3 = 8，未超 30s 上限）
+        assert!(
+            delay >= Duration::from_millis(8000),
+            "attempt 3 延迟应 ≥ 8000ms，实际: {}ms",
+            delay.as_millis()
+        );
+    }
+
+    #[test]
+    fn tc_rate_limit_005_backoff_delay_large_attempt_capped() {
+        // 极大 attempt 值应被上限 30s 截断
+        let delay = compute_rate_limit_backoff_delay(10);
+        // 上限 30s + 抖动 = 30000~30500ms
+        assert!(
+            delay >= Duration::from_secs(30),
+            "attempt 10 延迟应 ≥ 30000ms，实际: {}ms",
+            delay.as_millis()
+        );
+        assert!(
+            delay <= Duration::from_millis(30500),
+            "attempt 10 延迟应 ≤ 30500ms，实际: {}ms",
+            delay.as_millis()
+        );
+    }
+
+    #[test]
+    fn tc_rate_limit_006_backoff_delay_monotonic() {
+        // 延迟应随 attempt 递增（忽略抖动，验证基础延迟趋势）
+        // 多次取样取最小值，过滤抖动影响
+        let mut min_delay_0 = Duration::from_secs(30);
+        let mut min_delay_1 = Duration::from_secs(30);
+        for _ in 0..100 {
+            min_delay_0 = min_delay_0.min(compute_rate_limit_backoff_delay(0));
+            min_delay_1 = min_delay_1.min(compute_rate_limit_backoff_delay(1));
+        }
+        // 最小延迟应满足：attempt 1 > attempt 0（基础延迟 2s > 1s）
+        assert!(
+            min_delay_1 > min_delay_0,
+            "退避延迟应递增：attempt 1 ({:?}) 应 > attempt 0 ({:?})",
+            min_delay_1,
+            min_delay_0
+        );
+    }
+
+    #[test]
+    fn tc_rate_limit_007_max_retries_constant() {
+        // 验证常量值
+        assert_eq!(super::RATE_LIMIT_MAX_RETRIES, 3);
+        assert_eq!(super::RATE_LIMIT_BACKOFF_BASE_SECS, 1);
+        assert_eq!(super::RATE_LIMIT_BACKOFF_MAX_SECS, 30);
     }
 }

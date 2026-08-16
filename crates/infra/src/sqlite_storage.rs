@@ -568,6 +568,103 @@ impl SqliteStorage {
         .await
     }
 
+    // ========================================================================
+    // P1-1: 磁盘空间检查 + 弹性写入
+    // ========================================================================
+
+    /// 数据库文件路径（用于磁盘空间检查）。
+    fn db_path(&self) -> std::path::PathBuf {
+        // 从连接池获取数据库路径
+        // 注：r2d2 不直接暴露路径，但 SqliteStorage::new 时已知道路径
+        // 这里通过连接的 DBName 获取
+        let conn = self.pool.get().ok();
+        if let Some(conn) = conn {
+            let db_name: String = conn
+                .query_row("PRAGMA database_list", [], |row| row.get(2))
+                .unwrap_or_default();
+            std::path::PathBuf::from(db_name)
+        } else {
+            std::path::PathBuf::from("echomind.db")
+        }
+    }
+
+    /// 检查磁盘空间是否充足（P1-1：磁盘满弹性设计）。
+    ///
+    /// 在关键写入操作（文档导入、消息持久化）前调用此方法，
+    /// 如果可用空间低于阈值，返回 `DISK_FULL:` 前缀错误。
+    ///
+    /// # 参数
+    /// - `required_bytes`: 写入操作预估所需空间（字节）。如果为 0，仅检查是否低于阈值。
+    ///
+    /// # 返回
+    /// - `Ok(())`：空间充足，可以继续写入
+    /// - `Err`：空间不足，错误消息包含 `DISK_FULL:` 前缀
+    pub async fn check_disk_space(&self, required_bytes: u64) -> anyhow::Result<()> {
+        let db_path = self.db_path();
+        let path_for_check = if db_path.exists() {
+            db_path
+        } else {
+            // 如果数据库文件不存在（新建场景），检查父目录
+            db_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf()
+        };
+
+        let result = tokio::task::spawn_blocking(move || {
+            crate::disk_space::check_disk_space(&path_for_check, required_bytes)
+        })
+        .await
+        .context("磁盘空间检查任务失败")?;
+
+        if let Err(e) = result {
+            // 返回带 DISK_FULL 前缀的错误
+            return Err(anyhow::anyhow!(
+                "{}: {}",
+                echomind_core::errors::ERR_DISK_FULL,
+                e
+            ));
+        }
+        Ok(())
+    }
+
+    /// 清理磁盘空间（P1-1：磁盘满弹性设计）。
+    ///
+    /// 当磁盘空间不足时，调用此方法清理临时文件释放空间。
+    /// 清理范围：.partial / .tmp 文件、孤立 .meta.json、旧日志文件。
+    ///
+    /// # 参数
+    /// - `data_dir`: 应用数据目录
+    ///
+    /// # 返回
+    /// 释放的字节数。
+    pub async fn cleanup_for_disk_space(&self, data_dir: &Path) -> u64 {
+        let data_dir = data_dir.to_path_buf();
+        let freed =
+            tokio::task::spawn_blocking(move || crate::disk_space::cleanup_temp_files(&data_dir))
+                .await
+                .unwrap_or(0);
+
+        if freed > 0 {
+            info!(
+                "磁盘空间清理：释放了 {} 字节 ({:.1} MB)",
+                freed,
+                freed as f64 / (1024.0 * 1024.0)
+            );
+        }
+
+        // 执行 WAL checkpoint 收缩 WAL 文件
+        let pool = self.pool.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Ok(conn) = pool.get() {
+                let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+            }
+        })
+        .await;
+
+        freed
+    }
+
     // ---- 嵌入缓存（全尺度优化：按内容指纹跳过重复 ONNX 推理）----
 
     /// 按内容哈希查找缓存的嵌入向量。
@@ -610,6 +707,8 @@ impl SqliteStorage {
 
 impl Storage for SqliteStorage {
     async fn add_document(&self, doc: &Document) -> anyhow::Result<()> {
+        // P1-1: 写入前检查磁盘空间（文档记录约 1KB）
+        self.check_disk_space(1024).await?;
         documents::add_document(&self.pool, doc.clone()).await
     }
 
@@ -625,6 +724,9 @@ impl Storage for SqliteStorage {
 
     /// 批量写入分块（单事务，性能优化）。S03 拆分委托 `vectors::add_chunks_batch`。
     async fn add_chunks_batch(&self, chunks: &[Chunk]) -> anyhow::Result<()> {
+        // P1-1: 写入前检查磁盘空间（每个 chunk 约 1-4KB，保守估计 4KB/chunk）
+        let estimated_bytes = chunks.len() as u64 * 4096;
+        self.check_disk_space(estimated_bytes).await?;
         vectors::add_chunks_batch(&self.pool, chunks).await?;
         self.invalidate_vector_cache();
         Ok(())
@@ -638,6 +740,9 @@ impl Storage for SqliteStorage {
 
     /// 批量写入向量（性能优化：单事务 + 仅一次缓存失效）。S03 拆分委托。
     async fn add_embeddings_batch(&self, embeddings: &[(String, Vec<f32>)]) -> anyhow::Result<()> {
+        // P1-1: 写入前检查磁盘空间（每个向量 384 维 × 4 字节 = 1536 字节，保守估计 2KB/向量）
+        let estimated_bytes = embeddings.len() as u64 * 2048;
+        self.check_disk_space(estimated_bytes).await?;
         vectors::add_embeddings_batch(&self.pool, embeddings).await?;
         self.invalidate_vector_cache();
         Ok(())

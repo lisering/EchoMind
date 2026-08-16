@@ -719,8 +719,10 @@
     "llm": "LLM service error",
     "parse": "File parsing failed",
     "embed": "Vectorization failed",
-    "storage": "Storage error",
-    "unknown": "Unknown error"
+"storage": "Storage error",
+"disk_full": "Insufficient disk space. Please clean up files.",
+"rate_limit": "Too many requests. Please wait and retry.",
+"unknown": "Unknown error"
   },
   "backend": {
     "placeholder_title": "New Chat",

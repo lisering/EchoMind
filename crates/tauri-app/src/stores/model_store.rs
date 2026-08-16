@@ -149,7 +149,7 @@ impl ModelStore {
     async fn load_embedding_model(&self) -> EmbeddingModel {
         match self.storage.get_setting("vec.embedding_model").await {
             Ok(Some(s)) => parse_embedding_model(&s),
-            _ => EmbeddingModel::AllMiniLML6V2,
+            _ => EmbeddingModel::BgeSmallEnV1_5, // P1-5: 默认升级为 bge-small-en-v1.5
         }
     }
 
@@ -332,6 +332,7 @@ impl ModelStore {
 ///
 /// 支持预设模型名称和 `custom:{name}` 前缀的自定义模型。
 /// 例如：
+/// - `"bge-small-en-v1.5"` → `EmbeddingModel::BgeSmallEnV1_5`（P1-5 新增默认模型）
 /// - `"all-MiniLM-L6-v2"` → `EmbeddingModel::AllMiniLML6V2`
 /// - `"custom:my-bge-model"` → `EmbeddingModel::Custom("my-bge-model")`
 pub fn parse_embedding_model(s: &str) -> EmbeddingModel {
@@ -339,9 +340,11 @@ pub fn parse_embedding_model(s: &str) -> EmbeddingModel {
         return EmbeddingModel::Custom(name.to_string());
     }
     match s {
+        "bge-small-en-v1.5" => EmbeddingModel::BgeSmallEnV1_5,
+        "all-MiniLM-L6-v2" => EmbeddingModel::AllMiniLML6V2,
         "bge-small-zh-v1.5" => EmbeddingModel::BgeSmallZhV1_5,
         "e5-small-v2" => EmbeddingModel::E5SmallV2,
         "bge-base-en-v1.5" => EmbeddingModel::BgeBaseEnV1_5,
-        _ => EmbeddingModel::AllMiniLML6V2,
+        _ => EmbeddingModel::BgeSmallEnV1_5, // P1-5: 默认升级为 bge-small-en-v1.5
     }
 }
