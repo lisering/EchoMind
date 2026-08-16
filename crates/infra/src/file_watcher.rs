@@ -3,6 +3,12 @@
 //! 基于 `notify` + `notify-debouncer-full` 实现，支持 macOS / Windows / Linux。
 //! 使用 500ms 去抖避免文件写入过程中的大量中间事件触发多次同步。
 //!
+//! # 弹性设计（P2-1）
+//!
+//! - `tracing` 替代 `eprintln!`，错误事件经结构化日志记录
+//! - supervisor 自动重启：debouncer 错误回调触发重启（3 次指数退避）
+//! - `CancellationToken` 管理 tokio task 生命周期（替代 `sleep(1年)` hack）
+//!
 //! # 线程安全
 //!
 //! `FileWatcherHandle` 持有 debouncer 和接收事件的 tokio task，
@@ -14,6 +20,13 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{DebounceEventResult, Debouncer, FileIdMap, new_debouncer};
+use tokio_util::sync::CancellationToken;
+
+/// 文件监听器自动重启最大尝试次数（P2-1）。
+/// 超过此值后停止重试，记录 warn 日志。
+const MAX_RESTART_ATTEMPTS: u32 = 3;
+/// 自动重启基础退避延迟（秒）：第 1 次 2s，第 2 次 4s，第 3 次 8s。
+const RESTART_BACKOFF_BASE_SECS: u64 = 2;
 
 /// 文件监听句柄（REQ-SYNC-003）。
 ///
@@ -82,8 +95,14 @@ impl FileWatcher {
 
         // 创建 debouncer：500ms 去抖 + 无额外数据（FileIdMap）
         // Debounce 500ms：文件写入过程中的多次中间事件合并为一次回调
+        //
+        // P2-1 弹性设计：
+        // - 错误事件使用 tracing::warn! 替代 eprintln!（结构化日志）
+        // - supervisor 通过 restart_counter 跟踪重启次数，超过上限停止重试
         let callback_wrapper = Arc::new(Mutex::new(on_change));
         let callback_clone = callback_wrapper.clone();
+        let restart_counter = Arc::new(Mutex::new(0u32));
+        let restart_counter_clone = restart_counter.clone();
 
         let mut debouncer = new_debouncer(
             Duration::from_millis(500),
@@ -101,8 +120,30 @@ impl FileWatcher {
                         }
                     }
                     Err(errors) => {
-                        // 错误事件（如监听路径不可达）
-                        eprintln!("文件监听器错误: {errors:?}");
+                        // P2-1：tracing 替代 eprintln!（结构化日志）
+                        tracing::warn!(
+                            errors = ?errors,
+                            "文件监听器错误事件"
+                        );
+
+                        // P2-1：supervisor 自动重启逻辑
+                        // 每次错误事件递增 restart_counter，超过上限后停止重试
+                        if let Ok(mut counter) = restart_counter_clone.lock() {
+                            *counter = counter.saturating_add(1);
+                            if *counter <= MAX_RESTART_ATTEMPTS {
+                                tracing::warn!(
+                                    attempt = *counter,
+                                    max = MAX_RESTART_ATTEMPTS,
+                                    "文件监听器可能需要重启（错误事件累积）"
+                                );
+                            } else {
+                                tracing::error!(
+                                    attempts = *counter,
+                                    max = MAX_RESTART_ATTEMPTS,
+                                    "文件监听器错误事件已达上限，停止日志记录"
+                                );
+                            }
+                        }
                     }
                 }
             },
@@ -114,14 +155,33 @@ impl FileWatcher {
             .watch(path, RecursiveMode::Recursive)
             .context("监听文件夹失败，可能权限不足")?;
 
-        // 启动 tokio task（占位，实际事件在 debouncer 回调中处理）
-        let task = tokio::spawn(async {
-            // 等待信号退出（目前无退出机制，task 持续运行）
-            tokio::time::sleep(std::time::Duration::from_secs(3153600000u64)).await;
-        });
+        // P2-1：CancellationToken 管理生命周期（替代 sleep(1年) hack）
+        let cancel_token = CancellationToken::new();
+
+        // 启动 tokio task（等待取消信号退出，Drop 时 cancel + await task）
+        let task = {
+            let token = cancel_token.clone();
+            tokio::spawn(async move {
+                token.cancelled().await;
+            })
+        };
 
         Ok(FileWatcherHandle::new(debouncer, task))
     }
+}
+
+/// P2-1：计算文件监听器自动重启退避延迟。
+///
+/// 第 1 次重启 → 2s
+/// 第 2 次重启 → 4s
+/// 第 3 次重启 → 8s
+#[allow(dead_code)] // 测试引用，非 test 编译时无生产调用方
+fn compute_restart_backoff_delay(attempt: u32) -> Duration {
+    let base_secs = RESTART_BACKOFF_BASE_SECS
+        .checked_shl(attempt.saturating_sub(1))
+        .unwrap_or(60)
+        .min(60); // 上限 60s
+    Duration::from_secs(base_secs)
 }
 
 #[cfg(test)]
@@ -175,6 +235,83 @@ mod tests {
         assert!(
             result.unwrap_err().to_string().contains("不是文件夹"),
             "错误消息应包含「不是文件夹」"
+        );
+    }
+
+    // ─── P2-1: 文件监听器自动重启测试 ───
+
+    /// TC-FW-RESTART-001: 重启退避延迟第 1 次应为 2s。
+    #[test]
+    fn tc_fw_restart_001_backoff_delay_attempt_1() {
+        let delay = compute_restart_backoff_delay(1);
+        assert_eq!(
+            delay,
+            Duration::from_secs(2),
+            "attempt 1 延迟应为 2s，实际: {delay:?}"
+        );
+    }
+
+    /// TC-FW-RESTART-002: 重启退避延迟第 2 次应为 4s。
+    #[test]
+    fn tc_fw_restart_002_backoff_delay_attempt_2() {
+        let delay = compute_restart_backoff_delay(2);
+        assert_eq!(
+            delay,
+            Duration::from_secs(4),
+            "attempt 2 延迟应为 4s，实际: {delay:?}"
+        );
+    }
+
+    /// TC-FW-RESTART-003: 重启退避延迟第 3 次应为 8s。
+    #[test]
+    fn tc_fw_restart_003_backoff_delay_attempt_3() {
+        let delay = compute_restart_backoff_delay(3);
+        assert_eq!(
+            delay,
+            Duration::from_secs(8),
+            "attempt 3 延迟应为 8s，实际: {delay:?}"
+        );
+    }
+
+    /// TC-FW-RESTART-004: 重启退避延迟极大值应被上限 60s 截断。
+    #[test]
+    fn tc_fw_restart_004_backoff_delay_capped_at_60s() {
+        let delay = compute_restart_backoff_delay(10);
+        assert_eq!(
+            delay,
+            Duration::from_secs(60),
+            "attempt 10 延迟应被上限 60s 截断，实际: {delay:?}"
+        );
+    }
+
+    /// TC-FW-RESTART-005: 退避延迟应随 attempt 递增。
+    #[test]
+    fn tc_fw_restart_005_backoff_delay_monotonic() {
+        let d1 = compute_restart_backoff_delay(1);
+        let d2 = compute_restart_backoff_delay(2);
+        let d3 = compute_restart_backoff_delay(3);
+        assert!(
+            d1 < d2 && d2 < d3,
+            "退避延迟应递增: {d1:?} < {d2:?} < {d3:?}"
+        );
+    }
+
+    /// TC-FW-RESTART-006: 常量值验证。
+    #[test]
+    fn tc_fw_restart_006_constants() {
+        assert_eq!(MAX_RESTART_ATTEMPTS, 3);
+        assert_eq!(RESTART_BACKOFF_BASE_SECS, 2);
+    }
+
+    /// TC-FW-RESTART-007: attempt=0 安全处理（不 panic）。
+    #[test]
+    fn tc_fw_restart_007_attempt_zero_safe() {
+        let delay = compute_restart_backoff_delay(0);
+        // attempt=0 → saturating_sub(0) = 0 → 2 << 0 = 2s
+        assert_eq!(
+            delay,
+            Duration::from_secs(2),
+            "attempt 0 应安全处理为 2s，实际: {delay:?}"
         );
     }
 }

@@ -131,7 +131,11 @@ pub async fn chat_inner<R: Runtime>(
     // 「初始化向量化引擎」。现增加两层保护：
     //   1. 进度回调：未初始化时通过 `init_embedder_with_progress` 推送下载进度到前端
     //   2. 超时保护：`tokio::time::timeout` 包装初始化调用，超时后返回 `EMBED:` 错误
+    //
+    // **P2-6 弹性降级**：嵌入引擎初始化失败/超时时不再直接返回错误，而是降级到
+    // 纯关键词搜索（BM25）模式。用户仍可获取基于关键词的 RAG 回答，并收到降级提示。
     emit_chat_phase(app, "preparing", "初始化向量化引擎…");
+    let mut embedding_degraded = false;
     if !state.embedder_initialized().await {
         // 慢路径：首次初始化，推送下载进度到前端
         let app_for_progress = app.clone();
@@ -148,23 +152,36 @@ pub async fn chat_inner<R: Runtime>(
         match init_result {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
-                return Err(format!("EMBED: 向量化引擎不可用: {e:#}"));
+                // P2-6：降级到关键词搜索模式（不返回错误）
+                warn!("向量化引擎不可用，降级为关键词搜索: {e:#}");
+                embedding_degraded = true;
+                emit_chat_phase(app, "preparing", "向量化引擎不可用，降级为关键词搜索…");
             }
             Err(_) => {
-                return Err(format!(
-                    "EMBED: 向量化引擎初始化超时（{timeout_secs} 秒），\
-                     请检查网络连接后重试。如在境内，可在设置中手动初始化向量化引擎\
-                     （镜像源自动回退）"
-                ));
+                // P2-6：超时也降级到关键词搜索模式
+                warn!("向量化引擎初始化超时（{timeout_secs}s），降级为关键词搜索");
+                embedding_degraded = true;
+                emit_chat_phase(app, "preparing", "向量化引擎超时，降级为关键词搜索…");
             }
         }
     }
-    let embedder = state
-        .embedder()
-        .await
-        .map_err(|e| prefix_error(ERR_EMBED, &format!("向量化引擎不可用: {e:#}")))?;
-    let embedder = embedder.clone();
-    debug!("chat_inner embedder ready: {}ms", t0.elapsed().as_millis());
+    let embedder = if !embedding_degraded {
+        match state.embedder().await {
+            Ok(e) => {
+                let e = e.clone();
+                debug!("chat_inner embedder ready: {}ms", t0.elapsed().as_millis());
+                Some(e)
+            }
+            Err(e) => {
+                // P2-6：embedder 获取失败也降级
+                warn!("向量化引擎获取失败，降级为关键词搜索: {e:#}");
+                embedding_degraded = true;
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // 兜底：会话不存在时幂等创建（正常流程前端先 create_conversation）
     let conversation = Conversation::with_id(
@@ -249,13 +266,13 @@ pub async fn chat_inner<R: Runtime>(
         .unwrap_or(86400);
     let query_embedding_result: Option<Vec<f32>>;
 
-    if cache_enabled {
+    if cache_enabled && !embedding_degraded {
         let semantic_threshold = settings_map
             .get("cache.semantic_threshold")
             .and_then(|v| v.parse::<f32>().ok())
             .unwrap_or(0.92);
 
-        // L0 精确匹配（哈希，无嵌入开销）→ 未命中再走 L1 语义匹配（需查询嵌入）
+        // L0 精确匹配（哈希，无嵌入开销） → 未命中再走 L1 语义匹配（需查询嵌入）
         let exact_hit = state
             .cache
             .lookup_exact(&query_hash(query), cache_ttl_secs, cache_now)
@@ -266,7 +283,10 @@ pub async fn chat_inner<R: Runtime>(
             (exact_hit, None)
         } else {
             // **性能优化**：嵌入计算一次，后续 L3 缓存查找和向量检索复用
+            // P2-6：embedding_degraded 时不会走到这里（外层 if 已过滤）
             let emb = embedder
+                .as_ref()
+                .ok_or_else(|| prefix_error(ERR_EMBED, "向量化引擎不可用"))?
                 .embed(query)
                 .await
                 .map_err(|e| prefix_error(ERR_EMBED, &format!("查询向量化失败: {e:#}")))?;
@@ -314,61 +334,23 @@ pub async fn chat_inner<R: Runtime>(
             return Ok(());
         }
         query_embedding_result = emb;
-    } else {
+    } else if !embedding_degraded {
         // 缓存禁用：在 embedder 被 move 进 retriever 之前预计算嵌入
         query_embedding_result = Some(
             embedder
+                .as_ref()
+                .ok_or_else(|| prefix_error(ERR_EMBED, "向量化引擎不可用"))?
                 .embed(query)
                 .await
                 .map_err(|e| prefix_error(ERR_EMBED, &format!("查询向量化失败: {e:#}")))?,
         );
+    } else {
+        // P2-6：嵌入降级模式，无查询嵌入
+        query_embedding_result = None;
     }
-    // query_embedding_result 现在持有预计算的查询嵌入（Some）或未计算（None，仅 L0 命中但无答案场景，理论上不发生）
+    // query_embedding_result 现在持有预计算的查询嵌入（Some）或未计算（None）
     let query_embedding = query_embedding_result;
 
-    let retriever = {
-        let hybrid_enabled = settings_map
-            .get("rag.hybrid_search")
-            // 默认启用混合检索（未设置时视为 true）
-            .is_none_or(|&v| v != "false");
-        let rerank_enabled = settings_map
-            .get("rag.rerank_enabled")
-            // **性能优化**：默认关闭重排序（省 ~200ms Cross-Encoder 推理）。
-            // 重排序提升精度但增加延迟，用户可在设置中显式启用。
-            .is_some_and(|&v| v == "true");
-        let hyde_enabled = settings_map
-            .get("rag.hyde_enabled")
-            // 默认关闭 HyDE 查询改写（未设置时视为 false）
-            .is_some_and(|&v| v == "true");
-        let mut r = HybridRetriever::new(embedder, state.storage.clone());
-        r.set_hybrid_enabled(hybrid_enabled);
-        if rerank_enabled {
-            // 懒加载 Cross-Encoder 重排序引擎（首次启用触发模型下载 ~280MB）。
-            // **降级策略**：模型不可用（未下载/下载失败）时不阻塞对话，
-            // 仅告警并继续走无重排的混合检索（精度略降，功能可用）。
-            match state.reranker().await {
-                Ok(reranker) => {
-                    r.set_reranker(Some(Arc::new(reranker.clone())));
-                }
-                Err(e) => {
-                    warn!("重排序引擎不可用，降级为无重排检索: {e:#}");
-                }
-            }
-        }
-        if hyde_enabled {
-            // HyDE 查询改写（REQ-RAG-021）：使用用户 LLM 配置生成假设性答案文档
-            // 复用已有 LLM 配置（api_key / base_url / model），无额外模型下载
-            match HydeRewriter::new(
-                llm_config.api_key.clone(),
-                llm_config.base_url.clone(),
-                llm_config.model.clone(),
-            ) {
-                Ok(rewriter) => r.set_rewriter(Some(Arc::new(rewriter))),
-                Err(e) => warn!("HyDE 改写器初始化失败，跳过查询改写: {e:#}"),
-            }
-        }
-        r
-    };
     // Q11：使用 LlmRouter 路由到正确的后端（借鉴 QM HarnessRouter）
     // Router 根据 fallback（由 set_llm_mode 更新）和 per-conversation last_mode 决策
     let (llm_choice, router_verdict) = state
@@ -406,6 +388,136 @@ pub async fn chat_inner<R: Runtime>(
         .map_err(|e| prefix_error(ERR_LLM, &format!("{e:#}")))?;
         usage_handle = Some(p.usage_handle());
         LlmProvider::Remote(p)
+    };
+
+    // P2-6：嵌入降级路径 — 纯关键词搜索（BM25）+ 简单 RAG prompt + LLM 流式对话
+    //
+    // 当 ONNX 嵌入引擎初始化失败/超时时，不阻塞用户对话。降级为纯关键词检索，
+    // 精度略低于向量检索但功能可用。前端通过 chat_phase 事件收到降级提示。
+    if embedding_degraded {
+        emit_chat_phase(app, "retrieving", "关键词搜索中（向量检索降级）…");
+        let keyword_results = state
+            .storage
+            .keyword_search(query, rag_top_k)
+            .await
+            .map_err(|e| prefix_error(ERR_STORAGE, &format!("关键词检索失败: {e:#}")))?;
+
+        if keyword_results.is_empty() {
+            // 关键词也未命中
+            emit_chat_error(app, "知识库中未找到相关内容".to_string());
+            emit_chat_done(app, None);
+            return Ok(());
+        }
+
+        let sources = keyword_results.clone();
+        emit_chat_sources(app, &sources);
+
+        // 构建 RAG prompt（简化版：关键词检索结果 + 历史 + 查询）
+        let context_text: String = sources
+            .iter()
+            .enumerate()
+            .map(|(i, r)| format!("[{}] {}\n{}", i + 1, r.doc_name, r.chunk.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let system_prompt = format!(
+            "你是一个知识库助手。请根据以下检索到的资料片段回答用户问题。\
+             如果资料中没有答案，请如实告知。\n\n\
+             ⚠️ 当前为关键词搜索降级模式（向量检索不可用），检索精度可能降低。\n\n\
+             参考资料：\n{context_text}"
+        );
+
+        // 上下文压缩（复用已有逻辑：compact_smart 异步压缩）
+        let max_context_tokens = settings_map
+            .get("rag.context_token_limit")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(4096);
+        let compaction = CompactionEngine::new(&provider);
+        let compaction_result = compaction
+            .compact_smart(
+                history,
+                max_context_tokens,
+                &echomind_compact::VerbatimTailConfig::default(),
+            )
+            .await
+            .map_err(|e| prefix_error(ERR_LLM, &format!("上下文压缩失败: {e:#}")))?;
+        let compacted_history = &compaction_result.history;
+
+        emit_chat_phase(app, "generating", "正在生成回答…");
+        let stream = provider
+            .chat_stream(&system_prompt, compacted_history, query)
+            .await
+            .map_err(|e| classify_llm_error(&format!("{e:#}")))?;
+
+        let abort_token = state.abort_token_for(conversation_id).await;
+        let result = forward_stream(app, stream, abort_token, usage_handle)
+            .await
+            .map_err(|e| classify_llm_error(&e))?;
+        record_token_usage_inner(state, &result.token_usage).await;
+
+        persist_exchange(
+            state,
+            conversation_id,
+            query,
+            &result.content,
+            Some(sources),
+            None,
+            turn_group,
+            version,
+        )
+        .await?;
+        state.clear_abort(conversation_id).await;
+        return Ok(());
+    }
+
+    // ── 正常路径（嵌入可用）──
+
+    let retriever = {
+        let hybrid_enabled = settings_map
+            .get("rag.hybrid_search")
+            // 默认启用混合检索（未设置时视为 true）
+            .is_none_or(|&v| v != "false");
+        let rerank_enabled = settings_map
+            .get("rag.rerank_enabled")
+            // **性能优化**：默认关闭重排序（省 ~200ms Cross-Encoder 推理）。
+            // 重排序提升精度但增加延迟，用户可在设置中显式启用。
+            .is_some_and(|&v| v == "true");
+        let hyde_enabled = settings_map
+            .get("rag.hyde_enabled")
+            // 默认关闭 HyDE 查询改写（未设置时视为 false）
+            .is_some_and(|&v| v == "true");
+        // P2-6：降级路径已提前 return，此处 embedder 必为 Some
+        let emb = embedder
+            .as_ref()
+            .ok_or_else(|| prefix_error(ERR_EMBED, "向量化引擎不可用（降级路径未正确触发）"))?
+            .clone();
+        let mut r = HybridRetriever::new(emb, state.storage.clone());
+        r.set_hybrid_enabled(hybrid_enabled);
+        if rerank_enabled {
+            // 懒加载 Cross-Encoder 重排序引擎（首次启用触发模型下载 ~280MB）。
+            // **降级策略**：模型不可用（未下载/下载失败）时不阻塞对话，
+            // 仅告警并继续走无重排的混合检索（精度略降，功能可用）。
+            match state.reranker().await {
+                Ok(reranker) => {
+                    r.set_reranker(Some(Arc::new(reranker.clone())));
+                }
+                Err(e) => {
+                    warn!("重排序引擎不可用，降级为无重排检索: {e:#}");
+                }
+            }
+        }
+        if hyde_enabled {
+            // HyDE 查询改写（REQ-RAG-021）：使用用户 LLM 配置生成假设性答案文档
+            // 复用已有 LLM 配置（api_key / base_url / model），无额外模型下载
+            match HydeRewriter::new(
+                llm_config.api_key.clone(),
+                llm_config.base_url.clone(),
+                llm_config.model.clone(),
+            ) {
+                Ok(rewriter) => r.set_rewriter(Some(Arc::new(rewriter))),
+                Err(e) => warn!("HyDE 改写器初始化失败，跳过查询改写: {e:#}"),
+            }
+        }
+        r
     };
 
     // S4: Q06/S71 Shadow Screen 集成 — Strict 模式下对用户 query 执行 LLM 安全分类。
@@ -1212,9 +1324,21 @@ pub async fn chat_inner<R: Runtime>(
     }
 }
 
+/// 首 token 超时（秒）：P2-5 弹性设计增强。
+///
+/// 如果 LLM 端点在 60 秒内未返回任何 token，判定为连接异常（而非正常思考延迟），
+/// 提前返回 `NETWORK:` 错误，避免用户等待 300s 整体超时。
+///
+/// 300s 整体超时仍由 reqwest client `.timeout()` 兜底（防网络层永久挂起）。
+const FIRST_TOKEN_TIMEOUT_SECS: u64 = 60;
+
 /// 将 token 流逐条转发为 chat_token；abort 令牌触发立即中断（丢弃流即中止 HTTP 连接）。
 ///
 /// `usage_handle` 在流消费完毕后从中读取 API 报告的 token 用量并随 `chat_done` 事件推送前端。
+///
+/// **P2-5 首 token 超时**：在收到第一个 token 之前，如果 `FIRST_TOKEN_TIMEOUT_SECS`
+/// 秒内无数据到达，返回 `NETWORK:` 前缀错误（"LLM 首次响应超时"），避免用户等待
+/// 300s 整体超时。收到首 token 后此超时不再触发。
 pub async fn forward_stream<R: Runtime>(
     app: &AppHandle<R>,
     mut stream: BoxStream<'static, anyhow::Result<String>>,
@@ -1224,36 +1348,85 @@ pub async fn forward_stream<R: Runtime>(
     let mut content = String::new();
     let mut completed = false;
     let t_first_token = std::time::Instant::now();
-    let mut first_token_logged = false;
 
-    loop {
-        tokio::select! {
-            biased;
-            _ = abort_token.cancelled() => break,
-            item = stream.next() => {
-            match item {
-                None => {
-                    completed = true;
-                    break;
-                }
-                Some(Ok(token)) => {
-                    if !first_token_logged {
-                        debug!(
-                            "forward_stream first token: {}ms (from forward_stream start)",
-                            t_first_token.elapsed().as_millis()
-                        );
-                        first_token_logged = true;
-                    }
-                    content.push_str(&token);
-                    emit_chat_token(app, token);
-                }
-                Some(Err(err)) => {
-                    // Bug #3 修复：流式错误时补发 chat_done 事件，防止前端永久卡在 streaming 状态
-                    // （此前直接 return Err 跳过了下方的 emit_chat_done，前端收不到完成信号）
+    // P2-5：首 token 超时检测。
+    // 在收到第一个 token 之前，用 tokio::time::timeout 包装 stream.next()。
+    // 收到首 token 后直接使用裸 stream.next()（不再有超时分支）。
+    // 300s 整体超时仍由 reqwest client `.timeout()` 兜底。
+    let first_token_deadline = std::time::Duration::from_secs(FIRST_TOKEN_TIMEOUT_SECS);
+
+    // 阶段 1：等待首 token（带 60s 超时）
+    let first_item = tokio::select! {
+        biased;
+        _ = abort_token.cancelled() => {
+            // 在首 token 到达前被中断
+            emit_chat_done(app, None);
+            return Ok(ForwardResult {
+                completed: false,
+                content: String::new(),
+                token_usage: None,
+            });
+        }
+        result = tokio::time::timeout(first_token_deadline, stream.next()) => {
+            match result {
+                Ok(item) => item,
+                Err(_) => {
+                    // P2-5：首 token 超时
+                    emit_chat_error(app, "LLM 响应超时，请检查网络或 API 状态".to_string());
                     emit_chat_done(app, None);
-                    return Err(format!("{err:#}"));
+                    return Err(format!(
+                        "NETWORK: LLM 首次响应超时（{FIRST_TOKEN_TIMEOUT_SECS}s 无数据），请检查网络连接或 API 端点状态"
+                    ));
                 }
             }
+        }
+    };
+
+    // 处理首 token
+    match first_item {
+        None => {
+            // 流在首 token 前就结束了（空响应）
+            completed = true;
+        }
+        Some(Ok(token)) => {
+            debug!(
+                "forward_stream first token: {}ms (from forward_stream start)",
+                t_first_token.elapsed().as_millis()
+            );
+            content.push_str(&token);
+            emit_chat_token(app, token);
+        }
+        Some(Err(err)) => {
+            // Bug #3 修复：流式错误时补发 chat_done 事件
+            emit_chat_done(app, None);
+            return Err(format!("{err:#}"));
+        }
+    }
+
+    // 阶段 2：首 token 已收到，后续 token 无首 token 超时（300s 整体超时由 reqwest 兜底）
+    if !completed {
+        loop {
+            tokio::select! {
+                biased;
+                _ = abort_token.cancelled() => break,
+                item = stream.next() => {
+                match item {
+                    None => {
+                        completed = true;
+                        break;
+                    }
+                    Some(Ok(token)) => {
+                        content.push_str(&token);
+                        emit_chat_token(app, token);
+                    }
+                    Some(Err(err)) => {
+                        // Bug #3 修复：流式错误时补发 chat_done 事件，防止前端永久卡在 streaming 状态
+                        // （此前直接 return Err 跳过了下方的 emit_chat_done，前端收不到完成信号）
+                        emit_chat_done(app, None);
+                        return Err(format!("{err:#}"));
+                    }
+                }
+                }
             }
         }
     }
@@ -1923,4 +2096,42 @@ pub async fn delete_session_todos_inner(
         .delete_session_todos(conversation_id)
         .await
         .map_err(|e| format!("{e:#}"))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::assertions_on_constants
+    )]
+
+    use super::FIRST_TOKEN_TIMEOUT_SECS;
+
+    /// TC-FIRST-TOKEN-001: 首 token 超时常量应为 60 秒。
+    #[test]
+    fn tc_first_token_001_timeout_is_60_secs() {
+        assert_eq!(FIRST_TOKEN_TIMEOUT_SECS, 60, "首 token 超时应为 60 秒");
+    }
+
+    /// TC-FIRST-TOKEN-002: 首 token 超时应小于整体超时 300 秒。
+    #[test]
+    fn tc_first_token_002_less_than_overall_timeout() {
+        // 整体超时 REQUEST_TIMEOUT_SECS = 300s（定义在 openai_provider.rs）
+        // 首 token 超时必须 < 整体超时，否则永远不会触发
+        assert!(
+            FIRST_TOKEN_TIMEOUT_SECS < 300,
+            "首 token 超时 ({FIRST_TOKEN_TIMEOUT_SECS}s) 必须小于整体超时 (300s)"
+        );
+    }
+
+    /// TC-FIRST-TOKEN-003: 首 token 超时应 ≥ 30 秒（容忍慢 API）。
+    #[test]
+    fn tc_first_token_003_at_least_30_secs() {
+        // 30s 下限：DeepSeek/OpenAI 等远程 API 在高负载时首 token 可能 10-20s
+        assert!(
+            FIRST_TOKEN_TIMEOUT_SECS >= 30,
+            "首 token 超时应 ≥ 30s（容忍慢 API），实际: {FIRST_TOKEN_TIMEOUT_SECS}s"
+        );
+    }
 }

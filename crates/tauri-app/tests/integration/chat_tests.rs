@@ -494,12 +494,17 @@ async fn tc_rag_017_006_boundary_values() {
 // 前端卡死在「初始化向量化引擎」。
 //
 // 修复：chat_inner 使用 tokio::time::timeout 包装 init_embedder_with_progress，
-// 超时后返回 EMBED: 前缀错误。超时阈值可通过 ECHOMIND_EMBEDDER_TIMEOUT 环境变量覆盖。
+// 超时阈值可通过 ECHOMIND_EMBEDDER_TIMEOUT 环境变量覆盖。
+//
+// P2-6 弹性降级：嵌入引擎初始化失败/超时时不再返回 EMBED: 错误，而是降级到
+// 纯关键词搜索（BM25）模式。chat_inner 仍会快速返回（不永久阻塞），
+// 但错误可能来自 LLM 调用阶段（因为测试环境无真实 API）。
 
-/// TC-RES-001：embedder 初始化超时/失败时 chat_inner 返回 EMBED: 错误而非永久阻塞。
+/// TC-RES-001：embedder 初始化超时/失败时 chat_inner 不永久阻塞。
 ///
-/// 验证：设置 1 秒超时 → 导入文档使 KB 非空 → chat_inner 在合理时间内返回 EMBED: 错误。
+/// 验证：设置 1 秒超时 → 导入文档使 KB 非空 → chat_inner 在合理时间内返回。
 /// 此前无超时保护时，chat_inner 会永久阻塞。
+/// P2-6 后：降级到关键词搜索，不再返回 EMBED: 错误，但仍快速返回（LLM 阶段失败）。
 #[tokio::test]
 async fn tc_res_001_embedder_init_timeout_returns_embed_error() {
     // 设置 1 秒超时（测试环境无法在 1 秒内下载 30MB ONNX 模型）
@@ -548,14 +553,16 @@ async fn tc_res_001_embedder_init_timeout_returns_embed_error() {
         Err(_) => panic!("chat_inner 在 30 秒内未返回（可能永久阻塞）"),
     };
 
+    // P2-6：嵌入降级后不再返回 EMBED: 错误，而是降级到关键词搜索。
+    // 降级路径有两种结果：
+    //   1) 关键词搜索无结果 → return Ok(())（降级但无内容可回答）
+    //   2) 关键词搜索有结果 → LLM 调用（测试环境会失败 → Err）
+    // 核心验证点：chat_inner 不永久阻塞（在 30s 内返回）+ 不返回 EMBED: 错误
     let err = inner_result.err().unwrap_or_default();
+    // 降级路径不应返回 EMBED: 前缀（已降级为关键词搜索）
     assert!(
-        err.starts_with("EMBED:"),
-        "embedder 初始化失败/超时应返回 EMBED: 前缀错误，实际: {err}"
-    );
-    assert!(
-        err.contains("超时") || err.contains("不可用"),
-        "错误消息应包含「超时」或「不可用」，实际: {err}"
+        !err.starts_with("EMBED:"),
+        "P2-6 降级后不应返回 EMBED: 前缀错误，实际: {err}"
     );
 }
 
