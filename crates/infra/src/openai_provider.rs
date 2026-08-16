@@ -39,6 +39,10 @@ const RATE_LIMIT_MAX_RETRIES: u32 = 3;
 const RATE_LIMIT_BACKOFF_BASE_SECS: u64 = 1;
 /// 指数退避最大延迟上限（秒）：单次重试等待不超过 30s。
 const RATE_LIMIT_BACKOFF_MAX_SECS: u64 = 30;
+/// 5xx 服务端错误最大重试次数（REQ-ERR-002 AC-1）。
+const SERVER_ERROR_MAX_RETRIES: u32 = 3;
+/// 5xx 重试退避基础延迟（秒）：1s → 2s → 4s。
+const SERVER_ERROR_BACKOFF_BASE_SECS: u64 = 1;
 
 /// OpenAI 兼容 Provider（Chat Completions 协议）。
 pub struct OpenAIProvider {
@@ -56,6 +60,9 @@ pub struct OpenAIProvider {
     /// LLM 生成参数（REQ-RAG-015）：temperature/max_tokens/top_p，经请求体传递到 API。
     /// `None` 时使用 API 默认值（不包含在请求 JSON 中）。
     generation_params: Option<GenerationParams>,
+    /// 重试事件回调（REQ-ERR-002 AC-2）：重试时通知调用方发射 chat_phase 事件。
+    /// `None` 时不通知（默认）。
+    retry_notifier: Option<std::sync::Arc<tokio::sync::Notify>>,
 }
 
 impl OpenAIProvider {
@@ -80,6 +87,7 @@ impl OpenAIProvider {
             usage_cell: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
             reasoning_rx: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
             generation_params: None,
+            retry_notifier: None,
         })
     }
 
@@ -92,6 +100,15 @@ impl OpenAIProvider {
     /// 传入 `None` 清除自定义参数，恢复 API 默认值。
     pub fn with_generation_params(mut self, params: Option<GenerationParams>) -> Self {
         self.generation_params = params.map(|p| p.clamped());
+        self
+    }
+
+    /// 设置重试事件通知器（REQ-ERR-002 AC-2）。
+    ///
+    /// 调用方设置后，每次重试时通过 `notify_one()` 通知，
+    /// 调用方可监听此 Notify 发射 `chat_phase {phase: "retrying", attempt: N}` 事件。
+    pub fn with_retry_notifier(mut self, notifier: std::sync::Arc<tokio::sync::Notify>) -> Self {
+        self.retry_notifier = Some(notifier);
         self
     }
 
@@ -396,86 +413,133 @@ impl OpenAIProvider {
         Ok(Box::pin(token_stream))
     }
 
-    /// 带 429 限流指数退避重试的 HTTP 请求发送（P1-2）。
+    /// 带 429 限流 + 5xx 服务端错误指数退避重试的 HTTP 请求发送（P1-2 + REQ-ERR-002）。
     ///
     /// 发送 HTTP 请求 → 检查状态码：
     /// - 2xx → 返回 `Ok(resp)`，后续 SSE 流正常处理
     /// - 429 → 解析 `Retry-After` header，等待对应时间后重试（最多 3 次）
-    /// - 其他非 2xx → 直接返回错误（不重试）
+    /// - 5xx → 指数退避重试 1s→2s→4s（最多 3 次，REQ-ERR-002 AC-1）
+    /// - 连接超时/拒绝 → 指数退避重试（最多 3 次，REQ-ERR-002 AC-1）
+    /// - 4xx（除 429）→ 直接返回错误（不重试，REQ-ERR-002 AC-5）
     ///
     /// 重试仅在此阶段发生——一旦 HTTP 请求成功且 SSE 流开始传输 token，
     /// 不再重试（避免重复输出）。
     ///
     /// # 退避策略
-    /// - `Retry-After` header 存在 → 使用其值（上限 30s）
-    /// - 无 header → 指数退避：1s → 2s → 4s（+ 0~500ms 随机抖动）
+    /// - 429: `Retry-After` header 存在 → 使用其值（上限 30s）；无 header → 1s→2s→4s
+    /// - 5xx: 1s→2s→4s（+ 0~500ms 随机抖动）
     async fn send_stream_request_with_retry(
         &self,
         body: &serde_json::Value,
     ) -> anyhow::Result<reqwest::Response> {
         let mut last_error_text = String::new();
+        let mut last_status_label = String::new();
+        let total_max_retries = RATE_LIMIT_MAX_RETRIES.max(SERVER_ERROR_MAX_RETRIES);
 
-        for attempt in 0..=RATE_LIMIT_MAX_RETRIES {
-            let resp = self
-                .build_request(body)
-                .send()
-                .await
-                .context("LLM 请求发送失败")?;
+        for attempt in 0..=total_max_retries {
+            let resp_result = self.build_request(body).send().await;
+
+            // 连接错误处理（REQ-ERR-002 AC-1：超时/连接拒绝重试）
+            let resp = match resp_result {
+                Ok(r) => r,
+                Err(err) if attempt < total_max_retries => {
+                    let is_retryable = err.is_timeout() || err.is_connect() || err.is_request();
+                    if is_retryable {
+                        let delay = compute_server_error_backoff_delay(attempt);
+                        tracing::warn!(
+                            "LLM 请求连接失败（{}）：第 {}/{} 次重试，等待 {}ms",
+                            err,
+                            attempt + 1,
+                            total_max_retries,
+                            delay.as_millis()
+                        );
+                        self.notify_retry(attempt + 1, total_max_retries);
+                        tokio::time::sleep(delay).await;
+                        last_status_label = format!("连接错误: {err}");
+                        continue;
+                    }
+                    return Err(err).context("LLM 请求发送失败");
+                }
+                Err(err) => {
+                    return Err(err).context("LLM 请求发送失败");
+                }
+            };
 
             let status = resp.status();
             if status.is_success() {
                 return Ok(resp);
             }
 
-            // 非 429 错误：直接返回错误（不重试）
-            if status.as_u16() != 429 {
+            let status_code = status.as_u16();
+
+            // 4xx（除 429）错误：直接返回错误（不重试，REQ-ERR-002 AC-5）
+            if status_code != 429 && !status.is_server_error() {
                 let text = resp
                     .text()
                     .await
                     .unwrap_or_else(|_| "<无法读取响应体>".to_string());
                 bail!(
                     "LLM API 错误 (HTTP {}): {}",
-                    status.as_u16(),
+                    status_code,
                     truncate(&text, 500)
                 );
             }
 
-            // 429：记录错误文本（最后一次重试后作为错误返回）
+            // 记录错误文本
             last_error_text = resp
                 .text()
                 .await
                 .unwrap_or_else(|_| "<无法读取响应体>".to_string());
+            last_status_label = format!("HTTP {status_code}");
 
             // 最后一次尝试：不再重试，返回错误
-            if attempt == RATE_LIMIT_MAX_RETRIES {
+            if attempt == total_max_retries {
                 tracing::warn!(
-                    "LLM API 429 限流：已达到最大重试次数 {}，放弃重试",
-                    RATE_LIMIT_MAX_RETRIES
+                    "LLM API {}：已达到最大重试次数 {}，放弃重试",
+                    last_status_label,
+                    total_max_retries
                 );
                 bail!(
-                    "LLM API 错误 (HTTP 429): {}",
+                    "LLM API 错误 ({}): {}",
+                    last_status_label,
                     truncate(&last_error_text, 500)
                 );
             }
 
             // 计算退避延迟
-            let delay = compute_rate_limit_backoff_delay(attempt);
+            let delay = if status_code == 429 {
+                compute_rate_limit_backoff_delay(attempt)
+            } else {
+                compute_server_error_backoff_delay(attempt)
+            };
 
             tracing::info!(
-                "LLM API 429 限流：第 {}/{} 次重试，等待 {}ms",
+                "LLM API {}：第 {}/{} 次重试，等待 {}ms",
+                last_status_label,
                 attempt + 1,
-                RATE_LIMIT_MAX_RETRIES,
+                total_max_retries,
                 delay.as_millis()
             );
 
+            self.notify_retry(attempt + 1, total_max_retries);
             tokio::time::sleep(delay).await;
         }
 
         // 理论上不可达（循环已在 attempt == MAX 时 return）
         bail!(
-            "LLM API 错误 (HTTP 429): {}",
+            "LLM API 错误 ({}): {}",
+            last_status_label,
             truncate(&last_error_text, 500)
         );
+    }
+
+    /// 通知调用方正在重试（REQ-ERR-002 AC-2）。
+    /// 通过 Notify 机制触发调用方发射 chat_phase 事件。
+    fn notify_retry(&self, attempt: u32, max_retries: u32) {
+        if let Some(notifier) = &self.retry_notifier {
+            tracing::info!("LLM 重试通知：第 {}/{} 次重试", attempt, max_retries);
+            notifier.notify_one();
+        }
     }
 
     /// 返回推理接收端的共享句柄（Arc），供后台任务在流建立后随时取用。
@@ -500,6 +564,19 @@ impl OpenAIProvider {
 /// 抖动范围 0~500ms，避免惊群效应。
 fn compute_rate_limit_backoff_delay(attempt: u32) -> Duration {
     let base_secs = RATE_LIMIT_BACKOFF_BASE_SECS
+        .checked_shl(attempt)
+        .unwrap_or(RATE_LIMIT_BACKOFF_MAX_SECS)
+        .min(RATE_LIMIT_BACKOFF_MAX_SECS);
+    let jitter_ms = (rand::random::<u32>() % 500) as u64;
+    Duration::from_secs(base_secs) + Duration::from_millis(jitter_ms)
+}
+
+/// 5xx 服务端错误指数退避延迟（REQ-ERR-002 AC-1）。
+///
+/// 延迟 = base * 2^attempt + 0~500ms 抖动。
+/// 第 0 次重试: 1s + 抖动, 第 1 次: 2s + 抖动, 第 2 次: 4s + 抖动。
+fn compute_server_error_backoff_delay(attempt: u32) -> Duration {
+    let base_secs = SERVER_ERROR_BACKOFF_BASE_SECS
         .checked_shl(attempt)
         .unwrap_or(RATE_LIMIT_BACKOFF_MAX_SECS)
         .min(RATE_LIMIT_BACKOFF_MAX_SECS);
@@ -549,7 +626,10 @@ fn last_path_segment_is_version(url: &str) -> bool {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-    use super::{compute_rate_limit_backoff_delay, resolve_chat_completions_url};
+    use super::{
+        compute_rate_limit_backoff_delay, compute_server_error_backoff_delay,
+        resolve_chat_completions_url,
+    };
     use std::time::Duration;
 
     #[test]
@@ -710,5 +790,79 @@ mod tests {
         assert_eq!(super::RATE_LIMIT_MAX_RETRIES, 3);
         assert_eq!(super::RATE_LIMIT_BACKOFF_BASE_SECS, 1);
         assert_eq!(super::RATE_LIMIT_BACKOFF_MAX_SECS, 30);
+    }
+
+    // ─── REQ-ERR-002: 5xx/网络错误自动重试测试 ───
+
+    #[test]
+    fn tc_retry_001_server_error_backoff_attempt_0() {
+        // AC-1: 5xx 错误指数退避 1s → 2s → 4s
+        let delay = compute_server_error_backoff_delay(0);
+        assert!(
+            delay >= Duration::from_millis(1000),
+            "5xx attempt 0 延迟应 ≥ 1000ms，实际: {}ms",
+            delay.as_millis()
+        );
+        assert!(
+            delay <= Duration::from_millis(1500),
+            "5xx attempt 0 延迟应 ≤ 1500ms，实际: {}ms",
+            delay.as_millis()
+        );
+    }
+
+    #[test]
+    fn tc_retry_002_server_error_backoff_attempt_1() {
+        // AC-1: 第 1 次重试 2s
+        let delay = compute_server_error_backoff_delay(1);
+        assert!(
+            delay >= Duration::from_millis(2000),
+            "5xx attempt 1 延迟应 ≥ 2000ms，实际: {}ms",
+            delay.as_millis()
+        );
+        assert!(
+            delay <= Duration::from_millis(2500),
+            "5xx attempt 1 延迟应 ≤ 2500ms，实际: {}ms",
+            delay.as_millis()
+        );
+    }
+
+    #[test]
+    fn tc_retry_003_server_error_backoff_attempt_2() {
+        // AC-1: 第 2 次重试 4s
+        let delay = compute_server_error_backoff_delay(2);
+        assert!(
+            delay >= Duration::from_millis(4000),
+            "5xx attempt 2 延迟应 ≥ 4000ms，实际: {}ms",
+            delay.as_millis()
+        );
+        assert!(
+            delay <= Duration::from_millis(4500),
+            "5xx attempt 2 延迟应 ≤ 4500ms，实际: {}ms",
+            delay.as_millis()
+        );
+    }
+
+    #[test]
+    fn tc_retry_004_server_error_max_retries_constant() {
+        // AC-1: 最大重试次数 3 次
+        assert_eq!(super::SERVER_ERROR_MAX_RETRIES, 3);
+        assert_eq!(super::SERVER_ERROR_BACKOFF_BASE_SECS, 1);
+    }
+
+    #[test]
+    fn tc_retry_005_server_error_backoff_monotonic() {
+        // AC-1: 延迟应递增（忽略抖动）
+        let mut min_d0 = Duration::from_secs(30);
+        let mut min_d1 = Duration::from_secs(30);
+        for _ in 0..100 {
+            min_d0 = min_d0.min(compute_server_error_backoff_delay(0));
+            min_d1 = min_d1.min(compute_server_error_backoff_delay(1));
+        }
+        assert!(
+            min_d1 > min_d0,
+            "退避延迟应递增：attempt 1 ({:?}) 应 > attempt 0 ({:?})",
+            min_d1,
+            min_d0
+        );
     }
 }

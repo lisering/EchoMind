@@ -116,6 +116,7 @@
     "send": "Send",
     "stop": "Stop",
     "stop_generation": "Stop generation",
+    "retrying": "Retrying… ({n}/{m})",
     "import_files": "Import Files",
     "thinking_preparing": "Preparing…",
     "thinking_retrieving": "Retrieving from knowledge base…",
