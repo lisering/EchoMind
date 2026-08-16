@@ -449,9 +449,10 @@ pub async fn chat_inner<R: Runtime>(
             .map_err(|e| classify_llm_error(&format!("{e:#}")))?;
 
         let abort_token = state.abort_token_for(conversation_id).await;
-        let result = forward_stream(app, stream, abort_token, usage_handle)
-            .await
-            .map_err(|e| classify_llm_error(&e))?;
+        let result =
+            forward_stream_tracked(app, stream, abort_token, usage_handle, state, llm_mode)
+                .await
+                .map_err(|e| classify_llm_error(&e))?;
         record_token_usage_inner(state, &result.token_usage).await;
 
         persist_exchange(
@@ -929,9 +930,10 @@ pub async fn chat_inner<R: Runtime>(
                     Some(reasoning_collector.clone()),
                 );
                 let abort_token = state.abort_token_for(conversation_id).await;
-                let result = forward_stream(app, stream, abort_token, None)
-                    .await
-                    .map_err(|e| classify_llm_error(&e))?;
+                let result =
+                    forward_stream_tracked(app, stream, abort_token, None, state, llm_mode)
+                        .await
+                        .map_err(|e| classify_llm_error(&e))?;
                 record_token_usage_inner(state, &result.token_usage).await;
                 // REQ-PERF-001：正常回答写入查询缓存（下次相同/相似问题秒回）
                 write_query_cache(state, query, &result.content, &sources, conversation_id).await;
@@ -1004,9 +1006,10 @@ pub async fn chat_inner<R: Runtime>(
                     Some(reasoning_collector.clone()),
                 );
                 let abort_token = state.abort_token_for(conversation_id).await;
-                let result = forward_stream(app, stream, abort_token, None)
-                    .await
-                    .map_err(|e| classify_llm_error(&e))?;
+                let result =
+                    forward_stream_tracked(app, stream, abort_token, None, state, llm_mode)
+                        .await
+                        .map_err(|e| classify_llm_error(&e))?;
                 // 记录 token 用量到累计计数器
                 record_token_usage_inner(state, &result.token_usage).await;
                 // REQ-PERF-001：正常回答写入查询缓存（下次相同/相似问题秒回）
@@ -1290,9 +1293,10 @@ pub async fn chat_inner<R: Runtime>(
         );
 
         let abort_token = state.abort_token_for(conversation_id).await;
-        let result = forward_stream(app, stream, abort_token, usage_handle)
-            .await
-            .map_err(|e| classify_llm_error(&e))?;
+        let result =
+            forward_stream_tracked(app, stream, abort_token, usage_handle, state, llm_mode)
+                .await
+                .map_err(|e| classify_llm_error(&e))?;
         // 记录 token 用量到累计计数器
         record_token_usage_inner(state, &result.token_usage).await;
         // 正常结束或被中断：均已生成内容照常落库（REQ-RAG-005/006）
@@ -1331,6 +1335,52 @@ pub async fn chat_inner<R: Runtime>(
 ///
 /// 300s 整体超时仍由 reqwest client `.timeout()` 兜底（防网络层永久挂起）。
 const FIRST_TOKEN_TIMEOUT_SECS: u64 = 60;
+
+/// 包装 `forward_stream` 并跟踪远程 LLM 成功/失败（P2-2 弹性降级）。
+///
+/// 当 `llm_mode == Remote` 时：
+/// - 成功完成（`completed == true`）：调用 `record_remote_success()` 重置计数
+/// - 失败（`Err`）：调用 `record_remote_failure()`，如果达到阈值自动切换到 Local
+///   并通过 `llm_fallback` 事件通知前端
+/// - 中断（`completed == false`）：不记录成功也不记录失败（用户主动取消）
+///
+/// Local 模式不触发任何跟踪。
+async fn forward_stream_tracked<R: Runtime>(
+    app: &AppHandle<R>,
+    stream: futures::stream::BoxStream<'static, anyhow::Result<String>>,
+    abort_token: tokio_util::sync::CancellationToken,
+    usage_handle: Option<std::sync::Arc<tokio::sync::Mutex<Option<TokenUsage>>>>,
+    state: &AppState,
+    llm_mode: LlmMode,
+) -> Result<ForwardResult, String> {
+    let result = forward_stream(app, stream, abort_token, usage_handle).await;
+
+    // P2-2：仅跟踪 Remote 模式的成功/失败
+    if llm_mode == LlmMode::Remote {
+        match &result {
+            Ok(fr) if fr.completed => {
+                // 成功完成：重置计数
+                state.llm_router.record_remote_success();
+            }
+            Ok(_) => {
+                // 中断（completed=false）：用户主动取消，不计为失败
+            }
+            Err(_) => {
+                // 失败：递增计数，达阈值自动切换
+                let switched = state.llm_router.record_remote_failure().await;
+                if switched {
+                    let _ = app.emit(
+                        "llm_fallback",
+                        "远程 LLM 连续失败 3 次，已自动切换到本地模型",
+                    );
+                    info!("远程 LLM 连续失败 3 次，已自动切换 fallback 到 Local 模式");
+                }
+            }
+        }
+    }
+
+    result
+}
 
 /// 将 token 流逐条转发为 chat_token；abort 令牌触发立即中断（丢弃流即中止 HTTP 连接）。
 ///

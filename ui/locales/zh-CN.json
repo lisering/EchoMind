@@ -246,6 +246,7 @@
     "regen_prev": "上一个版本",
     "regen_next": "下一个版本",
     "context_high_warning": "上下文用量较高，建议新建会话以获得最佳回答",
+    "llm_fallback": "远程 LLM 连续失败 3 次，已自动切换到本地模型",
     "feedback_like": "有帮助",
     "feedback_dislike": "无帮助",
     "feedback_what_wrong": "哪里有问题？",

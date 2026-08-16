@@ -246,6 +246,7 @@
     "regen_prev": "Previous version",
     "regen_next": "Next version",
     "context_high_warning": "Context usage is high, consider starting a new conversation for best results",
+    "llm_fallback": "Remote LLM failed 3 times, automatically switched to local model",
     "feedback_like": "Helpful",
     "feedback_dislike": "Not helpful",
     "feedback_what_wrong": "What went wrong?",
