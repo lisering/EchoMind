@@ -269,6 +269,10 @@ pub enum EmbeddingModel {
     E5SmallV2,
     /// bge-base-en-v1.5（768 维，英文强检索场景；P1-4 嵌入模型升级评估新增）
     BgeBaseEnV1_5,
+    /// bge-m3（1024 维，多语言场景，REQ-VEC-015）
+    /// 支持 100+ 语言的通用嵌入模型，检索质量显著优于 small 系列。
+    /// 维度变化需重建全部嵌入（REQ-VEC-016 提供重建命令）。
+    BgeM3,
     /// 用户自定义 ONNX 嵌入模型（REQ-VEC-014，Pro 门控）。
     /// String = 模型名称（对应 `custom_models/{name}/` 目录）。
     /// 自定义模型的文件结构由用户上传，维度在加载时动态检测。
@@ -276,56 +280,60 @@ pub enum EmbeddingModel {
 }
 
 impl EmbeddingModel {
-    /// 返回 HuggingFace 模型仓库路径
-    fn repo(&self) -> &'static str {
+    /// 返回 HuggingFace 模型仓库路径（pub(crate) 供测试访问）
+    pub(crate) fn repo(&self) -> &'static str {
         match self {
             Self::AllMiniLML6V2 => "Xenova/all-MiniLM-L6-v2",
             Self::BgeSmallEnV1_5 => "BAAI/bge-small-en-v1.5",
             Self::BgeSmallZhV1_5 => "BAAI/bge-small-zh-v1.5",
             Self::E5SmallV2 => "intfloat/e5-small-v2",
             Self::BgeBaseEnV1_5 => "BAAI/bge-base-en-v1.5",
+            Self::BgeM3 => "BAAI/bge-m3",
             Self::Custom(_) => "", // 自定义模型无仓库路径
         }
     }
 
-    /// 返回本地模型目录名
-    fn dir_name(&self) -> &'static str {
+    /// 返回本地模型目录名（pub(crate) 供测试访问）
+    pub(crate) fn dir_name(&self) -> &'static str {
         match self {
             Self::AllMiniLML6V2 => "all-MiniLM-L6-v2",
             Self::BgeSmallEnV1_5 => "bge-small-en-v1.5",
             Self::BgeSmallZhV1_5 => "bge-small-zh-v1.5",
             Self::E5SmallV2 => "e5-small-v2",
             Self::BgeBaseEnV1_5 => "bge-base-en-v1.5",
+            Self::BgeM3 => "bge-m3",
             Self::Custom(_) => "", // 自定义模型目录名由调用方管理
         }
     }
 
-    /// 返回 ONNX 模型文件名
-    fn onnx_file(&self) -> &'static str {
+    /// 返回 ONNX 模型文件名（pub(crate) 供测试访问）
+    pub(crate) fn onnx_file(&self) -> &'static str {
         match self {
             Self::AllMiniLML6V2 => "model_quantized.onnx",
             Self::BgeSmallEnV1_5 => "model.onnx",
             Self::BgeSmallZhV1_5 => "model.onnx",
             Self::E5SmallV2 => "model_optimized.onnx",
             Self::BgeBaseEnV1_5 => "model.onnx",
+            Self::BgeM3 => "model.onnx",
             Self::Custom(_) => "", // 自定义模型 ONNX 文件名由 new_with_custom_model 检测
         }
     }
 
-    /// 返回仓库内 ONNX 文件路径
-    fn onnx_repo_path(&self) -> &'static str {
+    /// 返回仓库内 ONNX 文件路径（pub(crate) 供测试访问）
+    pub(crate) fn onnx_repo_path(&self) -> &'static str {
         match self {
             Self::AllMiniLML6V2 => "onnx/model_quantized.onnx",
             Self::BgeSmallEnV1_5 => "onnx/model.onnx",
             Self::BgeSmallZhV1_5 => "onnx/model.onnx",
             Self::E5SmallV2 => "onnx/model_optimized.onnx",
             Self::BgeBaseEnV1_5 => "onnx/model.onnx",
+            Self::BgeM3 => "onnx/model.onnx",
             Self::Custom(_) => "",
         }
     }
 
-    /// 返回所需模型文件清单：(仓库内路径, 本地文件名)
-    fn files(&self) -> [(&'static str, &'static str); 5] {
+    /// 返回所需模型文件清单：(仓库内路径, 本地文件名)（pub(crate) 供测试访问）
+    pub(crate) fn files(&self) -> [(&'static str, &'static str); 5] {
         [
             (self.onnx_repo_path(), self.onnx_file()),
             ("tokenizer.json", "tokenizer.json"),
@@ -345,6 +353,7 @@ impl EmbeddingModel {
             Self::BgeSmallZhV1_5 => 512,
             Self::E5SmallV2 => 384,
             Self::BgeBaseEnV1_5 => 768,
+            Self::BgeM3 => 1024,
             Self::Custom(_) => 0, // 自定义模型维度在加载时动态检测
         }
     }
@@ -742,6 +751,8 @@ impl LocalEmbedder {
             EmbeddingModel::BgeSmallEnV1_5,
             EmbeddingModel::BgeSmallZhV1_5,
             EmbeddingModel::E5SmallV2,
+            EmbeddingModel::BgeBaseEnV1_5,
+            EmbeddingModel::BgeM3,
         ] {
             let model_dir = cache_dir.join(model.dir_name());
             if model_dir.exists() {
@@ -780,6 +791,8 @@ impl LocalEmbedder {
                     EmbeddingModel::BgeSmallEnV1_5,
                     EmbeddingModel::BgeSmallZhV1_5,
                     EmbeddingModel::E5SmallV2,
+                    EmbeddingModel::BgeBaseEnV1_5,
+                    EmbeddingModel::BgeM3,
                 ] {
                     let model_dir = cache_dir.join(model.dir_name());
                     if model_dir.exists() {

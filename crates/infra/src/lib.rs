@@ -109,6 +109,9 @@ pub mod wasm_executor;
 #[cfg(feature = "pro")]
 pub mod weight_repack;
 
+/// bge-m3 多语言嵌入模型 TDD 测试（REQ-VEC-015）。
+#[cfg(test)]
+mod bge_m3_tests;
 /// ColBERT 多向量嵌入测试（REQ-PERF-008, Pro feature）。
 #[cfg(all(test, feature = "pro"))]
 mod colbert_embedder_tests;

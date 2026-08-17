@@ -376,6 +376,8 @@ pub fn run() {
             commands::delete_message,
             // Contextual Retrieval 上下文增强嵌入（REQ-RAG-041）（S09: set_contextual_retrieval → update_setting）
             commands::rebuild_contextual_embeddings,
+            // 全库嵌入重建（REQ-VEC-016 嵌入模型切换后维度迁移）
+            commands::rebuild_all_embeddings,
             // 文档标签系统（REQ-ING-022 用户自定义标签管理）
             commands::add_document_tag,
             commands::remove_document_tag,

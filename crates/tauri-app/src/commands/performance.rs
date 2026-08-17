@@ -604,3 +604,90 @@ pub async fn rebuild_contextual_embeddings_inner<R: Runtime>(
 
     Ok(())
 }
+
+/// 重建全库嵌入向量（REQ-VEC-016）。
+///
+/// 遍历所有 Indexed 状态文档，使用当前嵌入模型重新计算全部 chunks 的嵌入向量。
+/// 适用于用户切换嵌入模型后（如从 bge-small-en-v1.5 切换到 bge-m3）的维度迁移。
+/// 重建过程中通过 `doc-status-changed` 事件推送进度，重建完成后清空查询缓存。
+#[tauri::command]
+pub async fn rebuild_all_embeddings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    rebuild_all_embeddings_inner(&app, state.inner()).await
+}
+
+/// 全库嵌入重建逻辑（命令与集成测试复用）。
+///
+/// 与 `rebuild_contextual_embeddings_inner` 的区别：
+/// - `rebuild_contextual_embeddings`：仅重建上下文前缀（Contextual Retrieval 开关变更后使用）
+/// - `rebuild_all_embeddings`：全库重建（嵌入模型切换后维度迁移使用）
+///
+/// 两者底层都调用 `embed_document_chunks`，但 `rebuild_all_embeddings`
+/// 会强制重置 embedder 实例（确保使用新模型）。
+pub async fn rebuild_all_embeddings_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+) -> Result<(), String> {
+    // 强制重置 embedder 实例（确保使用切换后的新模型）
+    state.model_store.reset_embedder().await;
+
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    let total = docs.len();
+    let mut completed = 0usize;
+    let mut failed = 0usize;
+
+    for doc in &docs {
+        // 跳过非 Indexed 状态的文档（Failed/Pending/Processing）
+        if !matches!(doc.status, DocStatus::Indexed) {
+            completed += 1;
+            continue;
+        }
+        let name = display_name(&doc.file_path);
+        emit_status(app, "indexing", format!("正在重建嵌入：{name}"));
+
+        match super::import::embed_document_chunks(app, state, &doc.id, &name).await {
+            Ok(count) => {
+                completed += 1;
+                emit_status(
+                    app,
+                    "done",
+                    format!("嵌入重建完成：{name}（{count} 向量）[{completed}/{total}]"),
+                );
+            }
+            Err(err) => {
+                failed += 1;
+                warn!("嵌入重建失败（doc_id={}）: {err}", doc.id);
+                emit_status(
+                    app,
+                    "error",
+                    format!("嵌入重建失败：{name}（已处理 {completed}/{total}）"),
+                );
+            }
+        }
+    }
+
+    // 清空查询缓存（嵌入向量已变更，旧缓存答案引用过期的向量维度）
+    if let Err(e) = state.cache.clear_all().await {
+        warn!("全库嵌入重建后清空查询缓存失败: {e:#}");
+    }
+    state.step_cache.clear();
+
+    if failed > 0 {
+        emit_status(
+            app,
+            "done",
+            format!("全库嵌入重建完成（{completed}/{total} 成功，{failed} 失败）"),
+        );
+    } else {
+        emit_status(app, "done", format!("全库嵌入重建完成（{total} 个文档）"));
+    }
+
+    Ok(())
+}

@@ -163,6 +163,15 @@ impl ModelStore {
         Ok(())
     }
 
+    /// 重置向量化引擎实例（REQ-VEC-016）。
+    ///
+    /// 将 embedder 设为 None，下次调用 `embedder()` 时使用当前 settings 中的模型重新初始化。
+    /// 用于 `rebuild_all_embeddings` 命令确保使用切换后的新模型重新嵌入。
+    pub async fn reset_embedder(&self) {
+        let mut write = self.embedder.write().await;
+        *write = None;
+    }
+
     /// 带进度回调初始化向量化引擎（REQ-VEC-008）。
     ///
     /// 自定义模型（REQ-VEC-014）不支持下载进度回调（文件已在本地），
@@ -345,6 +354,7 @@ pub fn parse_embedding_model(s: &str) -> EmbeddingModel {
         "bge-small-zh-v1.5" => EmbeddingModel::BgeSmallZhV1_5,
         "e5-small-v2" => EmbeddingModel::E5SmallV2,
         "bge-base-en-v1.5" => EmbeddingModel::BgeBaseEnV1_5,
+        "bge-m3" => EmbeddingModel::BgeM3,
         _ => EmbeddingModel::BgeSmallEnV1_5, // P1-5: 默认升级为 bge-small-en-v1.5
     }
 }
