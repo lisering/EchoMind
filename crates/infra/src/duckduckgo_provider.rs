@@ -276,4 +276,270 @@ mod tests {
         // 无 AbstractText 且无 RelatedTopics → 空结果
         assert!(results.is_empty(), "空响应应返回空结果列表");
     }
+
+    // ─── 边界场景测试 ───
+
+    /// TC-DDG-004: 仅 AbstractText，无 RelatedTopics。
+    #[test]
+    fn tc_ddg_004_parse_only_abstract() {
+        let json = serde_json::json!({
+            "Heading": "Test Topic",
+            "AbstractText": "This is a test abstract.",
+            "AbstractURL": "https://example.com/test",
+            "RelatedTopics": []
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Test Topic");
+        assert_eq!(results[0].snippet, "This is a test abstract.");
+    }
+
+    /// TC-DDG-005: 仅 RelatedTopics，无 AbstractText。
+    #[test]
+    fn tc_ddg_005_parse_only_related_topics() {
+        let json = serde_json::json!({
+            "AbstractText": "",
+            "RelatedTopics": [
+                {
+                    "Text": "Topic 1 - Description here",
+                    "FirstURL": "https://example.com/1"
+                }
+            ]
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Topic 1");
+        assert!(results[0].snippet.contains("Description here"));
+    }
+
+    /// TC-DDG-006: 嵌套 Topics 消歧义处理。
+    #[test]
+    fn tc_ddg_006_parse_nested_topics() {
+        let json = serde_json::json!({
+            "AbstractText": "",
+            "RelatedTopics": [
+                {
+                    "Topics": [
+                        {
+                            "Text": "SubTopic A - First sub-topic",
+                            "FirstURL": "https://example.com/a"
+                        },
+                        {
+                            "Text": "SubTopic B - Second sub-topic",
+                            "FirstURL": "https://example.com/b"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].title, "SubTopic A");
+        assert_eq!(results[1].title, "SubTopic B");
+    }
+
+    /// TC-DDG-007: Text 中无 " - " 分隔符时 title = full text。
+    #[test]
+    fn tc_ddg_007_parse_no_separator_in_text() {
+        let json = serde_json::json!({
+            "AbstractText": "",
+            "RelatedTopics": [
+                {
+                    "Text": "NoSeparatorHere",
+                    "FirstURL": "https://example.com"
+                }
+            ]
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "NoSeparatorHere");
+        assert_eq!(results[0].snippet, "NoSeparatorHere");
+    }
+
+    /// TC-DDG-008: 空 Text 字符串的 RelatedTopics 被跳过。
+    #[test]
+    fn tc_ddg_008_parse_empty_text_in_related_topics() {
+        let json = serde_json::json!({
+            "AbstractText": "",
+            "RelatedTopics": [
+                {
+                    "Text": "",
+                    "FirstURL": "https://example.com"
+                },
+                {
+                    "Text": "Valid Topic - Has content",
+                    "FirstURL": "https://example.com/valid"
+                }
+            ]
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert_eq!(results.len(), 1, "空 Text 条目应被跳过");
+        assert_eq!(results[0].title, "Valid Topic");
+    }
+
+    /// TC-DDG-009: 完全空 JSON 对象 → 空结果。
+    #[test]
+    fn tc_ddg_009_parse_empty_json_object() {
+        let json = serde_json::json!({});
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert!(results.is_empty());
+    }
+
+    /// TC-DDG-010: 所有结果 source 字段为 "duckduckgo"。
+    #[test]
+    fn tc_ddg_010_all_results_have_duckduckgo_source() {
+        let json = serde_json::json!({
+            "AbstractText": "Abstract",
+            "AbstractURL": "https://example.com",
+            "RelatedTopics": [
+                {"Text": "Topic - Desc", "FirstURL": "https://example.com/1"}
+            ]
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        for (i, r) in results.iter().enumerate() {
+            assert_eq!(
+                r.source, "duckduckgo",
+                "结果 {} 的 source 应为 duckduckgo",
+                i
+            );
+        }
+    }
+
+    /// TC-DDG-011: RelatedTopics 为非数组类型时安全降级。
+    #[test]
+    fn tc_ddg_011_parse_related_topics_not_array() {
+        let json = serde_json::json!({
+            "AbstractText": "Valid abstract",
+            "AbstractURL": "https://example.com",
+            "RelatedTopics": "not an array"
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        // 仅 Abstract 被解析，RelatedTopics 被安全跳过
+        assert_eq!(results.len(), 1);
+    }
+
+    /// TC-DDG-012: AbstractText 为非字符串类型时安全降级。
+    #[test]
+    fn tc_ddg_012_parse_abstract_not_string() {
+        let json = serde_json::json!({
+            "AbstractText": 123,
+            "RelatedTopics": []
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert!(results.is_empty());
+    }
+
+    /// TC-DDG-013: 多分隔符 Text 只取第一个 " - " 作为 title 分界。
+    #[test]
+    fn tc_ddg_013_parse_multi_separator_text() {
+        let json = serde_json::json!({
+            "AbstractText": "",
+            "RelatedTopics": [
+                {
+                    "Text": "Title - Part 1 - Part 2 - Part 3",
+                    "FirstURL": "https://example.com"
+                }
+            ]
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Title");
+        assert_eq!(results[0].snippet, "Title - Part 1 - Part 2 - Part 3");
+    }
+
+    /// TC-DDG-014: 缺少 FirstURL 的 RelatedTopics 条目 url 为空字符串。
+    #[test]
+    fn tc_ddg_014_parse_missing_first_url() {
+        let json = serde_json::json!({
+            "AbstractText": "",
+            "RelatedTopics": [
+                {"Text": "Topic - Desc"}
+            ]
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url, "");
+    }
+
+    /// TC-DDG-015: 嵌套 Topics 与扁平条目混合。
+    #[test]
+    fn tc_ddg_015_parse_mixed_flat_and_nested() {
+        let json = serde_json::json!({
+            "AbstractText": "",
+            "RelatedTopics": [
+                {
+                    "Text": "Flat Topic - Description",
+                    "FirstURL": "https://example.com/flat"
+                },
+                {
+                    "Topics": [
+                        {
+                            "Text": "Nested Topic - Description",
+                            "FirstURL": "https://example.com/nested"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].title, "Flat Topic");
+        assert_eq!(results[1].title, "Nested Topic");
+    }
+
+    /// TC-DDG-016: 大量 RelatedTopics（100 条）解析正确。
+    #[test]
+    fn tc_ddg_016_parse_large_related_topics() {
+        let topics: Vec<serde_json::Value> = (0..100)
+            .map(|i| {
+                serde_json::json!({
+                    "Text": format!("Topic{} - Description{}", i, i),
+                    "FirstURL": format!("https://example.com/{}", i)
+                })
+            })
+            .collect();
+
+        let json = serde_json::json!({
+            "AbstractText": "Abstract",
+            "AbstractURL": "https://example.com",
+            "RelatedTopics": topics
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert_eq!(results.len(), 101); // 1 abstract + 100 related
+    }
+
+    /// TC-DDG-017: 空 URL 的 Abstract 仍被解析。
+    #[test]
+    fn tc_ddg_017_parse_abstract_with_empty_url() {
+        let json = serde_json::json!({
+            "Heading": "Test",
+            "AbstractText": "Has abstract but no URL",
+            "AbstractURL": ""
+        });
+
+        let results = DuckDuckGoProvider::parse_response(&json);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url, "");
+    }
+
+    /// TC-DDG-018: Default 实现不会 panic（降级安全）。
+    #[test]
+    fn tc_ddg_018_default_does_not_panic() {
+        // Default 实现使用 unwrap_or_else 降级，不会 panic
+        let provider = DuckDuckGoProvider::default();
+        // 验证 client 可用（通过编译器检查）
+        let _ = &provider.client;
+    }
 }

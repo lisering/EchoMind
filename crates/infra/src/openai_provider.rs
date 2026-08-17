@@ -865,4 +865,145 @@ mod tests {
             min_d0
         );
     }
+
+    // ─── URL 拼接边界测试 ───
+
+    #[test]
+    fn tc_url_001_v2_version_segment() {
+        // v2 版本段 → 仅追加 /chat/completions
+        let url = resolve_chat_completions_url("https://api.example.com/v2");
+        assert_eq!(url, "https://api.example.com/v2/chat/completions");
+    }
+
+    #[test]
+    fn tc_url_002_v10_version_segment() {
+        // v10 版本段 → 仅追加 /chat/completions
+        let url = resolve_chat_completions_url("https://api.example.com/v10");
+        assert_eq!(url, "https://api.example.com/v10/chat/completions");
+    }
+
+    #[test]
+    fn tc_url_003_no_version_segment_gets_v1() {
+        // 非版本段 → 追加 /v1/chat/completions
+        let url = resolve_chat_completions_url("https://api.example.com/openai");
+        assert_eq!(url, "https://api.example.com/openai/v1/chat/completions");
+    }
+
+    #[test]
+    fn tc_url_004_v_prefix_not_version() {
+        // "vabc" 不是版本号 → 追加 /v1/chat/completions
+        let url = resolve_chat_completions_url("https://api.example.com/vabc");
+        assert_eq!(url, "https://api.example.com/vabc/v1/chat/completions");
+    }
+
+    #[test]
+    fn tc_url_005_single_v_not_version() {
+        // "v" 单独不是版本号 → 追加 /v1/chat/completions
+        let url = resolve_chat_completions_url("https://api.example.com/v");
+        assert_eq!(url, "https://api.example.com/v/v1/chat/completions");
+    }
+
+    #[test]
+    fn tc_url_006_uppercase_v_not_version() {
+        // 大写 V 不匹配 → 追加 /v1/chat/completions
+        let url = resolve_chat_completions_url("https://api.example.com/V1");
+        assert_eq!(url, "https://api.example.com/V1/v1/chat/completions");
+    }
+
+    #[test]
+    fn tc_url_007_https_with_port() {
+        let url = resolve_chat_completions_url("https://api.example.com:8080");
+        assert_eq!(url, "https://api.example.com:8080/v1/chat/completions");
+    }
+
+    #[test]
+    fn tc_url_008_http_localhost() {
+        let url = resolve_chat_completions_url("http://localhost:8080");
+        assert_eq!(url, "http://localhost:8080/v1/chat/completions");
+    }
+
+    // ─── truncate 辅助函数测试 ───
+
+    #[test]
+    fn tc_truncate_001_short_text_unchanged() {
+        let text = "short error message";
+        assert_eq!(super::truncate(text, 300), text);
+    }
+
+    #[test]
+    fn tc_truncate_002_exact_length() {
+        let text = "a".repeat(300);
+        assert_eq!(super::truncate(&text, 300), text);
+    }
+
+    #[test]
+    fn tc_truncate_003_long_text_truncated() {
+        let text = "a".repeat(500);
+        let result = super::truncate(&text, 100);
+        assert_eq!(result.len(), 100);
+    }
+
+    #[test]
+    fn tc_truncate_004_unicode_char_boundary() {
+        // 中文字符 3 字节，截断到字符边界
+        let text = "你好世界你好世界你好世界你好世界你好世界你好世界";
+        let result = super::truncate(text, 10);
+        // 10 字节不是 3 的倍数，回退到 9 字节边界
+        assert_eq!(result.len() % 3, 0, "截断应在字符边界");
+    }
+
+    #[test]
+    fn tc_truncate_005_empty_text() {
+        assert_eq!(super::truncate("", 100), "");
+    }
+
+    // ─── 退避延迟上限测试 ───
+
+    #[test]
+    fn tc_backoff_001_rate_limit_max_30s() {
+        // 即使 attempt 很大，延迟不超过 RATE_LIMIT_BACKOFF_MAX_SECS = 30s + 500ms 抖动
+        let delay = compute_rate_limit_backoff_delay(100);
+        assert!(
+            delay <= Duration::from_millis(30500),
+            "大 attempt 延迟应 ≤ 30500ms，实际: {}ms",
+            delay.as_millis()
+        );
+    }
+
+    #[test]
+    fn tc_backoff_002_server_error_max_30s() {
+        let delay = compute_server_error_backoff_delay(100);
+        assert!(
+            delay <= Duration::from_millis(30500),
+            "大 attempt 5xx 延迟应 ≤ 30500ms，实际: {}ms",
+            delay.as_millis()
+        );
+    }
+
+    #[test]
+    fn tc_backoff_003_rate_limit_jitter_bound() {
+        // 验证抖动在 0~500ms 范围内
+        for attempt in 0..5 {
+            let delay = compute_rate_limit_backoff_delay(attempt);
+            let base = Duration::from_secs(
+                super::RATE_LIMIT_BACKOFF_BASE_SECS
+                    .checked_shl(attempt)
+                    .unwrap_or(super::RATE_LIMIT_BACKOFF_MAX_SECS)
+                    .min(super::RATE_LIMIT_BACKOFF_MAX_SECS),
+            );
+            assert!(
+                delay >= base,
+                "attempt {} 延迟 {:?} 应 ≥ 基础延迟 {:?}",
+                attempt,
+                delay,
+                base
+            );
+            assert!(
+                delay <= base + Duration::from_millis(500),
+                "attempt {} 延迟 {:?} 应 ≤ 基础+500ms",
+                attempt,
+                delay
+            );
+        }
+    }
 }
