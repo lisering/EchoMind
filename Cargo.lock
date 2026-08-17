@@ -2364,6 +2364,7 @@ name = "echomind-prompt"
 version = "2.1.0"
 dependencies = [
  "echomind-models",
+ "regex",
  "serde",
  "serde_json",
 ]

@@ -9,6 +9,7 @@ description = "EchoMind 提示词构建：RAG + Agent 系统提示词组装（Pr
 echomind-models = { path = "../models" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+regex = "1.11"
 
 [lints]
 workspace = true

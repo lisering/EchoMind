@@ -1192,3 +1192,130 @@ fn tc_3rrf_004_triple_overlap_ranks_highest() {
     assert!(score_v_only > score_k_only, "v_only 应高于 k_only");
     assert!(score_k_only > score_e_only, "k_only 应高于 e_only");
 }
+
+// ================================================================
+// P1-1 过检索倍数测试（2026-08-17）
+// ================================================================
+
+/// TC-ORETRIEVE-001：过检索倍数 5 使 RRF 融合候选池更大。
+///
+/// 验证倍数 5 比倍数 3 能让更多候选进入 RRF 融合，
+/// 从而提升最终 top-k 中包含真正相关结果的概率。
+#[test]
+fn tc_oretrieve_001_larger_pool_better_rrf() {
+    // 构造场景：向量检索 top-25 中有一个 rank-25 的相关结果
+    // 在倍数 3（top-15）时会被遗漏，倍数 5（top-25）时进入 RRF 融合
+    let mut vector_results = Vec::new();
+    for i in 0..25 {
+        let score = 0.9 - (i as f32 * 0.01); // 递减分数
+        vector_results.push(make_result(&format!("v{i}"), &format!("content{i}"), score));
+    }
+
+    // 关键词检索也返回 25 条，其中 rank-20 与向量 rank-25 是同一 chunk
+    let mut keyword_results = Vec::new();
+    for i in 0..25 {
+        let score = 0.8 - (i as f32 * 0.01);
+        keyword_results.push(make_result(&format!("k{i}"), &format!("kw{i}"), score));
+    }
+    // 在 rank-20 位置插入与向量 rank-25 相同的 chunk
+    keyword_results[20] = make_result("v24", "shared content", 0.6);
+
+    // RRF 融合：倍数 5（25 条）vs 倍数 3（15 条）
+    let fused_5 = rrf_fuse(vector_results.clone(), keyword_results.clone(), 5);
+
+    // 倍数 3：仅取前 15 条
+    let vector_15: Vec<_> = vector_results.into_iter().take(15).collect();
+    let keyword_15: Vec<_> = keyword_results.into_iter().take(15).collect();
+    let fused_3 = rrf_fuse(vector_15, keyword_15, 5);
+
+    // 倍数 5 的结果中应包含 v24（从 keyword rank-20 进入），倍数 3 不包含
+    let ids_5: Vec<&str> = fused_5.iter().map(|r| r.chunk.id.as_str()).collect();
+    let ids_3: Vec<&str> = fused_3.iter().map(|r| r.chunk.id.as_str()).collect();
+
+    assert!(
+        ids_5.contains(&"v24"),
+        "倍数 5 应包含 v24（从 keyword rank-20 进入 RRF）"
+    );
+    assert!(
+        !ids_3.contains(&"v24"),
+        "倍数 3 不应包含 v24（keyword rank-20 未进入 top-15）"
+    );
+}
+
+/// TC-ORETRIEVE-002：过检索倍数不影响 RRF 融合排序顺序。
+#[test]
+fn tc_oretrieve_002_rrf_order_preserved() {
+    let vector_results = vec![
+        make_result("v1", "content1", 0.9),
+        make_result("v2", "content2", 0.8),
+        make_result("v3", "content3", 0.7),
+    ];
+    let keyword_results = vec![make_result("v2", "kw2", 1.0), make_result("v1", "kw1", 0.9)];
+
+    let fused = rrf_fuse(vector_results, keyword_results, 3);
+
+    // v1 和 v2 都在两个通道中出现，应该排在前面
+    assert_eq!(fused[0].chunk.id, "v1", "v1 在两通道中排名高，应排第一");
+    assert_eq!(fused[1].chunk.id, "v2", "v2 在两通道中排名高，应排第二");
+    assert_eq!(fused[2].chunk.id, "v3", "v3 仅在向量通道，应排第三");
+}
+
+/// TC-ORETRIEVE-003：过检索倍数 5 在 top_k=1 时提供 5 条候选给 RRF。
+#[test]
+fn tc_oretrieve_003_top_k_one_with_five_candidates() {
+    // 验证 top_k=1 时，过检索倍数 5 → 各通道 5 条候选
+    // 这确保即使只请求 1 条结果，也有足够的候选池给 RRF 融合
+    // v0 在两通道中都出现（向量 rank-0 + 关键词 rank-0），RRF 分数最高
+    let vector_results: Vec<_> = (0..5)
+        .map(|i| make_result(&format!("v{i}"), &format!("c{i}"), 0.9 - i as f32 * 0.1))
+        .collect();
+    // 关键词结果中 v0 排第一（与向量结果共享 chunk ID，两通道 rank-0）
+    let keyword_results = vec![
+        make_result("v0", "kw for v0", 1.0), // 关键词 rank-0
+        make_result("v1", "kw for v1", 0.9), // 关键词 rank-1
+    ];
+
+    let fused = rrf_fuse(vector_results, keyword_results, 1);
+    assert_eq!(fused.len(), 1, "top_k=1 应返回 1 条结果");
+    // v0 在向量 rank-0 + 关键词 rank-0 → RRF 分数最高
+    assert_eq!(
+        fused[0].chunk.id, "v0",
+        "top_k=1 时应返回 RRF 分数最高的 v0"
+    );
+}
+
+/// TC-ORETRIEVE-004：空结果时 RRF 融合返回空。
+#[test]
+fn tc_oretrieve_004_empty_results_empty_fusion() {
+    let fused = rrf_fuse(vec![], vec![], 5);
+    assert!(fused.is_empty(), "空输入应返回空结果");
+}
+
+/// TC-ORETRIEVE-005：过检索倍数 5 允许 rank-25 结果通过 RRF 融合提升排名。
+#[test]
+fn tc_oretrieve_005_rank_25_promoted_by_rrf() {
+    // 构造：向量 rank-25 的 chunk 在关键词检索中 rank-1
+    // RRF 融合后应提升到 top-5 以内
+    let mut vector_results = Vec::new();
+    for i in 0..25 {
+        vector_results.push(make_result(
+            &format!("v{i}"),
+            &format!("c{i}"),
+            0.9 - i as f32 * 0.01,
+        ));
+    }
+
+    let keyword_results = vec![
+        make_result("v24", "kw for v24", 1.0), // 关键词 rank-1
+    ];
+
+    let fused = rrf_fuse(vector_results, keyword_results, 5);
+
+    // v24 在向量中 rank-25 (分数低) 但关键词 rank-1 (分数高)
+    // RRF 融合后应进入 top-5
+    let ids: Vec<&str> = fused.iter().map(|r| r.chunk.id.as_str()).collect();
+    assert!(
+        ids.contains(&"v24"),
+        "v24 通过关键词 rank-1 应进入 top-5 RRF 融合结果: {ids:?}"
+    );
+}

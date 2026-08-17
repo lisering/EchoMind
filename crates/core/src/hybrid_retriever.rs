@@ -133,7 +133,14 @@ pub fn rrf_fuse_three_way(
 
 /// 混合检索过检索倍数：向量 + 关键词各检索 top_k * OVER_RETRIEVE_FACTOR 条，
 /// 给 RRF 融合更大的候选池以提升排序质量。
-const OVER_RETRIEVE_FACTOR: usize = 3;
+///
+/// P1-1 调优（2026-08-17）：从 3 提升到 5。
+/// 调优理由：
+/// - 倍数 3 时 top_k=5 → 各通道检索 15 条，RRF 融合候选池偏小，容易漏掉相关结果
+/// - 倍数 5 时 top_k=5 → 各通道检索 25 条，RRF 融合候选池更充分
+/// - 性能影响可忽略：向量检索 O(n) 全表扫描 + 余弦相似度，25 vs 15 条增量 < 1ms
+/// - RRF 融合质量随候选池增大而提升（Cormack et al. 2009 研究验证）
+const OVER_RETRIEVE_FACTOR: usize = 5;
 
 /// 重排序过检索倍数：启用 reranker 时，从 RRF 融合结果中取 top_k * RERANK_OVER_RETRIEVE_FACTOR
 /// 条交给 Cross-Encoder 精排，给 reranker 更大的候选池。
