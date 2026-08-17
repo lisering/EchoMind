@@ -225,12 +225,7 @@ impl HnswIndex {
     pub fn serialize_binary(&self) -> Result<Vec<u8>> {
         let dim = self.vectors.first().map_or(0usize, Vec::len);
         let mut buf: Vec<u8> = Vec::with_capacity(
-            HEADER_LEN
-                + self
-                    .vectors
-                    .iter()
-                    .map(|v| v.len() * 4 + 8)
-                    .sum::<usize>(),
+            HEADER_LEN + self.vectors.iter().map(|v| v.len() * 4 + 8).sum::<usize>(),
         );
         buf.extend_from_slice(&MAGIC);
         buf.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
@@ -446,5 +441,71 @@ mod tests {
         let index = HnswIndex::build(&vectors).expect("构建索引失败");
 
         let results = index.search(&vectors[0].1, 0);
-        assert!(results.is_empty(), "top_k=0 应返回空结果");    }
+        assert!(results.is_empty(), "top_k=0 应返回空结果");
+    }
+
+    // ========================================================================
+    // REQ-PERF-015 TC-PERSIST-001~004：二进制持久化单元测试
+    // ========================================================================
+
+    /// TC-PERSIST-001：serialize/deserialize 二进制往返（AC-6 语义不变）。
+    #[test]
+    fn tc_persist_001_binary_roundtrip() {
+        let vectors = make_test_vectors(50, 128);
+        let index = HnswIndex::build(&vectors).expect("构建索引失败");
+
+        let bytes = index.serialize_binary().expect("序列化失败");
+        let loaded = HnswIndex::deserialize_binary(&bytes, 128).expect("反序列化失败");
+
+        assert_eq!(loaded.len(), 50, "加载后索引大小应一致");
+        // 搜索语义一致（HNSW 近似，≥80% 重叠）
+        let query = &vectors[10].1;
+        let a: std::collections::HashSet<String> = index
+            .search(query, 5)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        let b: std::collections::HashSet<String> = loaded
+            .search(query, 5)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        let overlap = a.intersection(&b).count();
+        assert!(overlap >= 4, "往返后 top-5 应 ≥80% 重叠，实际 {overlap}");
+    }
+
+    /// TC-PERSIST-002：魔数损坏 → 返回 Err（AC-5 不 panic）。
+    #[test]
+    fn tc_persist_002_corrupt_magic_returns_err() {
+        let vectors = make_test_vectors(10, 32);
+        let index = HnswIndex::build(&vectors).expect("构建索引失败");
+        let mut bytes = index.serialize_binary().expect("序列化失败");
+        bytes[0] ^= 0xFF; // 破坏魔数
+
+        let res = HnswIndex::deserialize_binary(&bytes, 32);
+        assert!(res.is_err(), "魔数损坏必须返回 Err");
+    }
+
+    /// TC-PERSIST-003：维度不匹配 → 返回 Err（AC-3 回退全量构建）。
+    #[test]
+    fn tc_persist_003_dim_mismatch_returns_err() {
+        let vectors = make_test_vectors(10, 32);
+        let index = HnswIndex::build(&vectors).expect("构建索引失败");
+        let bytes = index.serialize_binary().expect("序列化失败");
+
+        let res = HnswIndex::deserialize_binary(&bytes, 64);
+        assert!(res.is_err(), "维度不匹配必须返回 Err（触发回退全量构建）");
+    }
+
+    /// TC-PERSIST-004：截断数据 → 返回 Err（不 panic，不越界）。
+    #[test]
+    fn tc_persist_004_truncated_returns_err() {
+        let vectors = make_test_vectors(10, 32);
+        let index = HnswIndex::build(&vectors).expect("构建索引失败");
+        let bytes = index.serialize_binary().expect("序列化失败");
+
+        let truncated = &bytes[..bytes.len() / 2];
+        let res = HnswIndex::deserialize_binary(truncated, 32);
+        assert!(res.is_err(), "截断数据必须返回 Err");
+    }
 }

@@ -433,6 +433,11 @@ pub async fn record_retrieval_feedback_inner(
     signal: echomind_core::retrieval_memory::FeedbackSignal,
     state: &AppState,
 ) -> Result<(), String> {
+    // REQ-PERF-020：用户反馈同时校准语义缓存阈值（正反馈下调/负反馈上调，
+    // 钳位 [0.85, 0.97]）。隐私模式（cache.enabled=false）由上层处理，此处
+    // 校准仅影响阈值，不写入缓存内容，故始终安全执行。
+    let _ = state.cache.feedback_adjust(signal.feedback);
+
     if !state.retrieval_memory_enabled {
         return Ok(()); // 禁用时静默跳过
     }

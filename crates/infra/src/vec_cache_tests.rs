@@ -154,7 +154,10 @@ async fn tc_vec_cache_006_write_invalidates_cache() {
     storage.add_document(&doc).await.unwrap();
     let chunk = Chunk::new(doc.id.clone(), "新内容".to_string(), 4, 0);
     storage.add_chunk(&chunk).await.unwrap();
-    storage.add_embedding(&chunk.id, &angle_vec(0.03)).await.unwrap();
+    storage
+        .add_embedding(&chunk.id, &angle_vec(0.03))
+        .await
+        .unwrap();
 
     let after = storage.vector_search(&angle_vec(0.02), 5).await.unwrap();
     assert_eq!(after.len(), 3, "写入后缓存失效，新向量参与检索");

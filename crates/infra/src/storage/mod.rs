@@ -36,6 +36,8 @@ pub(crate) mod schema;
 pub(crate) mod vectors;
 
 // 重导出：SqliteStorage 主文件通过 `use storage::*` 访问。
-pub(crate) use crypto::{decrypt, decrypt_bytes, encrypt, encrypt_bytes, ensure_dir_0700, load_or_create_cipher};
+pub(crate) use crypto::{
+    decrypt, decrypt_bytes, encrypt, encrypt_bytes, ensure_dir_0700, load_or_create_cipher,
+};
 pub(crate) use migration::{Pool, init_schema};
 pub(crate) use schema::PRAGMAS;

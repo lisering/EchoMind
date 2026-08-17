@@ -85,6 +85,46 @@ pub async fn chat(
     Ok(())
 }
 
+/// REQ-PERF-018：合并图扩展结果到标准检索结果（确定性，纯函数）。
+///
+/// 并行与串行路径复用同一合并逻辑，保证结果一致：
+/// - 已存在的 chunk：保留较高分数（图扩展可能发现更高置信度的路径）
+/// - 新 chunk：追加到结果列表
+/// - 重新按分数降序排序，截断 `top_k * 2`
+///
+/// # 参数
+/// - `rr`: 标准检索结果（原地修改）
+/// - `graph_results`: 图扩展结果
+/// - `top_k`: 截断基准
+pub(crate) fn merge_graph_results(
+    rr: &mut Vec<RetrievalResult>,
+    graph_results: Vec<RetrievalResult>,
+    top_k: usize,
+) {
+    if graph_results.is_empty() {
+        return;
+    }
+    let existing_ids: std::collections::HashSet<String> =
+        rr.iter().map(|r| r.chunk.id.clone()).collect();
+    for gr in graph_results {
+        if existing_ids.contains(&gr.chunk.id) {
+            if let Some(existing) = rr.iter_mut().find(|r| r.chunk.id == gr.chunk.id)
+                && gr.score > existing.score
+            {
+                existing.score = gr.score;
+            }
+        } else {
+            rr.push(gr);
+        }
+    }
+    rr.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    rr.truncate(top_k * 2);
+}
+
 /// 对话编排（命令与集成测试复用）：空库拦截 → 配置检查 → 引擎初始化 → 检索对话 → 落库。
 pub async fn chat_inner<R: Runtime>(
     app: &AppHandle<R>,
@@ -270,7 +310,8 @@ pub async fn chat_inner<R: Runtime>(
         let semantic_threshold = settings_map
             .get("cache.semantic_threshold")
             .and_then(|v| v.parse::<f32>().ok())
-            .unwrap_or(0.92);
+            // REQ-PERF-020：用户未显式设置时使用反馈校准后的动态阈值（默认 0.92）
+            .unwrap_or_else(|| state.cache.current_semantic_threshold());
 
         // L0 精确匹配（哈希，无嵌入开销） → 未命中再走 L1 语义匹配（需查询嵌入）
         let exact_hit = state
@@ -787,50 +828,32 @@ pub async fn chat_inner<R: Runtime>(
                     None => retriever.retrieve(query, rag_top_k).await,
                 }
             };
-            let (cr, rr) = tokio::join!(compact_fut, retrieve_fut);
+            // REQ-PERF-018：图扩展与主检索并行执行（BFS 图遍历与向量+BM25 互不依赖）。
+            // 图扩展仅在标准 RAG 路径（非 coordinator/agent/speculative）且启用时执行。
+            let graph_fut = async {
+                if graph_retriever_enabled {
+                    let graph_retriever =
+                        echomind_core::graph_retriever::GraphRetriever::new(state.storage.clone());
+                    graph_retriever.expand(query, rag_top_k).await
+                } else {
+                    Ok(Vec::<RetrievalResult>::new())
+                }
+            };
+            let (cr, rr, graph_result) = tokio::join!(compact_fut, retrieve_fut, graph_fut);
             let cr = cr.map_err(|e| prefix_error(ERR_LLM, &format!("上下文压缩失败: {e:#}")))?;
             let mut rr = rr.map_err(|e| classify_llm_error(&format!("检索失败: {e:#}")))?;
 
             // REQ-RAG-027：知识图谱图遍历检索 — 沿实体关系图边扩展到关联 chunk
             // 图扩展作为 RRF 融合的第四路检索通道，为标准检索结果提供图扩展加成。
-            // 仅在标准 RAG 路径（非 coordinator/agent/speculative）且启用时执行。
+            // REQ-PERF-018：图扩展已在检索阶段并行完成，此处仅做确定性合并。
             if graph_retriever_enabled && !rr.is_empty() {
-                let graph_retriever =
-                    echomind_core::graph_retriever::GraphRetriever::new(state.storage.clone());
-                match graph_retriever.expand(query, rag_top_k).await {
+                match graph_result {
                     Ok(graph_results) if !graph_results.is_empty() => {
                         debug!(
                             "图扩展返回 {} 个关联 chunk，合并到检索结果",
                             graph_results.len()
                         );
-                        // 合并图扩展结果到标准检索结果：
-                        // - 已存在的 chunk：保留较高分数（图扩展可能发现更高置信度的路径）
-                        // - 新 chunk：追加到结果列表
-                        use std::collections::HashSet;
-                        let existing_ids: HashSet<String> =
-                            rr.iter().map(|r| r.chunk.id.clone()).collect();
-                        for gr in graph_results {
-                            if existing_ids.contains(&gr.chunk.id) {
-                                // 已存在：boost 分数（取最大值）
-                                if let Some(existing) =
-                                    rr.iter_mut().find(|r| r.chunk.id == gr.chunk.id)
-                                    && gr.score > existing.score
-                                {
-                                    existing.score = gr.score;
-                                }
-                            } else {
-                                // 新 chunk：追加
-                                rr.push(gr);
-                            }
-                        }
-                        // 重新按分数降序排序
-                        rr.sort_by(|a, b| {
-                            b.score
-                                .partial_cmp(&a.score)
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        });
-                        // 截取 top_k
-                        rr.truncate(rag_top_k * 2);
+                        merge_graph_results(&mut rr, graph_results, rag_top_k);
                     }
                     Ok(_) => {
                         debug!("图扩展无结果，保持标准检索结果");
@@ -2147,6 +2170,65 @@ mod tests {
     )]
 
     use super::FIRST_TOKEN_TIMEOUT_SECS;
+    use super::merge_graph_results;
+    use echomind_models::{Chunk, RetrievalResult};
+
+    /// 辅助：构造带指定分数与 chunk_id 的 RetrievalResult。
+    fn mk_result(id: &str, score: f32) -> RetrievalResult {
+        RetrievalResult {
+            chunk: Chunk {
+                id: id.to_string(),
+                doc_id: "doc".to_string(),
+                content: String::new(),
+                token_count: 1,
+                sequence: 0,
+            },
+            score,
+            doc_name: "doc.md".to_string(),
+        }
+    }
+
+    /// TC-PARALLEL-001：合并已有 chunk 保留较高分数 + 新 chunk 追加 + 降序截断。
+    #[test]
+    fn tc_parallel_001_merge_boosts_and_appends() {
+        let mut rr = vec![mk_result("a", 0.8), mk_result("b", 0.5)];
+        let graph = vec![mk_result("a", 0.9), mk_result("c", 0.7)];
+
+        merge_graph_results(&mut rr, graph, 3);
+
+        // a 分数从 0.8 → 0.9，c 追加，截断 3*2=6（不截断 3 项）
+        assert_eq!(rr.len(), 3);
+        assert_eq!(rr[0].chunk.id, "a", "a 分数提升后应排第一");
+        assert!((rr[0].score - 0.9).abs() < 1e-6);
+        assert_eq!(rr[1].chunk.id, "c");
+        assert_eq!(rr[2].chunk.id, "b");
+    }
+
+    /// TC-PARALLEL-002：空图结果不修改标准检索结果（确定性）。
+    #[test]
+    fn tc_parallel_002_empty_graph_noop() {
+        let mut rr = vec![mk_result("a", 0.8), mk_result("b", 0.5)];
+        merge_graph_results(&mut rr, vec![], 3);
+        assert_eq!(rr.len(), 2);
+        assert_eq!(rr[0].chunk.id, "a");
+    }
+
+    /// TC-PARALLEL-003：截断 top_k*2 生效。
+    #[test]
+    fn tc_parallel_003_truncates_to_2k() {
+        let mut rr = (0..5)
+            .map(|i| mk_result(&format!("r{i}"), 0.9 - i as f32 * 0.1))
+            .collect::<Vec<_>>();
+        let graph = (0..3)
+            .map(|i| mk_result(&format!("g{i}"), 0.5 - i as f32 * 0.05))
+            .collect::<Vec<_>>();
+        merge_graph_results(&mut rr, graph, 3);
+        assert_eq!(rr.len(), 6, "截断为 top_k*2 = 6");
+        // 分数降序
+        for w in rr.windows(2) {
+            assert!(w[0].score >= w[1].score);
+        }
+    }
 
     /// TC-FIRST-TOKEN-001: 首 token 超时常量应为 60 秒。
     #[test]

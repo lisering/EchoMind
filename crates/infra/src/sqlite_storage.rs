@@ -48,9 +48,11 @@ pub enum IntegrityCheckResult {
 // - 写操作（add_embedding / 删除）仍整体失效缓存，下次检索重建快照
 
 /// 向量快照缓存：`Option<Arc<快照>>`。命中时克隆 Arc（零深拷贝）。
-type VectorCache = std::sync::Arc<
-    std::sync::RwLock<Option<std::sync::Arc<Vec<(String, Vec<f32>)>>>>,
->;
+type VectorCache =
+    std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<Vec<(String, Vec<f32>)>>>>>;
+
+/// 向量快照（`(chunk_id, 归一化向量)` 列表，Arc 共享，REQ-PERF-016）。
+type VectorSnapshot = std::sync::Arc<Vec<(String, Vec<f32>)>>;
 
 /// HNSW 自动启用阈值（REQ-PERF-013）。
 ///
@@ -810,12 +812,12 @@ impl Storage for SqliteStorage {
         }
 
         // ---- 向量快照获取（REQ-PERF-016：Arc 快照，命中零深拷贝）----
-        let cached: Option<std::sync::Arc<Vec<(String, Vec<f32>)>>> = {
+        let cached: Option<VectorSnapshot> = {
             let guard = self.vector_cache.read();
             guard.ok().and_then(|g| g.clone())
         };
 
-        let vectors: std::sync::Arc<Vec<(String, Vec<f32>)>> = match cached {
+        let vectors: VectorSnapshot = match cached {
             Some(snapshot) => snapshot,
             None => {
                 // 缓存未命中：全量加载 + 归一化（REQ-PERF-017）+ 内存预算守卫
@@ -823,14 +825,13 @@ impl Storage for SqliteStorage {
                 for (_, v) in &mut loaded {
                     normalize_in_place(v);
                 }
-                let snapshot: std::sync::Arc<Vec<(String, Vec<f32>)>> =
-                    std::sync::Arc::new(loaded);
+                let snapshot: VectorSnapshot = std::sync::Arc::new(loaded);
                 // 内存预算守卫（REQ-PERF-016 AC-4）：0 = 自动（缓存全部）；
                 // 正数 = 向量总数超出预算时跳过缓存（检索结果仍完整，仅下次查询回退 DB）。
-                if self.max_vectors == 0 || snapshot.len() <= self.max_vectors {
-                    if let Ok(mut guard) = self.vector_cache.write() {
-                        *guard = Some(std::sync::Arc::clone(&snapshot));
-                    }
+                if (self.max_vectors == 0 || snapshot.len() <= self.max_vectors)
+                    && let Ok(mut guard) = self.vector_cache.write()
+                {
+                    *guard = Some(std::sync::Arc::clone(&snapshot));
                 }
                 snapshot
             }
@@ -853,14 +854,15 @@ impl Storage for SqliteStorage {
                 // 校验失败（缺失/损坏/维度不匹配/解密失败）回退全量构建。
                 let (idx, from_disk) = {
                     let guard = hnsw.lock().unwrap_or_else(|e| e.into_inner());
-                    if guard.is_none()
-                        && !hnsw_dirty.load(std::sync::atomic::Ordering::SeqCst)
-                    {
+                    if guard.is_none() && !hnsw_dirty.load(std::sync::atomic::Ordering::SeqCst) {
                         let loaded = std::fs::read(&hnsw_path)
                             .map_err(anyhow::Error::from)
                             .and_then(|enc| crypto_decrypt_bytes(&cipher, &enc))
                             .and_then(|plain| {
-                                crate::hnsw_index::HnswIndex::deserialize_binary(&plain, query.len())
+                                crate::hnsw_index::HnswIndex::deserialize_binary(
+                                    &plain,
+                                    query.len(),
+                                )
                             });
                         match loaded {
                             Ok(idx) => (idx, true),

@@ -303,3 +303,164 @@ async fn tc_hnsw_free_008_hnsw_vs_full_scan_consistency() {
         );
     }
 }
+
+// ============================================================================
+// REQ-PERF-015 + REQ-NFR-022 TC-PERSIST-005~008 / TC-BOOT-001~002
+// ============================================================================
+
+/// 辅助：在指定 db 文件名下创建 550 个向量并触发一次检索（构建 + 落盘）。
+/// 返回 (TempDir 保活, db 路径, chunk_ids)。文档用独立 hash 避免跨测试冲突。
+async fn setup_indexed_at(db_name: &str) -> (TempDir, std::path::PathBuf, Vec<String>) {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join(db_name);
+    let storage = SqliteStorage::new(&db_path).unwrap();
+
+    let doc = Document::new("persist-doc.md".to_string(), format!("hash-{db_name}"));
+    storage.add_document(&doc).await.unwrap();
+    let mut chunk_ids = Vec::with_capacity(550);
+    for i in 0..550 {
+        let chunk = Chunk::new(doc.id.clone(), format!("chunk {i}"), 10, i);
+        let cid = chunk.id.clone();
+        storage.add_chunk(&chunk).await.unwrap();
+        storage
+            .add_embedding(&cid, &make_vector(i, 64))
+            .await
+            .unwrap();
+        chunk_ids.push(cid);
+    }
+
+    // 触发 HNSW 构建 + 落盘
+    let hits = storage.vector_search(&make_vector(0, 64), 5).await.unwrap();
+    assert!(!hits.is_empty(), "首次检索应返回结果");
+
+    (dir, db_path, chunk_ids)
+}
+
+/// TC-PERSIST-005：构建后落盘 hnsw_index.bin（AC-1）。
+#[tokio::test]
+async fn tc_persist_005_build_persists_file() {
+    let (dir, db_path, _ids) = setup_indexed_at("persist_005.db").await;
+    let index_path = dir.path().join("hnsw_index.bin");
+    assert!(index_path.exists(), "构建后应落盘 hnsw_index.bin");
+    let _ = db_path;
+}
+
+/// TC-PERSIST-006：重开实例从磁盘加载（不重建，文件内容不变）。
+#[tokio::test]
+async fn tc_persist_006_reopen_loads_from_disk() {
+    let (dir, db_path, _ids) = setup_indexed_at("persist_006.db").await;
+    let index_path = dir.path().join("hnsw_index.bin");
+    let before = std::fs::read(&index_path).unwrap();
+    drop(_ids);
+
+    // 重新打开（模拟应用重启）
+    let reopened = SqliteStorage::new(&db_path).unwrap();
+    let hits = reopened
+        .vector_search(&make_vector(10, 64), 5)
+        .await
+        .unwrap();
+    assert!(!hits.is_empty(), "重开后检索应返回结果");
+
+    // 磁盘加载路径不重写文件（from_disk=true 跳过落盘）
+    let after = std::fs::read(&index_path).unwrap();
+    assert_eq!(before, after, "磁盘加载路径不得重写索引文件");
+}
+
+/// TC-PERSIST-007：损坏索引文件 → 回退全量构建（不崩溃，文件被覆盖）。
+#[tokio::test]
+async fn tc_persist_007_corrupt_file_falls_back() {
+    let (dir, db_path, _ids) = setup_indexed_at("persist_007.db").await;
+    let index_path = dir.path().join("hnsw_index.bin");
+    // 破坏文件（写入垃圾字节）
+    std::fs::write(&index_path, b"garbage-not-an-index").unwrap();
+
+    let reopened = SqliteStorage::new(&db_path).unwrap();
+    let hits = reopened
+        .vector_search(&make_vector(10, 64), 5)
+        .await
+        .unwrap();
+    assert!(!hits.is_empty(), "损坏文件应回退全量构建并返回结果");
+
+    // 回退构建后应重新落盘（覆盖损坏文件）
+    let rebuilt = std::fs::read(&index_path).unwrap();
+    assert_ne!(
+        &rebuilt[..],
+        b"garbage-not-an-index",
+        "回退构建应覆盖损坏文件"
+    );
+}
+
+/// TC-PERSIST-008：写入后标记 dirty → 删除落盘文件 → 重建（AC-4）。
+#[tokio::test]
+async fn tc_persist_008_write_deletes_and_rebuilds() {
+    let (dir, db_path, _ids) = setup_indexed_at("persist_008.db").await;
+    let index_path = dir.path().join("hnsw_index.bin");
+    assert!(index_path.exists());
+
+    // 写入新 embedding → mark_hnsw_dirty 删除落盘文件
+    let storage = SqliteStorage::new(&db_path).unwrap();
+    let doc = Document::new("extra.md".to_string(), "hash-extra".to_string());
+    storage.add_document(&doc).await.unwrap();
+    let chunk = Chunk::new(doc.id.clone(), "extra chunk".to_string(), 10, 999);
+    storage.add_chunk(&chunk).await.unwrap();
+    storage
+        .add_embedding(&chunk.id, &make_vector(0, 64))
+        .await
+        .unwrap();
+
+    assert!(
+        !index_path.exists(),
+        "写入后应删除陈旧索引文件（防止崩溃重启加载陈旧索引）"
+    );
+
+    // 下次检索重建并重新落盘
+    let hits = storage.vector_search(&make_vector(0, 64), 5).await.unwrap();
+    assert!(!hits.is_empty());
+    assert!(index_path.exists(), "重建后应重新落盘");
+}
+
+/// TC-BOOT-001：启动（构造 SqliteStorage）不构建/不加载 HNSW（懒加载，AC-1）。
+#[tokio::test]
+async fn tc_boot_001_no_index_on_startup() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("boot_001.db");
+    let storage = SqliteStorage::new(&db_path).unwrap();
+
+    // 插入 550 个向量（>阈值）但不检索
+    let doc = Document::new("boot-doc.md".to_string(), "hash-boot".to_string());
+    storage.add_document(&doc).await.unwrap();
+    for i in 0..550 {
+        let chunk = Chunk::new(doc.id.clone(), format!("c {i}"), 10, i);
+        let cid = chunk.id.clone();
+        storage.add_chunk(&chunk).await.unwrap();
+        storage
+            .add_embedding(&cid, &make_vector(i, 64))
+            .await
+            .unwrap();
+    }
+
+    let index_path = dir.path().join("hnsw_index.bin");
+    assert!(
+        !index_path.exists(),
+        "启动 + 导入（无检索）不得构建/落盘 HNSW 索引"
+    );
+}
+
+/// TC-BOOT-002：二次启动首次检索走磁盘加载且结果正确（AC-2 功能护栏）。
+#[tokio::test]
+async fn tc_boot_002_second_start_first_search_works() {
+    let (dir, db_path, _ids) = setup_indexed_at("boot_002.db").await;
+    let _ = db_path;
+
+    // 模拟重启：新实例首次检索直接命中磁盘索引
+    let reopened = SqliteStorage::new(&dir.path().join("boot_002.db")).unwrap();
+    let hits = reopened
+        .vector_search(&make_vector(5, 64), 5)
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 5, "二次启动首次检索应返回 5 个结果");
+    // 结果按分数降序
+    for w in hits.windows(2) {
+        assert!(w[0].score >= w[1].score, "结果必须降序");
+    }
+}

@@ -18,6 +18,7 @@ use echomind_core::cache::{
     cosine_similarity, embedding_from_bytes, embedding_to_bytes, estimate_rag_token_cost,
     is_expired, query_hash,
 };
+use echomind_core::retrieval_memory::FeedbackType;
 use echomind_models::{CacheHit, CacheLevel, CacheStats};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -38,7 +39,15 @@ pub struct SqliteCache {
     semantic_hits: Arc<AtomicU32>,
     retrieval_hits: Arc<AtomicU32>,
     total_queries: Arc<AtomicU32>,
+    // REQ-PERF-020：语义缓存阈值（动态校准，默认 0.92，区间 [0.85, 0.97]）。
+    // 仅当用户未显式设置 `cache.semantic_threshold` 时生效（反馈自学习）。
+    semantic_threshold: Arc<std::sync::RwLock<f32>>,
 }
+
+/// REQ-PERF-020：语义缓存阈值校准区间（下界/上界/默认值）。
+const SEMANTIC_THRESHOLD_MIN: f32 = 0.85;
+const SEMANTIC_THRESHOLD_MAX: f32 = 0.97;
+const SEMANTIC_THRESHOLD_DEFAULT: f32 = 0.92;
 
 impl SqliteCache {
     /// 创建 `SqliteCache`，使用已有的 r2d2 连接池。
@@ -52,9 +61,49 @@ impl SqliteCache {
             semantic_hits: Arc::new(AtomicU32::new(0)),
             retrieval_hits: Arc::new(AtomicU32::new(0)),
             total_queries: Arc::new(AtomicU32::new(0)),
+            semantic_threshold: Arc::new(std::sync::RwLock::new(SEMANTIC_THRESHOLD_DEFAULT)),
         };
         cache.init_tables()?;
         Ok(cache)
+    }
+
+    /// REQ-PERF-020：读取当前语义缓存阈值（默认 0.92，反馈校准后动态变化）。
+    #[must_use]
+    pub fn current_semantic_threshold(&self) -> f32 {
+        *self
+            .semantic_threshold
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// REQ-PERF-020：按增量调整语义缓存阈值，钳位到 [0.85, 0.97]。
+    ///
+    /// 正增量（负反馈：语义命中不可靠）上调阈值，负增量（正反馈）下调阈值。
+    /// 返回调整后的阈值。
+    pub fn adjust_semantic_threshold(&self, delta: f32) -> f32 {
+        let mut guard = self
+            .semantic_threshold
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        let adjusted = (*guard + delta).clamp(SEMANTIC_THRESHOLD_MIN, SEMANTIC_THRESHOLD_MAX);
+        *guard = adjusted;
+        adjusted
+    }
+
+    /// REQ-PERF-020：根据用户反馈信号校准阈值。
+    ///
+    /// - 负信号（ThumbsDown / RetryWithDifferentMethod / EditAndResend）：上调 +0.01（更保守）
+    /// - 正信号（ThumbsUp / Accepted）：下调 -0.005（更激进，提升命中率）
+    ///
+    /// 幅度经钳位，长期趋近区间边界但不会越界。
+    pub fn feedback_adjust(&self, feedback: FeedbackType) -> f32 {
+        let delta = match feedback {
+            FeedbackType::ThumbsDown
+            | FeedbackType::RetryWithDifferentMethod
+            | FeedbackType::EditAndResend => 0.01,
+            FeedbackType::ThumbsUp | FeedbackType::Accepted => -0.005,
+        };
+        self.adjust_semantic_threshold(delta)
     }
 
     /// 按文档名失效缓存条目（新鲜度感知，REQ-PERF-001 增强）。
@@ -651,5 +700,56 @@ mod tests {
         // 正常查询命中
         let hit = cache.lookup_exact(&hash, 86400, now).await.unwrap();
         assert!(hit.is_some());
+    }
+
+    // ========================================================================
+    // REQ-PERF-020 TC-CALIB-001~004：语义缓存阈值动态校准
+    // ========================================================================
+
+    /// TC-CALIB-001：初始阈值 0.92（默认行为不变，AC-1）。
+    #[test]
+    fn tc_calib_001_initial_threshold() {
+        let (cache, _tmp) = create_test_cache();
+        let t = cache.current_semantic_threshold();
+        assert!((t - 0.92).abs() < 1e-6, "初始阈值应为 0.92，实际 {t}");
+    }
+
+    /// TC-CALIB-002：阈值钳位到 [0.85, 0.97]（AC-3）。
+    #[test]
+    fn tc_calib_002_clamp_bounds() {
+        let (cache, _tmp) = create_test_cache();
+        // 大幅正增量 → 上界 0.97
+        let up = cache.adjust_semantic_threshold(10.0);
+        assert!((up - 0.97).abs() < 1e-6, "正增量应钳位到 0.97，实际 {up}");
+        // 大幅负增量 → 下界 0.85
+        let down = cache.adjust_semantic_threshold(-10.0);
+        assert!(
+            (down - 0.85).abs() < 1e-6,
+            "负增量应钳位到 0.85，实际 {down}"
+        );
+    }
+
+    /// TC-CALIB-003：负反馈上调阈值，正反馈下调阈值（AC-4）。
+    #[test]
+    fn tc_calib_003_feedback_direction() {
+        let (cache, _tmp) = create_test_cache();
+        let base = cache.current_semantic_threshold();
+
+        let up = cache.feedback_adjust(FeedbackType::ThumbsDown);
+        assert!(up > base, "负反馈（点踩）应上调阈值");
+
+        let down = cache.feedback_adjust(FeedbackType::ThumbsUp);
+        assert!(down < up, "正反馈（点赞）应下调阈值");
+    }
+
+    /// TC-CALIB-004：多次正反馈下调，最终钳位下界。
+    #[test]
+    fn tc_calib_004_repeated_feedback_clamps() {
+        let (cache, _tmp) = create_test_cache();
+        for _ in 0..100 {
+            cache.feedback_adjust(FeedbackType::ThumbsUp);
+        }
+        let t = cache.current_semantic_threshold();
+        assert!((t - 0.85).abs() < 1e-6, "连续正反馈应钳位到 0.85，实际 {t}");
     }
 }
