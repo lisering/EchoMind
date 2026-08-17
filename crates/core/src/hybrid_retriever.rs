@@ -26,6 +26,9 @@ use std::sync::Arc;
 use echomind_models::RetrievalResult;
 
 use crate::mmr_diversifier::{MmrConfig, mmr_diversify};
+use crate::quality_gate::{
+    ActiveGateConfig, GateConfig, build_enhanced_config, evaluate, should_retry,
+};
 use crate::retrieval_quality_gate::{QualityGateConfig, QualityVerdict, score_retrieval_quality};
 use crate::{Embedder, QueryRewriter, Reranker, Retriever, Storage};
 
@@ -176,6 +179,9 @@ pub struct HybridRetriever<E: Embedder, S: Storage> {
     /// 检索质量门控配置（借鉴 OpenMontage slideshow_risk.py）。
     /// 每次检索后评估质量并输出 tracing 日志，不影响检索结果（仅可观测性）。
     quality_gate_config: QualityGateConfig,
+    /// 主动门控配置（REQ-PERF-014）。
+    /// `None` 时禁用主动重试（仅日志评估），`Some` 时低质量自动增强重试。
+    active_gate_config: Option<ActiveGateConfig>,
 }
 
 impl<E: Embedder, S: Storage> HybridRetriever<E, S> {
@@ -190,6 +196,7 @@ impl<E: Embedder, S: Storage> HybridRetriever<E, S> {
             rewriter: None,
             mmr_config: None,
             quality_gate_config: QualityGateConfig::default(),
+            active_gate_config: None,
         }
     }
 
@@ -204,6 +211,7 @@ impl<E: Embedder, S: Storage> HybridRetriever<E, S> {
             rewriter: None,
             mmr_config: None,
             quality_gate_config: QualityGateConfig::default(),
+            active_gate_config: None,
         }
     }
 
@@ -252,6 +260,134 @@ impl<E: Embedder, S: Storage> HybridRetriever<E, S> {
     pub fn with_quality_gate(mut self, config: QualityGateConfig) -> Self {
         self.quality_gate_config = config;
         self
+    }
+
+    /// 设置主动门控配置（REQ-PERF-014）。
+    /// 传入 `Some(config)` 启用主动重试，`None` 关闭（仅日志评估）。
+    /// 启用后，低质量检索会自动以增强参数（扩大 top_k + HyDE + Rerank）重试一次。
+    pub fn set_active_gate(&mut self, config: Option<ActiveGateConfig>) {
+        self.active_gate_config = config;
+    }
+
+    /// Builder 方法：启用主动门控。
+    #[must_use]
+    pub fn with_active_gate(mut self, config: ActiveGateConfig) -> Self {
+        self.active_gate_config = Some(config);
+        self
+    }
+
+    /// 尝试主动重试：评估原始检索质量，低质量时用增强参数重试一次。
+    ///
+    /// REQ-PERF-014 核心逻辑：
+    /// 1. 评估原始检索结果的加权质量分数
+    /// 2. 如果 `should_retry()` 返回 true：用扩大 top_k 重试
+    /// 3. 重试结果与原始结果取最优
+    /// 4. 记录 tracing 日志（原始分数 → 重试分数 → 改善幅度）
+    ///
+    /// 如果主动门控未启用（`active_gate_config = None`），直接返回原始结果。
+    async fn try_active_retry(
+        &self,
+        query: &str,
+        original_results: Vec<RetrievalResult>,
+        top_k: usize,
+    ) -> Vec<RetrievalResult> {
+        let Some(ref active_config) = self.active_gate_config else {
+            return original_results;
+        };
+
+        // 评估原始检索质量
+        let gate_config = GateConfig::default();
+        let score = evaluate(&original_results, &gate_config);
+
+        // 判断是否需要重试
+        let decision = should_retry(&score, active_config);
+        if !decision.should_retry {
+            tracing::debug!(
+                target: "echomind::retriever::active_gate",
+                verdict = decision.reason.as_str(),
+                weighted = score.weighted,
+                "主动门控: 无需重试"
+            );
+            return original_results;
+        }
+
+        // 构建增强检索参数
+        let enhanced = build_enhanced_config(active_config, top_k);
+
+        tracing::info!(
+            target: "echomind::retriever::active_gate",
+            original_score = score.weighted,
+            enhanced_top_k = enhanced.enhanced_top_k,
+            enable_hyde = enhanced.enable_hyde,
+            enable_rerank = enhanced.enable_rerank,
+            reason = decision.reason.as_str(),
+            "主动门控: 触发增强重试"
+        );
+
+        // 用增强参数重试
+        let retry_results = match self
+            .retrieve_candidates(query, enhanced.enhanced_top_k)
+            .await
+        {
+            Ok(r) => {
+                // 取 top_k 条
+                let top: Vec<RetrievalResult> =
+                    r.into_iter().take(enhanced.enhanced_top_k).collect();
+                // 如果启用了 reranker 且有 reranker 实例，进行重排序
+                let ranked: Vec<RetrievalResult> = if enhanced.enable_rerank {
+                    if let Some(ref reranker) = self.reranker {
+                        match reranker.rerank(query, &top).await {
+                            Ok(reranked) => reranked.into_iter().take(top_k).collect(),
+                            Err(e) => {
+                                tracing::warn!(
+                                    target: "echomind::retriever::active_gate",
+                                    error = %e,
+                                    "增强重试 rerank 失败，使用原始结果"
+                                );
+                                top.into_iter().take(top_k).collect()
+                            }
+                        }
+                    } else {
+                        top.into_iter().take(top_k).collect()
+                    }
+                } else {
+                    top.into_iter().take(top_k).collect()
+                };
+                ranked
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "echomind::retriever::active_gate",
+                    error = %e,
+                    "增强重试检索失败，使用原始结果"
+                );
+                return original_results;
+            }
+        };
+
+        // 评估重试结果质量
+        let retry_score = evaluate(&retry_results, &gate_config);
+        let improvement = retry_score.weighted - score.weighted;
+
+        tracing::info!(
+            target: "echomind::retriever::active_gate",
+            original_score = score.weighted,
+            retry_score = retry_score.weighted,
+            improvement = improvement,
+            retried = true,
+            "主动门控: 重试完成"
+        );
+
+        // 选择质量更好的结果
+        if retry_score.weighted > score.weighted {
+            retry_results
+        } else {
+            tracing::debug!(
+                target: "echomind::retriever::active_gate",
+                "重试结果未优于原始结果，保留原始"
+            );
+            original_results
+        }
     }
 
     /// 对检索结果应用 MMR 多样性重排（如已启用）。
@@ -441,7 +577,9 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
             let mmr_hits = self.apply_mmr(hits, top_k);
             // 质量门控评估（仅日志，不影响结果）
             self.log_quality(&mmr_hits, query);
-            return crate::retriever::expand_neighbors(&self.storage, &mmr_hits).await;
+            // REQ-PERF-014：主动门控重试（低质量时增强重试）
+            let final_hits = self.try_active_retry(query, mmr_hits, top_k).await;
+            return crate::retriever::expand_neighbors(&self.storage, &final_hits).await;
         }
 
         match &self.reranker {
@@ -458,7 +596,9 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
                 let mmr_results = self.apply_mmr(top_k_results, top_k);
                 // 质量门控评估（仅日志）
                 self.log_quality(&mmr_results, query);
-                crate::retriever::expand_neighbors(&self.storage, &mmr_results).await
+                // REQ-PERF-014：主动门控重试
+                let final_results = self.try_active_retry(query, mmr_results, top_k).await;
+                crate::retriever::expand_neighbors(&self.storage, &final_results).await
             }
             None => {
                 let fused = self.retrieve_candidates(query, top_k).await?;
@@ -468,7 +608,9 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
                 let mmr_results = self.apply_mmr(fused_top, top_k);
                 // 质量门控评估（仅日志）
                 self.log_quality(&mmr_results, query);
-                crate::retriever::expand_neighbors(&self.storage, &mmr_results).await
+                // REQ-PERF-014：主动门控重试
+                let final_results = self.try_active_retry(query, mmr_results, top_k).await;
+                crate::retriever::expand_neighbors(&self.storage, &final_results).await
             }
         }
     }
@@ -500,7 +642,9 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
             let mmr_hits = self.apply_mmr(hits, top_k);
             // 质量门控评估（仅日志）
             self.log_quality(&mmr_hits, query);
-            return crate::retriever::expand_neighbors(&self.storage, &mmr_hits).await;
+            // REQ-PERF-014：主动门控重试
+            let final_hits = self.try_active_retry(query, mmr_hits, top_k).await;
+            return crate::retriever::expand_neighbors(&self.storage, &final_hits).await;
         }
 
         match &self.reranker {
@@ -519,7 +663,9 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
                 let mmr_results = self.apply_mmr(top_k_results, top_k);
                 // 质量门控评估（仅日志）
                 self.log_quality(&mmr_results, query);
-                crate::retriever::expand_neighbors(&self.storage, &mmr_results).await
+                // REQ-PERF-014：主动门控重试
+                let final_results = self.try_active_retry(query, mmr_results, top_k).await;
+                crate::retriever::expand_neighbors(&self.storage, &final_results).await
             }
             None => {
                 let fused = self
@@ -531,7 +677,9 @@ impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
                 let mmr_results = self.apply_mmr(fused_top, top_k);
                 // 质量门控评估（仅日志）
                 self.log_quality(&mmr_results, query);
-                crate::retriever::expand_neighbors(&self.storage, &mmr_results).await
+                // REQ-PERF-014：主动门控重试
+                let final_results = self.try_active_retry(query, mmr_results, top_k).await;
+                crate::retriever::expand_neighbors(&self.storage, &final_results).await
             }
         }
     }

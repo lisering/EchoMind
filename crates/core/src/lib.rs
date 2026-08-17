@@ -2330,6 +2330,8 @@ pub trait CodeExecutor: Send + Sync {
 }
 
 #[cfg(test)]
+mod active_gate_tests;
+#[cfg(test)]
 mod agent_tests;
 #[cfg(all(test, feature = "pro"))]
 mod audit_tests;
