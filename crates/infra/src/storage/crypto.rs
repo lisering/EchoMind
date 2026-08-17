@@ -68,6 +68,36 @@ pub(crate) fn decrypt(cipher: &Aes256Gcm, encoded: &str) -> anyhow::Result<Strin
     String::from_utf8(plaintext).context("设置项明文非合法 UTF-8")
 }
 
+/// REQ-PERF-015：字节级 AES-256-GCM 加密（用于 HNSW 索引二进制落盘）。
+///
+/// 返回 `base64(nonce‖ciphertext)` 的 ASCII 字节（与 `encrypt` 相同的 nonce 布局，
+/// 但明文/密文为任意字节，非 UTF-8）。索引文件在加密 DB 模式下不再泄露明文向量。
+pub(crate) fn encrypt_bytes(cipher: &Aes256Gcm, plaintext: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let nonce_bytes: [u8; NONCE_LEN] = rand::random();
+    let ciphertext = cipher
+        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext)
+        .map_err(|e| anyhow!("索引加密失败: {e}"))?;
+    let mut blob = nonce_bytes.to_vec();
+    blob.extend_from_slice(&ciphertext);
+    Ok(B64.encode(blob).into_bytes())
+}
+
+/// REQ-PERF-015：字节级 AES-256-GCM 解密（`encrypt_bytes` 的逆操作）。
+///
+/// 返回原始明文字节。解密失败（密钥不匹配/损坏）返回 `Err`，调用方回退全量构建。
+pub(crate) fn decrypt_bytes(cipher: &Aes256Gcm, encoded: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let decoded = B64
+        .decode(std::str::from_utf8(encoded).context("索引密文非 UTF-8")?)
+        .context("索引 base64 解码失败")?;
+    if decoded.len() < NONCE_LEN {
+        anyhow::bail!("索引密文长度非法");
+    }
+    let (nonce, ciphertext) = decoded.split_at(NONCE_LEN);
+    cipher
+        .decrypt(Nonce::from_slice(nonce), ciphertext)
+        .map_err(|e| anyhow!("索引解密失败（密钥不匹配或数据损坏）: {e}"))
+}
+
 // ============================================================================
 // 文件权限辅助（Unix / Windows 条件编译）
 // ============================================================================

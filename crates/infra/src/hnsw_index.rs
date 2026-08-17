@@ -21,7 +21,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use hnsw_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 // serde derive 宏在 infra crate 中已通过 Cargo.toml serde feature 启用
@@ -31,6 +31,13 @@ const MAX_NB_CONNECTION: usize = 32;
 const MAX_LAYER: usize = 16;
 const EF_CONSTRUCTION: usize = 400;
 const EF_SEARCH: usize = 64;
+
+/// 二进制持久化魔数（REQ-PERF-015 AC-5）：`b"HNSW"`。
+const MAGIC: [u8; 4] = *b"HNSW";
+/// 二进制持久化格式版本（REQ-PERF-015 AC-5）。
+const FORMAT_VERSION: u32 = 1;
+/// 文件头字节数：magic(4) + version(4) + dim(4) + count(8)。
+const HEADER_LEN: usize = 4 + 4 + 4 + 8;
 
 /// 持久化数据结构（JSON 格式）。
 #[derive(Serialize, Deserialize)]
@@ -189,6 +196,125 @@ impl HnswIndex {
     pub fn is_empty(&self) -> bool {
         self.id_map.is_empty()
     }
+
+    /// REQ-PERF-015：二进制持久化（魔数 + 版本 + 维度 + 向量 + ID 映射）。
+    ///
+    /// 相比 `save()` 的 JSON 格式，二进制格式序列化/反序列化快数倍，
+    /// 且自带魔数/版本/维度校验（AC-5）。文件布局（小端）：
+    /// `MAGIC(4) | version u32 | dim u32 | count u64 | [id_len u32 | id bytes | dim×f32]...`
+    pub fn save_binary(&self, path: &Path) -> Result<()> {
+        let bytes = self.serialize_binary()?;
+        std::fs::write(path, bytes)
+            .with_context(|| format!("写入二进制索引文件失败: {}", path.display()))?;
+        Ok(())
+    }
+
+    /// REQ-PERF-015：从二进制文件加载并重建索引（明文包装）。
+    ///
+    /// 校验魔数 + 版本 + 维度（`expected_dim` 不匹配时返回 `Err`）。
+    pub fn load_binary(path: &Path, expected_dim: usize) -> Result<Self> {
+        let bytes = std::fs::read(path)
+            .with_context(|| format!("读取二进制索引文件失败: {}", path.display()))?;
+        Self::deserialize_binary(&bytes, expected_dim)
+    }
+
+    /// REQ-PERF-015：序列化为二进制字节（供加密落盘使用）。
+    ///
+    /// 布局同 [`Self::save_binary`]，但不写盘——调用方（SqliteStorage）
+    /// 用 AES-256-GCM 加密后写入，避免加密 DB 模式泄露明文向量。
+    pub fn serialize_binary(&self) -> Result<Vec<u8>> {
+        let dim = self.vectors.first().map_or(0usize, Vec::len);
+        let mut buf: Vec<u8> = Vec::with_capacity(
+            HEADER_LEN
+                + self
+                    .vectors
+                    .iter()
+                    .map(|v| v.len() * 4 + 8)
+                    .sum::<usize>(),
+        );
+        buf.extend_from_slice(&MAGIC);
+        buf.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        buf.extend_from_slice(&(dim as u32).to_le_bytes());
+        buf.extend_from_slice(&(self.id_map.len() as u64).to_le_bytes());
+        for (i, id) in self.id_map.iter().enumerate() {
+            let idb = id.as_bytes();
+            buf.extend_from_slice(&(idb.len() as u32).to_le_bytes());
+            buf.extend_from_slice(idb);
+            for x in &self.vectors[i] {
+                buf.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        Ok(buf)
+    }
+
+    /// REQ-PERF-015：从二进制字节反序列化并重建索引。
+    ///
+    /// 校验魔数 + 版本 + 维度（`expected_dim` 不匹配时返回 `Err`，
+    /// 调用方回退全量构建）。损坏数据返回 `Err`，不 panic。
+    pub fn deserialize_binary(bytes: &[u8], expected_dim: usize) -> Result<Self> {
+        if bytes.len() < HEADER_LEN {
+            bail!("二进制索引文件过短（{} < {}）", bytes.len(), HEADER_LEN);
+        }
+        if bytes[0..4] != MAGIC {
+            bail!("二进制索引魔数不匹配");
+        }
+        let version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        if version != FORMAT_VERSION {
+            bail!("二进制索引版本不匹配: {version}");
+        }
+        let dim = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize;
+        if dim != expected_dim {
+            bail!("二进制索引维度不匹配: {dim} != {expected_dim}");
+        }
+        let count = u64::from_le_bytes([
+            bytes[12], bytes[13], bytes[14], bytes[15], bytes[16], bytes[17], bytes[18], bytes[19],
+        ]) as usize;
+
+        let mut offset = HEADER_LEN;
+        let mut id_map: Vec<String> = Vec::with_capacity(count);
+        let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(count);
+        for _ in 0..count {
+            if offset + 4 > bytes.len() {
+                bail!("二进制索引 ID 长度字段越界");
+            }
+            let id_len = u32::from_le_bytes([
+                bytes[offset],
+                bytes[offset + 1],
+                bytes[offset + 2],
+                bytes[offset + 3],
+            ]) as usize;
+            offset += 4;
+            if offset + id_len > bytes.len() {
+                bail!("二进制索引 ID 内容越界");
+            }
+            let id = std::str::from_utf8(&bytes[offset..offset + id_len])
+                .context("二进制索引 ID 非 UTF-8")?
+                .to_string();
+            offset += id_len;
+
+            let vec_len = dim * 4;
+            if offset + vec_len > bytes.len() {
+                bail!("二进制索引向量越界");
+            }
+            let mut vec = Vec::with_capacity(dim);
+            for k in 0..dim {
+                let s = offset + k * 4;
+                vec.push(f32::from_le_bytes([
+                    bytes[s],
+                    bytes[s + 1],
+                    bytes[s + 2],
+                    bytes[s + 3],
+                ]));
+            }
+            offset += vec_len;
+            id_map.push(id);
+            vectors.push(vec);
+        }
+
+        // 重建 HNSW 图
+        let pairs: Vec<(String, Vec<f32>)> = id_map.into_iter().zip(vectors).collect();
+        Self::build(&pairs)
+    }
 }
 
 // ================== 单元测试 ==================
@@ -320,6 +446,5 @@ mod tests {
         let index = HnswIndex::build(&vectors).expect("构建索引失败");
 
         let results = index.search(&vectors[0].1, 0);
-        assert!(results.is_empty(), "top_k=0 应返回空结果");
-    }
+        assert!(results.is_empty(), "top_k=0 应返回空结果");    }
 }

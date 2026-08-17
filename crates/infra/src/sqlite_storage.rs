@@ -14,7 +14,10 @@ use tracing::{error, info, warn};
 // 重导出子模块（保持外部引用路径不变）
 pub(crate) use storage::{PRAGMAS, Pool, ensure_dir_0700, init_schema, load_or_create_cipher};
 // crypto 辅助函数（接收 &Aes256Gcm 参数的自由函数）
-use storage::{decrypt as crypto_decrypt, encrypt as crypto_encrypt};
+use storage::{
+    decrypt as crypto_decrypt, decrypt_bytes as crypto_decrypt_bytes, encrypt as crypto_encrypt,
+    encrypt_bytes as crypto_encrypt_bytes,
+};
 // S02 拆分：CRUD 子模块
 // S03 拆分：新增 vectors / entities / misc 子模块
 use storage::{conversations, documents, entities, messages, misc, vectors};
@@ -93,6 +96,11 @@ pub struct SqliteStorage {
     hnsw: std::sync::Arc<std::sync::Mutex<Option<crate::hnsw_index::HnswIndex>>>,
     /// HNSW 索引是否因文档变更而失效（需要重建）。
     hnsw_dirty: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// REQ-PERF-015：HNSW 索引磁盘持久化路径（`hnsw_index.bin`）。
+    ///
+    /// 首次构建后落盘；后续启动首次检索时从磁盘加载（跳过 DB 全量读取），
+    /// 损坏/维度不匹配时回退全量构建。启动不加载（懒）。
+    hnsw_path: std::path::PathBuf,
     /// **性能优化（秒出答案）**：内存向量快照缓存（REQ-PERF-016）。
     ///
     /// 首次 `vector_search` 时全量加载所有 (chunk_id, vector) 对到内存并归一化
@@ -133,9 +141,10 @@ impl SqliteStorage {
             pool,
             cipher,
             hnsw: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            hnsw_dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            hnsw_dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             vector_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
             max_vectors: 0,
+            hnsw_path: data_dir.join("hnsw_index.bin"),
         };
         init_schema(&storage.pool, db_path)?;
         Ok(storage)
@@ -172,9 +181,10 @@ impl SqliteStorage {
             pool,
             cipher,
             hnsw: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            hnsw_dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            hnsw_dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             vector_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
             max_vectors: 0,
+            hnsw_path: data_dir.join("hnsw_index.bin"),
         };
         init_schema(&storage.pool, db_path)?;
         Ok(storage)
@@ -409,6 +419,15 @@ impl SqliteStorage {
     pub fn mark_hnsw_dirty(&self) {
         self.hnsw_dirty
             .store(true, std::sync::atomic::Ordering::SeqCst);
+        // REQ-PERF-015 AC-4：写入后磁盘索引已陈旧，删除落盘文件。
+        // 防止崩溃重启后（内存 dirty 标志丢失）加载陈旧索引。
+        // 删除失败不致命（下次搜索会用当前 DB 重建并覆盖）。
+        if let Err(e) = std::fs::remove_file(&self.hnsw_path) {
+            // 文件不存在（首次写入前）属正常，其余情况记录 debug 日志
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::debug!("删除陈旧 HNSW 索引文件失败: {e:#}");
+            }
+        }
     }
 
     /// 从 SQLite 加载全部 embeddings（HNSW 索引构建用，REQ-NFR-005）。
@@ -745,6 +764,12 @@ impl Storage for SqliteStorage {
         query_embedding: &[f32],
         top_k: usize,
     ) -> anyhow::Result<Vec<RetrievalResult>> {
+        // REQ-PERF-017：查询向量归一化一次（内存快照向量已在加载时归一化）。
+        // 归一化后余弦相似度退化为点积（1 次乘加/dim，~3× FLOPs 降低）。
+        // HNSW 的 DistCosine 与归一化输入组合结果等价（1 - dot = 1 - cos）。
+        let mut query_norm = query_embedding.to_vec();
+        normalize_in_place(&mut query_norm);
+
         // ---- HNSW 快速路径（REQ-NFR-005 + REQ-PERF-013）----
         // 已从 Pro 下沉到 Free。阈值切换：向量数 > HNSW_AUTO_THRESHOLD 用 HNSW O(log n)，
         // 否则走内存全量扫描 O(n)（小数据量全量扫描更快，无构建开销）。
@@ -758,7 +783,7 @@ impl Storage for SqliteStorage {
             let search_hits = {
                 let idx = self.hnsw.lock().unwrap_or_else(|e| e.into_inner());
                 idx.as_ref().map(|idx| {
-                    idx.search(query_embedding, top_k * 4)
+                    idx.search(&query_norm, top_k * 4)
                         .into_iter()
                         .map(|(id, dist)| (id, 1.0 - dist))
                         .collect::<Vec<_>>()
@@ -784,42 +809,85 @@ impl Storage for SqliteStorage {
             }
         }
 
-        // ---- 阈值切换：检查向量数量决定是否构建 HNSW 索引 ----
-        // 先从缓存或 DB 加载向量，检查数量是否超过阈值
-        let cached: Option<Vec<(String, Vec<f32>)>> = {
+        // ---- 向量快照获取（REQ-PERF-016：Arc 快照，命中零深拷贝）----
+        let cached: Option<std::sync::Arc<Vec<(String, Vec<f32>)>>> = {
             let guard = self.vector_cache.read();
-            guard
-                .ok()
-                .and_then(|g| g.as_ref().map(|cache| cache.to_vec()))
+            guard.ok().and_then(|g| g.clone())
         };
 
-        let vectors: Vec<(String, Vec<f32>)> = match cached {
-            Some(v) => v,
+        let vectors: std::sync::Arc<Vec<(String, Vec<f32>)>> = match cached {
+            Some(snapshot) => snapshot,
             None => {
-                // 缓存未命中：全量加载并填充 LRU 缓存
-                let loaded = self.load_all_embeddings().await?;
-                let cache = LruVectorCache::from_vectors(loaded, self.max_vectors);
-                let vec = cache.to_vec();
-                if let Ok(mut guard) = self.vector_cache.write() {
-                    *guard = Some(cache);
+                // 缓存未命中：全量加载 + 归一化（REQ-PERF-017）+ 内存预算守卫
+                let mut loaded = self.load_all_embeddings().await?;
+                for (_, v) in &mut loaded {
+                    normalize_in_place(v);
                 }
-                vec
+                let snapshot: std::sync::Arc<Vec<(String, Vec<f32>)>> =
+                    std::sync::Arc::new(loaded);
+                // 内存预算守卫（REQ-PERF-016 AC-4）：0 = 自动（缓存全部）；
+                // 正数 = 向量总数超出预算时跳过缓存（检索结果仍完整，仅下次查询回退 DB）。
+                if self.max_vectors == 0 || snapshot.len() <= self.max_vectors {
+                    if let Ok(mut guard) = self.vector_cache.write() {
+                        *guard = Some(std::sync::Arc::clone(&snapshot));
+                    }
+                }
+                snapshot
             }
         };
 
-        // 阈值切换：向量数 > 阈值且索引 dirty → 构建 HNSW 索引
+        // 阈值切换：向量数 > 阈值且索引 dirty → 构建/加载 HNSW 索引
         if vectors.len() > HNSW_AUTO_THRESHOLD && !vectors.is_empty() {
             // 防御：维度不匹配的向量（旧 schema 迁移遗留数据）不参与 HNSW 图构建
-            let query_dim = query_embedding.len();
+            let query_dim = query_norm.len();
             let (matched, excluded): (Vec<_>, Vec<_>) = vectors
-                .clone()
-                .into_iter()
+                .iter()
+                .cloned()
                 .partition(|(_, v)| v.len() == query_dim);
             let (hnsw, hnsw_dirty) = (self.hnsw.clone(), self.hnsw_dirty.clone());
-            let query = query_embedding.to_vec();
+            let hnsw_path = self.hnsw_path.clone();
+            let query = query_norm.clone();
+            let cipher = self.cipher.clone();
             let mut built_hits = tokio::task::spawn_blocking(move || {
-                let idx = crate::hnsw_index::HnswIndex::build(&matched)?;
+                // REQ-PERF-015：首次构建（非 dirty + 内存索引为空）优先从磁盘加载（加密），
+                // 校验失败（缺失/损坏/维度不匹配/解密失败）回退全量构建。
+                let (idx, from_disk) = {
+                    let guard = hnsw.lock().unwrap_or_else(|e| e.into_inner());
+                    if guard.is_none()
+                        && !hnsw_dirty.load(std::sync::atomic::Ordering::SeqCst)
+                    {
+                        let loaded = std::fs::read(&hnsw_path)
+                            .map_err(anyhow::Error::from)
+                            .and_then(|enc| crypto_decrypt_bytes(&cipher, &enc))
+                            .and_then(|plain| {
+                                crate::hnsw_index::HnswIndex::deserialize_binary(&plain, query.len())
+                            });
+                        match loaded {
+                            Ok(idx) => (idx, true),
+                            Err(e) => {
+                                warn!("HNSW 磁盘索引加载失败，回退全量构建: {e:#}");
+                                (crate::hnsw_index::HnswIndex::build(&matched)?, false)
+                            }
+                        }
+                    } else {
+                        (crate::hnsw_index::HnswIndex::build(&matched)?, false)
+                    }
+                };
                 let hits = idx.search(&query, top_k * 4);
+                // REQ-PERF-015 AC-1：全量构建后加密落盘（磁盘加载的索引已最新，跳过重写）。
+                if !from_disk {
+                    match idx
+                        .serialize_binary()
+                        .and_then(|plain| crypto_encrypt_bytes(&cipher, &plain))
+                    {
+                        Ok(enc) => {
+                            if let Err(e) = std::fs::write(&hnsw_path, enc) {
+                                warn!("HNSW 索引落盘失败: {e:#}");
+                            }
+                        }
+                        Err(e) => warn!("HNSW 索引序列化/加密失败: {e:#}"),
+                    }
+                }
                 *hnsw.lock().unwrap_or_else(|e| e.into_inner()) = Some(idx);
                 hnsw_dirty.store(false, std::sync::atomic::Ordering::SeqCst);
                 Ok::<_, anyhow::Error>(hits)
@@ -853,17 +921,20 @@ impl Storage for SqliteStorage {
         }
 
         // ---- 内存全量扫描路径（小知识库或 HNSW 降级）----
-        // 在内存中计算余弦相似度，取 top-k
-        let query_vec = query_embedding.to_vec();
+        // 归一化向量点积（等价余弦，REQ-PERF-017），O(N) select_nth 取 top-k。
+        // Arc 快照仅克隆指针（REQ-PERF-016 AC-3：零全量深拷贝）。
+        let query_for_scan = query_norm.clone();
+        let snapshot = std::sync::Arc::clone(&vectors);
         let top_k_val = top_k;
         let top_hits: Vec<(String, f32)> = tokio::task::spawn_blocking(move || {
             // 性能优化：先计算所有分数（不带 chunk_id clone），再用 select_nth_unstable_by
             // 取 top-k（O(N) 而非 O(N log N) 全量排序），最后仅 clone top-k 的 chunk_id
+            let vectors = &snapshot;
             let n = vectors.len();
             // 用索引数组避免 chunk_id clone
             let mut scores: Vec<(usize, f32)> = Vec::with_capacity(n);
             for (i, (_, vector)) in vectors.iter().enumerate() {
-                let score = cosine_similarity(&query_vec, vector);
+                let score = dot_product(&query_for_scan, vector);
                 scores.push((i, score));
             }
 
@@ -891,16 +962,6 @@ impl Storage for SqliteStorage {
         })
         .await
         .context("内存向量检索任务执行失败")?;
-
-        // S6: 搜索后 touch top-k 结果（更新 LRU 访问顺序）
-        if !top_hits.is_empty() {
-            let touch_keys: Vec<String> = top_hits.iter().map(|(id, _)| id.clone()).collect();
-            if let Ok(mut guard) = self.vector_cache.write()
-                && let Some(cache) = guard.as_mut()
-            {
-                cache.touch_batch(&touch_keys);
-            }
-        }
 
         if top_hits.is_empty() {
             return Ok(vec![]);
@@ -2062,7 +2123,6 @@ impl RetrievalMemoryStore for SqliteStorage {
 #[cfg(test)]
 mod fts5_query_tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
-    use super::LruVectorCache;
     use super::build_fts5_or_query;
     use crate::sqlite_storage::SqliteStorage;
     use echomind_core::Storage;
@@ -2098,187 +2158,6 @@ mod fts5_query_tests {
         let q = build_fts5_or_query("test NEAR water");
         // "NEAR" 被双引号包裹后视为普通字符串，不作为 FTS5 操作符
         assert!(q.contains("\"NEAR\""));
-    }
-
-    // ========================================================================
-    // S6: LRU 向量缓存 TDD 测试（TC-LRU-001~003）
-    // ========================================================================
-
-    /// TC-LRU-001：缓存满时驱逐最旧条目。
-    ///
-    /// 向容量为 3 的 LRU 缓存插入 5 个条目，
-    /// 验证仅保留最后 3 个，最旧的 2 个被驱逐。
-    #[test]
-    fn tc_lru_001_evict_oldest_when_full() {
-        let mut cache = LruVectorCache::new(3);
-        cache.insert("a".to_string(), vec![1.0]);
-        cache.insert("b".to_string(), vec![2.0]);
-        cache.insert("c".to_string(), vec![3.0]);
-        cache.insert("d".to_string(), vec![4.0]);
-        cache.insert("e".to_string(), vec![5.0]);
-
-        assert_eq!(cache.len(), 3, "容量 3 应仅保留 3 个条目");
-        // "a" 和 "b" 应被驱逐（最旧）
-        let entries: Vec<(String, Vec<f32>)> = cache.to_vec();
-        let has = |key: &str| entries.iter().any(|(k, _)| k == key);
-        assert!(!has("a"), "\"a\" 应被驱逐");
-        assert!(!has("b"), "\"b\" 应被驱逐");
-        assert!(has("c"), "\"c\" 应保留");
-        assert!(has("d"), "\"d\" 应保留");
-        assert!(has("e"), "\"e\" 应保留");
-    }
-
-    /// TC-LRU-002：检索操作更新访问顺序。
-    ///
-    /// 插入 a, b, c（容量 3），touch "a"（移到 MRU 端），
-    /// 再插入 "d" → "b"（最旧）被驱逐而非 "a"。
-    #[test]
-    fn tc_lru_002_touch_updates_access_order() {
-        let mut cache = LruVectorCache::new(3);
-        cache.insert("a".to_string(), vec![1.0]);
-        cache.insert("b".to_string(), vec![2.0]);
-        cache.insert("c".to_string(), vec![3.0]);
-
-        // touch "a" → 移到 MRU 端（最新）
-        cache.touch("a");
-
-        // 插入 "d" → "b" 被驱逐（"a" 已被 touch，不是最旧了）
-        cache.insert("d".to_string(), vec![4.0]);
-
-        assert_eq!(cache.len(), 3);
-        let entries: Vec<(String, Vec<f32>)> = cache.to_vec();
-        let has = |key: &str| entries.iter().any(|(k, _)| k == key);
-        assert!(has("a"), "\"a\" 被 touch 后应保留");
-        assert!(!has("b"), "\"b\" 应被驱逐（最旧）");
-        assert!(has("c"), "\"c\" 应保留");
-        assert!(has("d"), "\"d\" 应保留");
-    }
-
-    /// TC-LRU-003：写操作失效对应条目。
-    ///
-    /// 插入 a, b, c，remove "b" → "b" 被移除，其余保留。
-    /// 再插入 "d" 不会驱逐任何条目（有空位）。
-    #[test]
-    fn tc_lru_003_remove_invalidates_entry() {
-        let mut cache = LruVectorCache::new(5);
-        cache.insert("a".to_string(), vec![1.0]);
-        cache.insert("b".to_string(), vec![2.0]);
-        cache.insert("c".to_string(), vec![3.0]);
-
-        // remove "b"
-        cache.remove("b");
-
-        assert_eq!(cache.len(), 2, "remove 后应剩 2 个条目");
-        let entries: Vec<(String, Vec<f32>)> = cache.to_vec();
-        let has = |key: &str| entries.iter().any(|(k, _)| k == key);
-        assert!(has("a"), "\"a\" 应保留");
-        assert!(!has("b"), "\"b\" 应被移除");
-        assert!(has("c"), "\"c\" 应保留");
-
-        // 插入 "d" 不驱逐（有空位）
-        cache.insert("d".to_string(), vec![4.0]);
-        assert_eq!(cache.len(), 3, "有空位时插入不驱逐");
-    }
-
-    /// 额外：from_vectors 超量截断验证。
-    #[test]
-    fn tc_lru_extra_from_vectors_truncation() {
-        let vectors = vec![
-            ("a".to_string(), vec![1.0]),
-            ("b".to_string(), vec![2.0]),
-            ("c".to_string(), vec![3.0]),
-            ("d".to_string(), vec![4.0]),
-            ("e".to_string(), vec![5.0]),
-        ];
-        let cache = LruVectorCache::from_vectors(vectors, 3);
-        assert_eq!(cache.len(), 3, "from_vectors 应截断到 max_entries");
-    }
-
-    /// 额外：clear 清空全部。
-    #[test]
-    fn tc_lru_extra_clear() {
-        let mut cache = LruVectorCache::new(5);
-        cache.insert("a".to_string(), vec![1.0]);
-        cache.insert("b".to_string(), vec![2.0]);
-        assert!(!cache.is_empty());
-        cache.clear();
-        assert!(cache.is_empty());
-        assert_eq!(cache.len(), 0);
-    }
-
-    // ========================================================================
-    // 性能优化: O(1) LRU 额外验证（TC-LRU-OPT-001~003）
-    // ========================================================================
-
-    /// TC-LRU-OPT-001：大量 touch 操作后驱逐顺序正确。
-    ///
-    /// 验证 O(1) 双向链表实现在多次 touch 后仍保持正确的 LRU 顺序。
-    #[test]
-    fn tc_lru_opt_001_multiple_touch_order() {
-        let mut cache = LruVectorCache::new(3);
-        cache.insert("a".to_string(), vec![1.0]);
-        cache.insert("b".to_string(), vec![2.0]);
-        cache.insert("c".to_string(), vec![3.0]);
-
-        // touch a → a 移到 MRU
-        cache.touch("a");
-        // touch b → b 移到 MRU, a 变第二
-        cache.touch("b");
-        // touch a again → a 移到 MRU
-        cache.touch("a");
-
-        // 现在 LRU 顺序: c (最旧) → b → a (最新)
-        // 插入 d → c 被驱逐
-        cache.insert("d".to_string(), vec![4.0]);
-
-        let entries: Vec<(String, Vec<f32>)> = cache.to_vec();
-        let has = |key: &str| entries.iter().any(|(k, _)| k == key);
-        assert!(!has("c"), "多次 touch 后 c 应被驱逐");
-        assert!(has("a"), "a 应保留（最近 touch）");
-        assert!(has("b"), "b 应保留");
-        assert!(has("d"), "d 应保留");
-    }
-
-    /// TC-LRU-OPT-002：重复 key 更新值并移到 MRU。
-    #[test]
-    fn tc_lru_opt_002_update_existing_key() {
-        let mut cache = LruVectorCache::new(3);
-        cache.insert("a".to_string(), vec![1.0]);
-        cache.insert("b".to_string(), vec![2.0]);
-        cache.insert("c".to_string(), vec![3.0]);
-
-        // 更新 a 的值（不新增条目，不驱逐）
-        cache.insert("a".to_string(), vec![99.0]);
-
-        assert_eq!(cache.len(), 3, "更新已有 key 不应增加条目数");
-        let entries: Vec<(String, Vec<f32>)> = cache.to_vec();
-        let a_entry = entries.iter().find(|(k, _)| k == "a");
-        assert!(a_entry.is_some(), "a 应存在");
-        assert_eq!(a_entry.unwrap().1, vec![99.0], "a 的值应更新为 99.0");
-
-        // a 应在 MRU 端 → 插入 d 时 b 被驱逐
-        cache.insert("d".to_string(), vec![4.0]);
-        let entries: Vec<(String, Vec<f32>)> = cache.to_vec();
-        let has = |key: &str| entries.iter().any(|(k, _)| k == key);
-        assert!(!has("b"), "b 应被驱逐（a 更新后移到 MRU）");
-        assert!(has("a"), "a 应保留");
-    }
-
-    /// TC-LRU-OPT-003：touch_batch 批量更新访问顺序。
-    #[test]
-    fn tc_lru_opt_003_touch_batch() {
-        let mut cache = LruVectorCache::new(5);
-        cache.insert("a".to_string(), vec![1.0]);
-        cache.insert("b".to_string(), vec![2.0]);
-        cache.insert("c".to_string(), vec![3.0]);
-
-        // 批量 touch a 和 c
-        cache.touch_batch(&["a".to_string(), "c".to_string()]);
-
-        // LRU 顺序: b (最旧) → a → c (最新) [b 未被 touch]
-        // 但容量 5 未满，插入 d 不驱逐
-        cache.insert("d".to_string(), vec![4.0]);
-        assert_eq!(cache.len(), 4, "容量 5 未满不驱逐");
     }
 
     // ========================================================================
