@@ -211,7 +211,7 @@ impl SqliteStorage {
             vector_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
             max_vectors: 5000,
         };
-        init_schema(&storage.pool)?;
+        init_schema(&storage.pool, db_path)?;
         Ok(storage)
     }
 
@@ -250,7 +250,7 @@ impl SqliteStorage {
             vector_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
             max_vectors: 5000,
         };
-        init_schema(&storage.pool)?;
+        init_schema(&storage.pool, db_path)?;
         Ok(storage)
     }
 

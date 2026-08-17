@@ -4,11 +4,13 @@
 //! - `init_schema`：创建表、索引、FTS5 虚拟表、审计日志表
 //! - `backfill_fts_if_needed` / `backfill_messages_fts_if_needed`：旧库升级回填全文索引
 //! - `migrate_schema`：增量迁移旧表列结构（绝不丢弃用户数据）
+//! - `safe_migrate_schema`：安全迁移（REQ-DB-008）— 备份 → 迁移 → 完整性检查 → 恢复
 //! - `validate_table_name` / `table_exists` / `has_column`：表名安全校验与 schema 检测
 
 use anyhow::Context;
 use rusqlite::params;
-use tracing::info;
+use std::path::Path;
+use tracing::{error, info, warn};
 
 use super::schema::{
     KNOWN_TABLES, SCHEMA_AUDIT_LOG, SCHEMA_FTS, SCHEMA_INDEXES, SCHEMA_MESSAGES_FTS, SCHEMA_TABLES,
@@ -17,22 +19,26 @@ use super::schema::{
 /// 连接池类型别名（与 `SqliteStorage` 一致）。
 pub(crate) type Pool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
 
-/// 初始化数据库 schema：表 → 迁移 → 索引 → FTS → 回填 → 审计日志。
+/// 初始化数据库 schema：表 → 安全迁移 → 索引 → FTS → 回填 → 审计日志 → 完整性检查。
 ///
 /// 步骤顺序有严格依赖关系：
 /// 1. 创建表（`IF NOT EXISTS` 不修改已有表结构）
-/// 2. 迁移旧表 schema（修复历史版本不兼容的列缺失）
+/// 2. 安全迁移旧表 schema（REQ-DB-008：备份 → 迁移 → 完整性检查 → 恢复）
 /// 3. 创建索引（此时所有列已保证存在）
 /// 4. 创建 FTS5 虚拟表
 /// 5. 回填 FTS5 索引（旧库升级场景）
 /// 6. 创建审计日志表
-pub(crate) fn init_schema(pool: &Pool) -> anyhow::Result<()> {
+/// 7. 迁移后完整性检查
+pub(crate) fn init_schema(pool: &Pool, db_path: &Path) -> anyhow::Result<()> {
     let conn = pool.get().context("获取数据库连接失败")?;
     // 步骤 1：创建表（IF NOT EXISTS 不修改已有表结构）
     conn.execute_batch(SCHEMA_TABLES)
         .context("初始化数据库表结构失败")?;
-    // 步骤 2：迁移旧表 schema（修复历史版本不兼容的列缺失）
-    migrate_schema(&conn)?;
+    // 步骤 2：安全迁移旧表 schema（REQ-DB-008）
+    // 先关闭此连接（drop），让 safe_migrate_schema 用自己的连接操作
+    drop(conn);
+    safe_migrate_schema(pool, db_path)?;
+    let conn = pool.get().context("获取数据库连接失败")?;
     // 步骤 3：创建索引（此时所有列已保证存在）
     conn.execute_batch(SCHEMA_INDEXES)
         .context("初始化数据库索引失败")?;
@@ -49,6 +55,13 @@ pub(crate) fn init_schema(pool: &Pool) -> anyhow::Result<()> {
     // 步骤 6：创建审计日志表（防篡改哈希链）
     conn.execute_batch(SCHEMA_AUDIT_LOG)
         .context("初始化审计日志表失败")?;
+    // 步骤 7：迁移后完整性检查（REQ-DB-008 AC-3）
+    let integrity = run_integrity_check(pool)?;
+    if integrity != "ok" {
+        error!("迁移后完整性检查失败: {integrity}");
+        anyhow::bail!("数据库迁移后完整性检查失败: {integrity}");
+    }
+    info!("迁移后完整性检查通过");
     Ok(())
 }
 
@@ -387,4 +400,175 @@ pub(crate) fn has_column(
         .filter_map(|r| r.ok())
         .collect();
     Ok(col_names.iter().any(|c| c == column))
+}
+
+// ============================================================================
+// 安全迁移函数（REQ-DB-008 数据库迁移安全防护）
+// ============================================================================
+
+/// 检查是否有需要迁移的旧 schema。
+///
+/// 返回 `true` 表示存在需要迁移的旧表结构，需要备份。
+fn needs_migration(conn: &rusqlite::Connection) -> bool {
+    // chunks 表含旧版 session_id 列
+    if table_exists(conn, "chunks").unwrap_or(false)
+        && has_column(conn, "chunks", "session_id").unwrap_or(false)
+    {
+        return true;
+    }
+    // embeddings 表列名不匹配（embedding → vector）
+    if table_exists(conn, "embeddings").unwrap_or(false)
+        && !has_column(conn, "embeddings", "vector").unwrap_or(false)
+        && has_column(conn, "embeddings", "embedding").unwrap_or(false)
+    {
+        return true;
+    }
+    // entities 表缺少 chunk_id 列
+    if table_exists(conn, "entities").unwrap_or(false)
+        && !has_column(conn, "entities", "chunk_id").unwrap_or(false)
+    {
+        return true;
+    }
+    // propositions 表缺少 chunk_id 列
+    if table_exists(conn, "propositions").unwrap_or(false)
+        && !has_column(conn, "propositions", "chunk_id").unwrap_or(false)
+    {
+        return true;
+    }
+    // summary_nodes 表缺少 doc_id 列
+    if table_exists(conn, "summary_nodes").unwrap_or(false)
+        && !has_column(conn, "summary_nodes", "doc_id").unwrap_or(false)
+    {
+        return true;
+    }
+    false
+}
+
+/// 备份数据库文件（REQ-DB-008 AC-1）。
+///
+/// 在迁移前将数据库文件复制为 `.bak` 后缀的备份文件。
+/// 备份文件权限设为 0600（Unix）。
+/// 备份失败时返回 `Err`，但调用方 `safe_migrate_schema` 会降级为无备份模式。
+pub(crate) fn backup_database_file(db_path: &Path) -> anyhow::Result<()> {
+    let bak_path = db_path.with_extension("db.bak");
+    info!(
+        "迁移安全：备份数据库文件 {} → {}",
+        db_path.display(),
+        bak_path.display()
+    );
+    std::fs::copy(db_path, &bak_path).context("备份数据库文件失败")?;
+
+    // 设置备份文件权限（Unix 0600）
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&bak_path, std::fs::Permissions::from_mode(0o600));
+    }
+
+    Ok(())
+}
+
+/// 执行 `PRAGMA integrity_check` 并返回结果字符串（REQ-DB-008 AC-3）。
+///
+/// 返回 `"ok"` 表示数据库完整性正常。
+pub(crate) fn run_integrity_check(pool: &Pool) -> anyhow::Result<String> {
+    let conn = pool.get().context("获取数据库连接失败")?;
+    let result: String = conn
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .context("执行 PRAGMA integrity_check 失败")?;
+    Ok(result)
+}
+
+/// 从备份恢复数据库文件（REQ-DB-008 AC-4）。
+///
+/// 将 `.bak` 备份文件覆盖回数据库文件。
+/// 恢复后删除备份文件。
+pub(crate) fn restore_from_backup(db_path: &Path) -> anyhow::Result<()> {
+    let bak_path = db_path.with_extension("db.bak");
+    error!(
+        "迁移安全：从备份恢复数据库 {} → {}",
+        bak_path.display(),
+        db_path.display()
+    );
+    if !bak_path.exists() {
+        anyhow::bail!("备份文件不存在: {}", bak_path.display());
+    }
+    std::fs::copy(&bak_path, db_path).context("从备份恢复数据库失败")?;
+    // 清理备份文件
+    let _ = std::fs::remove_file(&bak_path);
+    Ok(())
+}
+
+/// 清理备份文件（REQ-DB-008 AC-5）。
+///
+/// 迁移成功后删除 `.bak` 备份文件。
+pub(crate) fn cleanup_backup(db_path: &Path) {
+    let bak_path = db_path.with_extension("db.bak");
+    if bak_path.exists() {
+        info!("迁移安全：清理备份文件 {}", bak_path.display());
+        let _ = std::fs::remove_file(&bak_path);
+    }
+}
+
+/// 安全迁移：备份 → 迁移 → 完整性检查 → 恢复/清理（REQ-DB-008）。
+///
+/// 1. 检查是否有需要迁移的旧 schema（无迁移则跳过备份，AC-7）
+/// 2. 备份数据库文件（AC-1）
+/// 3. 执行 `migrate_schema`（AC-2，DDL 在 SQLite 中自动事务）
+/// 4. 执行 `PRAGMA integrity_check`（AC-3）
+/// 5. 完整性检查失败 → 从备份恢复（AC-4）
+/// 6. 完整性检查通过 → 清理备份（AC-5）
+///
+/// 备份失败时降级为无备份模式（AC-9），仅 warning 日志不阻塞迁移。
+pub(crate) fn safe_migrate_schema(pool: &Pool, db_path: &Path) -> anyhow::Result<()> {
+    // 检查是否有需要迁移的旧 schema
+    {
+        let conn = pool.get().context("获取数据库连接失败")?;
+        if !needs_migration(&conn) {
+            info!("迁移安全：无需迁移，跳过备份");
+            return Ok(());
+        }
+    }
+
+    // AC-1: 备份数据库文件
+    let backup_result = backup_database_file(db_path);
+    let has_backup = if let Err(ref e) = backup_result {
+        // AC-9: 备份失败降级为无备份模式
+        warn!("迁移安全：备份失败，降级为无备份模式: {e}");
+        false
+    } else {
+        info!("迁移安全：备份成功");
+        true
+    };
+
+    // AC-2: 执行迁移（DDL 在 SQLite 中自动包裹在隐式事务中）
+    info!("迁移安全：执行 schema 迁移");
+    {
+        let conn = pool.get().context("获取数据库连接失败")?;
+        migrate_schema(&conn)?;
+    }
+
+    // AC-3: 迁移后完整性检查
+    info!("迁移安全：执行完整性检查");
+    let integrity = run_integrity_check(pool)?;
+
+    if integrity == "ok" {
+        // 完整性检查通过
+        info!("迁移安全：完整性检查通过");
+        if has_backup {
+            // AC-5: 清理备份
+            cleanup_backup(db_path);
+        }
+        Ok(())
+    } else {
+        // AC-4: 完整性检查失败，从备份恢复
+        error!("迁移安全：完整性检查失败: {integrity}");
+        if has_backup {
+            info!("迁移安全：从备份恢复数据库");
+            restore_from_backup(db_path)?;
+            anyhow::bail!("数据库迁移后完整性检查失败，已从备份恢复: {integrity}");
+        } else {
+            anyhow::bail!("数据库迁移后完整性检查失败（无备份可用）: {integrity}");
+        }
+    }
 }

@@ -29,6 +29,8 @@ pub(crate) mod documents;
 pub(crate) mod entities;
 pub(crate) mod messages;
 pub(crate) mod migration;
+#[cfg(test)]
+pub(crate) mod migration_tests;
 pub(crate) mod misc;
 pub(crate) mod schema;
 pub(crate) mod vectors;
