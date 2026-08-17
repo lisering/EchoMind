@@ -545,6 +545,43 @@ pub async fn set_contextual_retrieval_inner(enabled: bool, state: &AppState) -> 
     Ok(())
 }
 
+/// 设置 Late Chunking 开关（REQ-RAG-049）。
+///
+/// 开启后，新导入文档的嵌入将拼接文档前 500 字符作为上下文前缀，
+/// 使 chunk 向量包含全文语义上下文（Jina AI 2024 Late Chunking 技术）。
+/// 变更后需调用 `rebuild_all_embeddings` 重建已有嵌入向量。
+#[tauri::command]
+pub async fn set_late_chunking(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    set_late_chunking_inner(enabled, state.inner()).await
+}
+
+/// Late Chunking 开关写入逻辑（命令与集成测试复用）。
+pub async fn set_late_chunking_inner(enabled: bool, state: &AppState) -> Result<(), String> {
+    let value = if enabled { "true" } else { "false" };
+    state
+        .storage
+        .set_setting("rag.late_chunking", value)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(())
+}
+
+/// 获取 Late Chunking 开关状态（REQ-RAG-049）。
+#[tauri::command]
+pub async fn get_late_chunking(state: State<'_, AppState>) -> Result<bool, String> {
+    get_late_chunking_inner(state.inner()).await
+}
+
+/// Late Chunking 状态读取逻辑（命令与集成测试复用）。
+pub async fn get_late_chunking_inner(state: &AppState) -> Result<bool, String> {
+    let value = state
+        .storage
+        .get_setting("rag.late_chunking")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(value.is_some_and(|v| v == "true"))
+}
+
 /// 重建上下文增强嵌入（REQ-RAG-041）。
 ///
 /// 遍历所有已索引文档，对每个文档的 chunks 重新计算嵌入向量。

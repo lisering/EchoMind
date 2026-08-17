@@ -33,6 +33,7 @@ use echomind_core::errors::{
 use echomind_core::export::{export_conversation_to_markdown, sanitize_filename};
 use echomind_core::hybrid_retriever::HybridRetriever;
 use echomind_core::import::{ImportOutcome, ImportService};
+use echomind_core::late_chunking::{build_late_chunking_text, extract_doc_prefix};
 use echomind_core::license::verify_license;
 use echomind_core::retriever::build_contextual_text;
 use echomind_core::session_strip::SessionStripper;

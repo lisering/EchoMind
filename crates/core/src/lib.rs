@@ -60,6 +60,9 @@ pub mod hybrid_retriever;
 /// 幂等性存储 + 统一周期任务抽象：防重复操作（文件同步/AutoDream）+ 后台任务管理。
 pub mod idempotency;
 pub mod import;
+/// Late Chunking 上下文感知嵌入（REQ-RAG-049）：借鉴 Jina AI 2024 Late Chunking
+/// 技术，在嵌入阶段为 chunk 注入文档级上下文前缀。
+pub mod late_chunking;
 pub mod license;
 /// 多协议 LLM 适配（B10 LLM Protocol Types，REQ-ARCH-012）：
 /// LLM 协议类型枚举 + 协议感知 Provider trait。
@@ -2374,6 +2377,8 @@ mod hybrid_retriever_tests;
 mod idempotency_tests;
 #[cfg(test)]
 mod import_tests;
+#[cfg(test)]
+mod late_chunking_tests;
 #[cfg(test)]
 mod license_tests;
 #[cfg(test)]

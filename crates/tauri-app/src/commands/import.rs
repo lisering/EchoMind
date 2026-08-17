@@ -541,13 +541,46 @@ pub(crate) async fn embed_document_chunks<R: Runtime>(
     // REQ-RAG-041 Contextual Retrieval：嵌入时拼接文档名上下文前缀（build_contextual_text），
     // 使向量包含文档上下文信息，提升检索精度（Anthropic Contextual Retrieval：失败率 ↓49%）。
     // 当 contextual_retrieval_enabled = false 时，使用纯 chunk 文本嵌入（不含文档名前缀）。
+    //
+    // REQ-RAG-049 Late Chunking：嵌入时拼接文档前缀摘要（前 500 字符），使 chunk 向量
+    // 包含全文语义上下文（Jina AI 2024 Late Chunking 技术）。与 Contextual Retrieval
+    // 可组合：Late Chunking 前缀 + 文档名前缀 + chunk 内容。
     let use_contextual = state.contextual_retrieval_enabled;
+    let use_late_chunking = state.late_chunking_enabled;
+
+    // Late Chunking：提取文档前缀摘要
+    let doc_prefix = if use_late_chunking {
+        // 从已入库的 chunks 拼接文档全文，提取前 500 字符作为上下文前缀
+        let all_chunks = state
+            .storage
+            .list_chunks(doc_id)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        let full_text: String = all_chunks
+            .iter()
+            .map(|c| c.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        extract_doc_prefix(&full_text, 500)
+    } else {
+        String::new()
+    };
+
     for batch in chunks.chunks(EMBED_BATCH_SIZE) {
         // 构建嵌入文本 + 计算内容指纹
         let texts_and_hashes: Vec<(String, String)> = batch
             .iter()
             .map(|c| {
-                let text = if use_contextual {
+                // 嵌入文本构建优先级：Late Chunking + Contextual Retrieval > Contextual Retrieval > 纯 chunk
+                let text = if use_late_chunking && !doc_prefix.is_empty() {
+                    // Late Chunking 开启：文档前缀 + (可选)文档名前缀 + chunk 内容
+                    if use_contextual {
+                        let contextual = build_contextual_text(doc_name, &c.content);
+                        build_late_chunking_text(&doc_prefix, &contextual)
+                    } else {
+                        build_late_chunking_text(&doc_prefix, &c.content)
+                    }
+                } else if use_contextual {
                     build_contextual_text(doc_name, &c.content)
                 } else {
                     c.content.clone()

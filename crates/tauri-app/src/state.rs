@@ -91,6 +91,9 @@ pub struct AppState {
     /// 默认 true：嵌入管线已使用 build_contextual_text() 构建上下文文本。
     /// 关闭后新导入文档的嵌入使用纯 chunk 文本（不含文档名前缀）。
     pub contextual_retrieval_enabled: bool,
+    /// Late Chunking 是否启用（REQ-RAG-049：嵌入时拼接文档前缀摘要，使 chunk 向量包含全文上下文）
+    /// 默认 false：需用户在性能设置中开启。开启后新导入文档的嵌入使用 build_late_chunking_text()。
+    pub late_chunking_enabled: bool,
     /// Agent 生命周期 Hooks 注册表（REQ-RAG-029：插件式扩展 Agent/Coordinator 行为）
     /// `None` = 未注册 hook，引擎行为与之前完全一致
     pub hook_registry: Option<Arc<HookRegistry>>,
@@ -307,6 +310,10 @@ impl AppState {
             .map(|&v| v != "false")
             .unwrap_or(true);
 
+        let late_chunking_enabled = settings_map
+            .get("rag.late_chunking")
+            .is_some_and(|&v| v == "true");
+
         let log_level = settings_map
             .get("log.level")
             .map(|v| v.to_string())
@@ -381,6 +388,7 @@ impl AppState {
             memory_enabled,
             web_search_enabled,
             contextual_retrieval_enabled,
+            late_chunking_enabled,
             hook_registry: None,
             trace_store: Arc::new(RwLock::new(echomind_core::trace::TraceStore::new(50))),
             session_coordinator: Arc::new(
@@ -752,6 +760,7 @@ mod boot_tests {
         bool,   // memory_enabled
         bool,   // web_search_enabled
         bool,   // contextual_retrieval_enabled
+        bool,   // late_chunking_enabled
         String, // log_level
         SecurityPosture,
         String, // local_model
@@ -791,6 +800,10 @@ mod boot_tests {
             .map(|&v| v != "false")
             .unwrap_or(true);
 
+        let late_chunking_enabled = settings_map
+            .get("rag.late_chunking")
+            .is_some_and(|&v| v == "true");
+
         let log_level = settings_map
             .get("log.level")
             .map(|v| v.to_string())
@@ -815,6 +828,7 @@ mod boot_tests {
             memory_enabled,
             web_search_enabled,
             contextual_retrieval_enabled,
+            late_chunking_enabled,
             log_level,
             security_posture,
             local_model,
@@ -835,11 +849,12 @@ mod boot_tests {
         map.insert("memory.enabled", "false");
         map.insert("rag.web_search_enabled", "true");
         map.insert("rag.contextual_retrieval", "false");
+        map.insert("rag.late_chunking", "true");
         map.insert("log.level", "debug");
         map.insert("security.posture", "strict");
         map.insert("llm.local_model", "mistral-7b");
 
-        let (comp, spec, mem_retr, graph, gate, mem, web, ctx, log, posture, model) =
+        let (comp, spec, mem_retr, graph, gate, mem, web, ctx, late, log, posture, model) =
             parse_settings(&map);
 
         assert!((comp - 2.5).abs() < 0.01, "compression_ratio 应为 2.5");
@@ -850,6 +865,7 @@ mod boot_tests {
         assert!(!mem, "memory_enabled 应为 false");
         assert!(web, "web_search_enabled 应为 true");
         assert!(!ctx, "contextual_retrieval_enabled 应为 false");
+        assert!(late, "late_chunking_enabled 应为 true");
         assert_eq!(log, "debug");
         assert_eq!(posture, SecurityPosture::Strict);
         assert_eq!(model, "mistral-7b");
@@ -864,7 +880,7 @@ mod boot_tests {
         // 空 map（模拟 DB 查询失败或首次启动无 settings）
         let map = std::collections::HashMap::new();
 
-        let (comp, spec, mem_retr, graph, gate, mem, web, ctx, log, posture, model) =
+        let (comp, spec, mem_retr, graph, gate, mem, web, ctx, late, log, posture, model) =
             parse_settings(&map);
 
         // 所有项应回退到默认值
@@ -876,6 +892,7 @@ mod boot_tests {
         assert!(!mem, "memory_enabled 默认 false");
         assert!(!web, "web_search_enabled 默认 false");
         assert!(ctx, "contextual_retrieval_enabled 默认 true");
+        assert!(!late, "late_chunking_enabled 默认 false");
         assert_eq!(log, "info", "log_level 默认 info");
         assert_eq!(posture, SecurityPosture::Auto, "security_posture 默认 Auto");
         assert_eq!(model, "", "local_model 默认空字符串");
@@ -885,7 +902,7 @@ mod boot_tests {
         partial.insert("rag.speculative_enabled", "true");
         partial.insert("security.posture", "dangerous");
 
-        let (_, spec2, _, _, _, _, _, ctx2, log2, posture2, _) = parse_settings(&partial);
+        let (_, spec2, _, _, _, _, _, ctx2, _, log2, posture2, _) = parse_settings(&partial);
 
         // 存在的项用实际值
         assert!(spec2, "speculative_enabled 从 DB 读取为 true");

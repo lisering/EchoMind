@@ -378,6 +378,9 @@ pub fn run() {
             commands::rebuild_contextual_embeddings,
             // 全库嵌入重建（REQ-VEC-016 嵌入模型切换后维度迁移）
             commands::rebuild_all_embeddings,
+            // Late Chunking 上下文感知嵌入（REQ-RAG-049）
+            commands::set_late_chunking,
+            commands::get_late_chunking,
             // 文档标签系统（REQ-ING-022 用户自定义标签管理）
             commands::add_document_tag,
             commands::remove_document_tag,
