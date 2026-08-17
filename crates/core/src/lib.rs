@@ -101,6 +101,9 @@ pub mod quality_gate;
 /// RAG 评估指标系统（REQ-RAG-045，RAGAS 风格）：
 /// 纯 Rust 检索指标 + LLM-as-Judge 生成指标。
 pub mod rag_eval;
+/// RAG 评估数据集与端到端检索质量评估（REQ-RAG-048）：
+/// 标准评估数据集 + run_retrieval_eval 管线。
+pub mod rag_eval_dataset;
 /// 自进化检索记忆（REQ-PERF-012）：记录检索方法效果，自适应选择最佳策略。
 pub mod retrieval_memory;
 /// 检索质量门控（借鉴 OpenMontage slideshow_risk.py）：多维度评分 + verdict 系统。
@@ -2391,6 +2394,8 @@ mod property_tests;
 mod proposition_splitter_tests;
 #[cfg(test)]
 mod quality_gate_tests;
+#[cfg(test)]
+mod rag_eval_dataset_tests;
 #[cfg(test)]
 mod rag_eval_tests;
 #[cfg(test)]

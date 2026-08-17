@@ -2920,10 +2920,119 @@ impl ConversationBookmark {
     }
 }
 
-/// 缓存设置新增到 SettingsPayload（REQ-PERF-001）。
+// 缓存设置新增到 SettingsPayload（REQ-PERF-001）。
+//
+// 通过 `get_settings` 返回给前端，前端据此渲染缓存设置 UI。
+// 通过 `save_settings` 持久化到 settings 表。
+// ============================================================
+// RAG 评估数据集（REQ-RAG-048）
+// ============================================================
+
+/// RAG 评估数据集中的单个评估样本（REQ-RAG-048）。
 ///
-/// 通过 `get_settings` 返回给前端，前端据此渲染缓存设置 UI。
-/// 通过 `save_settings` 持久化到 settings 表。
+/// 每个样本定义了一个查询及其对应的 ground truth（标准答案）和
+/// 相关文档/chunk ID 列表，用于端到端检索质量评估。
+///
+/// # 字段
+/// - `query`：用户查询文本
+/// - `ground_truth`：标准答案（用于 Context Recall 指标）
+/// - `relevant_doc_ids`：相关文档 ID 列表
+/// - `relevant_chunk_ids`：相关 chunk ID 列表
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RagEvalDatasetSample {
+    /// 用户查询文本
+    pub query: String,
+    /// 标准答案（ground truth）
+    pub ground_truth: String,
+    /// 相关文档 ID 列表
+    #[serde(default)]
+    pub relevant_doc_ids: Vec<String>,
+    /// 相关 chunk ID 列表
+    #[serde(default)]
+    pub relevant_chunk_ids: Vec<String>,
+}
+
+impl RagEvalDatasetSample {
+    /// 创建新的评估样本。
+    pub fn new(query: String, ground_truth: String) -> Self {
+        Self {
+            query,
+            ground_truth,
+            relevant_doc_ids: Vec::new(),
+            relevant_chunk_ids: Vec::new(),
+        }
+    }
+
+    /// 设置相关文档 ID 列表。
+    pub fn with_doc_ids(mut self, doc_ids: Vec<String>) -> Self {
+        self.relevant_doc_ids = doc_ids;
+        self
+    }
+
+    /// 设置相关 chunk ID 列表。
+    pub fn with_chunk_ids(mut self, chunk_ids: Vec<String>) -> Self {
+        self.relevant_chunk_ids = chunk_ids;
+        self
+    }
+}
+
+/// RAG 评估数据集（REQ-RAG-048）。
+///
+/// 包含多个评估样本，用于端到端检索质量评估。
+/// JSON 格式，可序列化/反序列化，可扩展、可复现。
+///
+/// # 字段
+/// - `name`：数据集名称
+/// - `description`：数据集描述
+/// - `samples`：评估样本列表
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RagEvalDataset {
+    /// 数据集名称
+    pub name: String,
+    /// 数据集描述
+    #[serde(default)]
+    pub description: String,
+    /// 评估样本列表
+    pub samples: Vec<RagEvalDatasetSample>,
+}
+
+impl RagEvalDataset {
+    /// 创建新的评估数据集。
+    pub fn new(name: String, samples: Vec<RagEvalDatasetSample>) -> Self {
+        Self {
+            name,
+            description: String::new(),
+            samples,
+        }
+    }
+
+    /// 设置数据集描述。
+    pub fn with_description(mut self, description: String) -> Self {
+        self.description = description;
+        self
+    }
+
+    /// 获取样本数量。
+    pub fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// 是否为空数据集。
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty()
+    }
+
+    /// 序列化为 JSON 字符串。
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// 从 JSON 字符串反序列化。
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+}
+
 #[cfg(test)]
 mod llm_model_tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
