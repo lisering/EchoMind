@@ -45,19 +45,14 @@ pub async fn update_llm_config_inner(config: LlmConfig, state: &AppState) -> Res
     {
         return Err(prefix_error(ERR_VALIDATION, "Base URL 格式不正确"));
     }
+    // 性能优化：3 次串行 set_setting → 1 次批量事务写入
     state
         .storage
-        .set_setting("llm.api_key", &config.api_key)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    state
-        .storage
-        .set_setting("llm.base_url", &config.base_url)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    state
-        .storage
-        .set_setting("llm.model", &config.model)
+        .set_settings_batch(&[
+            ("llm.api_key", &config.api_key),
+            ("llm.base_url", &config.base_url),
+            ("llm.model", &config.model),
+        ])
         .await
         .map_err(|e| format!("{e:#}"))?;
     *state.llm_config().write().await = Some(config);

@@ -153,6 +153,9 @@ mod prompt_cache_tests;
 mod quant_blocks_tests;
 #[cfg(test)]
 mod storage_tests;
+/// 向量缓存正确性修复 + 归一化点积 TDD 测试（REQ-PERF-016/017, v2.2）。
+#[cfg(test)]
+mod vec_cache_tests;
 #[cfg(all(test, feature = "pro"))]
 mod weight_repack_tests;
 

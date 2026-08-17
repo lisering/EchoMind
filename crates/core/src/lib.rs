@@ -323,6 +323,17 @@ pub trait Storage: Send + Sync {
     /// 写入设置项（REQ-UI-008；敏感值由实现方负责加密存储）。
     async fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()>;
 
+    /// 批量写入多个设置项（性能优化：单次事务替代 N 次串行 set_setting）。
+    ///
+    /// 默认实现逐个调用 `set_setting`（N 次 spawn_blocking）；
+    /// 生产实现应覆盖为单次事务批量 INSERT OR REPLACE。
+    async fn set_settings_batch(&self, pairs: &[(&str, &str)]) -> anyhow::Result<()> {
+        for &(key, value) in pairs {
+            self.set_setting(key, value).await?;
+        }
+        Ok(())
+    }
+
     /// 读取设置项（REQ-UI-008）。
     async fn get_setting(&self, key: &str) -> anyhow::Result<Option<String>>;
 
@@ -2389,6 +2400,8 @@ mod llm_router_tests;
 mod loader_tests;
 #[cfg(test)]
 mod memory_store_tests;
+#[cfg(test)]
+mod perf_optim_tests;
 #[cfg(test)]
 mod progressive_injector_tests;
 #[cfg(test)]

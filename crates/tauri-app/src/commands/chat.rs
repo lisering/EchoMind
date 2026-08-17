@@ -1731,29 +1731,31 @@ pub async fn record_token_usage_inner(state: &AppState, usage: &Option<TokenUsag
     let Some(usage) = usage else {
         return; // 本地推理模式无 usage 数据，跳过
     };
-    // 读取现有累计值
-    let cur_prompt: u64 = state
+    // 性能优化：3 次串行 get_setting → 1 次批量读取
+    let settings = state
         .storage
-        .get_setting("usage.total_prompt_tokens")
+        .get_settings_batch(&[
+            "usage.total_prompt_tokens",
+            "usage.total_completion_tokens",
+            "usage.exchange_count",
+        ])
         .await
-        .ok()
-        .flatten()
+        .unwrap_or_default();
+    let settings_map: std::collections::HashMap<&str, &str> = settings
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+
+    let cur_prompt: u64 = settings_map
+        .get("usage.total_prompt_tokens")
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
-    let cur_completion: u64 = state
-        .storage
-        .get_setting("usage.total_completion_tokens")
-        .await
-        .ok()
-        .flatten()
+    let cur_completion: u64 = settings_map
+        .get("usage.total_completion_tokens")
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
-    let cur_exchange: u32 = state
-        .storage
-        .get_setting("usage.exchange_count")
-        .await
-        .ok()
-        .flatten()
+    let cur_exchange: u32 = settings_map
+        .get("usage.exchange_count")
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(0);
 
@@ -1763,34 +1765,22 @@ pub async fn record_token_usage_inner(state: &AppState, usage: &Option<TokenUsag
     let new_total = new_prompt + new_completion;
     let new_exchange = cur_exchange.saturating_add(1);
 
-    // 写回（容错：失败仅日志，不阻断主流程）
+    // 性能优化：4 次串行 set_setting → 1 次批量事务写入（容错：失败仅日志）
+    let prompt_str = new_prompt.to_string();
+    let completion_str = new_completion.to_string();
+    let total_str = new_total.to_string();
+    let exchange_str = new_exchange.to_string();
     if let Err(e) = state
         .storage
-        .set_setting("usage.total_prompt_tokens", &new_prompt.to_string())
+        .set_settings_batch(&[
+            ("usage.total_prompt_tokens", prompt_str.as_str()),
+            ("usage.total_completion_tokens", completion_str.as_str()),
+            ("usage.total_tokens", total_str.as_str()),
+            ("usage.exchange_count", exchange_str.as_str()),
+        ])
         .await
     {
-        warn!("记录 token 用量失败(prompt): {e:#}");
-    }
-    if let Err(e) = state
-        .storage
-        .set_setting("usage.total_completion_tokens", &new_completion.to_string())
-        .await
-    {
-        warn!("记录 token 用量失败(completion): {e:#}");
-    }
-    if let Err(e) = state
-        .storage
-        .set_setting("usage.total_tokens", &new_total.to_string())
-        .await
-    {
-        warn!("记录 token 用量失败(total): {e:#}");
-    }
-    if let Err(e) = state
-        .storage
-        .set_setting("usage.exchange_count", &new_exchange.to_string())
-        .await
-    {
-        warn!("记录 token 用量失败(exchange): {e:#}");
+        warn!("记录 token 用量失败: {e:#}");
     }
 
     // Q08: 记录预算使用情况（QM 借鉴）
