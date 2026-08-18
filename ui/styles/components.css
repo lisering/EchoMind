@@ -1186,21 +1186,21 @@ input[type="url"],
 }
 
 /* ============================================================
- * 消息列表容器 — 全宽，仅靠 px-5(20px) 控制左右边距
+ * 消息列表容器 — 居中阅读区（DeepSeek 风格：752~840px 居中）
  * overflow-anchor: auto — 浏览器原生滚动锚定，侧栏折叠/展开时
  * 内容宽度渐变导致文本重排，原生锚定自动维持滚动位置 */
 #chatArea {
   width: 100%;
-  max-width: 100%;
-  margin: 0;
+  max-width: var(--msg-list-max-width, 840px);
+  margin: 0 auto;
   overflow-anchor: auto;
 }
 
-/* 输入框容器 — 全宽，与聊天区一致 */
+/* 输入框容器 — 与消息区同宽居中对齐（DeepSeek 风格） */
 #inputBar {
   width: 100%;
-  max-width: 100%;
-  margin: 0;
+  max-width: var(--msg-list-max-width, 840px);
+  margin: 0 auto;
 }
 
 .msg-block {
@@ -1866,14 +1866,18 @@ input[type="url"],
   flex: 1;
 }
 
-/* 版本切换器（◀ 1 / N ▶，挂在用户操作栏末尾，编辑按钮右侧） */
+/* 危险按钮（删除）：hover 时红色 */
+.msg-action-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+}
 .branch-pagination {
   display: inline-flex;
   align-items: center;
   gap: 2px;
   margin: 0;
   margin-left: 4px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-tertiary, #94a3b8);
   user-select: none;
 }
@@ -1881,34 +1885,34 @@ input[type="url"],
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: 9999px;
   background: transparent;
   color: var(--text-tertiary, #94a3b8);
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
-  transition: background 0.1s ease-out, color 0.1s ease-out;
+  transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .branch-pagination-btn:hover {
   background: var(--surface-2, #1a1a20);
   color: var(--text-primary, #e2e8f0);
 }
 .branch-pagination-btn:active {
-transform: scale(0.95);
+  transform: scale(0.95);
 }
 .branch-pagination-btn:disabled {
-opacity: 0.3;
-cursor: not-allowed;
-pointer-events: none;
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  color: var(--text-quaternary, #64748b);
 }
 .branch-pagination-counter {
-  min-width: 28px;
+  min-width: 33px;
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-.branch-pagination-label {
+  font-size: 15px;
   color: var(--text-tertiary, #94a3b8);
 }
 

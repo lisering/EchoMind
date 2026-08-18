@@ -80,12 +80,12 @@
   --msg-radius: 12px;
   --msg-gap-qa: var(--space-8);            /* 问答间距 32px */
   --msg-gap-inner: var(--space-1);         /* 消息内部间距 4px */
-  --msg-list-max-width: 100%;              /* 消息列表最大宽度 — 全宽（仅留 20px padding） */
+  --msg-list-max-width: 840px;            /* 消息列表最大宽度 — 居中阅读区（DeepSeek 风格） */
 
   /* 用户消息 */
   --msg-user-bg: rgba(56, 189, 248, 0.08);
   --msg-user-border: rgba(56, 189, 248, 0.12);
-  --msg-user-max-width: 85%;
+  --msg-user-max-width: calc(100% - 88px);  /* DeepSeek 实测值 */
   --msg-user-radius: 22px;                 /* 用户气泡大圆角（DeepSeek 风格） */
 
   /* 助手消息 — 透明背景，无气泡（DeepSeek 风格） */
