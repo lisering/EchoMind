@@ -5,6 +5,10 @@
     "confirm": "確認",
     "delete": "削除"
   },
+  "conv_nav": {
+    "title": "Q&Aナビ",
+    "empty": "まだ質問がありません。会話を始めるとナビが表示されます。"
+  },
   "app": {
     "name": "EchoMind",
     "tagline": "ローカル AI ナレッジベース",
@@ -80,6 +84,7 @@
     "knowledge_base": "ナレッジベース",
     "settings": "設定",
     "tools": "ツール",
+    "right_panel": "ナビパネルの切替",
     "conversations": "会話",
     "import_files": "ファイルをインポート"
   },

@@ -5,6 +5,10 @@
     "confirm": "确认",
     "delete": "删除"
   },
+  "conv_nav": {
+    "title": "问答导航",
+    "empty": "暂无问答。开始对话后将显示导航。"
+  },
   "app": {
     "name": "EchoMind",
     "tagline": "灵犀",
@@ -84,6 +88,7 @@
     "knowledge_base": "知识库",
     "settings": "设置",
     "tools": "工具",
+    "right_panel": "切换导航面板",
     "conversations": "会话",
     "import_files": "导入文件"
   },
