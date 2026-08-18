@@ -128,9 +128,12 @@
 
 /* 对话导航条 — DeepSeek 风格
  * 默认：窄竖条 34px 宽 × 300px 高，垂直居中
- * hover：展开到 240px，显示全部对话标题列表
+ * hover：展开到 240px，显示全部对话列表（序号 badge + 问题文本 + 右侧箭头）
  * 0.2s 平滑过渡
- * DeepSeek 实测：height 300px + position fixed + 垂直居中 */
+ * DeepSeek 实测：nav 34×300 + scrollArea 242×92 + listPadding 15px 0 0 24px
+ * 列表项 210×30 + margin-right 8px
+ * 当前项：badge 蓝底蓝字 + 文本蓝色加粗
+ * 非当前项：文本深色普通 */
 .conv-nav {
   position: absolute;
   top: 50%;
@@ -142,27 +145,29 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 2px;
   z-index: 5;
   opacity: 0;
-  transition: width 0.2s ease, opacity 0.2s ease;
+  transition: width 0.2s ease, opacity 0.2s ease, background 0.2s ease;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
-  padding: 0;                                   /* DeepSeek 实测 0px */
-  border-radius: 8px;                           /* DeepSeek 实测 8px */
+  padding: 0;
+  border-radius: 8px;
 }
 .conv-nav::-webkit-scrollbar { display: none; }
 .conv-nav:hover {
   opacity: 1;
   width: 240px;
-  background: var(--surface-1, rgba(255,255,255,0.08));
+  background: var(--surface-elevated, rgba(255,255,255,0.95));
   backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  padding: 15px 0 15px 24px;               /* DeepSeek 实测 list padding */
+  gap: 0;
 }
 .conv-nav.has-items { opacity: 0.4; }
 .conv-nav.has-items:hover { opacity: 1; }
 
-/* 每个段：默认窄条，hover 展开后显示文本 */
+/* 列表项：[badge] + [文本] + [箭头icon] */
 .conv-nav-segment {
   width: 100%;
   height: 30px;                               /* DeepSeek 实测 30px */
@@ -170,21 +175,80 @@
   cursor: pointer;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding: 0;                                   /* DeepSeek 实测 0px */
+  padding: 0;
   margin: 0 8px 0 0;                            /* DeepSeek 实测 margin-right 8px */
   border-radius: 0;
   overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
-  transition: background 0.2s ease;
-  gap: 6px;
+  gap: 4px;
+  color: var(--text-primary, #0f1115);
+  font-size: 14px;
 }
 .conv-nav-segment:hover {
-  background: var(--surface-2, rgba(255,255,255,0.06));
+  background: transparent;
 }
 
-/* 视觉条 — 窄状态下的位置指示条 */
+/* 序号 badge — 仅当前项可见 */
+.conv-nav-badge {
+  display: none;
+  background: var(--msg-user-bg, rgba(237,243,254,0.15));
+  color: var(--accent, #3864fe);
+  font-size: 9px;
+  font-weight: 500;
+  padding: 1.5px 4px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  min-width: 16px;
+  text-align: center;
+  line-height: 1.2;
+}
+.conv-nav-segment.active .conv-nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 问题文本 */
+.conv-nav-segment-text {
+  font-size: 13px;
+  color: var(--text-primary, #0f1115);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  text-align: left;
+  opacity: 0;
+  transition: opacity 0.2s ease, color 0.2s ease;
+  padding-right: 12px;                           /* DeepSeek 实测 margin-right 12px */
+}
+.conv-nav:hover .conv-nav-segment-text {
+  opacity: 1;
+}
+/* 当前项文本：蓝色加粗 */
+.conv-nav-segment.active .conv-nav-segment-text {
+  color: var(--accent, #3864fe);
+  font-weight: 500;
+}
+
+/* 右侧箭头 icon */
+.conv-nav-icon {
+  width: 16px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-primary, #0f1115);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.conv-nav:hover .conv-nav-icon {
+  opacity: 1;
+}
+
+/* 窄条模式：位置指示条（伪元素）
+ * 只在未 hover 时显示 */
 .conv-nav-segment::before {
   content: '';
   display: block;
@@ -192,7 +256,7 @@
   min-width: 24px;
   height: 5px;
   border-radius: 2.5px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(128, 128, 128, 0.15);
   transition: background 0.2s ease;
   flex-shrink: 0;
 }
@@ -200,53 +264,14 @@
   background: rgba(56, 189, 248, 0.6);
 }
 .conv-nav-segment.active::before {
-  background: var(--accent);
+  background: var(--accent, #3864fe);
 }
-.conv-nav-segment.active:hover::before {
-  background: var(--accent-hover);
-}
-
-/* 文本标签 — 默认隐藏，hover 展开后显示 */
-.conv-nav-segment-text {
-  font-size: 13px;
-  color: var(--text-tertiary, #94a3b8);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  text-align: left;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  padding-right: 8px;                            /* DeepSeek 列表项 margin-right 8px */
-}
-.conv-nav:hover .conv-nav-segment-text {
-  opacity: 1;
-}
-.conv-nav-segment.active .conv-nav-segment-text {
-  color: var(--text-primary, #F8FAFC);
-  font-weight: 500;
+/* hover 展开后隐藏指示条 */
+.conv-nav:hover .conv-nav-segment::before {
+  display: none;
 }
 
-/* 导航条悬停 tooltip（独立 fixed 元素，不受伪元素变换影响） */
-.conv-nav-tooltip {
-  position: fixed;
-  background: var(--surface-3);
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  padding: 5px 10px;
-  max-width: 260px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  z-index: 100;
-}
+/* (旧 tooltip 已移除，DeepSeek 风格用展开式列表替代) */
 
 /* ============================================================
  * 文字选中策略 + 自定义右键菜单（REQ-IX-003 / REQ-UI-012）
