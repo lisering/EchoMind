@@ -126,59 +126,101 @@
  * 设计要点：点击区与视觉条分离，悬停只变换伪元素，零布局回流。
  * ============================================================ */
 
+/* 对话导航条 — DeepSeek 风格
+ * 默认：窄竖条 34px 宽，只显示位置指示条
+ * hover：展开到 240px，显示全部对话标题列表
+ * 0.2s 平滑过渡 */
 .conv-nav {
   position: absolute;
   top: 12px;
   right: 2px;
   bottom: 12px;
+  width: 34px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 2px;
   z-index: 5;
   opacity: 0;
-  transition: opacity 0.25s ease;
+  transition: width 0.2s ease, opacity 0.2s ease;
   overflow-y: auto;
-  overflow-x: visible;
+  overflow-x: hidden;
   scrollbar-width: none;
+  padding: 4px;
+  border-radius: 16px;
 }
 .conv-nav::-webkit-scrollbar { display: none; }
-.conv-nav:hover { opacity: 1; }
-.conv-nav.has-items { opacity: 0.3; }
+.conv-nav:hover {
+  opacity: 1;
+  width: 240px;
+  background: var(--surface-1, rgba(255,255,255,0.08));
+  backdrop-filter: blur(8px);
+}
+.conv-nav.has-items { opacity: 0.4; }
 .conv-nav.has-items:hover { opacity: 1; }
 
-/* 每个段是一个 28×16 的点击区，内部伪元素是 24×5 的视觉条 */
+/* 每个段：默认窄条，hover 展开后显示文本 */
 .conv-nav-segment {
-  width: 28px;
-  height: 16px;
+  width: 100%;
+  min-height: 28px;
   flex-shrink: 0;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  padding: 0 4px;
+  border-radius: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transition: background 0.2s ease;
+  gap: 6px;
+}
+.conv-nav-segment:hover {
+  background: var(--surface-2, rgba(255,255,255,0.06));
 }
 
-/* 视觉条 — 所有颜色/尺寸变换只作用于伪元素 */
+/* 视觉条 — 窄状态下的位置指示条 */
 .conv-nav-segment::before {
   content: '';
   display: block;
   width: 24px;
+  min-width: 24px;
   height: 5px;
   border-radius: 2.5px;
   background: rgba(255, 255, 255, 0.08);
-  transition: background 0.2s ease, transform 0.2s ease;
-  transform-origin: right center;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
 }
 .conv-nav-segment:hover::before {
   background: rgba(56, 189, 248, 0.6);
-  transform: scaleX(1.15);
 }
 .conv-nav-segment.active::before {
   background: var(--accent);
 }
 .conv-nav-segment.active:hover::before {
   background: var(--accent-hover);
-  transform: scaleX(1.15);
+}
+
+/* 文本标签 — 默认隐藏，hover 展开后显示 */
+.conv-nav-segment-text {
+  font-size: 13px;
+  color: var(--text-tertiary, #94a3b8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  text-align: left;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  padding-right: 8px;
+}
+.conv-nav:hover .conv-nav-segment-text {
+  opacity: 1;
+}
+.conv-nav-segment.active .conv-nav-segment-text {
+  color: var(--text-primary, #F8FAFC);
+  font-weight: 500;
 }
 
 /* 导航条悬停 tooltip（独立 fixed 元素，不受伪元素变换影响） */
@@ -1792,46 +1834,53 @@ input[type="url"],
   to { opacity: 1; }
 }
 
-/* 编辑 textarea — 与原始内容行高/字号完全一致（text-base/leading-normal），
- * padding 归零，高度由 JS 精确设置为原始内容高度 → 进入/退出编辑零布局位移 */
+/* 编辑 textarea — 就地编辑：保持气泡的背景色、圆角、max-width 和右对齐
+ * DeepSeek 风格：编辑模式下气泡外观完全不变，仅内容变为可编辑
+ * bg/radius/padding/maxWidth 与 .msg-user-content 一致 */
 .msg-edit-textarea.msg-edit-full {
   width: 100%;
   min-height: 0;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
+  padding: 10px 16px;                          /* 与气泡 padding 一致 */
+  background: var(--msg-user-bg);              /* 保持气泡背景色 */
+  border: 1px solid var(--msg-user-border);    /* 保持气泡边框 */
+  border-radius: var(--msg-user-radius);        /* 保持气泡圆角 22px */
   color: var(--text-primary, #F8FAFC);
-  font-size: 16px;        /* 与 .msg-user-content 的 text-base 一致 */
-  line-height: 1.5;       /* 与 leading-normal 一致 */
+  font-size: 16px;                              /* 与 .msg-user-content 的 text-base 一致 */
+  line-height: 1.5;                             /* 与 leading-normal 一致 */
   font-family: inherit;
   resize: none;
   outline: none;
   box-sizing: border-box;
   display: block;
+  max-width: var(--msg-user-max-width);          /* 保持气泡 max-width */
+  margin-left: auto;                            /* 右对齐 */
   overflow-y: auto;
+  transition: background 0.3s ease;             /* 与气泡一致 */
 }
 .msg-edit-textarea.msg-edit-full:focus {
   outline: none;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 56, 189, 248), 0.3);
 }
 
-/* 编辑模式下消息块：移除 padding，让 textarea 撑满整个外框（与外框一样大） */
+/* 编辑模式下消息块：保持布局，不移除 padding */
 .msg-block.msg-user.editing {
   position: relative;
-  padding: 0;
 }
 
-/* 编辑 textarea 覆盖整个消息块外框（含 1px 边框，margin 负值外扩）；
- * padding 与块原 p-4 一致，文字位置不变；聚焦时无任何高亮（外框本身已高亮） */
+/* 编辑 textarea 就地覆盖气泡位置（不覆盖整个块）
+ * 保持与气泡完全相同的 max-width + 右对齐 */
 .msg-block.msg-user.editing .msg-edit-textarea.msg-edit-full {
-  width: calc(100% + 2px);
-  margin: -1px;
-  padding: 16px;
-  background: transparent;
-  border: none;
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--msg-user-bg);
+  border: 1px solid var(--msg-user-border);
+  border-radius: var(--msg-user-radius);
   outline: none;
   box-shadow: none !important;
   caret-color: var(--text-primary);
+  max-width: var(--msg-user-max-width);
+  margin-left: auto;
+  transition: background 0.3s ease;
 }
 
 /* 操作按钮栏 — 正常文档流位于消息块下方，右对齐（不再绝对定位，
