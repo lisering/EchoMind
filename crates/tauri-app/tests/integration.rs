@@ -69,6 +69,8 @@ mod local_llm_chain;
 mod security_chain;
 #[path = "integration/security_tests.rs"]
 mod security_tests;
+#[path = "integration/smart_mode_tests.rs"]
+mod smart_mode_tests;
 
 pub use common::{make_valid_license, test_config};
 

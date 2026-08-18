@@ -157,6 +157,17 @@ pub async fn chat_inner<R: Runtime>(
         ));
     }
 
+    // 演示模式检测（REQ-RAG-051）：无需 LLM Key，使用关键词匹配模板回复
+    let demo_mode = state
+        .storage
+        .get_setting("rag.demo_mode")
+        .await
+        .map(|v| v.is_some_and(|v| v == "true"))
+        .unwrap_or(false);
+    if demo_mode {
+        return handle_demo_mode(app, query, state, conversation_id, turn_group, version).await;
+    }
+
     let llm_config = state
         .llm_config()
         .read()
@@ -2256,4 +2267,248 @@ mod tests {
             "首 token 超时应 ≥ 30s（容忍慢 API），实际: {FIRST_TOKEN_TIMEOUT_SECS}s"
         );
     }
+}
+
+// ============================================================================
+// REQ-RAG-051: 无 Key 演示模式
+// ============================================================================
+
+/// 演示模式预设回答模板（基于关键词匹配）。
+///
+/// 用户无需 API Key 即可体验基础 RAG 功能。根据查询关键词匹配预设回答。
+fn demo_mode_response(query: &str) -> String {
+    let q = query.to_lowercase();
+
+    // 关键词匹配规则
+    if q.contains("echomind") || q.contains("什么是") || q.contains("介绍") {
+        "EchoMind 是一款本地优先的智能知识库助手，采用 RAG（检索增强生成）技术，\
+         让你可以在不泄露数据的前提下，与自己的文档对话。\n\n\
+         核心特性：\n\
+         - 本地嵌入：文档向量化在本地完成，不上传云端\n\
+         - BYOK：自带 API Key，使用你自己的 LLM 端点\n\
+         - 混合检索：向量 + 关键词双路检索，精度更高\n\
+         - Agent 模式：复杂问题自动多步推理\n\n\
+         > 当前为演示模式，配置 API Key 后可解锁完整 AI 对话功能。"
+            .to_string()
+    } else if q.contains("rag") || q.contains("检索增强") || q.contains("原理") {
+        "RAG（Retrieval-Augmented Generation，检索增强生成）是一种 AI 技术，\
+         它先从知识库中检索相关文档片段，然后将这些片段作为上下文传给 LLM 生成回答。\n\n\
+         优势：\n\
+         - 减少幻觉：LLM 基于检索到的事实回答，而非凭空生成\n\
+         - 知识更新：只需更新知识库，无需重新训练模型\n\
+         - 数据隐私：文档留在本地，不进入模型训练\n\n\
+         > 当前为演示模式，配置 API Key 后可体验真实 RAG 对话。"
+            .to_string()
+    } else if q.contains("隐私") || q.contains("安全") || q.contains("数据") {
+        "EchoMind 的隐私安全设计：\n\n\
+         1. 本地优先：文档解析、分块、向量化全在本地完成\n\
+         2. BYOK 模式：使用你自己的 API Key，我们不触碰你的数据\n\
+         3. 无追踪：不收集任何用户数据，不嵌入分析 SDK\n\
+         4. 开源审计：代码完全开源，可自行审计验证\n\n\
+         > 当前为演示模式回答。配置 API Key 后可进行真实对话。"
+            .to_string()
+    } else {
+        format!(
+            "你好！你问的是「{query}」。\n\n\
+             当前处于演示模式，我只能基于预设模板回答关于 EchoMind、RAG 技术和隐私安全的问题。\n\n\
+             配置 API Key 后，我可以基于你的知识库文档进行真实的 RAG 检索和回答。\n\n\
+             试试问我：\n\
+             - 「什么是 EchoMind？」\n\
+             - 「RAG 的原理是什么？」\n\
+             - 「隐私安全如何保障？」"
+        )
+    }
+}
+
+/// 演示模式对话处理（REQ-RAG-051 AC-3）。
+///
+/// 跳过 LLM 调用，使用关键词匹配模板回复。仍执行关键词检索以展示 RAG 检索来源。
+async fn handle_demo_mode<R: Runtime>(
+    app: &AppHandle<R>,
+    query: &str,
+    state: &AppState,
+    conversation_id: &str,
+    turn_group: Option<&str>,
+    version: Option<i32>,
+) -> Result<(), String> {
+    emit_chat_phase(app, "retrieving", "演示模式：关键词检索中…");
+
+    // 关键词检索（不依赖向量化引擎，避免模型下载）
+    let results = state
+        .storage
+        .keyword_search(query, 5)
+        .await
+        .map_err(|e| prefix_error(ERR_STORAGE, &format!("关键词检索失败: {e:#}")))?;
+
+    // 推送检索来源
+    if !results.is_empty() {
+        emit_chat_sources(app, &results);
+    }
+
+    emit_chat_phase(app, "generating", "演示模式：生成回答中…");
+
+    // 生成预设回答
+    let answer = demo_mode_response(query);
+
+    // 逐字推送（模拟流式输出）
+    for ch in answer.chars() {
+        emit_chat_token(app, ch.to_string());
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // 落库
+    if turn_group.is_none() {
+        let user_msg = ChatMessage {
+            id: None,
+            role: "user".to_string(),
+            content: query.to_string(),
+            sources: None,
+            reasoning: None,
+            turn_group: turn_group.map(|s| s.to_string()),
+            version,
+        };
+        let _ = state.storage.add_message(conversation_id, &user_msg).await;
+    }
+
+    let assistant_msg = ChatMessage {
+        id: None,
+        role: "assistant".to_string(),
+        content: answer,
+        sources: if results.is_empty() {
+            None
+        } else {
+            Some(results.clone())
+        },
+        reasoning: None,
+        turn_group: turn_group.map(|s| s.to_string()),
+        version,
+    };
+    let _ = state
+        .storage
+        .add_message(conversation_id, &assistant_msg)
+        .await;
+
+    emit_chat_done(app, None);
+    Ok(())
+}
+
+/// 检查是否处于演示模式（REQ-RAG-051 AC-1）。
+///
+/// 从 settings 表读取 `rag.demo_mode` 键。
+#[tauri::command]
+pub async fn is_demo_mode(state: State<'_, AppState>) -> Result<bool, String> {
+    is_demo_mode_inner(state.inner()).await
+}
+
+/// 演示模式查询逻辑（命令与集成测试复用）。
+pub async fn is_demo_mode_inner(state: &AppState) -> Result<bool, String> {
+    let val = state
+        .storage
+        .get_setting("rag.demo_mode")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(val.is_some_and(|v| v == "true"))
+}
+
+/// 退出演示模式（REQ-RAG-051 AC-5）。
+///
+/// 设置 `rag.demo_mode = false` 并清除示例文档。
+#[tauri::command]
+pub async fn exit_demo_mode(state: State<'_, AppState>) -> Result<(), String> {
+    exit_demo_mode_inner(state.inner()).await
+}
+
+/// 退出演示模式逻辑（命令与集成测试复用）。
+pub async fn exit_demo_mode_inner(state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .set_setting("rag.demo_mode", "false")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 清除示例文档（标记为 demo 的文档）
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    for doc in docs {
+        if doc.file_path.starts_with("demo://") {
+            let _ = state.storage.delete_document(&doc.id).await;
+        }
+    }
+
+    Ok(())
+}
+
+/// 加载示例文档（REQ-RAG-051 AC-2）。
+///
+/// 将 3 个预设示例文档导入知识库，标记为 `[Demo]` 前缀。
+#[tauri::command]
+pub async fn load_demo_documents(state: State<'_, AppState>) -> Result<(), String> {
+    load_demo_documents_inner(state.inner()).await
+}
+
+/// 加载示例文档逻辑（命令与集成测试复用）。
+pub async fn load_demo_documents_inner(state: &AppState) -> Result<(), String> {
+    let demo_docs = [
+        (
+            "[Demo] EchoMind 介绍",
+            "EchoMind 是一款本地优先的智能知识库助手，采用 RAG（检索增强生成）技术。\n\n\
+             核心特性：\n\
+             - 本地嵌入：文档向量化在本地完成，不上传云端\n\
+             - BYOK：自带 API Key，使用你自己的 LLM 端点\n\
+             - 混合检索：向量 + 关键词双路检索，精度更高\n\
+             - Agent 模式：复杂问题自动多步推理\n\n\
+             EchoMind 让你可以在不泄露数据的前提下，与自己的文档对话。",
+        ),
+        (
+            "[Demo] RAG 技术概述",
+            "RAG（Retrieval-Augmented Generation，检索增强生成）是一种 AI 技术。\n\n\
+             工作流程：\n\
+             1. 文档分块：将长文档切分为语义连贯的小段落\n\
+             2. 向量化：用嵌入模型将文本转为向量\n\
+             3. 检索：用户提问时，从向量库中检索最相关的片段\n\
+             4. 生成：将检索到的片段作为上下文传给 LLM 生成回答\n\n\
+             优势：减少幻觉、知识更新快、数据隐私保护。",
+        ),
+        (
+            "[Demo] 隐私安全说明",
+            "EchoMind 的隐私安全设计：\n\n\
+             1. 本地优先：文档解析、分块、向量化全在本地完成\n\
+             2. BYOK 模式：使用你自己的 API Key，我们不触碰你的数据\n\
+             3. 无追踪：不收集任何用户数据，不嵌入分析 SDK\n\
+             4. 开源审计：代码完全开源，可自行审计验证\n\n\
+             你的文档数据始终留在本地，查询时仅将检索到的片段发送到你配置的 LLM 端点。",
+        ),
+    ];
+
+    for (title, content) in &demo_docs {
+        // 使用 Document::new 创建文档（自动生成 UUID + 时间戳）
+        let mut doc = echomind_models::Document::new(
+            format!("demo://{title}"),
+            // 简单 hash（演示模式不需要精确去重）
+            format!("demo_{:x}", md5::Md5::digest(content.as_bytes())),
+        );
+        doc.status = echomind_models::DocStatus::Indexed;
+        let _ = state.storage.add_document(&doc).await;
+
+        // 创建单个 chunk（演示模式不做向量嵌入，仅存文本供关键词检索）
+        let chunk = echomind_models::Chunk::new(
+            doc.id.clone(),
+            content.to_string(),
+            content.split_whitespace().count(),
+            0,
+        );
+        let _ = state.storage.add_chunk(&chunk).await;
+    }
+
+    // 设置演示模式标志
+    state
+        .storage
+        .set_setting("rag.demo_mode", "true")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    Ok(())
 }

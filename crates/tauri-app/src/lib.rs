@@ -400,6 +400,13 @@ pub fn run() {
             // S1 v1.9: LLM 生成参数可配置（REQ-RAG-015）
             commands::get_generation_params,
             commands::set_generation_params,
+            // S82 v2.3: 嵌入模型下载镜像源配置（REQ-VEC-017）
+            commands::set_mirror_source,
+            commands::get_mirror_source,
+            // S83 v2.3: 无 Key 演示模式（REQ-RAG-051）
+            commands::is_demo_mode,
+            commands::exit_demo_mode,
+            commands::load_demo_documents,
             // S5 v1.6: 错误日志导出（REQ-ERR-005）
             commands::export_error_logs,
             // Durable Prompt Admission（B05 持久化提示接纳）

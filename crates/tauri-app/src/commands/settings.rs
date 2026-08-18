@@ -1304,6 +1304,11 @@ pub async fn clear_import_history(state: State<'_, AppState>) -> Result<(), Stri
 // ------------------------------------------------------------------
 
 /// 智能模式开启时自动设置的优化项。
+///
+/// REQ-RAG-050（P2-7）：新增 RAG 检索参数调优：
+/// - top_k = 8（扩大候选池，DEFAULT_TOP_K 已为 8）
+/// - score_threshold = 0.05（降低过滤门槛，默认 0.0 → 0.05 在智能模式下更精准）
+/// - chunk_expansion_enabled = true（增加上下文窗口）
 const SMART_MODE_SETTINGS: &[(&str, &str)] = &[
     ("rag.hybrid_search", "true"),
     ("rag.rerank_enabled", "true"),
@@ -1312,6 +1317,10 @@ const SMART_MODE_SETTINGS: &[(&str, &str)] = &[
     ("rag.quality_gate_enabled", "true"),
     ("compression.ratio", "2.0"),
     ("rag.contextual_retrieval", "true"),
+    // REQ-RAG-050: RAG 检索参数调优（P2-7）
+    ("rag.top_k", "8"),
+    ("rag.score_threshold", "0.05"),
+    ("rag.chunk_expansion_enabled", "true"),
 ];
 
 /// 设置智能模式开关。
@@ -1393,6 +1402,56 @@ pub async fn get_smart_mode_inner(state: &AppState) -> Result<bool, String> {
 }
 
 // ============================================================================
+// REQ-VEC-017: 嵌入模型下载镜像源配置
+// ============================================================================
+
+/// 设置嵌入模型下载镜像源（REQ-VEC-017 AC-3）。
+///
+/// 持久化到 settings 表 `vec.mirror_source` 键。
+/// 支持的值：`auto` / `modelscope` / `hf-mirror` / `huggingface`
+///
+/// 切换镜像源后，下次模型下载时使用新源。已缓存文件不受影响。
+#[tauri::command]
+pub async fn set_mirror_source(source: String, state: State<'_, AppState>) -> Result<(), String> {
+    set_mirror_source_inner(&source, state.inner()).await
+}
+
+/// 镜像源设置写入逻辑（命令与集成测试复用）。
+pub async fn set_mirror_source_inner(source: &str, state: &AppState) -> Result<(), String> {
+    use echomind_infra::local_embedder::MirrorSource;
+    let mirror = MirrorSource::parse_str(source).ok_or_else(|| {
+        prefix_error(
+            ERR_VALIDATION,
+            &format!("无效的镜像源: {source}（可选: auto / modelscope / hf-mirror / huggingface）"),
+        )
+    })?;
+    state
+        .storage
+        .set_setting("vec.mirror_source", mirror.as_str())
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 获取当前镜像源配置（REQ-VEC-017 AC-3）。
+///
+/// 返回 `auto` / `modelscope` / `hf-mirror` / `huggingface`。
+/// 未配置时返回 `auto`。
+#[tauri::command]
+pub async fn get_mirror_source(state: State<'_, AppState>) -> Result<String, String> {
+    get_mirror_source_inner(state.inner()).await
+}
+
+/// 镜像源读取逻辑（命令与集成测试复用）。
+pub async fn get_mirror_source_inner(state: &AppState) -> Result<String, String> {
+    let val = state
+        .storage
+        .get_setting("vec.mirror_source")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(val.unwrap_or_else(|| "auto".to_string()))
+}
+
+// ============================================================================
 // S09: 统一设置命令 — update_setting(key, value) + get_setting(key)
 // ============================================================================
 
@@ -1423,6 +1482,7 @@ const UPDATEABLE_KEYS: &[&str] = &[
     "app.autostart",
     "rag.retrieval_memory_enabled",
     "update.auto_check",
+    "vec.mirror_source",
 ];
 
 /// 统一设置命令（S09 IPC 精简）。
@@ -1505,6 +1565,7 @@ pub async fn update_setting_inner(
 
         // ── 字符串类 ──
         "vec.embedding_model" => set_embedding_model_inner(value, state).await,
+        "vec.mirror_source" => set_mirror_source_inner(value, state).await,
 
         // ── 需要 AppHandle 的命令 ──
         "app.autostart" => set_autostart_inner(enabled, app.clone(), state).await,

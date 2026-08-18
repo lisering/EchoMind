@@ -59,12 +59,16 @@ pub async fn import_files_inner<R: Runtime>(
     };
     let mut imported = Vec::new();
 
+    // REQ-ING-023：文件夹拖拽导入 — 检测路径是否为目录，
+    // 若是则递归遍历子目录中所有支持格式的文件。
+    let expanded_paths = expand_folder_paths(paths);
+
     // REQ-ING-006：导入进度与取消
-    let total = paths.len();
+    let total = expanded_paths.len();
     let cancel_flag = state.import_cancel_flag();
     state.reset_import_cancel(); // 开始前重置取消标志
 
-    for (idx, raw_path) in paths.iter().enumerate() {
+    for (idx, raw_path) in expanded_paths.iter().enumerate() {
         let name = display_name(raw_path);
 
         // 检查取消标志（文件边界退出，已完成部分保留，不产生半成品索引）
@@ -951,4 +955,206 @@ pub async fn rebuild_index_inner<R: Runtime>(
     state: &AppState,
 ) -> Result<(), String> {
     retry_index_inner(app, doc_id, state).await
+}
+
+// ------------------------------------------------------------------
+// 文件夹拖拽导入（REQ-ING-023）
+// ------------------------------------------------------------------
+
+/// 跳过的隐藏目录名。
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    ".DS_Store",
+    "__pycache__",
+    ".svn",
+    ".hg",
+    "target",
+    "dist",
+    "build",
+    ".idea",
+    ".vscode",
+];
+
+/// 递归遍历深度上限。
+const MAX_DEPTH: usize = 5;
+
+/// 展开路径列表：如果路径是目录，递归遍历其中所有支持格式的文件。
+///
+/// REQ-ING-023：文件夹拖拽导入
+/// - 递归遍历深度上限 5 层
+/// - 跳过隐藏文件和目录（`.git` / `node_modules` / `.DS_Store` 等）
+/// - 文件扩展名必须在 ALLOWED_EXTENSIONS 中
+fn expand_folder_paths(paths: &[String]) -> Vec<String> {
+    let mut result = Vec::new();
+    for path in paths {
+        let p = std::path::Path::new(path);
+        if p.is_dir() {
+            traverse_dir(p, 0, &mut result);
+        } else if p.is_file() {
+            result.push(path.clone());
+        }
+    }
+    result
+}
+
+/// 递归遍历目录，收集所有支持格式的文件。
+fn traverse_dir(dir: &std::path::Path, depth: usize, result: &mut Vec<String>) {
+    if depth >= MAX_DEPTH {
+        return;
+    }
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // 跳过隐藏文件和目录
+        if name_str.starts_with('.') || SKIP_DIRS.contains(&name_str.as_ref()) {
+            continue;
+        }
+
+        if path.is_dir() {
+            traverse_dir(&path, depth + 1, result);
+        } else if path.is_file() {
+            // 仅收集支持格式的文件
+            if let Some(ext) = path.extension().and_then(|e| e.to_str())
+                && echomind_core::import::ALLOWED_EXTENSIONS.contains(&ext)
+                && let Some(path_str) = path.to_str()
+            {
+                result.push(path_str.to_string());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod folder_import_tests {
+    use super::*;
+
+    /// TC-ING-FOLDER-001: 文件夹展开 — 目录中的支持格式文件被收集
+    #[test]
+    fn tc_ing_folder_001_dir_expands_to_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path();
+
+        // 创建测试文件
+        std::fs::write(dir_path.join("test1.md"), "# Test 1").unwrap();
+        std::fs::write(dir_path.join("test2.txt"), "Test 2").unwrap();
+        std::fs::write(dir_path.join("readme.md"), "# README").unwrap();
+
+        let paths = vec![dir_path.to_str().unwrap().to_string()];
+        let expanded = expand_folder_paths(&paths);
+
+        assert!(expanded.len() >= 3, "应收集 3 个支持格式的文件");
+        assert!(
+            expanded.iter().any(|p| p.ends_with("test1.md")),
+            "应包含 test1.md"
+        );
+    }
+
+    /// TC-ING-FOLDER-002: 递归深度上限 5 层
+    #[test]
+    fn tc_ing_folder_002_max_depth_5() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut current = dir.path().to_path_buf();
+
+        // 创建 6 层深度目录（超过 MAX_DEPTH=5）
+        for i in 0..7 {
+            current = current.join(format!("level{i}"));
+            std::fs::create_dir_all(&current).unwrap();
+        }
+        std::fs::write(current.join("deep.md"), "# Deep").unwrap();
+
+        let paths = vec![dir.path().to_str().unwrap().to_string()];
+        let expanded = expand_folder_paths(&paths);
+
+        // 深度 6+ 的文件不应被收集
+        assert!(
+            !expanded.iter().any(|p| p.ends_with("deep.md")),
+            "超过 MAX_DEPTH 的文件不应被收集"
+        );
+    }
+
+    /// TC-ING-FOLDER-003: 跳过隐藏文件和目录
+    #[test]
+    fn tc_ing_folder_003_skip_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path();
+
+        // 创建正常文件
+        std::fs::write(dir_path.join("visible.md"), "# Visible").unwrap();
+
+        // 创建隐藏文件
+        std::fs::write(dir_path.join(".hidden.md"), "# Hidden").unwrap();
+
+        // 创建跳过目录
+        std::fs::create_dir_all(dir_path.join(".git")).unwrap();
+        std::fs::write(dir_path.join(".git").join("config.md"), "# Git config").unwrap();
+
+        std::fs::create_dir_all(dir_path.join("node_modules")).unwrap();
+        std::fs::write(dir_path.join("node_modules").join("lib.md"), "# Lib").unwrap();
+
+        let paths = vec![dir_path.to_str().unwrap().to_string()];
+        let expanded = expand_folder_paths(&paths);
+
+        assert!(
+            expanded.iter().any(|p| p.ends_with("visible.md")),
+            "正常文件应被收集"
+        );
+        assert!(
+            !expanded.iter().any(|p| p.contains(".hidden")),
+            "隐藏文件不应被收集"
+        );
+        assert!(
+            !expanded.iter().any(|p| p.contains(".git")),
+            ".git 目录中的文件不应被收集"
+        );
+        assert!(
+            !expanded.iter().any(|p| p.contains("node_modules")),
+            "node_modules 目录中的文件不应被收集"
+        );
+    }
+
+    /// TC-ING-FOLDER-004: 非目录路径直接保留
+    #[test]
+    fn tc_ing_folder_004_file_path_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("single.md");
+        std::fs::write(&file_path, "# Single").unwrap();
+
+        let paths = vec![file_path.to_str().unwrap().to_string()];
+        let expanded = expand_folder_paths(&paths);
+
+        assert_eq!(expanded.len(), 1, "单个文件路径应直接保留");
+    }
+
+    /// TC-ING-FOLDER-005: 混合路径（文件 + 目录）
+    #[test]
+    fn tc_ing_folder_005_mixed_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path();
+
+        // 目录中有文件
+        std::fs::write(dir_path.join("in_dir.md"), "# In Dir").unwrap();
+
+        // 独立文件
+        let standalone = dir_path.join("standalone.txt");
+        std::fs::write(&standalone, "Standalone").unwrap();
+
+        let paths = vec![
+            dir_path.to_str().unwrap().to_string(),
+            standalone.to_str().unwrap().to_string(),
+        ];
+        let expanded = expand_folder_paths(&paths);
+
+        // 目录展开的文件 + 独立文件
+        assert!(expanded.len() >= 2, "应包含目录展开的文件和独立文件");
+    }
 }

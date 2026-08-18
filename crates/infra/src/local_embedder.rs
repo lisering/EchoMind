@@ -9,6 +9,12 @@
 //! - 推理为 CPU 密集任务，一律经 `spawn_blocking` 执行；
 //! - ONNX intra-op 线程数由 fastembed 内部按 `available_parallelism()` 设置（即系统核心数）。
 //!
+//! ## 下载加速（REQ-VEC-017）
+//!
+//! 1. **重试机制**：每个源 3 次重试，退避间隔 2s/4s/8s；
+//! 2. **断点续传**：HTTP Range 请求 + `.partial` 文件，大文件中断后不重复下载；
+//! 3. **用户可配置镜像源**：设置键 `vec.mirror_source`（auto/ModelScope/hf-mirror/HuggingFace）。
+//!
 //! ## 并行推理会话池（GB 级文档加速）
 //!
 //! `LocalEmbedder` 内部维护 N 个独立 ONNX 会话（`TextEmbedding` 实例），
@@ -38,7 +44,7 @@ use serde::{Deserialize, Serialize};
 /// Tauri 层用 `app.emit()` 实现此回调。
 pub type DownloadProgressFn = Arc<dyn Fn(DownloadEvent) + Send + Sync>;
 
-/// 模型下载进度事件（REQ-VEC-008）。
+/// 模型下载进度事件（REQ-VEC-008 + REQ-VEC-017）。
 ///
 /// 通过 Tauri 事件 `model_download_progress` 推送到前端。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,12 +57,14 @@ pub enum DownloadEvent {
     /// - `total`: 当前文件总字节数（Content-Length 缺失时为 0）
     /// - `file_index`: 当前文件序号（0-based）
     /// - `total_files`: 总文件数
+    /// - `source`: 当前下载源 URL（REQ-VEC-017 AC-4）
     Downloading {
         file_name: String,
         current: u64,
         total: u64,
         file_index: usize,
         total_files: usize,
+        source: String,
     },
     /// 下载完成，正在构建 ONNX 会话
     Loading,
@@ -64,6 +72,58 @@ pub enum DownloadEvent {
     Done,
     /// 下载或加载失败
     Error { message: String },
+}
+
+/// 镜像源选择（REQ-VEC-017 AC-3）。
+///
+/// 用户可在设置中手动选择镜像源，`auto` 为自动检测。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MirrorSource {
+    /// 自动检测（中文系统→ModelScope 优先，其他→HuggingFace 优先）
+    Auto,
+    /// 魔搭（境内 CDN）
+    ModelScope,
+    /// HuggingFace 镜像（境内可达）
+    HfMirror,
+    /// HuggingFace 官方
+    HuggingFace,
+}
+
+impl MirrorSource {
+    /// 从字符串解析镜像源选择。
+    ///
+    /// 支持的值：`auto` / `modelscope` / `hf-mirror` / `huggingface`
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "modelscope" => Some(Self::ModelScope),
+            "hf-mirror" | "hf_mirror" => Some(Self::HfMirror),
+            "huggingface" | "hf" => Some(Self::HuggingFace),
+            _ => None,
+        }
+    }
+
+    /// 返回字符串标识（持久化用）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::ModelScope => "modelscope",
+            Self::HfMirror => "hf-mirror",
+            Self::HuggingFace => "huggingface",
+        }
+    }
+
+    /// 返回该镜像源对应的下载源列表。
+    /// `Auto` 时根据系统语言动态选择。
+    pub(crate) fn to_sources(&self) -> Vec<&'static DownloadSource> {
+        match self {
+            Self::Auto => get_download_sources(),
+            Self::ModelScope => vec![&SOURCE_MODELSCOPE, &SOURCE_HF_MIRROR, &SOURCE_HUGGINGFACE],
+            Self::HfMirror => vec![&SOURCE_HF_MIRROR, &SOURCE_MODELSCOPE, &SOURCE_HUGGINGFACE],
+            Self::HuggingFace => vec![&SOURCE_HUGGINGFACE, &SOURCE_HF_MIRROR, &SOURCE_MODELSCOPE],
+        }
+    }
 }
 
 /// 模型缓存信息（REQ-VEC-008）。
@@ -106,13 +166,13 @@ pub struct ModelEntry {
 /// 源顺序由 [`get_download_sources`] 根据系统语言动态决定：
 /// - 中文系统：ModelScope → hf-mirror → HuggingFace
 /// - 其他系统：HuggingFace → hf-mirror → ModelScope
-struct DownloadSource {
+pub(crate) struct DownloadSource {
     /// 源名称（日志用）
-    name: &'static str,
+    pub(crate) name: &'static str,
     /// Base URL 前缀（不含 repo 和文件路径）
-    base: &'static str,
+    pub(crate) base: &'static str,
     /// 分支名：HuggingFace 用 `main`，ModelScope 用 `master`
-    branch: &'static str,
+    pub(crate) branch: &'static str,
 }
 
 /// 所有可用下载源（顺序由 `get_download_sources` 动态决定）
@@ -439,10 +499,30 @@ impl LocalEmbedder {
         progress: Option<DownloadProgressFn>,
         pool_size: usize,
     ) -> anyhow::Result<Self> {
+        Self::new_with_mirror(cache_dir, model, progress, pool_size, MirrorSource::Auto).await
+    }
+
+    /// 使用指定模型 + 镜像源 + 池大小初始化（REQ-VEC-017）。
+    ///
+    /// # 参数
+    /// - `cache_dir`: 模型缓存目录
+    /// - `model`: Embedding 模型预设
+    /// - `progress`: 下载进度回调
+    /// - `pool_size`: 会话池大小
+    /// - `mirror_source`: 镜像源选择（auto/modelscope/hf-mirror/huggingface）
+    pub async fn new_with_mirror(
+        cache_dir: PathBuf,
+        model: EmbeddingModel,
+        progress: Option<DownloadProgressFn>,
+        pool_size: usize,
+        mirror_source: MirrorSource,
+    ) -> anyhow::Result<Self> {
         let pool_size = pool_size.clamp(1, MAX_POOL_SIZE);
-        tokio::task::spawn_blocking(move || Self::init(&cache_dir, model, progress, pool_size))
-            .await
-            .context("向量化引擎初始化任务失败")?
+        tokio::task::spawn_blocking(move || {
+            Self::init(&cache_dir, model, progress, pool_size, mirror_source)
+        })
+        .await
+        .context("向量化引擎初始化任务失败")?
     }
 
     /// 返回当前会话池大小（测试与诊断用）。
@@ -473,9 +553,10 @@ impl LocalEmbedder {
         model: EmbeddingModel,
         progress: Option<DownloadProgressFn>,
         pool_size: usize,
+        mirror_source: MirrorSource,
     ) -> anyhow::Result<Self> {
         let model_dir = cache_dir.join(model.dir_name());
-        Self::ensure_model_files(&model_dir, &model, &progress)?;
+        Self::ensure_model_files(&model_dir, &model, &progress, mirror_source)?;
         if let Some(p) = &progress {
             p(DownloadEvent::Loading);
         }
@@ -502,17 +583,22 @@ impl LocalEmbedder {
         Ok(Self { sessions, dim })
     }
 
-    /// 确保模型文件齐备：全量 GET + 多源容错 + 完整性校验。
+    /// 确保模型文件齐备：多源容错 + 重试 + 断点续传 + 完整性校验（REQ-VEC-017）。
     ///
-    /// 参考 rs-pro 方案：不使用 Range/`.partial` 断点续传（镜像源兼容性差），
-    /// 改为全量 GET + 下载后校验 + 失败删除重试。
+    /// 下载策略：
+    /// 1. **镜像源选择**：优先使用用户配置的 `mirror_source`（设置键 `vec.mirror_source`），
+    ///    未配置时走自动检测（中文系统→魔搭优先，其他→HuggingFace 优先）。
+    /// 2. **重试机制**：每个源失败后重试 3 次，退避间隔 2s/4s/8s（REQ-VEC-017 AC-1）。
+    /// 3. **断点续传**：下载到 `.partial` 文件，完成后原子 rename。支持 HTTP Range 请求
+    ///    续传已下载部分（REQ-VEC-017 AC-2）。镜像源不支持 Range 时回退为全量下载。
+    /// 4. **完整性校验**：Content-Length 匹配 + JSON 格式验证 + ONNX 头部检查。
     ///
-    /// 3 源容错：根据系统语言选择源顺序（中文→魔搭优先，其他→HuggingFace 优先）
     /// 一旦某源成功，后续文件优先使用该源（避免逐文件超时惩罚）。
     fn ensure_model_files(
         model_dir: &Path,
         model: &EmbeddingModel,
         progress: &Option<DownloadProgressFn>,
+        mirror_source: MirrorSource,
     ) -> anyhow::Result<()> {
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(5))
@@ -539,6 +625,7 @@ impl LocalEmbedder {
                             total: size,
                             file_index,
                             total_files,
+                            source: "cache".to_string(),
                         });
                     }
                     continue;
@@ -552,8 +639,8 @@ impl LocalEmbedder {
                     .with_context(|| format!("创建模型目录失败: {}", parent.display()))?;
             }
 
-            // 按优先级排序源（系统语言决定初始顺序）
-            let sources = get_download_sources();
+            // 按优先级排序源（用户配置或系统语言决定初始顺序）
+            let sources = mirror_source.to_sources();
             let mut order: Vec<usize> = (0..sources.len()).collect();
             if let Some(pref) = prefer_source {
                 order.sort_by_key(|&i| if i == pref { 0 } else { 1 + i });
@@ -566,25 +653,46 @@ impl LocalEmbedder {
                 let src = sources[idx];
                 let url = format!("{}/{repo}/resolve/{}/{}", src.base, src.branch, repo_path);
 
-                match Self::download_file_full(
-                    &client,
-                    &url,
-                    &dest,
-                    local_name,
-                    file_index,
-                    total_files,
-                    progress,
-                ) {
-                    Ok(()) => {
-                        prefer_source = Some(idx);
-                        downloaded = true;
-                        break;
+                // 重试机制：3 次重试 + 退避 2s/4s/8s（REQ-VEC-017 AC-1）
+                let backoff_secs = [2u64, 4, 8];
+                let mut attempt = 0;
+                loop {
+                    match Self::download_file_with_resume(
+                        &client,
+                        &url,
+                        &dest,
+                        local_name,
+                        file_index,
+                        total_files,
+                        progress,
+                    ) {
+                        Ok(()) => {
+                            prefer_source = Some(idx);
+                            downloaded = true;
+                            break;
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "[LocalEmbedder] {} 源下载失败 (attempt {}/{}) \
+                                 {url} → {err}",
+                                src.name,
+                                attempt + 1,
+                                backoff_secs.len() + 1,
+                            );
+                            if attempt < backoff_secs.len() {
+                                let wait = backoff_secs[attempt];
+                                eprintln!("[LocalEmbedder] {wait}s 后重试…");
+                                std::thread::sleep(Duration::from_secs(wait));
+                                attempt += 1;
+                                continue;
+                            }
+                            failures.push(format!("{}: {err}", src.name));
+                            break;
+                        }
                     }
-                    Err(err) => {
-                        eprintln!("[LocalEmbedder] {} 源下载失败: {url} → {err}", src.name);
-                        failures.push(format!("{}: {err}", src.name));
-                        let _ = std::fs::remove_file(&dest);
-                    }
+                }
+                if downloaded {
+                    break;
                 }
             }
 
@@ -604,13 +712,20 @@ impl LocalEmbedder {
         Ok(())
     }
 
-    /// 下载单个文件（全量 GET，不用 Range/`.partial`）。
+    /// 下载单个文件，支持断点续传（REQ-VEC-017 AC-2）。
+    ///
+    /// 断点续传策略：
+    /// 1. 检查 `.partial` 文件是否存在，获取已下载字节数
+    /// 2. 发送 `Range: bytes={offset}-` 请求续传
+    /// 3. 服务器返回 206 → 追加写入 `.partial` 文件
+    /// 4. 服务器返回 200 或不支持 Range → 全量下载覆盖 `.partial`
+    /// 5. 下载完成后原子 rename 到目标路径
     ///
     /// 下载后执行完整性校验：
     /// - Content-Length 匹配（检测传输截断）
     /// - JSON 文件格式验证（检测 HTML 错误页被保存为 JSON）
     /// - ONNX 文件头部检查（检测 HTML 错误页）
-    fn download_file_full(
+    fn download_file_with_resume(
         client: &reqwest::blocking::Client,
         url: &str,
         dest: &Path,
@@ -621,31 +736,87 @@ impl LocalEmbedder {
     ) -> anyhow::Result<()> {
         use std::io::{Read, Write};
 
-        let resp = client
-            .get(url)
+        // .partial 文件路径（断点续传用）
+        let partial = dest.with_extension(format!(
+            "{}partial",
+            dest.extension()
+                .map(|e| format!("{}.", e.to_string_lossy()))
+                .unwrap_or_default()
+        ));
+
+        // 检查已有 .partial 文件大小
+        let existing_offset: u64 = if partial.exists() {
+            std::fs::metadata(&partial).map(|m| m.len()).unwrap_or(0)
+        } else {
+            0
+        };
+
+        // 构建请求：如果有已下载部分，尝试 Range 请求
+        let mut request = client.get(url);
+        if existing_offset > 0 {
+            request = request.header(reqwest::header::RANGE, format!("bytes={existing_offset}-"));
+        }
+
+        let resp = request
             .send()
             .with_context(|| format!("HTTP 请求失败: {url}"))?;
 
+        // 416 Range Not Satisfiable：.partial 文件可能已完整或超出范围
+        // 清理 .partial 文件后全量重下
+        if resp.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+            let _ = std::fs::remove_file(&partial);
+            return Self::download_file_with_resume(
+                client,
+                url,
+                dest,
+                file_name,
+                file_index,
+                total_files,
+                progress,
+            );
+        }
+
+        // 判断是否为续传响应（206）或全量响应（200）
+        let is_resume = resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+
+        // 非 2xx 错误
         if !resp.status().is_success() {
             bail!("HTTP {} - {}", resp.status(), url);
         }
 
-        let expected_len: Option<u64> = resp
+        // 解析 Content-Length
+        let content_length: Option<u64> = resp
             .headers()
             .get(reqwest::header::CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u64>().ok());
 
-        let total = expected_len.unwrap_or(0);
-        let mut reader = resp;
-        let mut file = std::fs::File::create(dest)
-            .with_context(|| format!("创建文件失败: {}", dest.display()))?;
+        // 续传模式：Content-Length 是剩余大小，总大小 = offset + remaining
+        // 全量模式：Content-Length 是总大小
+        let total: u64 = if is_resume {
+            existing_offset + content_length.unwrap_or(0)
+        } else {
+            content_length.unwrap_or(0)
+        };
 
-        // 进度节流：每 100ms 最多发一次事件（避免大量小文件时事件风暴）
+        // 打开 .partial 文件：续传模式追加，全量模式创建新文件
+        let mut file = if is_resume && existing_offset > 0 {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&partial)
+                .with_context(|| format!("打开 .partial 文件失败: {}", partial.display()))?
+        } else {
+            // 全量下载或非续传响应：创建/截断 .partial
+            std::fs::File::create(&partial)
+                .with_context(|| format!("创建 .partial 文件失败: {}", partial.display()))?
+        };
+
+        // 进度节流：每 100ms 最多发一次事件
         let mut last_emit = std::time::Instant::now();
         let mut buf = vec![0u8; 64 * 1024]; // 64KB 缓冲区
-        let mut current: u64 = 0;
+        let mut current: u64 = if is_resume { existing_offset } else { 0 };
 
+        let mut reader = resp;
         loop {
             let n = reader
                 .read(&mut buf)
@@ -654,10 +825,9 @@ impl LocalEmbedder {
                 break;
             }
             file.write_all(&buf[..n])
-                .with_context(|| format!("写入文件失败: {}", dest.display()))?;
+                .with_context(|| format!("写入文件失败: {}", partial.display()))?;
             current += n as u64;
 
-            // 节流：大文件每 100ms 发一次，小文件每次都发（确保进度更新）
             let now = std::time::Instant::now();
             let should_emit = total == 0 || now.duration_since(last_emit).as_millis() >= 100;
             if should_emit {
@@ -669,6 +839,7 @@ impl LocalEmbedder {
                         total,
                         file_index,
                         total_files,
+                        source: url.to_string(),
                     });
                 }
             }
@@ -676,7 +847,7 @@ impl LocalEmbedder {
         file.sync_all().ok();
         drop(file); // 确保文件句柄关闭
 
-        // 下载完成：发送 100% 事件（确保进度条到达满）
+        // 下载完成：发送 100% 事件
         if let Some(p) = progress {
             p(DownloadEvent::Downloading {
                 file_name: file_name.to_string(),
@@ -684,18 +855,24 @@ impl LocalEmbedder {
                 total: if total > 0 { total } else { current },
                 file_index,
                 total_files,
+                source: url.to_string(),
             });
         }
 
         // ================================================================
         // 完整性校验 1：Content-Length 匹配
         // ================================================================
-        if let Some(expected) = expected_len
+        if let Some(expected) = content_length
+            && !is_resume
             && current != expected
         {
-            let _ = std::fs::remove_file(dest);
+            let _ = std::fs::remove_file(&partial);
             bail!("下载不完整: 期望 {expected} 字节，实际 {current} 字节");
         }
+
+        // 原子 rename .partial → dest
+        std::fs::rename(&partial, dest)
+            .with_context(|| format!("重命名 .partial → {} 失败", dest.display()))?;
 
         // ================================================================
         // 完整性校验 2：JSON 文件格式验证

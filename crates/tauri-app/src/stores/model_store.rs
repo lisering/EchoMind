@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use echomind_core::Storage;
-use echomind_infra::local_embedder::{EmbeddingModel, LocalEmbedder};
+use echomind_infra::local_embedder::{EmbeddingModel, LocalEmbedder, MirrorSource};
 use echomind_infra::local_reranker::LocalReranker;
 use echomind_infra::model_manager::ModelManager;
 use echomind_infra::robust_downloader::RobustDownloader;
@@ -113,6 +113,7 @@ impl ModelStore {
         }
         // 慢路径：初始化
         let model = self.load_embedding_model().await;
+        let mirror = self.load_mirror_source().await;
         let new_embedder = match &model {
             EmbeddingModel::Custom(name) => {
                 // 自定义模型路径（REQ-VEC-014，Pro 门控）
@@ -122,7 +123,14 @@ impl ModelStore {
             _ => {
                 // 预设模型路径
                 let cache_dir = self.data_dir.join("models");
-                LocalEmbedder::new_with_model(cache_dir, model.clone()).await?
+                LocalEmbedder::new_with_mirror(
+                    cache_dir,
+                    model.clone(),
+                    None,
+                    LocalEmbedder::default_pool_size(),
+                    mirror,
+                )
+                .await?
             }
         };
         {
@@ -150,6 +158,16 @@ impl ModelStore {
         match self.storage.get_setting("vec.embedding_model").await {
             Ok(Some(s)) => parse_embedding_model(&s),
             _ => EmbeddingModel::BgeSmallEnV1_5, // P1-5: 默认升级为 bge-small-en-v1.5
+        }
+    }
+
+    /// 从 settings 表读取镜像源配置（REQ-VEC-017 AC-3）。
+    ///
+    /// 未配置时默认 `auto`（自动检测系统语言选择源顺序）。
+    async fn load_mirror_source(&self) -> MirrorSource {
+        match self.storage.get_setting("vec.mirror_source").await {
+            Ok(Some(s)) => MirrorSource::parse_str(&s).unwrap_or(MirrorSource::Auto),
+            _ => MirrorSource::Auto,
         }
     }
 
@@ -187,6 +205,7 @@ impl ModelStore {
             }
         }
         let model = self.load_embedding_model().await;
+        let mirror = self.load_mirror_source().await;
         let new_embedder = match &model {
             EmbeddingModel::Custom(name) => {
                 // 自定义模型路径（文件已在本地，不需要下载进度）
@@ -196,10 +215,12 @@ impl ModelStore {
             }
             _ => {
                 let cache_dir = self.data_dir.join("models");
-                echomind_infra::local_embedder::LocalEmbedder::new_with_progress(
+                echomind_infra::local_embedder::LocalEmbedder::new_with_mirror(
                     cache_dir,
                     model.clone(),
                     Some(progress),
+                    echomind_infra::local_embedder::LocalEmbedder::default_pool_size(),
+                    mirror,
                 )
                 .await?
             }

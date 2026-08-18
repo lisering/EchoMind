@@ -2629,3 +2629,125 @@ mark.search-mark {
     animation: none;
   }
 }
+
+/* REQ-RAG-051: 演示模式提示栏 */
+.demo-mode-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--accent, #38bdf8);
+  color: var(--ink, #0f172a);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-radius: 0 0 0.75rem 0.75rem;
+}
+
+.demo-mode-text {
+  flex: 1;
+  text-align: center;
+}
+
+.demo-mode-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.demo-mode-close:hover {
+  opacity: 1;
+}
+
+/* REQ-RAG-052: Agent 步骤卡片 */
+.agent-step-card {
+  border: 1px solid var(--border-default, #1e293b);
+  border-radius: 0.5rem;
+  margin-top: 0.5rem;
+  overflow: hidden;
+}
+
+.agent-step-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.agent-step-card-header:hover {
+  background: var(--surface-3, rgba(255, 255, 255, 0.05));
+}
+
+.agent-step-icon {
+  color: var(--text-tertiary, #94a3b8);
+  flex-shrink: 0;
+}
+
+.agent-step-thought .agent-step-icon { color: #818cf8; }
+.agent-step-action .agent-step-icon { color: #f59e0b; }
+.agent-step-observation .agent-step-icon { color: #34d399; }
+.agent-step-answer .agent-step-icon { color: #38bdf8; }
+
+.agent-step-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #cbd5e1);
+}
+
+.agent-step-iteration {
+  color: var(--text-quaternary, #64748b);
+  margin-right: 0.25rem;
+}
+
+.agent-step-tool {
+  color: #f59e0b;
+  margin-left: 0.25rem;
+}
+
+.agent-step-card-body {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #94a3b8);
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.03));
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* REQ-RAG-052: Agent 进度条 */
+.agent-progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0 0.25rem;
+}
+
+.agent-progress-track {
+  flex: 1;
+  height: 4px;
+  background: var(--surface-3, rgba(255, 255, 255, 0.08));
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.agent-progress-fill {
+  height: 100%;
+  background: var(--accent, #38bdf8);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.agent-progress-text {
+  font-size: 0.6875rem;
+  color: var(--text-quaternary, #64748b);
+  white-space: nowrap;
+}
