@@ -943,8 +943,8 @@
         overflow-y: auto;
         overflow-x: hidden;
         scrollbar-width: none;
-        padding: 4px;
-        border-radius: 16px;
+        padding: 0;                                   /* DeepSeek 实测 0px */
+        border-radius: 8px;                           /* DeepSeek 实测 8px */
       }
       .conv-nav::-webkit-scrollbar { display: none; }
       .conv-nav:hover {
@@ -959,14 +959,15 @@
       /* 每个段：默认窄条，hover 展开后显示文本 */
       .conv-nav-segment {
         width: 100%;
-        min-height: 28px;
+        height: 30px;                               /* DeepSeek 实测 30px */
         flex-shrink: 0;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: flex-end;
-        padding: 0 4px;
-        border-radius: 8px;
+        padding: 0;                                   /* DeepSeek 实测 0px */
+        margin: 0 8px 0 0;                            /* DeepSeek 实测 margin-right 8px */
+        border-radius: 0;
         overflow: hidden;
         white-space: nowrap;
         text-overflow: ellipsis;
@@ -1010,7 +1011,7 @@
         text-align: left;
         opacity: 0;
         transition: opacity 0.2s ease;
-        padding-right: 8px;
+        padding-right: 8px;                            /* DeepSeek 列表项 margin-right 8px */
       }
       .conv-nav:hover .conv-nav-segment-text {
         opacity: 1;
