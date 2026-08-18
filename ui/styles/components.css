@@ -126,57 +126,85 @@
  * 设计要点：点击区与视觉条分离，悬停只变换伪元素，零布局回流。
  * ============================================================ */
 
-/* 对话导航条 — DeepSeek 风格
- * 默认：窄竖条 34px 宽 × 300px 高，垂直居中
- * hover：展开到 240px，显示全部对话列表（序号 badge + 问题文本 + 右侧箭头）
- * 0.2s 平滑过渡
- * DeepSeek 实测：nav 34×300 + scrollArea 242×92 + listPadding 15px 0 0 24px
- * 列表项 210×30 + margin-right 8px
- * 当前项：badge 蓝底蓝字 + 文本蓝色加粗
- * 非当前项：文本深色普通 */
+/* ============================================================
+ * 对话导航条 — DeepSeek 风格（精确实测复刻，REQ-NAV-010）
+ *
+ * DeepSeek 实测 DOM 结构（从外到内）：
+ * 1. 外层容器: fixed, top:50%+translateY(-50%), right:16px,
+ *    width:34px, height:auto(!自适应), border-radius:8px,
+ *    overflow:visible, display:flex, z-index:5
+ * 2. 内层滚动列表: max-height:calc(100vh-80px), overflow-y:auto,
+ *    padding:15px 0 0 24px (★只有顶部15px+左侧24px, 无底部padding)
+ * 3. 列表项: 210×30px, margin:0 8px 0 0, display:flex,
+ *    justify-content:flex-end, align-items:center
+ * 4a. badge: 22×13px, font-size:9px, padding:1.5px 4px,
+ *    margin:0 4px 0 0, border-radius:8px, opacity:0(非当前项隐藏)
+ * 4b. 文本: font-size:13px, margin:0 12px 0 0, flex:0 1 auto,
+ *    text-overflow:ellipsis, opacity:0(非当前项隐藏)
+ * 4c. 图标: 16×20px, flex:0 0 auto, opacity:1(始终可见)
+ *
+ * 核心设计：高度自适应，不使用固定高度！
+ * - 少量项：高度 = 15px(顶部padding) + 项数×30px
+ * - 大量项：max-height 限制后出现滚动条
+ * ============================================================ */
+
+/* 外层容器：窄竖条 + hover 展开 */
 .conv-nav {
-  position: absolute;
+  position: fixed;
   top: 50%;
-  right: 2px;
+  right: 16px;
   width: 34px;
-  height: 300px;
-  max-height: calc(100% - 24px);
+  height: auto;              /* ★自适应，不用固定高度 */
+  max-height: calc(100vh - 80px);  /* 视口高度限制，超出后滚动 */
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
-  justify-content: center;
   z-index: 5;
   opacity: 0;
-  transition: width 0.2s ease, opacity 0.2s ease, background 0.2s ease;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: none;
+  transition: width 0.2s ease, opacity 0.2s ease, background 0.2s ease, border-radius 0.2s ease;
+  overflow: visible;
   padding: 0;
   border-radius: 8px;
 }
 .conv-nav::-webkit-scrollbar { display: none; }
 .conv-nav:hover {
   opacity: 1;
-  width: 240px;
-  background: var(--surface-2, #1a1a20);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  padding: 15px 0 15px 24px;
-  gap: 0;
+  width: 242px;
+  background: transparent;
+  border-radius: 16px;
+  overflow: hidden;
+  padding: 0;
 }
 .conv-nav.has-items { opacity: 0.4; }
 .conv-nav.has-items:hover { opacity: 1; }
 
-/* 列表项：[badge] + [文本] + [箭头icon] */
-.conv-nav-segment {
+/* 内层滚动列表 — DeepSeek 实测：padding 只有顶部 15px + 左侧 24px，无底部 padding
+ * max-height 继承外层，超出后自动出现滚动条 */
+.conv-nav-list {
   width: 100%;
-  height: 30px;                               /* DeepSeek 实测 30px */
+  max-height: calc(100vh - 80px);  /* 视口高度限制 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  padding: 15px 0 0 24px;
+  display: block;
+}
+.conv-nav-list::-webkit-scrollbar { display: none; }
+
+/* 列表项：[badge] + [文本] + [箭头icon] — DeepSeek 实测 210×30px
+ * justify-content:flex-end 让内容右对齐（贴近窄条原位置）
+ * margin-right:8px 给右侧留间距 */
+.conv-nav-segment {
+  width: calc(100% - 8px);
+  height: 30px;
   flex-shrink: 0;
   cursor: pointer;
   display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
   align-items: center;
   padding: 0;
-  margin: 0 8px 0 0;                            /* DeepSeek 实测 margin-right 8px */
+  margin: 0 8px 0 0;
   border-radius: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -188,27 +216,35 @@
   background: transparent;
 }
 
-/* 序号 badge — 仅当前项可见 */
+/* 序号 badge — DeepSeek 实测 22×13px
+ * opacity:0 默认隐藏，hover 展开后仅当前项显示
+ * margin:0 4px 0 0, padding:1.5px 4px, border-radius:8px
+ * font-size:9px, color:rgb(57,100,254), bg:rgb(237,243,254) */
 .conv-nav-badge {
-  display: none;
-  background: var(--msg-user-bg, rgba(237,243,254,0.15));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(237, 243, 254, 0.15);
   color: var(--accent, #3864fe);
   font-size: 9px;
   font-weight: 500;
   padding: 1.5px 4px;
+  margin: 0 4px 0 0;
   border-radius: 8px;
-  flex-shrink: 0;
+  flex: 0 0 auto;
   min-width: 16px;
   text-align: center;
   line-height: 1.2;
+  opacity: 0;
+  transition: opacity 0.1s ease;
 }
-.conv-nav-segment.active .conv-nav-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.conv-nav:hover .conv-nav-segment.active .conv-nav-badge {
+  opacity: 1;
 }
 
-/* 问题文本 */
+/* 问题文本 — DeepSeek 实测 _72b6158
+ * font-size:13px, flex:0 1 auto, margin:0 12px 0 0
+ * text-overflow:ellipsis, opacity:0 默认隐藏 */
 .conv-nav-segment-text {
   font-size: 13px;
   color: var(--text-primary, #0f1115);
@@ -216,11 +252,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
+  flex: 0 1 auto;
   text-align: left;
   opacity: 0;
   transition: opacity 0.2s ease, color 0.2s ease;
-  padding-right: 12px;                           /* DeepSeek 实测 margin-right 12px */
+  margin: 0 12px 0 0;
 }
 .conv-nav:hover .conv-nav-segment-text {
   opacity: 1;
@@ -231,32 +267,30 @@
   font-weight: 500;
 }
 
-/* 右侧箭头 icon */
+/* 右侧箭头 icon — DeepSeek 实测 16×20px, flex:0 0 auto, opacity:1 始终可见 */
 .conv-nav-icon {
   width: 16px;
   height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  color: var(--text-primary, #0f1115);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-.conv-nav:hover .conv-nav-icon {
+  flex: 0 0 auto;
+  color: var(--text-tertiary, #81858c);
   opacity: 1;
+  transition: opacity 0.2s ease;
 }
 
 /* 窄条模式：位置指示条（伪元素）
- * 只在未 hover 时显示 */
+ * 只在未 hover 时显示
+ * DeepSeek 实测：窄条是 24px 宽 × 4px 高的圆角条 */
 .conv-nav-segment::before {
   content: '';
   display: block;
   width: 24px;
   min-width: 24px;
-  height: 5px;
-  border-radius: 2.5px;
-  background: rgba(255, 255, 255, 0.1);
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(128, 128, 128, 0.2);
   transition: background 0.2s ease;
   flex-shrink: 0;
 }
