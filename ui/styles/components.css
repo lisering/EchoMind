@@ -158,10 +158,10 @@
 .conv-nav:hover {
   opacity: 1;
   width: 240px;
-  background: var(--surface-elevated, rgba(255,255,255,0.95));
+  background: var(--surface-2, #1a1a20);
   backdrop-filter: blur(8px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  padding: 15px 0 15px 24px;               /* DeepSeek 实测 list padding */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  padding: 15px 0 15px 24px;
   gap: 0;
 }
 .conv-nav.has-items { opacity: 0.4; }
@@ -256,7 +256,7 @@
   min-width: 24px;
   height: 5px;
   border-radius: 2.5px;
-  background: rgba(128, 128, 128, 0.15);
+  background: rgba(255, 255, 255, 0.1);
   transition: background 0.2s ease;
   flex-shrink: 0;
 }
@@ -264,7 +264,7 @@
   background: rgba(56, 189, 248, 0.6);
 }
 .conv-nav-segment.active::before {
-  background: var(--accent, #3864fe);
+  background: var(--accent, #38bdf8);
 }
 /* hover 展开后隐藏指示条 */
 .conv-nav:hover .conv-nav-segment::before {
