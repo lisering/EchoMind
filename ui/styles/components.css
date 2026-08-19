@@ -2935,3 +2935,95 @@ mark.search-mark {
   color: var(--text-quaternary, #64748b);
   white-space: nowrap;
 }
+
+/* ============================================================
+ * 设置面板 Tab 导航栏
+ *
+ * 设计要点：
+ * 1. 水平滚动式（不换行），隐藏滚动条但可滑动
+ * 2. 底部滑动指示器（accent 色下划线，跟随激活 Tab 平滑移动）
+ * 3. Tab 按钮：未激活时低调灰色，激活时 accent 色文字
+ * 4. 与下方内容通过底部分隔线区分
+ * ============================================================ */
+
+/* Tab 栏容器 */
+.settings-tab-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface-1, #1e1e2e);
+  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.06));
+  /* 顶部细微阴影，滚动时产生层次感 */
+  box-shadow: 0 4px 12px -4px rgba(0,0,0,0.15);
+}
+
+/* 内部水平滚动容器 */
+.settings-tab-scroll {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+  padding: 0 20px;
+}
+
+/* 隐藏 WebKit 滚动条 */
+.settings-tab-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Tab 按钮列表 */
+.settings-tab-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 0;
+  white-space: nowrap;
+}
+
+/* 单个 Tab 按钮 */
+.settings-tab-btn {
+  position: relative;
+  padding: 8px 14px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-tertiary, #94a3b8);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s ease, background-color 0.2s ease;
+  border-radius: 6px 6px 0 0;
+  letter-spacing: 0.01em;
+}
+
+/* Tab 按钮 hover 状态 */
+.settings-tab-btn:hover {
+  color: var(--text-secondary, #cbd5e1);
+  background: rgba(255,255,255,0.03);
+}
+
+/* Tab 激活状态 */
+.settings-tab-btn.settings-tab-active {
+  color: var(--accent, #6366f1);
+}
+
+.settings-tab-btn.settings-tab-active:hover {
+  background: transparent;
+}
+
+/* 底部滑动指示器 */
+.settings-tab-indicator {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent, #6366f1);
+  border-radius: 2px 2px 0 0;
+  opacity: 0;
+  transform: translateX(0);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.2s ease;
+  pointer-events: none;
+}
