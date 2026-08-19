@@ -2941,9 +2941,9 @@ mark.search-mark {
  *
  * 设计要点：
  * 1. 水平滚动式（不换行），隐藏滚动条但可滑动
- * 2. 底部滑动指示器（accent 色下划线，跟随激活 Tab 平滑移动）
- * 3. Tab 按钮：未激活时低调灰色，激活时 accent 色文字
- * 4. 与下方内容通过底部分隔线区分
+ * 2. 每个按钮 ::after 伪元素做居中下划线（无需 JS 计算位置）
+ * 3. 左右渐隐遮罩提示可滚动方向
+ * 4. 与下方内容通过底部分隔线 + 投影区分
  * ============================================================ */
 
 /* Tab 栏容器 */
@@ -2951,10 +2951,9 @@ mark.search-mark {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: var(--surface-1, #1e1e2e);
+  background: var(--surface-1, #131316);
   border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.06));
-  /* 顶部细微阴影，滚动时产生层次感 */
-  box-shadow: 0 4px 12px -4px rgba(0,0,0,0.15);
+  box-shadow: 0 4px 12px -4px rgba(0,0,0,0.2);
 }
 
 /* 内部水平滚动容器 */
@@ -2962,9 +2961,9 @@ mark.search-mark {
   position: relative;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE/Edge */
-  padding: 0 20px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 0 16px;
 }
 
 /* 隐藏 WebKit 滚动条 */
@@ -2972,19 +2971,45 @@ mark.search-mark {
   display: none;
 }
 
+/* 左侧渐隐遮罩（提示可向左滚动） */
+.settings-tab-scroll::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  background: linear-gradient(to right, var(--surface-1, #131316), transparent);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* 右侧渐隐遮罩（提示可向右滚动） */
+.settings-tab-scroll::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  background: linear-gradient(to left, var(--surface-1, #131316), transparent);
+  z-index: 1;
+  pointer-events: none;
+}
+
 /* Tab 按钮列表 */
 .settings-tab-list {
   display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 8px 0 0;
+  align-items: stretch;
+  gap: 0;
   white-space: nowrap;
+  position: relative;
 }
 
 /* 单个 Tab 按钮 */
 .settings-tab-btn {
   position: relative;
-  padding: 8px 14px 10px;
+  padding: 10px 14px 11px;
   font-size: 0.75rem;
   font-weight: 500;
   color: var(--text-tertiary, #94a3b8);
@@ -2992,38 +3017,50 @@ mark.search-mark {
   border: none;
   cursor: pointer;
   white-space: nowrap;
-  transition: color 0.2s ease, background-color 0.2s ease;
-  border-radius: 6px 6px 0 0;
+  transition: color 0.2s ease;
   letter-spacing: 0.01em;
+  /* 底部留出指示器空间 */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
 }
 
 /* Tab 按钮 hover 状态 */
 .settings-tab-btn:hover {
   color: var(--text-secondary, #cbd5e1);
-  background: rgba(255,255,255,0.03);
 }
 
-/* Tab 激活状态 */
+/* Tab 激活状态：文字变 accent 色 */
 .settings-tab-btn.settings-tab-active {
   color: var(--accent, #6366f1);
 }
 
 .settings-tab-btn.settings-tab-active:hover {
-  background: transparent;
+  color: var(--accent, #6366f1);
 }
 
-/* 底部滑动指示器 */
-.settings-tab-indicator {
+/* 居中下划线指示器（::after 伪元素）
+ * 宽度为 60% 按钮宽度，自动居中，不需要 JS 计算 */
+.settings-tab-btn::after {
+  content: '';
   position: absolute;
   bottom: 0;
-  left: 0;
+  left: 50%;
+  transform: translateX(-50%) scaleX(0);
+  width: 60%;
   height: 2px;
   background: var(--accent, #6366f1);
   border-radius: 2px 2px 0 0;
-  opacity: 0;
-  transform: translateX(0);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-              width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 0.2s ease;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   pointer-events: none;
+}
+
+/* 激活状态下划线显示 */
+.settings-tab-btn.settings-tab-active::after {
+  transform: translateX(-50%) scaleX(1);
+}
+
+/* hover 时微弱下划线预览 */
+.settings-tab-btn:not(.settings-tab-active):hover::after {
+  transform: translateX(-50%) scaleX(0.3);
+  background: var(--text-quaternary, #64748b);
 }
