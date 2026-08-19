@@ -566,6 +566,7 @@
     "logs_exported": "日志已导出",
     "diagnostics_exported": "诊断信息已导出",
 "data_management": "备份与恢复",
+"backup_description": "导出知识库、对话和设置为 JSON 文件，或从备份文件恢复数据。",
 "export_backup": "导出备份",
 "import_backup": "恢复数据",
 "exporting_backup": "正在导出备份…",

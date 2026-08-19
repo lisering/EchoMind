@@ -5763,12 +5763,19 @@
 </div>
 </div>
 </div>
-<div class="space-y-3 mb-5">
-<div class="text-xs uppercase tracking-wider text-text-quaternary" data-i18n="settings.data_management"></div>
+<div class="space-y-3 mt-5 mb-5">
+<h4 class="side-label text-[11px] uppercase tracking-wider text-text-quaternary mb-2" data-i18n="settings.data_management"></h4>
 <div class="bg-surface-2 border border-border-default rounded-xl px-4 py-3">
+<p class="text-xs text-text-quaternary mb-3" data-i18n="settings.backup_description"></p>
 <div class="flex flex-col gap-2">
-<button id="exportBackupBtn" class="w-full border border-border-default rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-surface-2 transition-colors" onclick="exportBackup()" data-i18n="settings.export_backup"></button>
-<button id="importBackupBtn" class="w-full border border-border-default rounded-lg px-3 py-2 text-sm text-text-secondary hover:bg-surface-2 transition-colors" onclick="importBackup()" data-i18n="settings.import_backup"></button>
+<button id="exportBackupBtn" class="w-full flex items-center justify-center gap-2 border border-accent/30 rounded-lg px-3 py-2.5 text-sm text-accent hover:bg-accent/10 transition-colors" onclick="exportBackup()">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+<span data-i18n="settings.export_backup"></span>
+</button>
+<button id="importBackupBtn" class="w-full flex items-center justify-center gap-2 border border-border-default rounded-lg px-3 py-2.5 text-sm text-text-secondary hover:bg-surface-3 transition-colors" onclick="importBackup()">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+<span data-i18n="settings.import_backup"></span>
+</button>
 </div>
 </div>
 </div>

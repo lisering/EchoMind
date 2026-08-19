@@ -566,6 +566,7 @@
     "logs_exported": "Logs exported",
     "diagnostics_exported": "Diagnostics exported",
 "data_management": "Backup & Restore",
+"backup_description": "Export your knowledge base, conversations, and settings to a JSON file, or restore from a backup.",
 "export_backup": "Export Backup",
 "import_backup": "Import Backup",
 "exporting_backup": "Exporting backup…",
