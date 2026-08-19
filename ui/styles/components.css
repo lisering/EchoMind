@@ -7,7 +7,7 @@
  * 全屏模式下（.topbar-fs 类）traffic lights 消失，padding 收缩到 8px 让按钮左移填补空间。
  * h-7(28px) + w-6 h-6(24px) 按钮居中 → 中心 y=14px，与 macOS traffic lights 完美对齐。
  */
-#topBar { padding-left: 78px; }
+#topBar { padding-left: 78px; z-index: 60; position: relative; }
 #topBar.topbar-fs { padding-left: 8px; }
 
 /* ============================================================

@@ -801,7 +801,7 @@
        * 全屏模式下（.topbar-fs 类）traffic lights 消失，padding 收缩到 8px 让按钮左移填补空间。
        * h-7(28px) + w-6 h-6(24px) 按钮居中 → 中心 y=14px，与 macOS traffic lights 完美对齐。
        */
-      #topBar { padding-left: 78px; }
+      #topBar { padding-left: 78px; z-index: 60; position: relative; }
       #topBar.topbar-fs { padding-left: 8px; }
       
       /* ============================================================
@@ -5294,7 +5294,7 @@
 </div>
 
 <!-- ============ 设置 Modal（REQ-MM-003 前端接线） ============ -->
-    <div id="settingsModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[5vh]" role="dialog" aria-modal="true" aria-label="settings.title">
+    <div id="settingsModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center" style="padding-top: 40px" role="dialog" aria-modal="true" aria-label="settings.title">
       <div class="w-full max-w-md bg-surface-1 border border-border-strong rounded-lg shadow-modal scale-in overflow-hidden flex flex-col" style="max-height: 90vh">
         <div class="flex items-center justify-between px-5 h-12 border-b border-border-subtle shrink-0">
           <h2 class="text-sm font-semibold text-text-primary" data-i18n="settings.title"></h2>
