@@ -565,7 +565,7 @@
     "exporting_diagnostics": "正在导出诊断信息…",
     "logs_exported": "日志已导出",
     "diagnostics_exported": "诊断信息已导出",
-"data_management": "数据管理",
+"data_management": "备份与恢复",
 "export_backup": "导出备份",
 "import_backup": "恢复数据",
 "exporting_backup": "正在导出备份…",

@@ -552,7 +552,7 @@
     "exporting_diagnostics": "診断情報をエクスポート中…",
     "logs_exported": "ログをエクスポートしました",
     "diagnostics_exported": "診断情報をエクスポートしました",
-    "data_management": "データ管理",
+    "data_management": "バックアップと復元",
     "export_backup": "バックアップをエクスポート",
     "import_backup": "バックアップをインポート",
     "exporting_backup": "バックアップをエクスポート中…",
