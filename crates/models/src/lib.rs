@@ -2891,8 +2891,12 @@ impl StripPreview {
 
 /// 对话书签（REQ-RAG-047）。
 ///
-/// 用户可将重要对话标记为书签，支持自定义备注。
+/// 用户可将重要对话或特定消息标记为书签，支持自定义备注。
 /// 持久化到 `conversation_bookmarks` 表。
+///
+/// 兼容两种书签模式：
+/// - **会话级书签**（REQ-RAG-047）：`message_id` 为 `None`，标记整个会话
+/// - **消息级书签**（REQ-RAG-053）：`message_id` 为 `Some(msg_id)`，标记特定 AI 回答消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationBookmark {
     /// 书签所属会话 ID
@@ -2901,15 +2905,39 @@ pub struct ConversationBookmark {
     pub note: Option<String>,
     /// 创建时间戳（Unix 秒）
     pub created_at: i64,
+    /// 消息级书签：关联的消息 ID（REQ-RAG-053）。
+    /// `None` 表示会话级书签（向后兼容），`Some(msg_id)` 表示消息级书签。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    /// 消息级书签：消息内容摘要（前 50 字，REQ-RAG-053）。
+    /// 仅消息级书签使用，会话级为 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
 }
 
 impl ConversationBookmark {
-    /// 创建新书签。
+    /// 创建新会话级书签（向后兼容）。
     pub fn new(conversation_id: String) -> Self {
         Self {
             conversation_id,
             note: None,
             created_at: chrono::Utc::now().timestamp(),
+            message_id: None,
+            summary: None,
+        }
+    }
+
+    /// 创建新消息级书签（REQ-RAG-053）。
+    ///
+    /// `summary` 自动截取前 50 字符。
+    pub fn new_message(conversation_id: String, message_id: String, content: &str) -> Self {
+        let summary: String = content.chars().take(50).collect();
+        Self {
+            conversation_id,
+            note: None,
+            created_at: chrono::Utc::now().timestamp(),
+            message_id: Some(message_id),
+            summary: Some(summary),
         }
     }
 
@@ -2917,6 +2945,11 @@ impl ConversationBookmark {
     pub fn with_note(mut self, note: String) -> Self {
         self.note = Some(note);
         self
+    }
+
+    /// 是否为消息级书签。
+    pub fn is_message_bookmark(&self) -> bool {
+        self.message_id.is_some()
     }
 }
 

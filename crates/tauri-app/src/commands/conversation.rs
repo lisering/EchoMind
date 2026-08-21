@@ -807,25 +807,36 @@ pub async fn reorder_conversations_inner(
 // 对话书签（REQ-RAG-047）
 // ==================================================================
 
-/// 添加对话书签（REQ-RAG-047 AC-1/AC-2）。
+/// 添加对话书签（REQ-RAG-047 AC-1/AC-2 + REQ-RAG-053 消息级）。
 #[tauri::command]
 pub async fn add_bookmark(
     conversation_id: String,
     note: Option<String>,
+    message_id: Option<String>,
+    summary: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    add_bookmark_inner(&conversation_id, note.as_deref(), state.inner()).await
+    add_bookmark_inner(
+        &conversation_id,
+        note.as_deref(),
+        message_id.as_deref(),
+        summary.as_deref(),
+        state.inner(),
+    )
+    .await
 }
 
 /// `add_bookmark` 的逻辑实现。
 pub async fn add_bookmark_inner(
     conversation_id: &str,
     note: Option<&str>,
+    message_id: Option<&str>,
+    summary: Option<&str>,
     state: &AppState,
 ) -> Result<(), String> {
     state
         .storage
-        .add_bookmark(conversation_id, note)
+        .add_bookmark(conversation_id, note, message_id, summary)
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -881,6 +892,27 @@ pub async fn is_bookmarked_inner(conversation_id: &str, state: &AppState) -> Res
     state
         .storage
         .is_bookmarked(conversation_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 查询指定消息的书签（REQ-RAG-053）。
+#[tauri::command]
+pub async fn get_message_bookmark(
+    message_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<echomind_models::ConversationBookmark>, String> {
+    get_message_bookmark_inner(&message_id, state.inner()).await
+}
+
+/// `get_message_bookmark` 的逻辑实现。
+pub async fn get_message_bookmark_inner(
+    message_id: &str,
+    state: &AppState,
+) -> Result<Option<echomind_models::ConversationBookmark>, String> {
+    state
+        .storage
+        .get_message_bookmark(message_id)
         .await
         .map_err(|e| format!("{e:#}"))
 }

@@ -337,18 +337,23 @@ pub(crate) async fn get_workspace_stats(
 // ============================================================================
 
 /// 添加对话书签（INSERT OR REPLACE）。
+///
+/// 支持会话级书签（REQ-RAG-047）和消息级书签（REQ-RAG-053）。
+/// `message_id` / `summary` 为 `Some` 时表示消息级书签。
 pub(crate) async fn add_bookmark(
     pool: &super::migration::Pool,
     conversation_id: String,
     note: Option<String>,
     created_at: i64,
+    message_id: Option<String>,
+    summary: Option<String>,
 ) -> anyhow::Result<()> {
     let pool = pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = pool.get()?;
         conn.execute(
-            "INSERT OR REPLACE INTO conversation_bookmarks (conversation_id, note, created_at) VALUES (?1, ?2, ?3)",
-            params![conversation_id, note, created_at],
+            "INSERT OR REPLACE INTO conversation_bookmarks (conversation_id, note, created_at, message_id, summary) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![conversation_id, note, created_at, message_id, summary],
         )
         .context("写入 conversation_bookmarks 失败")?;
         Ok::<_, anyhow::Error>(())
@@ -377,6 +382,8 @@ pub(crate) async fn remove_bookmark(
 }
 
 /// 列出全部书签（按创建时间降序）。
+///
+/// 包含会话级和消息级书签（REQ-RAG-053）。
 pub(crate) async fn list_bookmarks(
     pool: &super::migration::Pool,
 ) -> anyhow::Result<Vec<echomind_models::ConversationBookmark>> {
@@ -384,7 +391,7 @@ pub(crate) async fn list_bookmarks(
     tokio::task::spawn_blocking(move || {
         let conn = pool.get()?;
         let mut stmt = conn.prepare(
-            "SELECT conversation_id, note, created_at FROM conversation_bookmarks ORDER BY created_at DESC",
+            "SELECT conversation_id, note, created_at, message_id, summary FROM conversation_bookmarks ORDER BY created_at DESC",
         )
         .context("准备 conversation_bookmarks 查询失败")?;
         let rows = stmt
@@ -393,6 +400,8 @@ pub(crate) async fn list_bookmarks(
                     conversation_id: row.get(0)?,
                     note: row.get(1)?,
                     created_at: row.get(2)?,
+                    message_id: row.get(3)?,
+                    summary: row.get(4)?,
                 })
             })
             .context("查询 conversation_bookmarks 失败")?;
@@ -424,4 +433,34 @@ pub(crate) async fn is_bookmarked(
     })
     .await??;
     Ok(count > 0)
+}
+
+/// 查询指定消息的书签（REQ-RAG-053）。
+///
+/// 返回 `Some(bookmark)` 表示该消息已加书签，`None` 表示未加书签。
+pub(crate) async fn get_message_bookmark(
+    pool: &super::migration::Pool,
+    message_id: String,
+) -> anyhow::Result<Option<echomind_models::ConversationBookmark>> {
+    let pool = pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT conversation_id, note, created_at, message_id, summary FROM conversation_bookmarks WHERE message_id = ?1 LIMIT 1",
+        )
+        .context("准备 conversation_bookmarks message_id 查询失败")?;
+        let result = stmt
+            .query_row(params![message_id], |row| {
+                Ok(echomind_models::ConversationBookmark {
+                    conversation_id: row.get(0)?,
+                    note: row.get(1)?,
+                    created_at: row.get(2)?,
+                    message_id: row.get(3)?,
+                    summary: row.get(4)?,
+                })
+            })
+            .ok();
+        Ok::<_, anyhow::Error>(result)
+    })
+    .await?
 }

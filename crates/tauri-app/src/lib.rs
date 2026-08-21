@@ -144,6 +144,7 @@ pub fn run() {
             commands::remove_bookmark,
             commands::list_bookmarks,
             commands::is_bookmarked,
+            commands::get_message_bookmark,
             commands::abort_chat,
             commands::abort_import,
             commands::test_llm_connection,

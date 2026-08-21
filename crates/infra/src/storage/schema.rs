@@ -308,13 +308,17 @@ CREATE INDEX IF NOT EXISTS idx_budget_records_principal ON budget_records(princi
 CREATE INDEX IF NOT EXISTS idx_budget_records_timestamp ON budget_records(timestamp);
 CREATE INDEX IF NOT EXISTS idx_import_logs_timestamp ON import_logs(timestamp);
 
--- 对话书签表（REQ-RAG-047）
+-- 对话书签表（REQ-RAG-047 + REQ-RAG-053）
 CREATE TABLE IF NOT EXISTS conversation_bookmarks (
-  conversation_id TEXT PRIMARY KEY,
-  note TEXT,
-  created_at INTEGER NOT NULL
+conversation_id TEXT PRIMARY KEY,
+note TEXT,
+created_at INTEGER NOT NULL,
+message_id TEXT,
+summary TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_bookmarks_created ON conversation_bookmarks(created_at);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_message ON conversation_bookmarks(message_id) WHERE message_id IS NOT NULL;
+
 ";
 
 // ============================================================================

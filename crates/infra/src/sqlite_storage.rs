@@ -1859,14 +1859,22 @@ impl Storage for SqliteStorage {
     // 对话书签（REQ-RAG-047）
     // ------------------------------------------------------------------
 
-    /// 添加对话书签（REQ-RAG-047 AC-1/AC-2）。
-    async fn add_bookmark(&self, conversation_id: &str, note: Option<&str>) -> anyhow::Result<()> {
+    /// 添加对话书签（REQ-RAG-047 AC-1/AC-2 + REQ-RAG-053 消息级）。
+    async fn add_bookmark(
+        &self,
+        conversation_id: &str,
+        note: Option<&str>,
+        message_id: Option<&str>,
+        summary: Option<&str>,
+    ) -> anyhow::Result<()> {
         let now = chrono::Utc::now().timestamp();
         conversations::add_bookmark(
             &self.pool,
             conversation_id.to_string(),
             note.map(|s| s.to_string()),
             now,
+            message_id.map(|s| s.to_string()),
+            summary.map(|s| s.to_string()),
         )
         .await
     }
@@ -1876,7 +1884,7 @@ impl Storage for SqliteStorage {
         conversations::remove_bookmark(&self.pool, conversation_id.to_string()).await
     }
 
-    /// 列出全部书签（REQ-RAG-047 AC-3/AC-4）。
+    /// 列出全部书签（REQ-RAG-047 AC-3/AC-4 + REQ-RAG-053）。
     async fn list_bookmarks(&self) -> anyhow::Result<Vec<echomind_models::ConversationBookmark>> {
         conversations::list_bookmarks(&self.pool).await
     }
@@ -1884,6 +1892,14 @@ impl Storage for SqliteStorage {
     /// 检查指定会话是否已加书签（REQ-RAG-047 AC-2）。
     async fn is_bookmarked(&self, conversation_id: &str) -> anyhow::Result<bool> {
         conversations::is_bookmarked(&self.pool, conversation_id.to_string()).await
+    }
+
+    /// 查询指定消息的书签（REQ-RAG-053）。
+    async fn get_message_bookmark(
+        &self,
+        message_id: &str,
+    ) -> anyhow::Result<Option<echomind_models::ConversationBookmark>> {
+        conversations::get_message_bookmark(&self.pool, message_id.to_string()).await
     }
 }
 

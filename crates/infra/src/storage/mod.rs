@@ -23,6 +23,8 @@
 //! 所有常量和函数使用 `pub(crate)` 可见性——仅 infra crate 内部访问。
 //! `SqliteStorage` 通过 `use storage::*` 引入后，在自身 `impl` 块中调用。
 
+#[cfg(test)]
+pub(crate) mod bookmark_tests;
 pub(crate) mod conversations;
 pub(crate) mod crypto;
 pub(crate) mod documents;

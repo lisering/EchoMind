@@ -1572,14 +1572,17 @@ pub trait Storage: Send + Sync {
     // 对话书签（REQ-RAG-047）
     // ------------------------------------------------------------------
 
-    /// 添加对话书签（REQ-RAG-047 AC-1/AC-2）。
+    /// 添加对话书签（REQ-RAG-047 AC-1/AC-2 + REQ-RAG-053 消息级）。
     ///
-    /// 将指定会话标记为书签，可附带备注。重复添加时更新备注。
+    /// 将指定会话标记为书签，可附带备注。
+    /// `message_id` / `summary` 为 `Some` 时表示消息级书签（REQ-RAG-053）。
     /// 默认实现为空操作；生产适配器应覆盖为 SQL INSERT OR REPLACE。
     async fn add_bookmark(
         &self,
         _conversation_id: &str,
         _note: Option<&str>,
+        _message_id: Option<&str>,
+        _summary: Option<&str>,
     ) -> anyhow::Result<()> {
         Ok(())
     }
@@ -1591,9 +1594,9 @@ pub trait Storage: Send + Sync {
         Ok(())
     }
 
-    /// 列出全部书签（REQ-RAG-047 AC-3/AC-4）。
+    /// 列出全部书签（REQ-RAG-047 AC-3/AC-4 + REQ-RAG-053）。
     ///
-    /// 返回所有书签列表，按创建时间倒序排列。
+    /// 返回所有书签列表（含会话级和消息级），按创建时间倒序排列。
     /// 默认实现返回空 Vec；生产适配器应覆盖为 SQL SELECT。
     async fn list_bookmarks(&self) -> anyhow::Result<Vec<echomind_models::ConversationBookmark>> {
         Ok(vec![])
@@ -1604,6 +1607,17 @@ pub trait Storage: Send + Sync {
     /// 默认实现返回 false；生产适配器应覆盖为 SQL SELECT。
     async fn is_bookmarked(&self, _conversation_id: &str) -> anyhow::Result<bool> {
         Ok(false)
+    }
+
+    /// 查询指定消息的书签（REQ-RAG-053）。
+    ///
+    /// 返回 `Some(bookmark)` 表示该消息已加书签，`None` 表示未加书签。
+    /// 默认实现返回 None；生产适配器应覆盖为 SQL SELECT。
+    async fn get_message_bookmark(
+        &self,
+        _message_id: &str,
+    ) -> anyhow::Result<Option<echomind_models::ConversationBookmark>> {
+        Ok(None)
     }
 }
 pub trait LLMProvider: Send + Sync {

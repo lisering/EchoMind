@@ -364,6 +364,31 @@ pub(crate) fn migrate_schema(conn: &rusqlite::Connection) -> anyhow::Result<()> 
         .context("迁移失败：重建 summary_nodes 表失败")?;
     }
 
+    // ── conversation_bookmarks 表：message_id + summary 列在 REQ-RAG-053 新增 ──
+    // ALTER TABLE ADD COLUMN 添加为 nullable；旧书签 message_id = NULL / summary = NULL（会话级书签）
+    if table_exists(conn, "conversation_bookmarks")?
+        && !has_column(conn, "conversation_bookmarks", "message_id")?
+    {
+        info!(
+            "schema 迁移：conversation_bookmarks 表缺少 message_id 列，执行 ALTER TABLE ADD COLUMN"
+        );
+        conn.execute(
+            "ALTER TABLE conversation_bookmarks ADD COLUMN message_id TEXT",
+            [],
+        )
+        .context("迁移失败：conversation_bookmarks 表添加 message_id 列失败")?;
+    }
+    if table_exists(conn, "conversation_bookmarks")?
+        && !has_column(conn, "conversation_bookmarks", "summary")?
+    {
+        info!("schema 迁移：conversation_bookmarks 表缺少 summary 列，执行 ALTER TABLE ADD COLUMN");
+        conn.execute(
+            "ALTER TABLE conversation_bookmarks ADD COLUMN summary TEXT",
+            [],
+        )
+        .context("迁移失败：conversation_bookmarks 表添加 summary 列失败")?;
+    }
+
     Ok(())
 }
 
@@ -438,6 +463,12 @@ fn needs_migration(conn: &rusqlite::Connection) -> bool {
     // summary_nodes 表缺少 doc_id 列
     if table_exists(conn, "summary_nodes").unwrap_or(false)
         && !has_column(conn, "summary_nodes", "doc_id").unwrap_or(false)
+    {
+        return true;
+    }
+    // conversation_bookmarks 表缺少 message_id 列（REQ-RAG-053）
+    if table_exists(conn, "conversation_bookmarks").unwrap_or(false)
+        && !has_column(conn, "conversation_bookmarks", "message_id").unwrap_or(false)
     {
         return true;
     }
