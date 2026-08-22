@@ -64,9 +64,7 @@ multiple-versions = "warn"
 wildcards = "allow"
 deny = []
 skip = [
-    { name = "windows-sys", version = "0.48" },
     { name = "windows-sys", version = "0.52" },
-    { name = "windows-targets", version = "0.48" },
     { name = "windows-targets", version = "0.52" },
 ]
 skip-tree = []
