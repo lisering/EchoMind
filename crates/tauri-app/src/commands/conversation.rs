@@ -613,6 +613,44 @@ pub async fn search_conversations_inner(
 }
 
 // ============================================================================
+// 全局搜索增强（REQ-IX-008, S90）
+// ============================================================================
+
+/// 全局搜索 IPC 命令（REQ-IX-008）。
+///
+/// 统一搜索消息（FTS5）+ 文档（文件名/摘要 LIKE）+ 实体（entity_text LIKE）。
+/// 返回 `GlobalSearchResults`，前端按类型分组展示并支持点击跳转。
+///
+/// # 参数
+/// - `query`: 搜索关键词
+/// - `limit`: 每组返回结果数量上限（默认 5）
+///
+/// # 返回
+/// `GlobalSearchResults` — 包含三组搜索结果。
+#[tauri::command]
+pub async fn global_search(
+    query: String,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<GlobalSearchResults, String> {
+    let limit = limit.unwrap_or(5);
+    global_search_inner(&query, limit, state.inner()).await
+}
+
+/// 全局搜索逻辑（命令与集成测试复用）。
+pub async fn global_search_inner(
+    query: &str,
+    limit: usize,
+    state: &AppState,
+) -> Result<GlobalSearchResults, String> {
+    state
+        .storage
+        .global_search(query, limit)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ============================================================================
 // Session Strip（REQ-RAG-046）— S10: 开发者工具门控
 // ============================================================================
 

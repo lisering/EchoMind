@@ -218,9 +218,9 @@ pub mod workflow;
 
 use echomind_models::{
     ChatMessage, Chunk, ChunkPreview, CodeExecutorConfig, CodeSymbol, Conversation, DocStatus,
-    Document, DocumentPreview, EntityRelation, ExecutionResult, MemoryEntry, MemoryTier,
-    MessageSearchResult, PendingInput, Proposition, RetrievalResult, ScratchLogEntry, SessionTodo,
-    SummaryNode, SymbolKind, TodoStatus, TurnActiveVersion, WikiLink,
+    Document, DocumentPreview, EntityRelation, ExecutionResult, GlobalSearchResults, MemoryEntry,
+    MemoryTier, MessageSearchResult, PendingInput, Proposition, RetrievalResult, ScratchLogEntry,
+    SessionTodo, SummaryNode, SymbolKind, TodoStatus, TurnActiveVersion, WikiLink,
 };
 use futures::stream::BoxStream;
 
@@ -690,6 +690,24 @@ pub trait Storage: Send + Sync {
         _limit: usize,
     ) -> anyhow::Result<Vec<MessageSearchResult>> {
         Ok(Vec::new())
+    }
+
+    /// 全局搜索（REQ-IX-008）：统一搜索消息 + 文档 + 实体。
+    ///
+    /// 返回 `GlobalSearchResults`，包含三组搜索结果，每组最多 `limit` 条。
+    /// 空查询返回空列表，不返回 Err。
+    ///
+    /// 默认实现返回空结果（不支持全局搜索的适配器）。
+    async fn global_search(
+        &self,
+        _query: &str,
+        _limit: usize,
+    ) -> anyhow::Result<GlobalSearchResults> {
+        Ok(GlobalSearchResults {
+            messages: Vec::new(),
+            documents: Vec::new(),
+            entities: Vec::new(),
+        })
     }
 
     /// 按内容指纹查找缓存的嵌入向量（全尺度性能优化）。

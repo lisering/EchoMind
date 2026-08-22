@@ -702,6 +702,45 @@ pub struct MessageSearchResult {
     pub created_at: i64,
 }
 
+/// 全局搜索结果组（REQ-IX-008）。
+///
+/// 包含四类搜索结果，每组按相关性排序后截断到 `limit` 条。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobalSearchResults {
+    /// 匹配的对话消息列表（FTS5 BM25 排序）
+    pub messages: Vec<MessageSearchResult>,
+    /// 匹配的文档列表（文件名 + 摘要 LIKE 匹配）
+    pub documents: Vec<DocumentSearchResult>,
+    /// 匹配的实体列表（entity_text LIKE 匹配）
+    pub entities: Vec<EntitySearchResult>,
+}
+
+/// 文档搜索结果（REQ-IX-008）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentSearchResult {
+    /// 文档 ID
+    pub doc_id: String,
+    /// 文件路径
+    pub file_path: String,
+    /// 文档摘要（可能为空）
+    pub summary: Option<String>,
+    /// 匹配类型："title" 或 "summary"
+    pub match_type: String,
+}
+
+/// 实体搜索结果（REQ-IX-008）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntitySearchResult {
+    /// 实体文本
+    pub entity_text: String,
+    /// 实体类型
+    pub entity_type: String,
+    /// 关联的 chunk ID
+    pub chunk_id: String,
+    /// 关联的文档 ID
+    pub doc_id: String,
+}
+
 /// 持久化提示接纳（B05 Durable Prompt Admission）。
 ///
 /// 借鉴 OpenCode 的 Prompt Admission / Promotion 机制：用户消息先「接纳」到

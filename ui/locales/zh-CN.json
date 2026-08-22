@@ -671,16 +671,17 @@
     "cmd_shortcuts": "快捷键帮助",
     "shortcuts_hint": "快捷键面板将在后续版本支持"
   },
-  "global_search": {
-    "placeholder": "搜索会话、文档、消息…",
-    "no_results": "未找到匹配内容",
-    "searching": "搜索中…",
-    "search_error": "搜索失败，请重试",
-    "untitled": "未命名",
-    "group_conversations": "会话",
-    "group_documents": "文档",
-    "group_messages": "消息"
-  },
+"global_search": {
+"placeholder": "搜索会话、文档、消息…",
+"no_results": "未找到匹配内容",
+"searching": "搜索中…",
+"search_error": "搜索失败，请重试",
+"untitled": "未命名",
+"group_conversations": "会话",
+"group_documents": "文档",
+"group_messages": "消息",
+"group_entities": "实体"
+},
   "markdown": {
     "copy": "复制",
     "copied": "已复制 ✓",

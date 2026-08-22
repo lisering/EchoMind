@@ -671,16 +671,17 @@
     "cmd_shortcuts": "Keyboard Shortcuts",
     "shortcuts_hint": "Press ⌘/ to view all shortcuts"
   },
-  "global_search": {
-    "placeholder": "Search conversations, documents, messages…",
-    "no_results": "No matching content found",
-    "searching": "Searching…",
-    "search_error": "Search failed, please try again",
-    "untitled": "Untitled",
-    "group_conversations": "Conversations",
-    "group_documents": "Documents",
-    "group_messages": "Messages"
-  },
+"global_search": {
+"placeholder": "Search conversations, documents, messages…",
+"no_results": "No matching content found",
+"searching": "Searching…",
+"search_error": "Search failed, please try again",
+"untitled": "Untitled",
+"group_conversations": "Conversations",
+"group_documents": "Documents",
+"group_messages": "Messages",
+"group_entities": "Entities"
+},
   "markdown": {
     "copy": "Copy",
     "copied": "Copied ✓",

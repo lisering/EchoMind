@@ -6,7 +6,7 @@
 //! 所有函数接收 `&Pool` 参数，不持有 `&self`，可见性 `pub(crate)`。
 
 use anyhow::Context;
-use echomind_models::{DocStatus, Document};
+use echomind_models::{DocStatus, Document, DocumentSearchResult};
 use rusqlite::params;
 
 use super::schema::DOC_COLS;
@@ -529,6 +529,58 @@ pub(crate) async fn delete_document(
         conn.execute("DELETE FROM documents WHERE id = ?1", params![doc_id])
             .context("删除文档失败")?;
         Ok(())
+    })
+    .await
+}
+
+// ============================================================================
+// 全局搜索（REQ-IX-008）
+// ============================================================================
+
+/// 全局搜索文档（文件名 + 摘要 LIKE 匹配，REQ-IX-008）。
+///
+/// 搜索 documents 表的 `file_path` 和 `summary` 列。
+/// 返回结果按文件名匹配优先排序，每组最多 `limit` 条。
+pub(crate) async fn search_documents(
+    pool: &super::migration::Pool,
+    query: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<DocumentSearchResult>> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+    let pool = pool.clone();
+    let pattern = format!("%{trimmed}%");
+    let trimmed_lower = trimmed.to_lowercase();
+    run_db(move || {
+        let conn = pool.get().context("获取数据库连接失败")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, file_path, summary FROM documents \
+             WHERE file_path LIKE ?1 OR summary LIKE ?1 \
+             ORDER BY CASE WHEN file_path LIKE ?1 THEN 0 ELSE 1 END \
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![pattern, limit as i64], |row| {
+            let file_path: String = row.get(1)?;
+            let summary: Option<String> = row.get(2)?;
+            let match_type = if file_path.to_lowercase().contains(&trimmed_lower) {
+                "title"
+            } else {
+                "summary"
+            };
+            Ok(DocumentSearchResult {
+                doc_id: row.get(0)?,
+                file_path,
+                summary,
+                match_type: match_type.to_string(),
+            })
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
     })
     .await
 }

@@ -365,6 +365,8 @@ pub fn run() {
             commands::branch_from_message,
             // 对话全文搜索（REQ-RAG-040）
             commands::search_conversations,
+            // 全局搜索增强（REQ-IX-008）
+            commands::global_search,
             // Session Strip 会话条带化（REQ-RAG-046）
             // S10: 开发者工具门控 — Release 构建中不注册
             #[cfg(debug_assertions)]

@@ -75,9 +75,9 @@ use echomind_core::retrieval_memory::{
 };
 use echomind_models::{
     BudgetStats, ChatMessage, Chunk, CodeSymbol, Conversation, DocStatus, Document, EntityRelation,
-    MemoryEntry, MemorySource, MemoryTier, MessageSearchResult, PendingInput, Proposition,
-    RetrievalResult, ScratchLogEntry, SessionTodo, SummaryNode, SymbolKind, TodoStatus,
-    TurnActiveVersion, WikiLink,
+    GlobalSearchResults, MemoryEntry, MemorySource, MemoryTier, MessageSearchResult, PendingInput,
+    Proposition, RetrievalResult, ScratchLogEntry, SessionTodo, SummaryNode, SymbolKind,
+    TodoStatus, TurnActiveVersion, WikiLink,
 };
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
@@ -1375,6 +1375,38 @@ impl Storage for SqliteStorage {
         limit: usize,
     ) -> anyhow::Result<Vec<MessageSearchResult>> {
         messages::search_messages(&self.pool, query, limit).await
+    }
+
+    /// 全局搜索（REQ-IX-008）：统一搜索消息 + 文档 + 实体。
+    ///
+    /// 并行执行三路搜索：消息 FTS5 + 文档 LIKE + 实体 LIKE。
+    /// 每组结果按相关性排序后截断到 `limit` 条。
+    async fn global_search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> anyhow::Result<GlobalSearchResults> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() || limit == 0 {
+            return Ok(GlobalSearchResults {
+                messages: Vec::new(),
+                documents: Vec::new(),
+                entities: Vec::new(),
+            });
+        }
+
+        // 并行执行三路搜索
+        let (messages, documents, entities) = tokio::join!(
+            messages::search_messages(&self.pool, trimmed, limit),
+            documents::search_documents(&self.pool, trimmed, limit),
+            entities::search_entities(&self.pool, trimmed, limit),
+        );
+
+        Ok(GlobalSearchResults {
+            messages: messages?,
+            documents: documents?,
+            entities: entities?,
+        })
     }
 
     // ---- 嵌入缓存：按内容指纹去重（全尺度性能优化）----
