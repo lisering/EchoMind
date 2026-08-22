@@ -389,6 +389,10 @@ pub fn run() {
             commands::remove_document_tag,
             commands::list_all_tags,
             commands::filter_documents_by_tag,
+            // 文档批量操作（REQ-ING-024 文档批量操作）
+            commands::batch_delete_documents,
+            commands::batch_move_documents,
+            commands::batch_add_tags,
             // KB 统计仪表盘（REQ-KB-003 v1.5）
             commands::get_kb_stats,
             // P1-1: 磁盘空间检查与清理（磁盘满弹性设计）

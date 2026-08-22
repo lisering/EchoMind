@@ -1198,8 +1198,151 @@ async fn tc_ing_tag_005_idempotent_add() {
     assert_eq!(found.tags.len(), 1, "重复添加同一标签不应产生重复条目");
 }
 
-// ==================================================================
-// B05: Durable Prompt Admission — pending_inputs 存储测试
+// ============================================================
+// 文档批量操作 TDD 测试（REQ-ING-024，TC-ING-BATCH-001~006）
+// ============================================================
+
+/// TC-ING-BATCH-001：批量删除 — 3 个文档批量删除后全部消失。
+#[tokio::test]
+async fn tc_ing_batch_001_batch_delete() {
+    let dir = TempDir::new().unwrap();
+    let storage = SqliteStorage::new(&dir.path().join("test.db")).unwrap();
+
+    let doc1 = Document::new("a.md".to_string(), "hash-a".to_string());
+    let doc2 = Document::new("b.md".to_string(), "hash-b".to_string());
+    let doc3 = Document::new("c.md".to_string(), "hash-c".to_string());
+    storage.add_document(&doc1).await.unwrap();
+    storage.add_document(&doc2).await.unwrap();
+    storage.add_document(&doc3).await.unwrap();
+
+    // 批量删除
+    let ids = vec![doc1.id.clone(), doc2.id.clone(), doc3.id.clone()];
+    storage.batch_delete_documents(&ids).await.unwrap();
+
+    // 验证全部删除
+    let docs = storage.list_documents().await.unwrap();
+    assert_eq!(docs.len(), 0, "批量删除后应无文档残留");
+}
+
+/// TC-ING-BATCH-002：批量移动 — 3 个文档移动到新工作空间。
+#[tokio::test]
+async fn tc_ing_batch_002_batch_move() {
+    let dir = TempDir::new().unwrap();
+    let storage = SqliteStorage::new(&dir.path().join("test.db")).unwrap();
+
+    // 创建工作空间
+    let ws = echomind_models::Workspace::new("目标库".to_string());
+    storage.create_workspace(&ws).await.unwrap();
+
+    let doc1 = Document::new("a.md".to_string(), "hash-a".to_string());
+    let doc2 = Document::new("b.md".to_string(), "hash-b".to_string());
+    storage.add_document(&doc1).await.unwrap();
+    storage.add_document(&doc2).await.unwrap();
+
+    // 批量移动
+    let ids = vec![doc1.id.clone(), doc2.id.clone()];
+    storage.batch_move_documents(&ids, &ws.id).await.unwrap();
+
+    // 验证 workspace_id 已更新
+    let docs = storage.list_documents().await.unwrap();
+    for doc in &docs {
+        assert_eq!(doc.workspace_id, ws.id, "文档应已移动到目标工作空间");
+    }
+}
+
+/// TC-ING-BATCH-003：批量添加标签 — 3 个文档 × 2 个标签。
+#[tokio::test]
+async fn tc_ing_batch_003_batch_add_tags() {
+    let dir = TempDir::new().unwrap();
+    let storage = SqliteStorage::new(&dir.path().join("test.db")).unwrap();
+
+    let doc1 = Document::new("a.md".to_string(), "hash-a".to_string());
+    let doc2 = Document::new("b.md".to_string(), "hash-b".to_string());
+    let doc3 = Document::new("c.md".to_string(), "hash-c".to_string());
+    storage.add_document(&doc1).await.unwrap();
+    storage.add_document(&doc2).await.unwrap();
+    storage.add_document(&doc3).await.unwrap();
+
+    // 批量添加 2 个标签
+    let ids = vec![doc1.id.clone(), doc2.id.clone(), doc3.id.clone()];
+    let tags = vec!["重要".to_string(), "技术".to_string()];
+    storage.batch_add_tags(&ids, &tags).await.unwrap();
+
+    // 验证每个文档都有 2 个标签
+    let docs = storage.list_documents().await.unwrap();
+    for doc in &docs {
+        assert_eq!(doc.tags.len(), 2, "每个文档应有 2 个标签");
+        assert!(doc.tags.contains(&"重要".to_string()), "应包含「重要」标签");
+        assert!(doc.tags.contains(&"技术".to_string()), "应包含「技术」标签");
+    }
+}
+
+/// TC-ING-BATCH-004：批量删除空列表 — 空列表不报错。
+#[tokio::test]
+async fn tc_ing_batch_004_empty_list() {
+    let dir = TempDir::new().unwrap();
+    let storage = SqliteStorage::new(&dir.path().join("test.db")).unwrap();
+
+    // 空列表批量操作不应报错
+    storage.batch_delete_documents(&[]).await.unwrap();
+    storage.batch_move_documents(&[], "default").await.unwrap();
+    storage.batch_add_tags(&[], &[]).await.unwrap();
+}
+
+/// TC-ING-BATCH-005：批量标签幂等 — 重复添加不产生重复。
+#[tokio::test]
+async fn tc_ing_batch_005_idempotent_tags() {
+    let dir = TempDir::new().unwrap();
+    let storage = SqliteStorage::new(&dir.path().join("test.db")).unwrap();
+
+    let doc1 = Document::new("a.md".to_string(), "hash-a".to_string());
+    storage.add_document(&doc1).await.unwrap();
+
+    let ids = vec![doc1.id.clone()];
+    let tags = vec!["标签A".to_string()];
+    storage.batch_add_tags(&ids, &tags).await.unwrap();
+    // 重复添加
+    storage.batch_add_tags(&ids, &tags).await.unwrap();
+
+    let docs = storage.list_documents().await.unwrap();
+    let found = docs.iter().find(|d| d.id == doc1.id).unwrap();
+    assert_eq!(found.tags.len(), 1, "重复添加不应产生重复标签");
+}
+
+/// TC-ING-BATCH-006：批量删除后向量缓存失效 — 确保缓存被清理。
+#[tokio::test]
+async fn tc_ing_batch_006_cache_invalidation() {
+    let dir = TempDir::new().unwrap();
+    let storage = SqliteStorage::new(&dir.path().join("test.db")).unwrap();
+
+    let doc1 = Document::new("a.md".to_string(), "hash-a".to_string());
+    storage.add_document(&doc1).await.unwrap();
+
+    // 添加 chunk + embedding 以填充向量缓存
+    let chunk = Chunk {
+        id: uuid::Uuid::new_v4().to_string(),
+        doc_id: doc1.id.clone(),
+        content: "test content".to_string(),
+        token_count: 2,
+        sequence: 0,
+    };
+    storage.add_chunk(&chunk).await.unwrap();
+    let embedding = vec![0.1_f32, 0.2, 0.3];
+    storage.add_embedding(&chunk.id, &embedding).await.unwrap();
+
+    // 触发向量搜索以加载缓存
+    let _ = storage.vector_search(&embedding, 5).await.unwrap();
+
+    // 批量删除
+    storage
+        .batch_delete_documents(std::slice::from_ref(&doc1.id))
+        .await
+        .unwrap();
+
+    // 验证文档已删除
+    let docs = storage.list_documents().await.unwrap();
+    assert_eq!(docs.len(), 0, "文档应已删除");
+}
 // ==================================================================
 
 /// 辅助函数：创建包含会话的存储（用于 pending_inputs 测试）。

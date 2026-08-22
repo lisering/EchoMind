@@ -2992,6 +2992,49 @@ impl ConversationBookmark {
     }
 }
 
+/// 批量操作结果（REQ-ING-024 文档批量操作）。
+///
+/// 记录批量删除/移动/标签操作的成功与失败统计。
+/// 失败的文档 ID 收集到 `failed_ids` 中，便于前端针对性提示。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchResult {
+    /// 成功操作的文档数
+    pub success_count: usize,
+    /// 失败操作的文档数
+    pub failed_count: usize,
+    /// 失败的文档 ID 列表
+    pub failed_ids: Vec<String>,
+}
+
+impl BatchResult {
+    /// 创建全成功的 BatchResult。
+    pub fn all_success(count: usize) -> Self {
+        Self {
+            success_count: count,
+            failed_count: 0,
+            failed_ids: Vec::new(),
+        }
+    }
+
+    /// 从结果列表构建 BatchResult。
+    pub fn from_results(results: Vec<(String, Result<(), String>)>) -> Self {
+        let mut success_count = 0;
+        let mut failed_ids = Vec::new();
+        for (id, result) in results {
+            match result {
+                Ok(()) => success_count += 1,
+                Err(_) => failed_ids.push(id),
+            }
+        }
+        let failed_count = failed_ids.len();
+        Self {
+            success_count,
+            failed_count,
+            failed_ids,
+        }
+    }
+}
+
 // 缓存设置新增到 SettingsPayload（REQ-PERF-001）。
 //
 // 通过 `get_settings` 返回给前端，前端据此渲染缓存设置 UI。

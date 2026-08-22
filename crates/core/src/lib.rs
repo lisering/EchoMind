@@ -858,6 +858,53 @@ pub trait Storage: Send + Sync {
         Ok(Vec::new())
     }
 
+    // ------------------------------------------------------------------
+    // 文档批量操作（REQ-ING-024 文档批量操作）
+    // ------------------------------------------------------------------
+
+    /// 批量删除文档（REQ-ING-024 AC-3）。
+    ///
+    /// 在单个事务中执行批量 DELETE，全部成功或全部回滚。
+    /// 级联清理 chunks / embeddings / FTS5 索引。
+    ///
+    /// 默认实现逐条调用 `delete_document`；生产适配器应覆盖为单事务批量 DELETE。
+    async fn batch_delete_documents(&self, doc_ids: &[String]) -> anyhow::Result<()> {
+        for id in doc_ids {
+            self.delete_document(id).await?;
+        }
+        Ok(())
+    }
+
+    /// 批量移动文档到目标工作空间（REQ-ING-024 AC-4）。
+    ///
+    /// 在单个事务中批量更新 `workspace_id`，全部成功或全部回滚。
+    ///
+    /// 默认实现逐条调用 `migrate_document`；生产适配器应覆盖为单事务批量 UPDATE。
+    async fn batch_move_documents(
+        &self,
+        doc_ids: &[String],
+        target_workspace_id: &str,
+    ) -> anyhow::Result<()> {
+        for id in doc_ids {
+            self.migrate_document(id, target_workspace_id).await?;
+        }
+        Ok(())
+    }
+
+    /// 批量添加文档标签（REQ-ING-024 AC-5）。
+    ///
+    /// 为多个文档批量添加多个标签（去重幂等）。
+    ///
+    /// 默认实现逐条调用 `add_document_tag`；生产适配器应覆盖为单事务批量操作。
+    async fn batch_add_tags(&self, doc_ids: &[String], tags: &[String]) -> anyhow::Result<()> {
+        for doc_id in doc_ids {
+            for tag in tags {
+                self.add_document_tag(doc_id, tag).await?;
+            }
+        }
+        Ok(())
+    }
+
     /// 批量写入实体索引（REQ-PERF-006 实体链接增强）。
     ///
     /// 导入文档时抽取实体并批量写入 `entities` 表，供三路 RRF 实体检索通道使用。

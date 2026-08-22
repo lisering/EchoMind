@@ -1540,6 +1540,105 @@ impl Storage for SqliteStorage {
         documents::filter_documents_by_tag(&self.pool, tag).await
     }
 
+    // ------------------------------------------------------------------
+    // 文档批量操作（REQ-ING-024 文档批量操作）
+    // ------------------------------------------------------------------
+
+    /// 批量删除文档（REQ-ING-024 AC-3）。
+    ///
+    /// 在单个事务中批量 DELETE documents + chunks_fts，全部成功或全部回滚。
+    /// 删除后失效向量缓存。
+    async fn batch_delete_documents(&self, doc_ids: &[String]) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let ids: Vec<String> = doc_ids.to_vec();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let tx = conn.unchecked_transaction().context("开启事务失败")?;
+            {
+                let mut stmt_fts = tx.prepare("DELETE FROM chunks_fts WHERE doc_id = ?1")?;
+                let mut stmt_doc = tx.prepare("DELETE FROM documents WHERE id = ?1")?;
+                for id in &ids {
+                    stmt_fts
+                        .execute(params![id])
+                        .context("清理 FTS5 索引失败")?;
+                    stmt_doc.execute(params![id]).context("删除文档失败")?;
+                }
+            }
+            tx.commit().context("提交事务失败")?;
+            Ok(())
+        })
+        .await?;
+        self.invalidate_vector_cache();
+        Ok(())
+    }
+
+    /// 批量移动文档到目标工作空间（REQ-ING-024 AC-4）。
+    ///
+    /// 在单个事务中批量 UPDATE `workspace_id`，全部成功或全部回滚。
+    async fn batch_move_documents(
+        &self,
+        doc_ids: &[String],
+        target_workspace_id: &str,
+    ) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let ids: Vec<String> = doc_ids.to_vec();
+        let target = target_workspace_id.to_string();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let tx = conn.unchecked_transaction().context("开启事务失败")?;
+            {
+                let mut stmt =
+                    tx.prepare("UPDATE documents SET workspace_id = ?1 WHERE id = ?2")?;
+                for id in &ids {
+                    stmt.execute(params![target, id])
+                        .context("更新工作空间失败")?;
+                }
+            }
+            tx.commit().context("提交事务失败")?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// 批量添加文档标签（REQ-ING-024 AC-5）。
+    ///
+    /// 在单个事务中为多个文档批量添加多个标签（去重幂等）。
+    async fn batch_add_tags(&self, doc_ids: &[String], tags: &[String]) -> anyhow::Result<()> {
+        let pool = self.pool.clone();
+        let ids: Vec<String> = doc_ids.to_vec();
+        let tags_cleaned: Vec<String> = tags
+            .iter()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+        run_db(move || {
+            let conn = pool.get().context("获取数据库连接失败")?;
+            let tx = conn.unchecked_transaction().context("开启事务失败")?;
+            {
+                let mut stmt = tx.prepare("SELECT tags FROM documents WHERE id = ?1")?;
+                let mut stmt_update = tx.prepare("UPDATE documents SET tags = ?1 WHERE id = ?2")?;
+                for doc_id in &ids {
+                    let tags_json: String = stmt
+                        .query_row(params![doc_id], |row| row.get(0))
+                        .unwrap_or_else(|_| "[]".to_string());
+                    let mut current_tags: Vec<String> =
+                        serde_json::from_str(&tags_json).unwrap_or_default();
+                    for tag in &tags_cleaned {
+                        if !current_tags.iter().any(|t| t == tag) {
+                            current_tags.push(tag.clone());
+                        }
+                    }
+                    let new_json =
+                        serde_json::to_string(&current_tags).unwrap_or_else(|_| "[]".to_string());
+                    stmt_update.execute(params![new_json, doc_id])?;
+                }
+            }
+            tx.commit().context("提交事务失败")?;
+            Ok(())
+        })
+        .await
+    }
+
     // ========================================================================
     // S03 拆分：以下方法委托至 storage::entities / storage::misc 子模块
     // ========================================================================

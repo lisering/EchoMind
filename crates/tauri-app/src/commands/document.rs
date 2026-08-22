@@ -711,3 +711,160 @@ pub async fn check_disk_space_inner(required_bytes: u64, state: &AppState) -> Re
             }
         })
 }
+
+// ====================================================================
+// 文档批量操作（REQ-ING-024 文档批量操作）
+// ====================================================================
+
+/// 批量删除文档（REQ-ING-024 AC-3）。
+///
+/// 在单个事务中批量删除文档 + FTS5 索引，全部成功或全部回滚。
+/// 删除后同时清理数据目录中的文件副本和缓存。
+#[tauri::command]
+pub async fn batch_delete_documents(
+    ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<BatchResult, String> {
+    batch_delete_documents_inner(ids, state.inner()).await
+}
+
+/// `batch_delete_documents` 的逻辑实现（命令与集成测试复用）。
+pub async fn batch_delete_documents_inner(
+    ids: Vec<String>,
+    state: &AppState,
+) -> Result<BatchResult, String> {
+    if ids.is_empty() {
+        return Ok(BatchResult::all_success(0));
+    }
+
+    // 先取文件路径（删除后无法回查）
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let id_set: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
+    let file_paths: Vec<(String, String)> = docs
+        .iter()
+        .filter(|d| id_set.contains(d.id.as_str()))
+        .map(|d| (d.id.clone(), d.file_path.clone()))
+        .collect();
+
+    // 批量删除（事务保证全成功或全回滚）
+    state
+        .storage
+        .batch_delete_documents(&ids)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 清理文件副本和缓存（失败不阻塞）
+    for (doc_id, file_path) in &file_paths {
+        if let Err(err) = tokio::fs::remove_file(file_path).await {
+            warn!("文档副本清理失败（可忽略）: {file_path}: {err}");
+        }
+        if let Some(doc_name) = std::path::Path::new(file_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            && let Err(e) = state.cache.invalidate_by_doc(&doc_name).await
+        {
+            warn!("删除文档后失效缓存失败: {e:#}");
+        }
+        let _ = &doc_id; // doc_id 保留以备日志
+    }
+    state.step_cache.clear();
+
+    Ok(BatchResult::all_success(ids.len()))
+}
+
+/// 批量移动文档到目标工作空间（REQ-ING-024 AC-4）。
+///
+/// 在单个事务中批量更新 workspace_id。
+#[tauri::command]
+pub async fn batch_move_documents(
+    ids: Vec<String>,
+    target_workspace_id: String,
+    state: State<'_, AppState>,
+) -> Result<BatchResult, String> {
+    batch_move_documents_inner(ids, target_workspace_id, state.inner()).await
+}
+
+/// `batch_move_documents` 的逻辑实现（命令与集成测试复用）。
+pub async fn batch_move_documents_inner(
+    ids: Vec<String>,
+    target_workspace_id: String,
+    state: &AppState,
+) -> Result<BatchResult, String> {
+    if ids.is_empty() {
+        return Ok(BatchResult::all_success(0));
+    }
+
+    // 验证目标工作空间存在
+    let workspaces = state
+        .storage
+        .list_workspaces()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if !workspaces.iter().any(|ws| ws.id == target_workspace_id) {
+        return Err(format!("目标知识库不存在: {target_workspace_id}"));
+    }
+
+    // 免费版配额检查
+    let is_pro = *state.is_pro().read().await;
+    if !is_pro {
+        let count = state
+            .storage
+            .count_documents_in_workspace(&target_workspace_id)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        if count + ids.len() >= echomind_core::import::FREE_TIER_MAX_FILES {
+            return Err(format!(
+                "LIMIT_REACHED: 目标知识库将达免费版上限（{} 个文件）",
+                echomind_core::import::FREE_TIER_MAX_FILES
+            ));
+        }
+    }
+
+    state
+        .storage
+        .batch_move_documents(&ids, &target_workspace_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 清空查询缓存
+    if let Err(e) = state.cache.clear_all().await {
+        tracing::warn!("批量迁移后清空查询缓存失败: {e:#}");
+    }
+
+    Ok(BatchResult::all_success(ids.len()))
+}
+
+/// 批量添加文档标签（REQ-ING-024 AC-5）。
+///
+/// 为多个文档批量添加多个标签（逗号分隔输入，去重幂等）。
+#[tauri::command]
+pub async fn batch_add_tags(
+    ids: Vec<String>,
+    tags: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<BatchResult, String> {
+    batch_add_tags_inner(ids, tags, state.inner()).await
+}
+
+/// `batch_add_tags` 的逻辑实现（命令与集成测试复用）。
+pub async fn batch_add_tags_inner(
+    ids: Vec<String>,
+    tags: Vec<String>,
+    state: &AppState,
+) -> Result<BatchResult, String> {
+    if ids.is_empty() || tags.is_empty() {
+        return Ok(BatchResult::all_success(0));
+    }
+
+    state
+        .storage
+        .batch_add_tags(&ids, &tags)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    Ok(BatchResult::all_success(ids.len()))
+}

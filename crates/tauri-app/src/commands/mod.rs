@@ -44,7 +44,7 @@ use echomind_infra::hyde_rewriter::HydeRewriter;
 use echomind_infra::openai_provider::OpenAIProvider;
 use echomind_infra::sqlite_storage::SqliteStorage;
 use echomind_models::{
-    AgentStepPayload, CacheSettingsPayload, CacheStats, ChatMessage, ChatPhasePayload,
+    AgentStepPayload, BatchResult, CacheSettingsPayload, CacheStats, ChatMessage, ChatPhasePayload,
     Conversation, ConversationCost, ConversationTree, ConversationTreeNode, DocStatus,
     DocStatusPayload, Document, DocumentPreview, EmbeddingProgressPayload, EntityRelation,
     ExecutionResult, GenerationParams, GlobalSearchResults, GraphCommunity, GraphPath, GraphStats,
