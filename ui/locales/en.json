@@ -1535,6 +1535,14 @@
     "auto_update": "Check for updates automatically",
     "auto_update_desc": "Check GitHub Releases for new versions every 24 hours"
   },
+  "update_banner": {
+    "label": "Update available",
+    "desc": "New version available: you have {{current}}, latest is {{latest}}",
+    "view_notes": "Release Notes",
+    "download": "Download",
+    "close": "Close",
+    "notes_title": "Release Notes"
+  },
   "breadcrumb": {
     "new_conversation": "New Chat",
     "messages": "messages",

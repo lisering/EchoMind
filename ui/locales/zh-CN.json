@@ -1535,6 +1535,14 @@
     "auto_update": "自动检查更新",
     "auto_update_desc": "每 24 小时检查 GitHub Releases 是否有新版本"
   },
+  "update_banner": {
+    "label": "有新版本可用",
+    "desc": "发现新版本：当前 {{current}}，最新 {{latest}}",
+    "view_notes": "更新日志",
+    "download": "立即下载",
+    "close": "关闭",
+    "notes_title": "更新日志"
+  },
   "breadcrumb": {
     "new_conversation": "新对话",
     "messages": "条消息",

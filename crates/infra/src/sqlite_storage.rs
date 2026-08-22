@@ -327,6 +327,7 @@ pub(crate) fn vec_to_bytes(vector: &[f32]) -> Vec<u8> {
 }
 
 /// 小端字节 → f32 向量（长度校验，绝不 Panic）。
+#[allow(clippy::chunks_exact_to_as_chunks)] // Rust 1.98+ 新 lint，as_chunks 返回元组类型不兼容
 pub(crate) fn bytes_to_vec(bytes: &[u8]) -> anyhow::Result<Vec<f32>> {
     if !bytes.len().is_multiple_of(4) {
         bail!("向量字节长度非法（非 4 的倍数）: {}", bytes.len());

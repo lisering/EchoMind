@@ -315,6 +315,7 @@ pub async fn chat_inner<R: Runtime>(
         .get("cache.ttl_secs")
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(86400);
+    #[allow(clippy::needless_late_init)] // 三分支延迟初始化，clippy 1.98+ 新 lint
     let query_embedding_result: Option<Vec<f32>>;
 
     if cache_enabled && !embedding_degraded {

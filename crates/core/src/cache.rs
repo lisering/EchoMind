@@ -143,6 +143,7 @@ pub fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
 ///
 /// # 错误
 /// 如果字节长度不是 4 的整数倍，返回空向量。
+#[allow(clippy::chunks_exact_to_as_chunks)] // Rust 1.98+ 新 lint，as_chunks 返回元组类型不兼容
 pub fn embedding_from_bytes(bytes: &[u8]) -> Vec<f32> {
     if !bytes.len().is_multiple_of(4) {
         return Vec::new();

@@ -3222,3 +3222,170 @@ mark.search-mark {
 [data-settings-section]:not(.hidden) {
   animation: settings-fade-in 0.15s ease-out;
 }
+
+/* REQ-HELP-004: 更新横幅（S87 前端增强） */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: #fef3c7; /* amber-100 */
+  color: #92400e; /* amber-800 */
+  font-size: 0.8125rem;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(-100%);
+  transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+  z-index: 50;
+}
+
+[data-theme="dark"] .update-banner,
+[data-theme="high-contrast"] .update-banner {
+  background: #78350f; /* amber-900 */
+  color: #fde68a; /* amber-200 */
+}
+
+[data-theme="light"] .update-banner {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.update-banner-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.update-banner-text {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.update-banner-version {
+  font-weight: 700;
+  background: #f59e0b; /* amber-500 */
+  color: #fff;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+}
+
+.update-banner-desc {
+  flex: 1;
+}
+
+.update-banner-link {
+  font-size: 0.75rem;
+  color: inherit;
+  text-decoration: underline;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  transition: background 0.15s ease;
+}
+
+.update-banner-link:hover {
+  background: rgba(146, 64, 14, 0.15);
+}
+
+[data-theme="dark"] .update-banner-link:hover,
+[data-theme="high-contrast"] .update-banner-link:hover {
+  background: rgba(253, 230, 138, 0.15);
+}
+
+.update-banner-download {
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #f59e0b;
+  color: #fff;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.375rem;
+  transition: background 0.15s ease;
+}
+
+.update-banner-download:hover {
+  background: #d97706; /* amber-600 */
+}
+
+.update-banner-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: inherit;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.update-banner-close:hover {
+  opacity: 1;
+}
+
+/* 更新日志模态框 */
+.update-notes-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.update-notes-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.update-notes-dialog {
+  position: relative;
+  max-width: 600px;
+  max-height: 70vh;
+  width: 90%;
+  background: var(--surface-1, #1e293b);
+  border: 1px solid var(--border-default, #334155);
+  border-radius: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.update-notes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-default, #334155);
+}
+
+.update-notes-version {
+  font-weight: 700;
+  color: var(--text-primary, #f1f5f9);
+  font-size: 0.875rem;
+}
+
+.update-notes-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--text-secondary, #94a3b8);
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.update-notes-close:hover {
+  opacity: 1;
+}
+
+.update-notes-body {
+  padding: 1rem;
+  overflow-y: auto;
+  color: var(--text-secondary, #94a3b8);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
