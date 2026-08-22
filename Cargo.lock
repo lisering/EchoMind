@@ -2238,7 +2238,7 @@ dependencies = [
 
 [[package]]
 name = "echomind-compact"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "anyhow",
  "echomind-core",
@@ -2253,7 +2253,7 @@ dependencies = [
 
 [[package]]
 name = "echomind-context"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2266,7 +2266,7 @@ dependencies = [
 
 [[package]]
 name = "echomind-core"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2304,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "echomind-infra"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2351,7 +2351,7 @@ dependencies = [
 
 [[package]]
 name = "echomind-models"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "chrono",
  "serde",
@@ -2361,7 +2361,7 @@ dependencies = [
 
 [[package]]
 name = "echomind-prompt"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "echomind-models",
  "regex",
@@ -2371,7 +2371,7 @@ dependencies = [
 
 [[package]]
 name = "echomind-tauri-app"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4717,7 +4717,7 @@ dependencies = [
 
 [[package]]
 name = "license-issuer"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

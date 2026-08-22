@@ -1,6 +1,6 @@
 [package]
 name = "echomind-infra"
-version = "2.3.0"
+version = "2.4.0"
 edition = "2024"
 license = "MIT"
 description = "EchoMind 适配器层：SQLite 持久化与本地向量化引擎（实现 core 端口，六边形架构）"
