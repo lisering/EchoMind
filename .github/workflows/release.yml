@@ -1,6 +1,6 @@
 # Release — Cross-platform build artifacts
 # Triggers: tag push (v*) or manual dispatch
-# Produces: macOS (.dmg), Windows (.msi), Linux (.AppImage/.deb)
+# Produces: macOS (.dmg, signed + notarized if certs available), Windows (.msi), Linux (.AppImage/.deb)
 name: Release
 
 on:
@@ -60,8 +60,58 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked
 
+      # ─── macOS: Import signing certificate (if available) ───
+      - name: Import macOS signing certificate
+        if: runner.os == 'macOS' && env.SIGNING_CERTIFICATE_P12 != ''
+        env:
+          SIGNING_CERTIFICATE_P12: ${{ secrets.SIGNING_CERTIFICATE_P12 }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          # Decode P12 from base64 secret
+          echo "$SIGNING_CERTIFICATE_P12" | base64 --decode > /tmp/certificate.p12
+
+          # Create temporary keychain
+          KEYCHAIN_NAME="echomind-build-$(date +%s).keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN_NAME"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security import /tmp/certificate.p12 \
+              -k "$KEYCHAIN_NAME" \
+              -P "$SIGNING_PASSWORD" \
+              -T /usr/bin/codesign \
+              -T /usr/bin/security
+          security set-key-partition-list -S apple-tools: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security list-keychains -d user -s "$KEYCHAIN_NAME" login.keychain
+
+          # Export identity name for Tauri
+          echo "APPLE_SIGNING_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_NAME" | grep -oE 'Developer ID Application.*' | head -1)" >> $GITHUB_ENV
+
+          # Cleanup P12 file
+          rm -f /tmp/certificate.p12
+
       - name: Build installer (${{ matrix.label }})
+        env:
+          # macOS signing (passed to Tauri CLI)
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          # macOS notarization (passed to Tauri CLI)
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: cargo tauri build --target ${{ matrix.target }}
+
+      # ─── macOS: Verify signing (if certificate was used) ───
+      - name: Verify macOS signing
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_IDENTITY != ''
+        run: |
+          APP_PATH="target/${{ matrix.target }}/release/bundle/macos/EchoMind.app"
+          echo "Verifying code signature..."
+          codesign -v --deep --strict "$APP_PATH"
+          echo "Verifying Gatekeeper..."
+          spctl --assess --type execute -vv "$APP_PATH" || true
+          echo "Verifying notarization staple..."
+          xcrun stapler validate "$APP_PATH" || echo "Notarization staple not found (may not be notarized)"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
