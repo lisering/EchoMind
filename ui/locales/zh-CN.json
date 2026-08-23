@@ -408,7 +408,7 @@
     "vlm_enabled": "VLM 增强已开启",
     "vlm_disabled": "VLM 增强已关闭",
     "rerank_section": "检索质量增强",
-    "rerank_toggle": "Cross-Encoder 重排序",
+    "rerank_toggle": "结果重排序",
     "rerank_desc": "对检索结果用 bge-reranker-base 精排，提升 top-k 准确率（首次启用需下载 ~280MB 模型）",
     "rerank_enabled": "重排序已开启",
     "rerank_disabled": "重排序已关闭",
