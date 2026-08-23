@@ -124,9 +124,10 @@ impl std::fmt::Display for FinishReason {
 fn has_action_pattern(text: &str) -> bool {
     text.lines().any(|line| {
         let trimmed = line.trim().to_lowercase();
-        trimmed.starts_with("action:") || trimmed.starts_with("action ") && {
-            let after = &trimmed[7..]; // "action ".len()
-            after.bytes().next().is_some_and(|b| b.is_ascii_digit())
-        }
+        trimmed.starts_with("action:")
+            || trimmed.starts_with("action ") && {
+                let after = &trimmed[7..]; // "action ".len()
+                after.bytes().next().is_some_and(|b| b.is_ascii_digit())
+            }
     })
 }

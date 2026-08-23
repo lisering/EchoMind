@@ -158,18 +158,18 @@ impl ToolRegistry {
     /// 执行工具。
     pub async fn call(&self, name: &str, args: &str) -> anyhow::Result<ToolOutput> {
         let guard = self.tools.read().unwrap();
-        let tool = guard.get(name).ok_or_else(|| {
-            anyhow::anyhow!("未知工具: {name}")
-        })?;
+        let tool = guard
+            .get(name)
+            .ok_or_else(|| anyhow::anyhow!("未知工具: {name}"))?;
         if !tool.enabled() {
             return Ok(ToolOutput::error(format!("工具 {name} 已禁用")));
         }
         drop(guard);
         // 重新获取读锁调用（Pin<Box<Future>> 需要 &'a 引用）
         let guard = self.tools.read().unwrap();
-        let tool = guard.get(name).ok_or_else(|| {
-            anyhow::anyhow!("工具 {name} 在执行时被注销")
-        })?;
+        let tool = guard
+            .get(name)
+            .ok_or_else(|| anyhow::anyhow!("工具 {name} 在执行时被注销"))?;
         tool.call(args).await
     }
 

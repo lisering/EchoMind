@@ -58,8 +58,7 @@ pub struct OpenAIProvider {
     /// 共享的 finish_reason 存储：SSE 流末尾的 finish_reason 解析后写入此 cell，
     /// `finish_reason_handle()` 返回的 Arc clone 可在流消费后读取。
     /// 用于 AgentEngine 判断输出是否被 max_tokens 截断。
-    finish_reason_cell:
-        std::sync::Arc<tokio::sync::Mutex<Option<FinishReason>>>,
+    finish_reason_cell: std::sync::Arc<tokio::sync::Mutex<Option<FinishReason>>>,
     /// 推理内容（reasoning_content）接收端：每次流式请求建立时放入新的 receiver，
     /// 调用方通过 `take_reasoning_receiver()` 取出并消费（DeepSeek R1 等推理模型的思考过程）。
     reasoning_rx:
@@ -134,9 +133,7 @@ impl OpenAIProvider {
     /// 在流消费完毕后，通过此句柄 `lock().await.take()` 读取 API 报告的停止原因。
     /// 用于 `AgentEngine` 判断输出是否被 `max_tokens` 截断（`Length`），
     /// 触发自动翻倍重试。
-    pub fn finish_reason_handle(
-        &self,
-    ) -> std::sync::Arc<tokio::sync::Mutex<Option<FinishReason>>> {
+    pub fn finish_reason_handle(&self) -> std::sync::Arc<tokio::sync::Mutex<Option<FinishReason>>> {
         self.finish_reason_cell.clone()
     }
 

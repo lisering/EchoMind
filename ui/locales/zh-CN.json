@@ -1593,5 +1593,31 @@
 "migrate_no_target": "没有可迁移的目标知识库",
 "migrating": "正在迁移「{name}」…",
 "migrate_success": "已迁移「{name}」到「{target}」"
+},
+"embed_eval": {
+"title": "嵌入模型对比评估",
+"loading": "加载中…",
+"kb_chunks_available": "知识库中有 {count} 个 chunks",
+"no_chunks": "知识库中没有已索引的文档，请先导入文档",
+"select_models": "选择模型",
+"select_hint": "选择 2-3 个模型进行对比",
+"dataset": "数据集",
+"builtin_dataset": "内置示例数据集",
+"custom_dataset": "自定义数据集 (JSON)",
+"top_k": "Top-K",
+"start": "开始评估",
+"starting": "正在启动评估…",
+"evaluating_model": "正在评估模型 {model} ({index}/{total})…",
+"embedding_done": "已用 {model} 嵌入 {count} 个 chunks",
+"model_completed": "模型 {model} 评估完成",
+"finalizing": "正在汇总结果…",
+"completed": "评估完成",
+"need_at_least_2": "请至少选择 2 个模型",
+"invalid_json": "数据集 JSON 格式无效",
+"no_results": "无评估结果",
+"result_table": "结果表格",
+"chart": "对比图表",
+"model": "模型",
+"dim": "维度"
 }
 }

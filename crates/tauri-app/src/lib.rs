@@ -381,6 +381,9 @@ pub fn run() {
             commands::rebuild_contextual_embeddings,
             // 全库嵌入重建（REQ-VEC-016 嵌入模型切换后维度迁移）
             commands::rebuild_all_embeddings,
+            // 嵌入模型对比评估（REQ-VEC-018，开发者工具门控）
+            #[cfg(debug_assertions)]
+            commands::run_embed_comparison,
             // Late Chunking 上下文感知嵌入（REQ-RAG-049）
             commands::set_late_chunking,
             commands::get_late_chunking,

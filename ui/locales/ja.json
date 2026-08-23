@@ -1544,5 +1544,31 @@
     "migrate_no_target": "利用可能な移行先ワークスペースなし",
     "migrating": "「{name}」を移行中…",
     "migrate_success": "「{name}」を「{target}」に移行しました"
+  },
+  "embed_eval": {
+    "title": "埋め込みモデル比較評価",
+    "loading": "読み込み中…",
+    "kb_chunks_available": "ナレッジベースに {count} チャンクあり",
+    "no_chunks": "インデックスされたチャンクがありません。ドキュメントをインポートしてください。",
+    "select_models": "モデル選択",
+    "select_hint": "2-3 モデルを選択して比較",
+    "dataset": "データセット",
+    "builtin_dataset": "組み込みサンプルデータセット",
+    "custom_dataset": "カスタムデータセット (JSON)",
+    "top_k": "Top-K",
+    "start": "評価開始",
+    "starting": "評価を開始中…",
+    "evaluating_model": "モデル {model} を評価中 ({index}/{total})…",
+    "embedding_done": "{model} で {count} チャンクを埋め込み完了",
+    "model_completed": "モデル {model} の評価完了",
+    "finalizing": "結果を集計中…",
+    "completed": "評価完了",
+    "need_at_least_2": "2 つ以上のモデルを選択してください",
+    "invalid_json": "データセット JSON 形式が無効です",
+    "no_results": "評価結果なし",
+    "result_table": "結果テーブル",
+    "chart": "比較チャート",
+    "model": "モデル",
+    "dim": "次元"
   }
 }

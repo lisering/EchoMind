@@ -99,7 +99,9 @@ pub fn parse_openai_payload(payload: &str) -> Option<StreamItem> {
         .and_then(|c| c.finish_reason.as_deref())
         .filter(|s| !s.is_empty())
     {
-        return Some(StreamItem::Finish(FinishReason::from_provider_str(finish_raw)));
+        return Some(StreamItem::Finish(FinishReason::from_provider_str(
+            finish_raw,
+        )));
     }
 
     // 回答阶段：提取 content token（绝大多数 chunk 携带 token）

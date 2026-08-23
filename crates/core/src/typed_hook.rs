@@ -111,8 +111,9 @@ pub trait TypedHook: Send + Sync {
     fn on_before_generation<'a>(
         &'a self,
         ctx: &'a mut HookContext,
-    ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<BeforeGenerationAction>> + Send + 'a>>
-    {
+    ) -> Pin<
+        Box<dyn std::future::Future<Output = anyhow::Result<BeforeGenerationAction>> + Send + 'a>,
+    > {
         Box::pin(async { Ok(BeforeGenerationAction::Continue) })
     }
 
@@ -219,7 +220,11 @@ mod tests {
     #[test]
     fn tc_th_002_before_retrieval_patch_query() {
         let action = BeforeRetrievalAction::PatchQuery("rewritten query".into());
-        let mut ctx = HookContext::new("conv1".into(), "original".into(), HookPhase::BeforeRetrieval);
+        let mut ctx = HookContext::new(
+            "conv1".into(),
+            "original".into(),
+            HookPhase::BeforeRetrieval,
+        );
         assert!(apply_before_retrieval_action(&mut ctx, action).unwrap());
         assert_eq!(ctx.query, "rewritten query");
     }
@@ -326,8 +331,11 @@ mod tests {
         fn on_before_retrieval<'a>(
             &'a self,
             _ctx: &'a mut HookContext,
-        ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<BeforeRetrievalAction>> + Send + 'a>>
-        {
+        ) -> Pin<
+            Box<
+                dyn std::future::Future<Output = anyhow::Result<BeforeRetrievalAction>> + Send + 'a,
+            >,
+        > {
             Box::pin(async { Ok(BeforeRetrievalAction::PatchQuery("rewritten".into())) })
         }
     }

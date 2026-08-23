@@ -1593,5 +1593,31 @@
     "migrate_no_target": "No available target workspace",
     "migrating": "Migrating \"{name}\"…",
     "migrate_success": "Migrated \"{name}\" to \"{target}\""
+  },
+  "embed_eval": {
+    "title": "Embedding Model Comparison",
+    "loading": "Loading…",
+    "kb_chunks_available": "{count} chunks available in knowledge base",
+    "no_chunks": "No indexed chunks in knowledge base. Please import documents first.",
+    "select_models": "Select Models",
+    "select_hint": "Select 2-3 models to compare",
+    "dataset": "Dataset",
+    "builtin_dataset": "Built-in sample dataset",
+    "custom_dataset": "Custom dataset (JSON)",
+    "top_k": "Top-K",
+    "start": "Start Evaluation",
+    "starting": "Starting evaluation…",
+    "evaluating_model": "Evaluating model {model} ({index}/{total})…",
+    "embedding_done": "Embedded {count} chunks with {model}",
+    "model_completed": "Model {model} completed",
+    "finalizing": "Finalizing results…",
+    "completed": "Evaluation completed",
+    "need_at_least_2": "Please select at least 2 models",
+    "invalid_json": "Invalid dataset JSON format",
+    "no_results": "No evaluation results",
+    "result_table": "Results Table",
+    "chart": "Comparison Chart",
+    "model": "Model",
+    "dim": "Dim"
   }
 }

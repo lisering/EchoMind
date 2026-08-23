@@ -39,20 +39,20 @@ pub mod coordinator;
 pub mod coordinator_strategy;
 /// 领域画像自动分类（REQ-VEC-013）：16 领域嵌入质心分类。
 pub mod domain;
+/// 嵌入模型对比评估（REQ-VEC-018）：多模型嵌入 + 检索质量对比。
+pub mod embed_comparison;
 /// 数据库加密模块（Argon2id 密钥派生 + SQLCipher 加密 + 暴力破解防护 + 密码强度检测）。
 pub mod encryption;
 /// NER 实体抽取器（REQ-PERF-006）：纯规则 + 正则，零 LLM/模型依赖。
 pub mod entity_extractor;
 /// 统一错误分类体系（REQ-ERR-001）：错误前缀常量 + 分类辅助函数。
 pub mod errors;
-/// LLM API 类型化错误（B-02 借鉴 Rig ProviderResponseError）：保留原始 HTTP Status + Body。
-pub mod llm_api_error;
 /// 事件流自动埋点（借鉴 OpenMontage events.py）：追加写入 JSONL + 容错读取 + 零负担。
 pub mod event_stream;
-/// FinishReason 归一化枚举（借鉴 Rig `FinishReason`）：归一化 provider 停止原因 + `reconcile_with_output()` + `is_truncated()`。
-pub mod finish_reason;
 /// 对话导出模块：会话 → Markdown 文件（REQ-EXP-001）。
 pub mod export;
+/// FinishReason 归一化枚举（借鉴 Rig `FinishReason`）：归一化 provider 停止原因 + `reconcile_with_output()` + `is_truncated()`。
+pub mod finish_reason;
 /// 知识图谱高级分析引擎（REQ-RAG-027 Session 5）：最短路径 + 社区检测 + 度中心性。
 pub mod graph_analyzer;
 /// 知识图谱导出模块（REQ-EXP-006）：GraphML + JSON-LD 双格式导出。
@@ -61,10 +61,6 @@ pub mod graph_export;
 pub mod graph_retriever;
 /// Agent 生命周期 Hooks 系统（REQ-RAG-029）：在 Agent/Coordinator 关键节点插入可扩展的插件式 hook。
 pub mod hooks;
-/// 类型安全 Hook 系统（B-04 借鉴 Rig AgentHook）：每事件一 Action 类型，编译期拒绝不合法组合。
-pub mod typed_hook;
-/// PortableTool Trait（B-05 借鉴 Rig PortableTool）：context-free 工具抽象，工具注册解耦。
-pub mod portable_tool;
 /// 混合检索器：向量 + 关键词 RRF 融合（REQ-RAG-010）。
 pub mod hybrid_retriever;
 /// 幂等性存储 + 统一周期任务抽象：防重复操作（文件同步/AutoDream）+ 后台任务管理。
@@ -74,6 +70,8 @@ pub mod import;
 /// 技术，在嵌入阶段为 chunk 注入文档级上下文前缀。
 pub mod late_chunking;
 pub mod license;
+/// LLM API 类型化错误（B-02 借鉴 Rig ProviderResponseError）：保留原始 HTTP Status + Body。
+pub mod llm_api_error;
 /// 多协议 LLM 适配（B10 LLM Protocol Types，REQ-ARCH-012）：
 /// LLM 协议类型枚举 + 协议感知 Provider trait。
 pub mod llm_protocol;
@@ -81,6 +79,8 @@ pub mod llm_protocol;
 /// 按对话或用户偏好动态切换 LLM 后端，切换时通知重置会话状态。
 pub mod llm_router;
 pub mod loader;
+/// Memory Policy + Compactor + DemotionHook 三层抽象（B-07 借鉴 Rig Memory 体系）。
+pub mod memory_policy;
 /// 持久化记忆系统（REQ-RAG-032）：借鉴 IfAI 三层记忆 Wing/Hall/Room + Bamboo-agent 上下文压缩。
 ///
 /// 三层记忆架构：
@@ -91,8 +91,6 @@ pub mod loader;
 /// 自动从对话中提取关键事实（LLM 辅助），查询时注入相关记忆到 RAG prompt，
 /// AutoDream 后台空闲时自动整合（提升/遗忘）。
 pub mod memory_store;
-/// Memory Policy + Compactor + DemotionHook 三层抽象（B-07 借鉴 Rig Memory 体系）。
-pub mod memory_policy;
 /// 语义分块器：段落→句子→子句递归分割，保留代码块完整性。
 /// MMR 多样性重排（借鉴 OpenMontage corpus.py）：Maximal Marginal Relevance。
 pub mod mmr_diversifier;
@@ -103,6 +101,8 @@ pub mod perf_metrics;
 pub mod permission;
 /// 流水线阶段门控（借鉴 OpenMontage checkpoint.py）：前置检查 + 人审门控 + 历史记录。
 pub mod pipeline_checkpoint;
+/// PortableTool Trait（B-05 借鉴 Rig PortableTool）：context-free 工具抽象，工具注册解耦。
+pub mod portable_tool;
 pub mod privacy;
 /// 渐进式上下文注入（REQ-PERF-010）：按需注入 chunk，LLM 上下文足够时停止追加。
 pub mod progressive_injector;
@@ -159,6 +159,8 @@ pub mod sync;
 pub mod tool_output;
 /// 轻量 RAG 链路追踪系统（S70：Cherry Studio 借鉴 — span 级耗时追踪）。
 pub mod trace;
+/// 类型安全 Hook 系统（B-04 借鉴 Rig AgentHook）：每事件一 Action 类型，编译期拒绝不合法组合。
+pub mod typed_hook;
 /// 应用更新检查（REQ-HELP-004）：GitHub Releases 版本比较。
 pub mod update_check;
 /// VLM 分级图表理解提示词（REQ-MM-005）：4 级精度策略集中定义。
@@ -2468,6 +2470,8 @@ mod export_tests;
 #[cfg(test)]
 mod finish_reason_tests;
 
+#[cfg(test)]
+mod embed_comparison_tests;
 #[cfg(test)]
 mod graph_analyzer_tests;
 #[cfg(test)]

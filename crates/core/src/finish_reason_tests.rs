@@ -45,7 +45,10 @@ fn tc_fr_005_parse_content_filter() {
 
 #[test]
 fn tc_fr_006_parse_unknown() {
-    assert_eq!(FinishReason::from_provider_str("max_tokens"), FinishReason::Other);
+    assert_eq!(
+        FinishReason::from_provider_str("max_tokens"),
+        FinishReason::Other
+    );
     assert_eq!(FinishReason::from_provider_str("null"), FinishReason::Other);
     assert_eq!(FinishReason::from_provider_str(""), FinishReason::Other);
 }
@@ -53,7 +56,10 @@ fn tc_fr_006_parse_unknown() {
 #[test]
 fn tc_fr_007_parse_case_insensitive() {
     assert_eq!(FinishReason::from_provider_str("STOP"), FinishReason::Stop);
-    assert_eq!(FinishReason::from_provider_str("Length"), FinishReason::Length);
+    assert_eq!(
+        FinishReason::from_provider_str("Length"),
+        FinishReason::Length
+    );
     assert_eq!(
         FinishReason::from_provider_str("TOOL_CALLS"),
         FinishReason::ToolCalls
@@ -78,10 +84,7 @@ fn tc_fr_008_parse_with_whitespace() {
 fn tc_fr_009_reconcile_stop_without_action_stays_stop() {
     let reason = FinishReason::Stop;
     let output = "This is a normal answer without any actions.";
-    assert_eq!(
-        reason.reconcile_with_output(output),
-        FinishReason::Stop
-    );
+    assert_eq!(reason.reconcile_with_output(output), FinishReason::Stop);
 }
 
 #[test]
@@ -109,10 +112,7 @@ fn tc_fr_012_reconcile_length_unchanged() {
     let reason = FinishReason::Length;
     let output = "Thought: I need to search\nAction: search_kb";
     // Length 不被 reconcile 修改（只有 Stop → ToolCalls 升级）
-    assert_eq!(
-        reason.reconcile_with_output(output),
-        FinishReason::Length
-    );
+    assert_eq!(reason.reconcile_with_output(output), FinishReason::Length);
 }
 
 #[test]
@@ -197,8 +197,5 @@ fn tc_fr_021_reconcile_action_in_text_not_upgraded() {
     let reason = FinishReason::Stop;
     // "Action:" 出现在句子中间，不是行首 Action 模式
     let output = "The user asked about Action: what is it?";
-    assert_eq!(
-        reason.reconcile_with_output(output),
-        FinishReason::Stop
-    );
+    assert_eq!(reason.reconcile_with_output(output), FinishReason::Stop);
 }

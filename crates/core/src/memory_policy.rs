@@ -224,7 +224,8 @@ impl Compactor for TextTruncationCompactor {
     fn compact<'a>(
         &'a self,
         demoted: &'a [ChatMessage],
-    ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<Option<String>>> + Send + 'a>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<Option<String>>> + Send + 'a>>
+    {
         let max_chars = self.max_chars;
         Box::pin(async move {
             if demoted.is_empty() {
@@ -239,9 +240,7 @@ impl Compactor for TextTruncationCompactor {
                 };
                 summary.push_str(&format!("[{}] {}\n", msg.role, truncated));
             }
-            Ok(Some(format!(
-                "以下是之前对话的摘要：\n{summary}"
-            )))
+            Ok(Some(format!("以下是之前对话的摘要：\n{summary}")))
         })
     }
 }
@@ -457,7 +456,10 @@ mod tests {
     #[tokio::test]
     async fn tc_mp_007_compactor_generates_summary() {
         let compactor = TextTruncationCompactor::new(500);
-        let demoted = vec![make_msg("user", "hello world"), make_msg("assistant", "hi there")];
+        let demoted = vec![
+            make_msg("user", "hello world"),
+            make_msg("assistant", "hi there"),
+        ];
         let result = compactor.compact(&demoted).await.unwrap();
         assert!(result.is_some());
         let summary = result.unwrap();
@@ -484,7 +486,12 @@ mod tests {
     impl CountingDemotionHook {
         fn new() -> (Self, Arc<AtomicUsize>) {
             let count = Arc::new(AtomicUsize::new(0));
-            (Self { call_count: count.clone() }, count)
+            (
+                Self {
+                    call_count: count.clone(),
+                },
+                count,
+            )
         }
     }
 

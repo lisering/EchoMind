@@ -3148,6 +3148,125 @@ impl RagEvalDataset {
     }
 }
 
+// ============================================================
+// 嵌入模型对比评估（REQ-VEC-018）
+// ============================================================
+
+/// 嵌入模型对比评估请求（REQ-VEC-018）。
+///
+/// 用户选择 2-3 个嵌入模型，对同一文档集进行嵌入并对比检索质量。
+///
+/// # 字段
+/// - `model_names`：参与对比的嵌入模型名称列表（如 `["all-MiniLM-L6-v2", "bge-small-en-v1.5"]`）
+/// - `top_k`：每个查询检索的 top-k 结果数（默认 5）
+/// - `dataset_json`：自定义评估数据集 JSON 字符串（`None` 时使用内置示例数据集）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbedComparisonRequest {
+    /// 参与对比的嵌入模型名称列表
+    pub model_names: Vec<String>,
+    /// 每个查询检索的 top-k 结果数
+    #[serde(default = "default_top_k")]
+    pub top_k: usize,
+    /// 自定义评估数据集 JSON（None 时使用内置示例数据集）
+    pub dataset_json: Option<String>,
+}
+
+/// 默认 top_k 值。
+fn default_top_k() -> usize {
+    5
+}
+
+/// 嵌入模型评估指标分数（REQ-VEC-018）。
+///
+/// 每个模型在三个检索质量指标上的平均分数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbedMetricScores {
+    /// 命中率（Hit Rate），[0.0, 1.0]
+    pub hit_rate: f32,
+    /// 平均倒数排名（MRR），[0.0, 1.0]
+    pub mrr: f32,
+    /// 归一化折扣累积增益（NDCG），[0.0, 1.0]
+    pub ndcg: f32,
+}
+
+impl EmbedMetricScores {
+    /// 创建零分数实例。
+    pub fn zero() -> Self {
+        Self {
+            hit_rate: 0.0,
+            mrr: 0.0,
+            ndcg: 0.0,
+        }
+    }
+
+    /// 从指标列表中提取 Hit Rate / MRR / NDCG 三个分数的平均值。
+    pub fn from_metrics_avg(metrics: &[Vec<RagEvalMetric>]) -> Self {
+        if metrics.is_empty() {
+            return Self::zero();
+        }
+
+        let mut hit_sum = 0.0f32;
+        let mut mrr_sum = 0.0f32;
+        let mut ndcg_sum = 0.0f32;
+        let mut hit_count = 0usize;
+        let mut mrr_count = 0usize;
+        let mut ndcg_count = 0usize;
+
+        for sample_metrics in metrics {
+            for m in sample_metrics {
+                match m.metric_type {
+                    RagMetricType::HitRate => {
+                        hit_sum += m.score;
+                        hit_count += 1;
+                    }
+                    RagMetricType::MRR => {
+                        mrr_sum += m.score;
+                        mrr_count += 1;
+                    }
+                    RagMetricType::NDCG => {
+                        ndcg_sum += m.score;
+                        ndcg_count += 1;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Self {
+            hit_rate: if hit_count > 0 {
+                hit_sum / hit_count as f32
+            } else {
+                0.0
+            },
+            mrr: if mrr_count > 0 {
+                mrr_sum / mrr_count as f32
+            } else {
+                0.0
+            },
+            ndcg: if ndcg_count > 0 {
+                ndcg_sum / ndcg_count as f32
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
+/// 单个嵌入模型的对比评估结果（REQ-VEC-018）。
+///
+/// 包含模型名称、向量维度、三指标分数和评估样本数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbedComparisonResult {
+    /// 模型名称
+    pub model_name: String,
+    /// 向量维度
+    pub dim: usize,
+    /// 三指标平均分数
+    pub metrics: EmbedMetricScores,
+    /// 评估样本数
+    pub sample_count: usize,
+}
+
 #[cfg(test)]
 mod llm_model_tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]

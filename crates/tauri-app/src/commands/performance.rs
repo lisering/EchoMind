@@ -733,3 +733,166 @@ pub async fn rebuild_all_embeddings_inner<R: Runtime>(
 
     Ok(())
 }
+
+// ============================================================================
+// 嵌入模型对比评估（REQ-VEC-018，开发者工具门控）
+// ============================================================================
+
+/// 运行嵌入模型对比评估（REQ-VEC-018）。
+///
+/// 对用户选择的 2-3 个嵌入模型，使用同一文档集进行嵌入并对比检索质量
+/// （Hit Rate / MRR / NDCG）。评估使用内置示例数据集或用户自定义数据集。
+///
+/// # 参数
+/// - `request`：评估请求（model_names + top_k + dataset_json）
+///
+/// # 返回
+/// `Vec<EmbedComparisonResult>`，每个模型一个结果
+///
+/// # 注意
+/// 此命令为开发者工具，仅在 Debug 构建中可用（`#[cfg(debug_assertions)]` 门控）。
+/// 评估过程中每个模型需要下载并加载 ONNX 模型文件（~30MB），可能较慢。
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn run_embed_comparison(
+    request: echomind_models::EmbedComparisonRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<echomind_models::EmbedComparisonResult>, String> {
+    run_embed_comparison_inner(request, &app, state.inner()).await
+}
+
+/// 嵌入模型对比评估逻辑（命令与集成测试复用）。
+#[cfg(debug_assertions)]
+pub async fn run_embed_comparison_inner(
+    request: echomind_models::EmbedComparisonRequest,
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<Vec<echomind_models::EmbedComparisonResult>, String> {
+    use echomind_core::embed_comparison::{ProgressEvent, run_embed_comparison as run_core};
+    use echomind_core::rag_eval_dataset::create_sample_dataset;
+    use echomind_infra::local_embedder::{LocalEmbedder, MirrorSource};
+    use std::sync::Arc;
+
+    // 加载评估数据集
+    let dataset = if let Some(ref json) = request.dataset_json {
+        echomind_core::rag_eval_dataset::load_eval_dataset(json)
+            .map_err(|e| format!("{ERR_VALIDATION}: 数据集 JSON 解析失败: {e:#}"))?
+    } else {
+        create_sample_dataset()
+    };
+
+    if dataset.is_empty() {
+        return Err(format!("{ERR_VALIDATION}: 评估数据集为空"));
+    }
+
+    if request.model_names.is_empty() {
+        return Err(format!("{ERR_VALIDATION}: 未选择任何嵌入模型"));
+    }
+
+    // 从知识库读取全部 chunks（Indexed 状态文档）
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{ERR_STORAGE}: {e:#}"))?;
+
+    let mut chunks: Vec<(String, String)> = Vec::new();
+    for doc in &docs {
+        if !matches!(doc.status, DocStatus::Indexed) {
+            continue;
+        }
+        let doc_chunks = state
+            .storage
+            .list_chunks(&doc.id)
+            .await
+            .map_err(|e| format!("{ERR_STORAGE}: {e:#}"))?;
+        for chunk in doc_chunks {
+            chunks.push((chunk.id, chunk.content));
+        }
+    }
+
+    if chunks.is_empty() {
+        return Err(format!(
+            "{ERR_VALIDATION}: 知识库中没有已索引的文档 chunks，请先导入文档"
+        ));
+    }
+
+    // 解析模型名称为 EmbeddingModel 枚举
+    let cache_dir = state.data_dir.join("models");
+
+    // 进度回调：通过 Tauri 事件推送
+    let app_handle = app.clone();
+    let progress: echomind_core::embed_comparison::ProgressFn =
+        Arc::new(move |evt: ProgressEvent| {
+            let payload = match &evt {
+                ProgressEvent::ModelStarted {
+                    model_name,
+                    index,
+                    total,
+                } => serde_json::json!({
+                    "phase": "model_started",
+                    "model": model_name,
+                    "index": index,
+                    "total": total
+                }),
+                ProgressEvent::EmbeddingDone {
+                    model_name,
+                    chunk_count,
+                } => serde_json::json!({
+                    "phase": "embedding_done",
+                    "model": model_name,
+                    "chunk_count": chunk_count
+                }),
+                ProgressEvent::ModelCompleted {
+                    model_name, result, ..
+                } => serde_json::json!({
+                    "phase": "model_completed",
+                    "model": model_name,
+                    "result": result
+                }),
+                ProgressEvent::AllCompleted { results } => serde_json::json!({
+                    "phase": "all_completed",
+                    "results": results
+                }),
+            };
+            let _ = app_handle.emit("embed_eval_progress", payload);
+        });
+
+    // 工厂闭包：按模型名称创建 LocalEmbedder
+    let mirror_source = MirrorSource::Auto;
+    let results = run_core(
+        &chunks,
+        &dataset,
+        &request.model_names,
+        move |model_name: &str| {
+            let model = parse_embedding_model_name(model_name);
+            let cache = cache_dir.clone();
+            let mirror = mirror_source.clone();
+            Box::pin(
+                async move { LocalEmbedder::new_with_mirror(cache, model, None, 1, mirror).await },
+            )
+        },
+        request.top_k,
+        Some(progress),
+    )
+    .await
+    .map_err(|e| format!("嵌入对比评估失败: {e:#}"))?;
+
+    Ok(results)
+}
+
+/// 解析嵌入模型名称字符串为 `EmbeddingModel` 枚举（开发者工具辅助函数）。
+#[cfg(debug_assertions)]
+fn parse_embedding_model_name(name: &str) -> echomind_infra::local_embedder::EmbeddingModel {
+    use echomind_infra::local_embedder::EmbeddingModel;
+    match name {
+        "all-MiniLM-L6-v2" => EmbeddingModel::AllMiniLML6V2,
+        "bge-small-en-v1.5" => EmbeddingModel::BgeSmallEnV1_5,
+        "bge-small-zh-v1.5" => EmbeddingModel::BgeSmallZhV1_5,
+        "e5-small-v2" => EmbeddingModel::E5SmallV2,
+        "bge-base-en-v1.5" => EmbeddingModel::BgeBaseEnV1_5,
+        "bge-m3" => EmbeddingModel::BgeM3,
+        _ => EmbeddingModel::AllMiniLML6V2, // 默认回退
+    }
+}

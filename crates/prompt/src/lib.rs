@@ -25,8 +25,8 @@ pub mod sanitize;
 // Document 归一化注入（B-06 借鉴 Rig Document）
 pub mod document;
 
-pub use sanitize::{sanitize_chunk_content, sanitize_dynamic_context};
 pub use document::{Document, documents_from_retrieval, normalized_documents};
+pub use sanitize::{sanitize_chunk_content, sanitize_dynamic_context};
 
 // ============================================================
 // TDD 测试
