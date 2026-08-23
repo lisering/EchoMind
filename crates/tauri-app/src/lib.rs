@@ -479,6 +479,13 @@ pub fn run() {
             commands::get_workspace_stats,
             commands::get_workspace_quota,
             commands::migrate_document,
+            // MCP 协议适配器（REQ-ARCH-016）
+            commands::add_mcp_server,
+            commands::remove_mcp_server,
+            commands::list_mcp_servers,
+            commands::toggle_mcp_server,
+            commands::get_mcp_tools,
+            commands::call_mcp_tool,
         ]);
 
     if let Err(err) = builder.run(tauri::generate_context!()) {

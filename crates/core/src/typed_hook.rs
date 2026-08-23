@@ -17,7 +17,7 @@
 use echomind_models::RetrievalResult;
 use std::pin::Pin;
 
-use crate::hooks::{HookContext, HookPhase};
+use crate::hooks::HookContext;
 
 /// BeforeRetrieval 阶段的 Action 类型。
 #[derive(Debug, Clone)]
@@ -92,7 +92,7 @@ pub trait TypedHook: Send + Sync {
     /// 检索前：可修改查询文本。
     fn on_before_retrieval<'a>(
         &'a self,
-        ctx: &'a mut HookContext,
+        _ctx: &'a mut HookContext,
     ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<BeforeRetrievalAction>> + Send + 'a>>
     {
         Box::pin(async { Ok(BeforeRetrievalAction::Continue) })
@@ -101,7 +101,7 @@ pub trait TypedHook: Send + Sync {
     /// 检索后：可过滤/修改检索结果。
     fn on_after_retrieval<'a>(
         &'a self,
-        ctx: &'a mut HookContext,
+        _ctx: &'a mut HookContext,
     ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<AfterRetrievalAction>> + Send + 'a>>
     {
         Box::pin(async { Ok(AfterRetrievalAction::Continue) })
@@ -110,7 +110,7 @@ pub trait TypedHook: Send + Sync {
     /// 生成前：可修改请求参数。
     fn on_before_generation<'a>(
         &'a self,
-        ctx: &'a mut HookContext,
+        _ctx: &'a mut HookContext,
     ) -> Pin<
         Box<dyn std::future::Future<Output = anyhow::Result<BeforeGenerationAction>> + Send + 'a>,
     > {
@@ -120,7 +120,7 @@ pub trait TypedHook: Send + Sync {
     /// 模型响应后：可请求重试。
     fn on_model_response<'a>(
         &'a self,
-        ctx: &'a mut HookContext,
+        _ctx: &'a mut HookContext,
     ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<ModelResponseAction>> + Send + 'a>>
     {
         Box::pin(async { Ok(ModelResponseAction::Continue) })
@@ -170,7 +170,7 @@ pub fn apply_after_retrieval_action(
 
 /// 应用 `BeforeGenerationAction` 到上下文。
 pub fn apply_before_generation_action(
-    ctx: &mut HookContext,
+    _ctx: &mut HookContext,
     action: BeforeGenerationAction,
 ) -> anyhow::Result<Option<RequestPatch>> {
     match action {

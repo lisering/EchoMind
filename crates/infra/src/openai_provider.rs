@@ -449,6 +449,7 @@ impl OpenAIProvider {
         body: &serde_json::Value,
     ) -> anyhow::Result<reqwest::Response> {
         let mut last_error_text = String::new();
+        #[allow(unused_assignments)]
         let mut last_status_label = String::new();
         let total_max_retries = RATE_LIMIT_MAX_RETRIES.max(SERVER_ERROR_MAX_RETRIES);
 
@@ -471,7 +472,7 @@ impl OpenAIProvider {
                         );
                         self.notify_retry(attempt + 1, total_max_retries);
                         tokio::time::sleep(delay).await;
-                        last_status_label = format!("连接错误: {err}");
+                        let _ = format!("连接错误: {err}");
                         continue;
                     }
                     return Err(err).context("LLM 请求发送失败");
@@ -598,6 +599,8 @@ fn compute_server_error_backoff_delay(attempt: u32) -> Duration {
 }
 
 /// 截断错误响应体（保持字符边界，防超长错误刷屏）。
+/// Deprecated: unused function retained for potential future use.
+#[allow(dead_code)]
 fn truncate(text: &str, max: usize) -> &str {
     if text.len() <= max {
         return text;

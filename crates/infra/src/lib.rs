@@ -17,6 +17,8 @@ pub mod local_embedder;
 pub mod local_logger;
 pub mod local_reranker;
 /// 本地 LLM 模型文件管理器（REQ-LLM-004）：下载、删除、列表本地 GGUF 模型。
+/// MCP 传输层实现（REQ-ARCH-016 AC-2/AC-3）：`StdioTransport` + `SseTransport`。
+pub mod mcp_transport;
 pub mod model_manager;
 pub mod openai_provider;
 /// 性能基准测试框架（借鉴 Zed `util_macros::perf`）：统一计时、吞吐量计算、断言。

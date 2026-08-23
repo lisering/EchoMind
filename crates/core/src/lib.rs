@@ -79,6 +79,9 @@ pub mod llm_protocol;
 /// 按对话或用户偏好动态切换 LLM 后端，切换时通知重置会话状态。
 pub mod llm_router;
 pub mod loader;
+/// MCP（Model Context Protocol）协议适配器（REQ-ARCH-016）：
+/// MCP 客户端 JSON-RPC 通信（stdio + SSE transport），工具注册表，安全沙箱。
+pub mod mcp;
 /// Memory Policy + Compactor + DemotionHook 三层抽象（B-07 借鉴 Rig Memory 体系）。
 pub mod memory_policy;
 /// 持久化记忆系统（REQ-RAG-032）：借鉴 IfAI 三层记忆 Wing/Hall/Room + Bamboo-agent 上下文压缩。

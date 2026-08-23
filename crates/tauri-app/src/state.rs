@@ -141,6 +141,8 @@ pub struct AppState {
     pub llm_router: echomind_core::llm_router::LlmRouter,
     /// 日志系统 WorkerGuard（保持非阻塞写入器后台线程存活，REQ-OBS-001）
     pub _log_guard: Option<LocalLogger>,
+    /// MCP 服务器注册表（REQ-ARCH-016）：管理多个 MCP 服务器连接 + 工具聚合。
+    pub mcp_registry: echomind_core::mcp::registry::McpRegistry,
 }
 
 impl AppState {
@@ -404,6 +406,7 @@ impl AppState {
             persist_queue: echomind_core::concurrency::KeyedQueue::new(),
             llm_router: llm_router_init,
             _log_guard: log_guard,
+            mcp_registry: echomind_core::mcp::registry::McpRegistry::new(),
         })
     }
 

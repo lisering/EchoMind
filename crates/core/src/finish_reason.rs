@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 /// | OpenAI | `tool_calls` / `function_call` | `ToolCalls` |
 /// | OpenAI | `content_filter` | `ContentFilter` |
 /// | 其他 | 任意非识别值 | `Other` |
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
     /// LLM 自然停止生成（完整回答）
@@ -40,6 +40,7 @@ pub enum FinishReason {
     /// 内容被安全过滤器拦截
     ContentFilter,
     /// 其他未识别的停止原因
+    #[default]
     Other,
 }
 
@@ -103,12 +104,6 @@ impl FinishReason {
             Self::ContentFilter => "content_filter",
             Self::Other => "other",
         }
-    }
-}
-
-impl Default for FinishReason {
-    fn default() -> Self {
-        Self::Other
     }
 }
 

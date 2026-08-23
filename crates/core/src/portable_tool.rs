@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -144,29 +144,41 @@ impl ToolRegistry {
     /// 注册工具。
     pub fn register(&self, tool: Box<dyn PortableTool>) {
         let name = tool.definition().name;
-        self.tools.write().unwrap().insert(name, tool);
+        let Ok(mut guard) = self.tools.write() else {
+            return;
+        };
+        guard.insert(name, tool);
     }
 
     /// 按名称查找工具。
     pub fn get(&self, name: &str) -> Option<ToolHandle> {
-        let guard = self.tools.read().unwrap();
-        guard.get(name).map(|t| ToolHandle {
+        let Ok(guard) = self.tools.read() else {
+            return None;
+        };
+        guard.get(name).map(|_t| ToolHandle {
             name: name.to_string(),
         })
     }
 
     /// 执行工具。
+    #[allow(clippy::await_holding_lock)]
     pub async fn call(&self, name: &str, args: &str) -> anyhow::Result<ToolOutput> {
-        let guard = self.tools.read().unwrap();
-        let tool = guard
-            .get(name)
-            .ok_or_else(|| anyhow::anyhow!("未知工具: {name}"))?;
-        if !tool.enabled() {
-            return Ok(ToolOutput::error(format!("工具 {name} 已禁用")));
+        // 先检查是否存在且启用
+        {
+            let Ok(guard) = self.tools.read() else {
+                return Err(anyhow::anyhow!("注册表读取失败"));
+            };
+            let tool = guard
+                .get(name)
+                .ok_or_else(|| anyhow::anyhow!("未知工具: {name}"))?;
+            if !tool.enabled() {
+                return Ok(ToolOutput::error(format!("工具 {name} 已禁用")));
+            }
         }
-        drop(guard);
         // 重新获取读锁调用（Pin<Box<Future>> 需要 &'a 引用）
-        let guard = self.tools.read().unwrap();
+        let Ok(guard) = self.tools.read() else {
+            return Err(anyhow::anyhow!("注册表读取失败"));
+        };
         let tool = guard
             .get(name)
             .ok_or_else(|| anyhow::anyhow!("工具 {name} 在执行时被注销"))?;
@@ -175,22 +187,26 @@ impl ToolRegistry {
 
     /// 列出全部工具定义。
     pub fn list_definitions(&self) -> Vec<ToolDefinition> {
-        self.tools
-            .read()
-            .unwrap()
-            .values()
-            .map(|t| t.definition())
-            .collect()
+        let Ok(guard) = self.tools.read() else {
+            return Vec::new();
+        };
+        guard.values().map(|t| t.definition()).collect()
     }
 
     /// 已注册工具数量。
     pub fn count(&self) -> usize {
-        self.tools.read().unwrap().len()
+        let Ok(guard) = self.tools.read() else {
+            return 0;
+        };
+        guard.len()
     }
 
     /// 是否为空。
     pub fn is_empty(&self) -> bool {
-        self.tools.read().unwrap().is_empty()
+        let Ok(guard) = self.tools.read() else {
+            return true;
+        };
+        guard.is_empty()
     }
 }
 
@@ -202,7 +218,11 @@ impl Default for ToolRegistry {
 
 impl std::fmt::Debug for ToolRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let names: Vec<String> = self.tools.read().unwrap().keys().cloned().collect();
+        let names: Vec<String> = self
+            .tools
+            .read()
+            .map(|g| g.keys().cloned().collect())
+            .unwrap_or_default();
         f.debug_struct("ToolRegistry")
             .field("tool_count", &names.len())
             .field("tool_names", &names)

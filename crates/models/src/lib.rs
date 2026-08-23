@@ -3267,6 +3267,219 @@ pub struct EmbedComparisonResult {
     pub sample_count: usize,
 }
 
+// ============================================================================
+// MCP 协议数据模型（REQ-ARCH-016 MCP 协议适配器 Phase 1）
+// ============================================================================
+
+/// MCP 传输类型（REQ-ARCH-016 AC-2/AC-3）。
+///
+/// - `Stdio`：通过子进程 stdin/stdout 通信（本地工具服务器）
+/// - `Sse`：通过 HTTP + Server-Sent Events 通信（远程工具服务器）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransportType {
+    /// stdio 传输（启动子进程 JSON-RPC 通信）
+    #[default]
+    Stdio,
+    /// SSE 传输（HTTP + Server-Sent Events JSON-RPC 通信）
+    Sse,
+}
+
+impl McpTransportType {
+    /// 转为字符串表示。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Stdio => "stdio",
+            Self::Sse => "sse",
+        }
+    }
+
+    /// 从字符串解析传输类型。
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "stdio" => Some(Self::Stdio),
+            "sse" => Some(Self::Sse),
+            _ => None,
+        }
+    }
+}
+
+/// MCP 服务器配置（REQ-ARCH-016 AC-1）。
+///
+/// 描述一个外部 MCP 服务器的连接配置。存储在 settings 表 `mcp.servers` 键中（JSON 数组）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// 服务器唯一标识（UUID v4）
+    pub id: String,
+    /// 服务器显示名称
+    pub name: String,
+    /// 传输类型
+    pub transport: McpTransportType,
+    /// stdio 传输：可执行文件路径（如 `npx`、`node`、`python3`）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub command: Option<String>,
+    /// stdio 传输：命令行参数
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub args: Vec<String>,
+    /// stdio 传输：环境变量
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub env: Vec<(String, String)>,
+    /// SSE 传输：服务器 URL
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub url: Option<String>,
+    /// SSE 传输：认证头（如 Bearer token）
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub headers: Vec<(String, String)>,
+    /// 是否启用
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// 默认返回 `true`（用于 serde `default` 属性）。
+/// 复用已有的 pub fn default_true()（line 1344）。
+impl McpServerConfig {
+    /// 创建新的 stdio 传输 MCP 服务器配置。
+    pub fn new_stdio(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        command: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            transport: McpTransportType::Stdio,
+            command: Some(command.into()),
+            args: Vec::new(),
+            env: Vec::new(),
+            url: None,
+            headers: Vec::new(),
+            enabled: true,
+        }
+    }
+
+    /// 创建新的 SSE 传输 MCP 服务器配置。
+    pub fn new_sse(id: impl Into<String>, name: impl Into<String>, url: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            transport: McpTransportType::Sse,
+            command: None,
+            args: Vec::new(),
+            env: Vec::new(),
+            url: Some(url.into()),
+            headers: Vec::new(),
+            enabled: true,
+        }
+    }
+
+    /// 验证配置完整性。
+    ///
+    /// 返回 `Ok(())` 表示配置有效，`Err(message)` 表示缺失必填字段。
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("服务器名称不能为空".to_string());
+        }
+        if self.id.trim().is_empty() {
+            return Err("服务器 ID 不能为空".to_string());
+        }
+        match self.transport {
+            McpTransportType::Stdio => {
+                if self
+                    .command
+                    .as_deref()
+                    .map(str::trim)
+                    .unwrap_or("")
+                    .is_empty()
+                {
+                    return Err("stdio 传输需要指定 command（可执行文件路径）".to_string());
+                }
+            }
+            McpTransportType::Sse => {
+                if self.url.as_deref().map(str::trim).unwrap_or("").is_empty() {
+                    return Err("SSE 传输需要指定 url（服务器地址）".to_string());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// MCP 工具定义（REQ-ARCH-016 AC-4）。
+///
+/// 描述一个由 MCP 服务器暴露的工具，可被 Agent 调用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpTool {
+    /// 工具名称（MCP 服务器内唯一）
+    pub name: String,
+    /// 工具描述
+    #[serde(default)]
+    pub description: String,
+    /// 输入参数 JSON Schema（JSON 字符串）
+    #[serde(default)]
+    pub input_schema: String,
+    /// 来源服务器 ID
+    pub server_id: String,
+    /// 来源服务器名称
+    pub server_name: String,
+}
+
+/// MCP 工具调用结果（REQ-ARCH-016 AC-5）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolCallResult {
+    /// 工具名称
+    pub tool_name: String,
+    /// 来源服务器 ID
+    pub server_id: String,
+    /// 调用是否成功
+    pub success: bool,
+    /// 输出内容（成功时为结果文本，失败时为错误信息）
+    pub content: String,
+    /// 是否为错误结果
+    #[serde(default)]
+    pub is_error: bool,
+}
+
+/// MCP 服务器连接状态（REQ-ARCH-016 AC-6）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum McpConnectionStatus {
+    /// 已连接
+    Connected,
+    /// 已断开
+    #[default]
+    Disconnected,
+    /// 连接错误
+    Error,
+}
+
+impl McpConnectionStatus {
+    /// 转为字符串表示。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Connected => "connected",
+            Self::Disconnected => "disconnected",
+            Self::Error => "error",
+        }
+    }
+}
+
+/// MCP 服务器状态信息（REQ-ARCH-016 AC-6）。
+///
+/// 包含服务器配置与当前连接状态，用于前端状态显示。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerStatus {
+    /// 服务器配置
+    pub config: McpServerConfig,
+    /// 连接状态
+    pub status: McpConnectionStatus,
+    /// 错误信息（仅 status == Error 时有值）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error_message: Option<String>,
+    /// 已注册工具数量
+    #[serde(default)]
+    pub tool_count: usize,
+}
+
 #[cfg(test)]
 mod llm_model_tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]

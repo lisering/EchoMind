@@ -336,21 +336,21 @@ impl MemoryPipeline {
 
         let mut kept = kept;
         if has_demoted {
-            if let Some(ref compactor) = self.compactor {
-                if let Some(summary) = compactor.compact(&demoted).await? {
-                    kept.insert(
-                        0,
-                        ChatMessage {
-                            id: None,
-                            role: "system".into(),
-                            content: summary,
-                            sources: None,
-                            reasoning: None,
-                            turn_group: None,
-                            version: None,
-                        },
-                    );
-                }
+            if let Some(ref compactor) = self.compactor
+                && let Some(summary) = compactor.compact(&demoted).await?
+            {
+                kept.insert(
+                    0,
+                    ChatMessage {
+                        id: None,
+                        role: "system".into(),
+                        content: summary,
+                        sources: None,
+                        reasoning: None,
+                        turn_group: None,
+                        version: None,
+                    },
+                );
             }
 
             // DemotionHook 流入长期存储
