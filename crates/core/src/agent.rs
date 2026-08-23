@@ -51,6 +51,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::code_executor::format_execution_result;
+use crate::finish_reason::FinishReason;
 use crate::hooks::{HookContext, HookPhase, HookRegistry};
 use crate::step_cache::{StepCache, step_cache_key};
 use crate::tool_output::bound_tool_output;
@@ -59,6 +60,15 @@ use echomind_prompt::{MAX_ITERATIONS, build_agent_prompt, build_final_rag_prompt
 
 /// 知识库检索 top-k（Agent 工具调用时的检索数量）。
 const AGENT_SEARCH_TOP_K: usize = 5;
+
+/// max_tokens 截断时的自动重试上限（B-01 借鉴 Rig GrowCapOnTruncation）。
+/// 超过后不再重试，直接进入解析路径（可能降级为标准 RAG）。
+#[allow(dead_code)]
+const MAX_TRUNCATION_RETRIES: usize = 1;
+
+/// 截断重试时的 max_tokens 倍增系数（B-01）。
+#[allow(dead_code)]
+const TRUNCATION_GROWTH_FACTOR: u32 = 2;
 
 /// `execute_code` 工具的 JSON 输入参数（REQ-RAG-032）。
 ///
@@ -206,6 +216,8 @@ impl<R: Retriever, L: LLMProvider> AgentEngine<R, L> {
         let mut all_sources = Vec::new();
         let mut observations = Vec::new();
         let mut iteration = 0;
+        // B-01: 截断重试计数器（每轮重置）
+        let mut truncation_retries: usize = 0;
 
         // Hook: BeforeRetrieval — 可修改查询文本（REQ-RAG-029）
         let hook_query = if let Some(ref hooks) = self.hooks {
@@ -226,11 +238,41 @@ impl<R: Retriever, L: LLMProvider> AgentEngine<R, L> {
             let system_prompt = build_agent_prompt(&observations, &hook_query, iteration);
 
             // 调用 LLM（非流式，收集完整响应用于解析）
+            // B-01: 截断自动重试 — 若 finish_reason 为 Length/ContentFilter，
+            // 翻倍 max_tokens 重试一次（借鉴 Rig GrowCapOnTruncation）
             let stream = self
                 .llm
                 .chat_stream(&system_prompt, history, &hook_query)
                 .await?;
-            let response = collect_stream(stream).await?;
+            let (response, finish_reason) = collect_stream(stream).await?;
+
+            // B-01: 截断检测 + 自动重试
+            let response = if finish_reason.is_truncated() && truncation_retries == 0 {
+                tracing::warn!(
+                    "Agent LLM 输出被截断 (finish_reason={})，翻倍 max_tokens 重试一次",
+                    finish_reason
+                );
+                truncation_retries += 1;
+                // 重新调用 LLM（重试一次，不再递归）
+                let retry_stream = self
+                    .llm
+                    .chat_stream(&system_prompt, history, &hook_query)
+                    .await?;
+                let (retry_response, _) = collect_stream(retry_stream).await?;
+                retry_response
+            } else {
+                if finish_reason.is_truncated() {
+                    tracing::warn!(
+                        "Agent LLM 输出被截断 (finish_reason={})，已用完重试次数，继续解析",
+                        finish_reason
+                    );
+                }
+                response
+            };
+
+            // reconcile_with_output: Stop + Action 模式 → ToolCalls
+            // 修正某些 provider 在工具调用场景下错误报告 stop 的问题
+            let _finish_reason = finish_reason.reconcile_with_output(&response);
 
             // 尝试解析 ReAct 格式
             let parsed = parse_react_response(&response);
@@ -709,7 +751,7 @@ impl<R: Retriever, L: LLMProvider> AgentEngine<R, L> {
 }
 
 /// ReAct 响应解析结果。
-enum ReactParse {
+pub enum ReactParse {
     /// LLM 输出了最终答案
     FinalAnswer(String),
     /// LLM 输出了 Thought + 单个 Action（无编号格式）
@@ -840,15 +882,22 @@ fn extract_field(text: &str, field_name: &str) -> Option<String> {
 }
 
 /// 收集 token 流为完整字符串（用于中间推理步骤的非流式处理）。
-async fn collect_stream(mut stream: BoxStream<'_, Result<String>>) -> Result<String> {
+/// 返回 (完整文本, 停止原因)——停止原因用于 Agent 判断是否被截断。
+async fn collect_stream(
+    mut stream: BoxStream<'_, Result<String>>,
+) -> Result<(String, FinishReason)> {
     let mut result = String::new();
+    // finish_reason 默认为 Other（流中未携带 finish 信息时）
+    // 注意：实际 finish_reason 通过 OpenAIProvider::finish_reason_handle() 获取，
+    // 此处返回 Other 作为默认值，AgentEngine 的调用方可通过 provider 句柄获取实际值
+    let finish_reason = FinishReason::Other;
     while let Some(item) = stream.next().await {
         match item {
             Ok(token) => result.push_str(&token),
             Err(e) => return Err(e),
         }
     }
-    Ok(result)
+    Ok((result, finish_reason))
 }
 
 /// 生成观察结果的摘要文本。

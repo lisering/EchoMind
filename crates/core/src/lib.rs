@@ -10,6 +10,8 @@
 
 /// Agentic RAG 多步推理引擎（REQ-RAG-022）：ReAct 范式 Thought→Action→Observation 循环。
 pub mod agent;
+/// AgentEngine Sans-IO 状态机（B-03 借鉴 Rig `AgentRun`）：决策与 IO 分离，可独立单元测试。
+pub mod agent_run;
 /// 文档一致性审计引擎：全量扫描式矛盾检测（REQ-AUDIT-001~005）。
 #[cfg(feature = "pro")]
 pub mod audit;
@@ -43,8 +45,12 @@ pub mod encryption;
 pub mod entity_extractor;
 /// 统一错误分类体系（REQ-ERR-001）：错误前缀常量 + 分类辅助函数。
 pub mod errors;
+/// LLM API 类型化错误（B-02 借鉴 Rig ProviderResponseError）：保留原始 HTTP Status + Body。
+pub mod llm_api_error;
 /// 事件流自动埋点（借鉴 OpenMontage events.py）：追加写入 JSONL + 容错读取 + 零负担。
 pub mod event_stream;
+/// FinishReason 归一化枚举（借鉴 Rig `FinishReason`）：归一化 provider 停止原因 + `reconcile_with_output()` + `is_truncated()`。
+pub mod finish_reason;
 /// 对话导出模块：会话 → Markdown 文件（REQ-EXP-001）。
 pub mod export;
 /// 知识图谱高级分析引擎（REQ-RAG-027 Session 5）：最短路径 + 社区检测 + 度中心性。
@@ -55,6 +61,10 @@ pub mod graph_export;
 pub mod graph_retriever;
 /// Agent 生命周期 Hooks 系统（REQ-RAG-029）：在 Agent/Coordinator 关键节点插入可扩展的插件式 hook。
 pub mod hooks;
+/// 类型安全 Hook 系统（B-04 借鉴 Rig AgentHook）：每事件一 Action 类型，编译期拒绝不合法组合。
+pub mod typed_hook;
+/// PortableTool Trait（B-05 借鉴 Rig PortableTool）：context-free 工具抽象，工具注册解耦。
+pub mod portable_tool;
 /// 混合检索器：向量 + 关键词 RRF 融合（REQ-RAG-010）。
 pub mod hybrid_retriever;
 /// 幂等性存储 + 统一周期任务抽象：防重复操作（文件同步/AutoDream）+ 后台任务管理。
@@ -81,6 +91,8 @@ pub mod loader;
 /// 自动从对话中提取关键事实（LLM 辅助），查询时注入相关记忆到 RAG prompt，
 /// AutoDream 后台空闲时自动整合（提升/遗忘）。
 pub mod memory_store;
+/// Memory Policy + Compactor + DemotionHook 三层抽象（B-07 借鉴 Rig Memory 体系）。
+pub mod memory_policy;
 /// 语义分块器：段落→句子→子句递归分割，保留代码块完整性。
 /// MMR 多样性重排（借鉴 OpenMontage corpus.py）：Maximal Marginal Relevance。
 pub mod mmr_diversifier;
@@ -2453,6 +2465,9 @@ mod domain_tests;
 mod entity_extractor_tests;
 #[cfg(test)]
 mod export_tests;
+#[cfg(test)]
+mod finish_reason_tests;
+
 #[cfg(test)]
 mod graph_analyzer_tests;
 #[cfg(test)]

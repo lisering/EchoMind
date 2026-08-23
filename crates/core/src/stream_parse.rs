@@ -50,6 +50,8 @@ fn extract_data_lines(event: &str) -> String {
     lines.join("\n")
 }
 
+use crate::finish_reason::FinishReason;
+
 /// OpenAI 流式元素。
 #[derive(Debug, PartialEq)]
 pub enum StreamItem {
@@ -59,6 +61,8 @@ pub enum StreamItem {
     Reasoning(String),
     /// Token 用量统计（流末尾的 usage 字段）
     Usage(echomind_models::TokenUsage),
+    /// 停止原因（finish_reason 字段，通常出现在最后一个 chunk）
+    Finish(FinishReason),
     /// `[DONE]` 结束标记
     Done,
 }
@@ -86,6 +90,16 @@ pub fn parse_openai_payload(payload: &str) -> Option<StreamItem> {
         .filter(|content| !content.is_empty())
     {
         return Some(StreamItem::Reasoning(reasoning.to_string()));
+    }
+
+    // 流末尾的 finish_reason（通常在最后一个含 choices 的 chunk 中）
+    // 注意：必须在 `into_iter()` 消费 choices 之前检查
+    if let Some(finish_raw) = choices
+        .first()
+        .and_then(|c| c.finish_reason.as_deref())
+        .filter(|s| !s.is_empty())
+    {
+        return Some(StreamItem::Finish(FinishReason::from_provider_str(finish_raw)));
     }
 
     // 回答阶段：提取 content token（绝大多数 chunk 携带 token）
@@ -126,6 +140,8 @@ struct UsagePayload {
 #[derive(serde::Deserialize)]
 struct ChunkChoice {
     delta: ChunkDelta,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(serde::Deserialize)]

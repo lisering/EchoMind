@@ -21,6 +21,8 @@ use std::time::Duration;
 
 use anyhow::{Context, bail};
 use echomind_core::LLMProvider;
+use echomind_core::finish_reason::FinishReason;
+use echomind_core::llm_api_error::LlmApiError;
 use echomind_core::stream_parse::{SseParser, StreamItem, parse_openai_payload};
 use echomind_models::{ChatMessage, GenerationParams, TokenUsage};
 use futures::StreamExt;
@@ -53,6 +55,11 @@ pub struct OpenAIProvider {
     /// 共享的 token 用量存储：SSE 流末尾的 usage chunk 解析后写入此 cell，
     /// `usage_handle()` 返回的 Arc clone 可在流消费后读取。
     usage_cell: std::sync::Arc<tokio::sync::Mutex<Option<TokenUsage>>>,
+    /// 共享的 finish_reason 存储：SSE 流末尾的 finish_reason 解析后写入此 cell，
+    /// `finish_reason_handle()` 返回的 Arc clone 可在流消费后读取。
+    /// 用于 AgentEngine 判断输出是否被 max_tokens 截断。
+    finish_reason_cell:
+        std::sync::Arc<tokio::sync::Mutex<Option<FinishReason>>>,
     /// 推理内容（reasoning_content）接收端：每次流式请求建立时放入新的 receiver，
     /// 调用方通过 `take_reasoning_receiver()` 取出并消费（DeepSeek R1 等推理模型的思考过程）。
     reasoning_rx:
@@ -85,6 +92,7 @@ impl OpenAIProvider {
             base_url,
             model,
             usage_cell: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+            finish_reason_cell: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
             reasoning_rx: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
             generation_params: None,
             retry_notifier: None,
@@ -121,6 +129,17 @@ impl OpenAIProvider {
         self.usage_cell.clone()
     }
 
+    /// 返回 finish_reason 句柄的 Arc clone（B-01 借鉴 Rig FinishReason）。
+    ///
+    /// 在流消费完毕后，通过此句柄 `lock().await.take()` 读取 API 报告的停止原因。
+    /// 用于 `AgentEngine` 判断输出是否被 `max_tokens` 截断（`Length`），
+    /// 触发自动翻倍重试。
+    pub fn finish_reason_handle(
+        &self,
+    ) -> std::sync::Arc<tokio::sync::Mutex<Option<FinishReason>>> {
+        self.finish_reason_cell.clone()
+    }
+
     fn build_request(&self, body: &serde_json::Value) -> reqwest::RequestBuilder {
         let mut req = self.client.post(self.chat_completions_url()).json(body);
         if let Some(key) = &self.api_key {
@@ -148,11 +167,9 @@ impl OpenAIProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "<无法读取响应体>".to_string());
-            bail!(
-                "LLM API 错误 (HTTP {}): {}",
-                status.as_u16(),
-                truncate(&text, 300)
-            );
+            // B-02: 返回类型化错误（保留 HTTP status + body），调用方可精确分类
+            let api_err = LlmApiError::new(status.as_u16(), &text, "openai");
+            bail!("{}", api_err.to_prefixed_string());
         }
         Ok(format!(
             "连接成功：{} 响应正常 (HTTP {})",
@@ -197,11 +214,9 @@ impl OpenAIProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "<无法读取响应体>".to_string());
-            bail!(
-                "HyDE 改写 LLM API 错误 (HTTP {}): {}",
-                status.as_u16(),
-                truncate(&text, 300)
-            );
+            // B-02: 返回类型化错误
+            let api_err = LlmApiError::new(status.as_u16(), &text, "openai");
+            bail!("{}", api_err.to_prefixed_string());
         }
         let json: serde_json::Value = resp.json().await.context("HyDE 改写响应 JSON 解析失败")?;
         let content = json
@@ -358,12 +373,11 @@ impl OpenAIProvider {
             );
         }
 
-        // 重置 usage cell（上一次对话的残留数据清空）
-        // 必须使用 lock().await 而非 blocking_lock()——后者在异步上下文中会 panic：
-        // "Cannot block the current thread from within a runtime"
-        //（blocking_lock 内部调用 block_in_place，多线程 runtime 工作线程上禁止）
+        // 重置 usage cell + finish_reason cell
         *self.usage_cell.lock().await = None;
+        *self.finish_reason_cell.lock().await = None;
         let usage_cell = self.usage_cell.clone();
+        let finish_reason_cell = self.finish_reason_cell.clone();
 
         // 推理内容通道：reasoning_content 增量经此 channel 独立流出，不混入 token 流
         let (reasoning_tx, reasoning_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -392,6 +406,7 @@ impl OpenAIProvider {
             .take_while(|item| std::future::ready(!matches!(item, Ok(StreamItem::Done))))
             .filter_map(move |item| {
                 let cell = usage_cell.clone();
+                let finish_cell = finish_reason_cell.clone();
                 let tx = reasoning_tx.clone();
                 async move {
                     match item {
@@ -403,6 +418,10 @@ impl OpenAIProvider {
                         }
                         Ok(StreamItem::Usage(usage)) => {
                             *cell.lock().await = Some(usage);
+                            None
+                        }
+                        Ok(StreamItem::Finish(reason)) => {
+                            *finish_cell.lock().await = Some(reason);
                             None
                         }
                         Ok(StreamItem::Done) => None,
@@ -478,11 +497,9 @@ impl OpenAIProvider {
                     .text()
                     .await
                     .unwrap_or_else(|_| "<无法读取响应体>".to_string());
-                bail!(
-                    "LLM API 错误 (HTTP {}): {}",
-                    status_code,
-                    truncate(&text, 500)
-                );
+                // B-02: 返回类型化错误
+                let api_err = LlmApiError::new(status_code, &text, "openai");
+                bail!("{}", api_err.to_prefixed_string());
             }
 
             // 记录错误文本
@@ -499,11 +516,13 @@ impl OpenAIProvider {
                     last_status_label,
                     total_max_retries
                 );
-                bail!(
-                    "LLM API 错误 ({}): {}",
-                    last_status_label,
-                    truncate(&last_error_text, 500)
-                );
+                // B-02: 返回类型化错误
+                let api_err = if status_code == 429 {
+                    LlmApiError::new(429, &last_error_text, "openai")
+                } else {
+                    LlmApiError::new(status_code, &last_error_text, "openai")
+                };
+                bail!("{}", api_err.to_prefixed_string());
             }
 
             // 计算退避延迟
@@ -526,11 +545,8 @@ impl OpenAIProvider {
         }
 
         // 理论上不可达（循环已在 attempt == MAX 时 return）
-        bail!(
-            "LLM API 错误 ({}): {}",
-            last_status_label,
-            truncate(&last_error_text, 500)
-        );
+        let api_err = LlmApiError::new(0, &last_error_text, "openai");
+        bail!("{}", api_err.to_prefixed_string());
     }
 
     /// 通知调用方正在重试（REQ-ERR-002 AC-2）。
