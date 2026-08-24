@@ -120,6 +120,17 @@ sync_dir "$ROOT_DIR/crates/tauri-app/src"   "$RELEASE_DIR/crates/tauri-app/src"
 sync_dir "$ROOT_DIR/crates/tauri-app/capabilities" "$RELEASE_DIR/crates/tauri-app/capabilities"
 sync_dir "$ROOT_DIR/crates/tauri-app/icons" "$RELEASE_DIR/crates/tauri-app/icons"
 sync_dir "$ROOT_DIR/crates/tauri-app/tests" "$RELEASE_DIR/crates/tauri-app/tests"
+# ─── [7.5/10] e2e-tests（CI frontend-checks 的 Vitest 与 E2E 依赖）───
+echo ""
+echo -e "${BLUE}[7.5/10] 同步 e2e-tests${NC}"
+sync_file "$ROOT_DIR/e2e-tests/package.json"      "$RELEASE_DIR/e2e-tests/package.json"
+sync_file "$ROOT_DIR/e2e-tests/package-lock.json" "$RELEASE_DIR/e2e-tests/package-lock.json"
+sync_file "$ROOT_DIR/e2e-tests/playwright.config.ts" "$RELEASE_DIR/e2e-tests/playwright.config.ts"
+sync_file "$ROOT_DIR/e2e-tests/vitest.config.ts"  "$RELEASE_DIR/e2e-tests/vitest.config.ts"
+sync_file "$ROOT_DIR/e2e-tests/wdio.conf.mjs"     "$RELEASE_DIR/e2e-tests/wdio.conf.mjs" 2>/dev/null || true
+sync_dir "$ROOT_DIR/e2e-tests/tests"              "$RELEASE_DIR/e2e-tests/tests"
+sync_dir "$ROOT_DIR/e2e-tests/scripts"            "$RELEASE_DIR/e2e-tests/scripts"
+
 sync_file "$ROOT_DIR/crates/tauri-app/Cargo.toml" "$RELEASE_DIR/crates/tauri-app/Cargo.toml"
 sync_file "$ROOT_DIR/crates/tauri-app/build.rs" "$RELEASE_DIR/crates/tauri-app/build.rs"
 sync_file "$ROOT_DIR/crates/tauri-app/tauri.conf.json" "$RELEASE_DIR/crates/tauri-app/tauri.conf.json"
