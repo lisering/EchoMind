@@ -79,8 +79,8 @@ describe('thinking-panel.js — 思维链折叠面板', () => {
     expect(chevron.style.transform).toBe('');
   });
 
-  it('TC-DS-009: setComplete() 更新 header 文本', () => {
-    panel.setComplete();
+  it('TC-DS-009: setComplete() 更新 header 文本', async () => {
+    await panel.setComplete();
     const textEl = panel.container.querySelector('.thinking-panel-text');
     expect(textEl.textContent).toBe('思考完成');
   });
@@ -123,18 +123,18 @@ describe('thinking-panel.js — 思维链折叠面板', () => {
     expect(iconEl.innerHTML).not.toBe(iconBefore);
   });
 
-  it('TC-DS-010c: setComplete 移除图标旋转动画', () => {
+  it('TC-DS-010c: setComplete 移除图标旋转动画', async () => {
     const p = createThinkingPanel();
     p.update('正在检索…', 'retrieving');
     const iconEl = p.container.querySelector('.thinking-stage-icon');
     expect(iconEl.classList.contains('thinking-icon-active')).toBe(true);
-    p.setComplete();
+    await p.setComplete();
     expect(iconEl.classList.contains('thinking-icon-active')).toBe(false);
   });
 
-  it('TC-DS-010d: reset 恢复灯泡图标与旋转动画', () => {
+  it('TC-DS-010d: reset 恢复灯泡图标与旋转动画', async () => {
     const p = createThinkingPanel();
-    p.setComplete();
+    await p.setComplete();
     p.update('正在生成…', 'generating');
     // reset 后：图标回灯泡 + 旋转动画恢复
     p.reset();

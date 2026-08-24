@@ -4,12 +4,14 @@
  * REQ-NAV-001：折叠时侧栏向左滑出视口（transform），展开时恢复完整列表。状态持久化。
  */
 
-import { $, WORKSPACE } from './utils.js';
+import { $ } from './utils.js';
 import { invoke } from './ipc.js';
+import { getCurrentWorkspaceId } from './workspace.js';
 import { t } from './i18n.js';
 import { toast, toastError } from './toast.js';
 import { showConfirmDialog } from './confirm-dialog.js';
 import { pushPanel, removePanel } from './panel-stack.js';
+import { isComposingEvent } from './input-utils.js';
 
 /**
  * 侧栏折叠/展开切换（REQ-NAV-001 AC-1/AC-2）。
@@ -236,7 +238,7 @@ export async function toggleSidebar() {
 
   // 持久化折叠状态（AC-4）
   try {
-    await invoke('set_sidebar_collapsed', { collapsed: willCollapse });
+    await invoke('update_setting', { key: 'ui.sidebar_collapsed', value: String(willCollapse) });
   } catch (_) {
     // IPC 失败时静默降级（E2E 测试环境无 Tauri 运行时）
   }
@@ -420,6 +422,38 @@ const SEARCH_PAGE_SIZE = 50;
 let _searchRenderedCount = 0;
 
 /**
+ * 转义 HTML 特殊字符，防止 XSS。
+ * @param {string} text
+ * @returns {string}
+ */
+function _escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/**
+ * 高亮搜索关键词：将文本中匹配搜索词的部分包裹在 <mark> 标签中。
+ * @param {string} text - 原始文本
+ * @param {string} query - 搜索关键词
+ * @returns {string} 包含 <mark> 的 HTML 字符串
+ */
+function _highlightSearchTerm(text, query) {
+  const q = query.trim().toLowerCase();
+  if (!q || !text) return _escapeHtml(text || '');
+  const escaped = _escapeHtml(text);
+  const lower = escaped.toLowerCase();
+  const pos = lower.indexOf(q.toLowerCase());
+  if (pos < 0) return escaped;
+  // 转义搜索词中的 HTML 特殊字符后再用于匹配
+  const escapedQuery = _escapeHtml(query.trim());
+  const before = escaped.substring(0, pos);
+  const match = escaped.substring(pos, pos + escapedQuery.length);
+  const after = escaped.substring(pos + escapedQuery.length);
+  return `${before}<mark class="search-mark">${match}</mark>${after}`;
+}
+
+/**
  * 拉取会话列表并渲染到搜索弹框结果区（初始仅渲染前 50 条，滚动加载更多）。
  * content 模式调用 search_conversations IPC 搜索消息内容（REQ-RAG-040）。
  * @param {string} [searchTerm=''] - 搜索关键词
@@ -459,7 +493,7 @@ async function _renderSearchResults(searchTerm = '') {
   }
 
   // 会话标题搜索模式（原有逻辑）
-  const list = await invoke('get_conversations', { workspaceId: WORKSPACE });
+  const list = await invoke('get_conversations', { workspaceId: getCurrentWorkspaceId() });
   const lowerTerm = term.toLowerCase();
   _searchFiltered = lowerTerm
     ? list.filter(c => (c.title || '').toLowerCase().includes(lowerTerm))
@@ -497,18 +531,19 @@ function _renderMessageSearchPage(box) {
     roleTag.textContent = r.role === 'user' ? 'Q' : 'A';
     const convTitle = document.createElement('span');
     convTitle.className = 'truncate';
-    convTitle.textContent = r.conversation_title || t('backend.placeholder_title');
+    convTitle.innerHTML = _highlightSearchTerm(r.conversation_title || t('backend.placeholder_title'), _currentSearchTerm);
     header.appendChild(roleTag);
     header.appendChild(convTitle);
-    // 消息内容摘要
+    // 消息内容摘要（高亮搜索关键词）
     const content = document.createElement('div');
     content.className = 'text-text-secondary text-xs line-clamp-2';
-    content.textContent = r.content.length > 120 ? r.content.slice(0, 120) + '…' : r.content;
+    const snippet = r.content.length > 120 ? r.content.slice(0, 120) + '…' : r.content;
+    content.innerHTML = _highlightSearchTerm(snippet, _currentSearchTerm);
     item.appendChild(header);
     item.appendChild(content);
     item.onclick = () => {
       closeSearchPopup();
-      _onSelectConversation(r.conversation_id);
+      _onSelectConversation(r.conversation_id, _currentSearchTerm);
     };
     box.appendChild(item);
   }
@@ -530,7 +565,7 @@ function _renderSearchPage(box) {
     icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     const title = document.createElement('span');
     title.className = 'truncate';
-    title.textContent = c.title || t('backend.placeholder_title');
+    title.innerHTML = _highlightSearchTerm(c.title || t('backend.placeholder_title'), _currentSearchTerm);
     item.appendChild(icon);
     item.appendChild(title);
     item.onclick = () => {
@@ -560,12 +595,15 @@ function _loadMoreSearchResults() {
 }
 
 /** 选中会话后的回调（由 main.js 注入）。 */
-/** @type {(id: string) => Promise<void>} */
+/** @type {(id: string, searchQuery?: string) => Promise<void>} */
 let _onSelectConversation = async (id) => {};
+
+/** 当前搜索关键词（用于跳转高亮时传递） */
+let _currentSearchTerm = '';
 
 /**
  * 初始化搜索弹框事件绑定。
- * @param {(id: string) => Promise<void>} onSelectConversation - 选中会话后的回调
+ * @param {(id: string, searchQuery?: string) => Promise<void>} onSelectConversation - 选中会话后的回调
  */
 export function initSearchPopup(onSelectConversation) {
   _onSelectConversation = onSelectConversation || (async () => {});
@@ -591,6 +629,7 @@ export function initSearchPopup(onSelectConversation) {
     let timer = null;
     input.addEventListener('input', () => {
       clearTimeout(timer);
+      _currentSearchTerm = input.value.trim();
       timer = setTimeout(() => _renderSearchResults(input.value), 150);
     });
     // 键盘导航
@@ -609,6 +648,7 @@ export function initSearchPopup(onSelectConversation) {
         _searchSelectedIndex = Math.max(_searchSelectedIndex - 1, 0);
         _updateSearchSelection();
       } else if (e.key === 'Enter') {
+        if (isComposingEvent(e)) return; // IME 组合中不触发
         e.preventDefault();
         if (_searchFiltered.length === 0) return;
         const conv = _searchFiltered[_searchSelectedIndex];
@@ -703,13 +743,21 @@ export function initSidebar() {
     });
   }
 
-  // 筛选面板切换（默认折叠）
-  if ($('kbFilterToggle')) {
-    $('kbFilterToggle').onclick = () => {
-      const panel = $('kbFilterPanel');
-      if (panel) panel.classList.toggle('hidden');
-    };
-  }
+// 筛选面板切换（默认折叠）
+if ($('kbFilterToggle')) {
+$('kbFilterToggle').onclick = () => {
+const panel = $('kbFilterPanel');
+if (panel) panel.classList.toggle('hidden');
+};
+}
+
+// 排序面板切换（v1.10 REQ-ING-008）
+if ($('kbSortBtn')) {
+$('kbSortBtn').onclick = () => {
+const panel = $('kbSortPanel');
+if (panel) panel.classList.toggle('hidden');
+};
+}
 
   // 文档搜索（300ms 防抖）+ 筛选器变化
   if ($('docSearchInput')) {
@@ -728,7 +776,7 @@ export function initSidebar() {
     $('docTagFilter').addEventListener('change', () => _onFilterChange());
   }
 
-  // 多选模式 + 批量删除（REQ-ING-009, REQ-IX-005 统一确认对话框）
+  // 多选模式 + 批量操作（REQ-ING-024 增强：批量删除/移动/标签）
   if ($('kbSelectToggle')) {
     $('kbSelectToggle').onclick = toggleMultiSelect;
   }
@@ -737,6 +785,15 @@ export function initSidebar() {
   }
   if ($('kbBatchDelete')) {
     $('kbBatchDelete').onclick = showBatchDeleteConfirm;
+  }
+  if ($('kbBatchMove')) {
+    $('kbBatchMove').onclick = showBatchMoveDialog;
+  }
+  if ($('kbBatchTag')) {
+    $('kbBatchTag').onclick = showBatchTagDialog;
+  }
+  if ($('kbSelectAll')) {
+    $('kbSelectAll').onchange = toggleSelectAll;
   }
   // 旧 kbConfirmDialog 按钮事件移除（已迁移到 showConfirmDialog 统一组件）
   if ($('kbConfirmCancel')) {
@@ -811,8 +868,21 @@ function updateSelectedCount() {
 }
 
 /**
- * 显示批量删除确认对话框（REQ-IX-005 统一确认对话框）。
- * 使用 showConfirmDialog() 替代旧的 #kbConfirmDialog 固定 HTML 弹窗。
+ * 全选/反选所有文档复选框（REQ-ING-024 AC-1）。
+ */
+function toggleSelectAll() {
+  const selectAll = $('kbSelectAll');
+  if (!selectAll) return;
+  const checked = selectAll.checked;
+  document.querySelectorAll('#docList input[type="checkbox"]').forEach((cb) => {
+    cb.checked = checked;
+  });
+  updateSelectedCount();
+}
+
+/**
+ * 显示批量删除确认对话框（REQ-ING-024 AC-3，REQ-IX-005 统一确认对话框）。
+ * 使用 batch_delete_documents IPC 批量删除（事务保证）。
  */
 async function showBatchDeleteConfirm() {
   const checked = document.querySelectorAll('#docList input[type="checkbox"]:checked');
@@ -830,25 +900,144 @@ async function showBatchDeleteConfirm() {
   const docIds = Array.from(checked).map((cb) => cb.dataset.docId).filter(Boolean);
   if (docIds.length === 0) return;
 
-  let successCount = 0;
-  let failCount = 0;
-  for (const docId of docIds) {
-    try {
-      await invoke('delete_document', { id: docId });
-      successCount++;
-    } catch (err) {
-      failCount++;
+  try {
+    const result = await invoke('batch_delete_documents', { ids: docIds });
+    if (result.failedCount > 0) {
+      toastError(t('knowledge_base.batch_delete_partial', {
+        success: result.success_count,
+        failed: result.failed_count,
+      }));
+    } else {
+      toast(t('knowledge_base.batch_deleted', { count: result.success_count }), 'success');
     }
-  }
-
-  // 显示结果 toast
-  if (failCount > 0) {
+  } catch (err) {
     toastError(t('knowledge_base.batch_delete_failed'));
-  } else {
-    toast(t('knowledge_base.batch_deleted', { count: successCount }), 'info');
   }
 
   // 退出多选模式并刷新列表
+  exitMultiSelect();
+  _onReloadDocs();
+}
+
+/**
+ * 显示批量移动对话框（REQ-ING-024 AC-4）。
+ * 加载工作空间列表 → 用户选择目标 → 调用 batch_move_documents IPC。
+ */
+async function showBatchMoveDialog() {
+  const checked = document.querySelectorAll('#docList input[type="checkbox"]:checked');
+  if (checked.length === 0) return;
+
+  const docIds = Array.from(checked).map((cb) => cb.dataset.docId).filter(Boolean);
+  if (docIds.length === 0) return;
+
+  // 加载工作空间列表
+  let workspaces = [];
+  try {
+    workspaces = await invoke('list_workspaces');
+  } catch (_) {
+    workspaces = [];
+  }
+
+  if (workspaces.length <= 1) {
+    toastError(t('knowledge_base.no_other_workspaces'));
+    return;
+  }
+
+  // 构建选择对话框
+  const ok = await showConfirmDialog({
+    title: t('knowledge_base.batch_move_title'),
+    body: t('knowledge_base.batch_move_body', { count: docIds.length }),
+    confirmText: t('knowledge_base.batch_move_confirm'),
+    customContent: (() => {
+      const select = document.createElement('select');
+      select.className = 'w-full mt-2 bg-surface-2 border border-border-default rounded-lg px-3 py-2 text-sm text-text-primary';
+      select.id = 'batchMoveTarget';
+      for (const ws of workspaces) {
+        const opt = document.createElement('option');
+        opt.value = ws.id;
+        opt.textContent = ws.name;
+        select.appendChild(opt);
+      }
+      return select;
+    })(),
+  });
+
+  if (!ok) return;
+
+  const targetSelect = document.getElementById('batchMoveTarget');
+  if (!targetSelect) return;
+  const targetWorkspaceId = targetSelect.value;
+
+  try {
+    const result = await invoke('batch_move_documents', {
+      ids: docIds,
+      targetWorkspaceId,
+    });
+    if (result.failedCount > 0) {
+      toastError(t('knowledge_base.batch_move_partial', {
+        success: result.success_count,
+        failed: result.failed_count,
+      }));
+    } else {
+      toast(t('knowledge_base.batch_moved', { count: result.success_count }), 'success');
+    }
+  } catch (err) {
+    toastError(String(err?.message || err || t('knowledge_base.batch_move_failed')));
+  }
+
+  exitMultiSelect();
+  _onReloadDocs();
+}
+
+/**
+ * 显示批量标签对话框（REQ-ING-024 AC-5）。
+ * 用户输入标签名（逗号分隔）→ 调用 batch_add_tags IPC。
+ */
+async function showBatchTagDialog() {
+  const checked = document.querySelectorAll('#docList input[type="checkbox"]:checked');
+  if (checked.length === 0) return;
+
+  const docIds = Array.from(checked).map((cb) => cb.dataset.docId).filter(Boolean);
+  if (docIds.length === 0) return;
+
+  const ok = await showConfirmDialog({
+    title: t('knowledge_base.batch_tag_title'),
+    body: t('knowledge_base.batch_tag_body', { count: docIds.length }),
+    confirmText: t('knowledge_base.batch_tag_confirm'),
+    customContent: (() => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.id = 'batchTagInput';
+      input.className = 'w-full mt-2 bg-surface-2 border border-border-default rounded-lg px-3 py-2 text-sm text-text-primary';
+      input.placeholder = t('knowledge_base.batch_tag_placeholder');
+      return input;
+    })(),
+  });
+
+  if (!ok) return;
+
+  const tagInput = document.getElementById('batchTagInput');
+  if (!tagInput) return;
+  const tagText = tagInput.value.trim();
+  if (!tagText) return;
+
+  // 逗号分隔标签
+  const tags = tagText.split(',').map((s) => s.trim()).filter(Boolean);
+
+  try {
+    const result = await invoke('batch_add_tags', { ids: docIds, tags });
+    if (result.failedCount > 0) {
+      toastError(t('knowledge_base.batch_tag_partial', {
+        success: result.success_count,
+        failed: result.failed_count,
+      }));
+    } else {
+      toast(t('knowledge_base.batch_tagged', { count: result.success_count }), 'success');
+    }
+  } catch (err) {
+    toastError(String(err?.message || err || t('knowledge_base.batch_tag_failed')));
+  }
+
   exitMultiSelect();
   _onReloadDocs();
 }

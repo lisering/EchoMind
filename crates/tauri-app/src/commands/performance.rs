@@ -433,6 +433,11 @@ pub async fn record_retrieval_feedback_inner(
     signal: echomind_core::retrieval_memory::FeedbackSignal,
     state: &AppState,
 ) -> Result<(), String> {
+    // REQ-PERF-020：用户反馈同时校准语义缓存阈值（正反馈下调/负反馈上调，
+    // 钳位 [0.85, 0.97]）。隐私模式（cache.enabled=false）由上层处理，此处
+    // 校准仅影响阈值，不写入缓存内容，故始终安全执行。
+    let _ = state.cache.feedback_adjust(signal.feedback);
+
     if !state.retrieval_memory_enabled {
         return Ok(()); // 禁用时静默跳过
     }
@@ -545,6 +550,43 @@ pub async fn set_contextual_retrieval_inner(enabled: bool, state: &AppState) -> 
     Ok(())
 }
 
+/// 设置 Late Chunking 开关（REQ-RAG-049）。
+///
+/// 开启后，新导入文档的嵌入将拼接文档前 500 字符作为上下文前缀，
+/// 使 chunk 向量包含全文语义上下文（Jina AI 2024 Late Chunking 技术）。
+/// 变更后需调用 `rebuild_all_embeddings` 重建已有嵌入向量。
+#[tauri::command]
+pub async fn set_late_chunking(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    set_late_chunking_inner(enabled, state.inner()).await
+}
+
+/// Late Chunking 开关写入逻辑（命令与集成测试复用）。
+pub async fn set_late_chunking_inner(enabled: bool, state: &AppState) -> Result<(), String> {
+    let value = if enabled { "true" } else { "false" };
+    state
+        .storage
+        .set_setting("rag.late_chunking", value)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(())
+}
+
+/// 获取 Late Chunking 开关状态（REQ-RAG-049）。
+#[tauri::command]
+pub async fn get_late_chunking(state: State<'_, AppState>) -> Result<bool, String> {
+    get_late_chunking_inner(state.inner()).await
+}
+
+/// Late Chunking 状态读取逻辑（命令与集成测试复用）。
+pub async fn get_late_chunking_inner(state: &AppState) -> Result<bool, String> {
+    let value = state
+        .storage
+        .get_setting("rag.late_chunking")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(value.is_some_and(|v| v == "true"))
+}
+
 /// 重建上下文增强嵌入（REQ-RAG-041）。
 ///
 /// 遍历所有已索引文档，对每个文档的 chunks 重新计算嵌入向量。
@@ -603,4 +645,254 @@ pub async fn rebuild_contextual_embeddings_inner<R: Runtime>(
     state.step_cache.clear();
 
     Ok(())
+}
+
+/// 重建全库嵌入向量（REQ-VEC-016）。
+///
+/// 遍历所有 Indexed 状态文档，使用当前嵌入模型重新计算全部 chunks 的嵌入向量。
+/// 适用于用户切换嵌入模型后（如从 bge-small-en-v1.5 切换到 bge-m3）的维度迁移。
+/// 重建过程中通过 `doc-status-changed` 事件推送进度，重建完成后清空查询缓存。
+#[tauri::command]
+pub async fn rebuild_all_embeddings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    rebuild_all_embeddings_inner(&app, state.inner()).await
+}
+
+/// 全库嵌入重建逻辑（命令与集成测试复用）。
+///
+/// 与 `rebuild_contextual_embeddings_inner` 的区别：
+/// - `rebuild_contextual_embeddings`：仅重建上下文前缀（Contextual Retrieval 开关变更后使用）
+/// - `rebuild_all_embeddings`：全库重建（嵌入模型切换后维度迁移使用）
+///
+/// 两者底层都调用 `embed_document_chunks`，但 `rebuild_all_embeddings`
+/// 会强制重置 embedder 实例（确保使用新模型）。
+pub async fn rebuild_all_embeddings_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+) -> Result<(), String> {
+    // 强制重置 embedder 实例（确保使用切换后的新模型）
+    state.model_store.reset_embedder().await;
+
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    let total = docs.len();
+    let mut completed = 0usize;
+    let mut failed = 0usize;
+
+    for doc in &docs {
+        // 跳过非 Indexed 状态的文档（Failed/Pending/Processing）
+        if !matches!(doc.status, DocStatus::Indexed) {
+            completed += 1;
+            continue;
+        }
+        let name = display_name(&doc.file_path);
+        emit_status(app, "indexing", format!("正在重建嵌入：{name}"));
+
+        match super::import::embed_document_chunks(app, state, &doc.id, &name).await {
+            Ok(count) => {
+                completed += 1;
+                emit_status(
+                    app,
+                    "done",
+                    format!("嵌入重建完成：{name}（{count} 向量）[{completed}/{total}]"),
+                );
+            }
+            Err(err) => {
+                failed += 1;
+                warn!("嵌入重建失败（doc_id={}）: {err}", doc.id);
+                emit_status(
+                    app,
+                    "error",
+                    format!("嵌入重建失败：{name}（已处理 {completed}/{total}）"),
+                );
+            }
+        }
+    }
+
+    // 清空查询缓存（嵌入向量已变更，旧缓存答案引用过期的向量维度）
+    if let Err(e) = state.cache.clear_all().await {
+        warn!("全库嵌入重建后清空查询缓存失败: {e:#}");
+    }
+    state.step_cache.clear();
+
+    if failed > 0 {
+        emit_status(
+            app,
+            "done",
+            format!("全库嵌入重建完成（{completed}/{total} 成功，{failed} 失败）"),
+        );
+    } else {
+        emit_status(app, "done", format!("全库嵌入重建完成（{total} 个文档）"));
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// 嵌入模型对比评估（REQ-VEC-018，开发者工具门控）
+// ============================================================================
+
+/// 运行嵌入模型对比评估（REQ-VEC-018）。
+///
+/// 对用户选择的 2-3 个嵌入模型，使用同一文档集进行嵌入并对比检索质量
+/// （Hit Rate / MRR / NDCG）。评估使用内置示例数据集或用户自定义数据集。
+///
+/// # 参数
+/// - `request`：评估请求（model_names + top_k + dataset_json）
+///
+/// # 返回
+/// `Vec<EmbedComparisonResult>`，每个模型一个结果
+///
+/// # 注意
+/// 此命令为开发者工具，仅在 Debug 构建中可用（`#[cfg(debug_assertions)]` 门控）。
+/// 评估过程中每个模型需要下载并加载 ONNX 模型文件（~30MB），可能较慢。
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn run_embed_comparison(
+    request: echomind_models::EmbedComparisonRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<echomind_models::EmbedComparisonResult>, String> {
+    run_embed_comparison_inner(request, &app, state.inner()).await
+}
+
+/// 嵌入模型对比评估逻辑（命令与集成测试复用）。
+#[cfg(debug_assertions)]
+pub async fn run_embed_comparison_inner(
+    request: echomind_models::EmbedComparisonRequest,
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<Vec<echomind_models::EmbedComparisonResult>, String> {
+    use echomind_core::embed_comparison::{ProgressEvent, run_embed_comparison as run_core};
+    use echomind_core::rag_eval_dataset::create_sample_dataset;
+    use echomind_infra::local_embedder::{LocalEmbedder, MirrorSource};
+    use std::sync::Arc;
+
+    // 加载评估数据集
+    let dataset = if let Some(ref json) = request.dataset_json {
+        echomind_core::rag_eval_dataset::load_eval_dataset(json)
+            .map_err(|e| format!("{ERR_VALIDATION}: 数据集 JSON 解析失败: {e:#}"))?
+    } else {
+        create_sample_dataset()
+    };
+
+    if dataset.is_empty() {
+        return Err(format!("{ERR_VALIDATION}: 评估数据集为空"));
+    }
+
+    if request.model_names.is_empty() {
+        return Err(format!("{ERR_VALIDATION}: 未选择任何嵌入模型"));
+    }
+
+    // 从知识库读取全部 chunks（Indexed 状态文档）
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{ERR_STORAGE}: {e:#}"))?;
+
+    let mut chunks: Vec<(String, String)> = Vec::new();
+    for doc in &docs {
+        if !matches!(doc.status, DocStatus::Indexed) {
+            continue;
+        }
+        let doc_chunks = state
+            .storage
+            .list_chunks(&doc.id)
+            .await
+            .map_err(|e| format!("{ERR_STORAGE}: {e:#}"))?;
+        for chunk in doc_chunks {
+            chunks.push((chunk.id, chunk.content));
+        }
+    }
+
+    if chunks.is_empty() {
+        return Err(format!(
+            "{ERR_VALIDATION}: 知识库中没有已索引的文档 chunks，请先导入文档"
+        ));
+    }
+
+    // 解析模型名称为 EmbeddingModel 枚举
+    let cache_dir = state.data_dir.join("models");
+
+    // 进度回调：通过 Tauri 事件推送
+    let app_handle = app.clone();
+    let progress: echomind_core::embed_comparison::ProgressFn =
+        Arc::new(move |evt: ProgressEvent| {
+            let payload = match &evt {
+                ProgressEvent::ModelStarted {
+                    model_name,
+                    index,
+                    total,
+                } => serde_json::json!({
+                    "phase": "model_started",
+                    "model": model_name,
+                    "index": index,
+                    "total": total
+                }),
+                ProgressEvent::EmbeddingDone {
+                    model_name,
+                    chunk_count,
+                } => serde_json::json!({
+                    "phase": "embedding_done",
+                    "model": model_name,
+                    "chunk_count": chunk_count
+                }),
+                ProgressEvent::ModelCompleted {
+                    model_name, result, ..
+                } => serde_json::json!({
+                    "phase": "model_completed",
+                    "model": model_name,
+                    "result": result
+                }),
+                ProgressEvent::AllCompleted { results } => serde_json::json!({
+                    "phase": "all_completed",
+                    "results": results
+                }),
+            };
+            let _ = app_handle.emit("embed_eval_progress", payload);
+        });
+
+    // 工厂闭包：按模型名称创建 LocalEmbedder
+    let mirror_source = MirrorSource::Auto;
+    let results = run_core(
+        &chunks,
+        &dataset,
+        &request.model_names,
+        move |model_name: &str| {
+            let model = parse_embedding_model_name(model_name);
+            let cache = cache_dir.clone();
+            let mirror = mirror_source.clone();
+            Box::pin(
+                async move { LocalEmbedder::new_with_mirror(cache, model, None, 1, mirror).await },
+            )
+        },
+        request.top_k,
+        Some(progress),
+    )
+    .await
+    .map_err(|e| format!("嵌入对比评估失败: {e:#}"))?;
+
+    Ok(results)
+}
+
+/// 解析嵌入模型名称字符串为 `EmbeddingModel` 枚举（开发者工具辅助函数）。
+#[cfg(debug_assertions)]
+fn parse_embedding_model_name(name: &str) -> echomind_infra::local_embedder::EmbeddingModel {
+    use echomind_infra::local_embedder::EmbeddingModel;
+    match name {
+        "all-MiniLM-L6-v2" => EmbeddingModel::AllMiniLML6V2,
+        "bge-small-en-v1.5" => EmbeddingModel::BgeSmallEnV1_5,
+        "bge-small-zh-v1.5" => EmbeddingModel::BgeSmallZhV1_5,
+        "e5-small-v2" => EmbeddingModel::E5SmallV2,
+        "bge-base-en-v1.5" => EmbeddingModel::BgeBaseEnV1_5,
+        "bge-m3" => EmbeddingModel::BgeM3,
+        _ => EmbeddingModel::AllMiniLML6V2, // 默认回退
+    }
 }

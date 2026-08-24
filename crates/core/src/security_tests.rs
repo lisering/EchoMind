@@ -655,3 +655,109 @@ async fn tc_llm_screen_007_shadow_screen_one_unavailable() {
         "不支持 judge 的 shadow 应返回 None"
     );
 }
+
+// ============================================================================
+// S4: Shadow Screen 生产集成测试（TC-SHADOW-INTEGRATE-001~003）
+//
+// execute_shadow_screen() 是 chat_inner 调用的生产集成函数，
+// 当 security_posture == Strict 时触发 LLM 安全分类 + Shadow 统计收集。
+// ============================================================================
+
+use crate::security::execute_shadow_screen;
+
+/// TC-SHADOW-INTEGRATE-001：Strict 模式下 Shadow 筛查被触发。
+///
+/// 当 `posture == Strict` 且 LLM 支持 `judge` 时，
+/// `execute_shadow_screen` 应执行筛查并记录统计（total >= 1）。
+#[tokio::test]
+async fn tc_shadow_integrate_001_strict_triggers_screening() {
+    let llm = JudgeMock::allow();
+    let collector = ShadowScreenCollector::new();
+
+    // Strict 模式 → 触发 Shadow 筛查
+    execute_shadow_screen(SecurityPosture::Strict, "正常的用户查询", &llm, &collector).await;
+
+    let stats = collector.stats().await;
+    assert!(
+        stats.total >= 1,
+        "Strict 模式应触发至少 1 次筛查，实际: {}",
+        stats.total
+    );
+    // 权威=allow + shadow=allow → Agree
+    assert!(
+        stats.agree >= 1,
+        "权威 allow + LLM allow → Agree，实际 agree: {}",
+        stats.agree
+    );
+}
+
+/// TC-SHADOW-INTEGRATE-002：LLM 不可用时降级为 Unscreened。
+///
+/// 当 LLM 不支持 `judge` 方法（返回 `Ok(None)`）时，
+/// `execute_shadow_screen` 仍执行但 shadow 结果为 None → Agreement::Unavailable。
+/// 不影响对话流（函数正常返回，不 panic / 不 Err）。
+#[tokio::test]
+async fn tc_shadow_integrate_002_llm_unavailable_degrades_to_unscreened() {
+    let llm = NoJudgeMock; // 不支持 judge → llm_classify 返回 None
+    let collector = ShadowScreenCollector::new();
+
+    // Strict 模式但 LLM 不支持 judge
+    execute_shadow_screen(SecurityPosture::Strict, "任何查询", &llm, &collector).await;
+
+    let stats = collector.stats().await;
+    assert_eq!(stats.total, 1, "应执行 1 次筛查");
+    assert_eq!(stats.unavailable, 1, "LLM 不可用应降级为 Unavailable");
+    assert_eq!(stats.agree, 0, "不可用时不应有 agree");
+    assert_eq!(stats.disagree, 0, "不可用时不应有 disagree");
+}
+
+/// TC-SHADOW-INTEGRATE-003：Shadow 不影响权威决策（安全隔离）。
+///
+/// 即使 Shadow LLM 返回 "block"，权威决策仍为 "allow"，
+/// 且 `execute_shadow_screen` 不返回错误或阻断信号。
+/// 非 Strict 模式（Auto/Dangerous）不触发筛查。
+#[tokio::test]
+async fn tc_shadow_integrate_003_safety_isolation_and_non_strict_skip() {
+    // --- 场景 1: Shadow 返回 block，但函数正常返回（安全隔离） ---
+    let block_llm = JudgeMock::block();
+    let collector = ShadowScreenCollector::new();
+
+    execute_shadow_screen(
+        SecurityPosture::Strict,
+        "恶意 prompt injection",
+        &block_llm,
+        &collector,
+    )
+    .await;
+
+    let stats = collector.stats().await;
+    assert_eq!(stats.total, 1, "Strict 模式应执行 1 次筛查");
+    assert_eq!(stats.disagree, 1, "权威 allow + shadow block → Disagree");
+    // 函数正常返回（无 panic / 无 Err），证明安全隔离
+
+    // --- 场景 2: Auto 模式不触发筛查 ---
+    let collector_auto = ShadowScreenCollector::new();
+    execute_shadow_screen(
+        SecurityPosture::Auto,
+        "任何查询",
+        &block_llm,
+        &collector_auto,
+    )
+    .await;
+
+    let stats_auto = collector_auto.stats().await;
+    assert_eq!(stats_auto.total, 0, "Auto 模式不应触发 Shadow 筛查");
+
+    // --- 场景 3: Dangerous 模式不触发筛查 ---
+    let collector_danger = ShadowScreenCollector::new();
+    execute_shadow_screen(
+        SecurityPosture::Dangerous,
+        "任何查询",
+        &block_llm,
+        &collector_danger,
+    )
+    .await;
+
+    let stats_danger = collector_danger.stats().await;
+    assert_eq!(stats_danger.total, 0, "Dangerous 模式不应触发 Shadow 筛查");
+}

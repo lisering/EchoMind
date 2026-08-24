@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use echomind_core::Storage;
-use echomind_infra::local_embedder::{EmbeddingModel, LocalEmbedder};
+use echomind_infra::local_embedder::{EmbeddingModel, LocalEmbedder, MirrorSource};
 use echomind_infra::local_reranker::LocalReranker;
 use echomind_infra::model_manager::ModelManager;
 use echomind_infra::robust_downloader::RobustDownloader;
@@ -113,6 +113,7 @@ impl ModelStore {
         }
         // 慢路径：初始化
         let model = self.load_embedding_model().await;
+        let mirror = self.load_mirror_source().await;
         let new_embedder = match &model {
             EmbeddingModel::Custom(name) => {
                 // 自定义模型路径（REQ-VEC-014，Pro 门控）
@@ -122,7 +123,14 @@ impl ModelStore {
             _ => {
                 // 预设模型路径
                 let cache_dir = self.data_dir.join("models");
-                LocalEmbedder::new_with_model(cache_dir, model.clone()).await?
+                LocalEmbedder::new_with_mirror(
+                    cache_dir,
+                    model.clone(),
+                    None,
+                    LocalEmbedder::default_pool_size(),
+                    mirror,
+                )
+                .await?
             }
         };
         {
@@ -149,7 +157,17 @@ impl ModelStore {
     async fn load_embedding_model(&self) -> EmbeddingModel {
         match self.storage.get_setting("vec.embedding_model").await {
             Ok(Some(s)) => parse_embedding_model(&s),
-            _ => EmbeddingModel::AllMiniLML6V2,
+            _ => EmbeddingModel::BgeSmallEnV1_5, // P1-5: 默认升级为 bge-small-en-v1.5
+        }
+    }
+
+    /// 从 settings 表读取镜像源配置（REQ-VEC-017 AC-3）。
+    ///
+    /// 未配置时默认 `auto`（自动检测系统语言选择源顺序）。
+    async fn load_mirror_source(&self) -> MirrorSource {
+        match self.storage.get_setting("vec.mirror_source").await {
+            Ok(Some(s)) => MirrorSource::parse_str(&s).unwrap_or(MirrorSource::Auto),
+            _ => MirrorSource::Auto,
         }
     }
 
@@ -161,6 +179,15 @@ impl ModelStore {
         let mut write = self.embedder.write().await;
         *write = None;
         Ok(())
+    }
+
+    /// 重置向量化引擎实例（REQ-VEC-016）。
+    ///
+    /// 将 embedder 设为 None，下次调用 `embedder()` 时使用当前 settings 中的模型重新初始化。
+    /// 用于 `rebuild_all_embeddings` 命令确保使用切换后的新模型重新嵌入。
+    pub async fn reset_embedder(&self) {
+        let mut write = self.embedder.write().await;
+        *write = None;
     }
 
     /// 带进度回调初始化向量化引擎（REQ-VEC-008）。
@@ -178,6 +205,7 @@ impl ModelStore {
             }
         }
         let model = self.load_embedding_model().await;
+        let mirror = self.load_mirror_source().await;
         let new_embedder = match &model {
             EmbeddingModel::Custom(name) => {
                 // 自定义模型路径（文件已在本地，不需要下载进度）
@@ -187,10 +215,12 @@ impl ModelStore {
             }
             _ => {
                 let cache_dir = self.data_dir.join("models");
-                echomind_infra::local_embedder::LocalEmbedder::new_with_progress(
+                echomind_infra::local_embedder::LocalEmbedder::new_with_mirror(
                     cache_dir,
                     model.clone(),
                     Some(progress),
+                    echomind_infra::local_embedder::LocalEmbedder::default_pool_size(),
+                    mirror,
                 )
                 .await?
             }
@@ -332,6 +362,7 @@ impl ModelStore {
 ///
 /// 支持预设模型名称和 `custom:{name}` 前缀的自定义模型。
 /// 例如：
+/// - `"bge-small-en-v1.5"` → `EmbeddingModel::BgeSmallEnV1_5`（P1-5 新增默认模型）
 /// - `"all-MiniLM-L6-v2"` → `EmbeddingModel::AllMiniLML6V2`
 /// - `"custom:my-bge-model"` → `EmbeddingModel::Custom("my-bge-model")`
 pub fn parse_embedding_model(s: &str) -> EmbeddingModel {
@@ -339,9 +370,12 @@ pub fn parse_embedding_model(s: &str) -> EmbeddingModel {
         return EmbeddingModel::Custom(name.to_string());
     }
     match s {
+        "bge-small-en-v1.5" => EmbeddingModel::BgeSmallEnV1_5,
+        "all-MiniLM-L6-v2" => EmbeddingModel::AllMiniLML6V2,
         "bge-small-zh-v1.5" => EmbeddingModel::BgeSmallZhV1_5,
         "e5-small-v2" => EmbeddingModel::E5SmallV2,
         "bge-base-en-v1.5" => EmbeddingModel::BgeBaseEnV1_5,
-        _ => EmbeddingModel::AllMiniLML6V2,
+        "bge-m3" => EmbeddingModel::BgeM3,
+        _ => EmbeddingModel::BgeSmallEnV1_5, // P1-5: 默认升级为 bge-small-en-v1.5
     }
 }

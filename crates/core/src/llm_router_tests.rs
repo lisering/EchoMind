@@ -229,3 +229,114 @@ async fn tc_router_012_convenience_constructors() {
     assert_eq!(l.mode, LlmMode::Local);
     assert_eq!(l.model_id, "qwen.gguf");
 }
+
+// ============================================================================
+// P2-2: 远程 LLM 连续失败 → 自动切换 Local 模式（TC-FALLBACK-001~007）
+// ============================================================================
+
+/// TC-FALLBACK-001：初始远程失败计数为 0。
+#[tokio::test]
+async fn tc_fallback_001_initial_count_zero() {
+    let router = LlmRouter::new_pro_default();
+    assert_eq!(router.remote_failure_count(), 0, "初始连续失败计数应为 0");
+}
+
+/// TC-FALLBACK-002：单次失败递增计数，不触发自动切换。
+#[tokio::test]
+async fn tc_fallback_002_single_failure_no_switch() {
+    let router = LlmRouter::new_pro_default();
+    let switched = router.record_remote_failure().await;
+    assert!(!switched, "1 次失败不应触发自动切换");
+    assert_eq!(router.remote_failure_count(), 1, "计数应为 1");
+    // fallback 仍为 Remote
+    let fb = router.fallback().await;
+    assert_eq!(fb.mode, LlmMode::Remote, "fallback 不应改变");
+}
+
+/// TC-FALLBACK-003：3 次连续失败触发自动切换到 Local（Pro 模式）。
+#[tokio::test]
+async fn tc_fallback_003_three_failures_trigger_switch() {
+    let router = LlmRouter::new_pro_default();
+
+    // 2 次失败：不触发
+    router.record_remote_failure().await;
+    router.record_remote_failure().await;
+    assert_eq!(router.remote_failure_count(), 2);
+
+    // 第 3 次失败：触发自动切换
+    let switched = router.record_remote_failure().await;
+    assert!(switched, "3 次连续失败应触发自动切换到 Local");
+    // 计数器在切换后重置
+    assert_eq!(router.remote_failure_count(), 0, "切换后计数器应重置");
+
+    // fallback 已切换到 Local
+    let fb = router.fallback().await;
+    assert_eq!(fb.mode, LlmMode::Local, "fallback 应已切换到 Local");
+}
+
+/// TC-FALLBACK-004：成功调用重置失败计数。
+#[tokio::test]
+async fn tc_fallback_004_success_resets_count() {
+    let router = LlmRouter::new_pro_default();
+
+    // 2 次失败
+    router.record_remote_failure().await;
+    router.record_remote_failure().await;
+    assert_eq!(router.remote_failure_count(), 2);
+
+    // 成功调用重置
+    router.record_remote_success();
+    assert_eq!(router.remote_failure_count(), 0, "成功后计数应重置为 0");
+
+    // 再失败 1 次：不应触发（因为计数从 0 开始）
+    let switched = router.record_remote_failure().await;
+    assert!(!switched, "重置后 1 次失败不应触发切换");
+}
+
+/// TC-FALLBACK-005：Free 版本（Local 不可用）3 次失败不触发自动切换。
+#[tokio::test]
+async fn tc_fallback_005_free_mode_no_local_no_switch() {
+    let router = LlmRouter::new_free_default();
+
+    router.record_remote_failure().await;
+    router.record_remote_failure().await;
+    let switched = router.record_remote_failure().await;
+
+    assert!(!switched, "Free 版本无 Local 模式，不应触发自动切换");
+    // fallback 仍为 Remote
+    let fb = router.fallback().await;
+    assert_eq!(fb.mode, LlmMode::Remote, "fallback 应保持 Remote");
+}
+
+/// TC-FALLBACK-006：自动切换后后续 resolve() 返回 Local 模式。
+#[tokio::test]
+async fn tc_fallback_006_post_switch_resolve_returns_local() {
+    let router = LlmRouter::new_pro_default();
+
+    // 触发 3 次失败 → 自动切换
+    for _ in 0..3 {
+        router.record_remote_failure().await;
+    }
+
+    // 新会话（无显式请求）应使用切换后的 fallback
+    let (choice, _) = router.resolve("new-conv", None).await.unwrap();
+    assert_eq!(choice.mode, LlmMode::Local, "自动切换后新会话应使用 Local");
+}
+
+/// TC-FALLBACK-007：中断（非失败）不计入失败计数。
+///
+/// `forward_stream` 返回 `Ok(ForwardResult { completed: false, .. })` 表示用户中断，
+/// 不是 LLM 故障，不应递增失败计数。
+/// 此测试验证：成功路径不调用 `record_remote_failure`，计数保持 0。
+#[tokio::test]
+async fn tc_fallback_007_no_failure_on_success() {
+    let router = LlmRouter::new_pro_default();
+
+    // 模拟成功调用：调用 record_remote_success
+    router.record_remote_success();
+    assert_eq!(router.remote_failure_count(), 0, "成功调用后计数应保持 0");
+
+    // 再次成功
+    router.record_remote_success();
+    assert_eq!(router.remote_failure_count(), 0, "再次成功计数仍为 0");
+}

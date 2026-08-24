@@ -1,4 +1,7 @@
 //! settings 域 IPC 命令子模块（从 commands.rs 拆分，纯重构）。
+//!
+//! S09: `update_setting(key, value)` 统一设置命令 — 合并 ~20 个 set_xxx 命令为单一入口。
+//! 旧 set_xxx 命令标记 `#[deprecated]`，已从 `generate_handler!` 移除，但保留 `*_inner` 逻辑供测试复用。
 use super::*;
 
 /// 测试 LLM 连接：极简请求验证 API Key 与 URL 有效性。
@@ -42,19 +45,14 @@ pub async fn update_llm_config_inner(config: LlmConfig, state: &AppState) -> Res
     {
         return Err(prefix_error(ERR_VALIDATION, "Base URL 格式不正确"));
     }
+    // 性能优化：3 次串行 set_setting → 1 次批量事务写入
     state
         .storage
-        .set_setting("llm.api_key", &config.api_key)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    state
-        .storage
-        .set_setting("llm.base_url", &config.base_url)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    state
-        .storage
-        .set_setting("llm.model", &config.model)
+        .set_settings_batch(&[
+            ("llm.api_key", &config.api_key),
+            ("llm.base_url", &config.base_url),
+            ("llm.model", &config.model),
+        ])
         .await
         .map_err(|e| format!("{e:#}"))?;
     *state.llm_config().write().await = Some(config);
@@ -658,10 +656,11 @@ pub async fn set_token_budget_config_inner(
 }
 
 // ============================================================================
-// Q08: Budget Tracking (QM 借鉴 — LLM API 费用控制和速率限制)
+// Q08: Budget Tracking (QM 借鉴) — S10: 开发者工具门控
 // ============================================================================
 
 /// 获取预算统计（QM 借鉴）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_budget_stats(
     state: State<'_, AppState>,
@@ -682,6 +681,7 @@ pub async fn get_budget_stats_inner(
 }
 
 /// 设置预算限制（QM 借鉴）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn set_budget_limit(
     daily_limit_usd: f64,
@@ -699,3 +699,923 @@ pub async fn set_budget_limit_inner(daily_limit_usd: f64, state: &AppState) -> R
         .await
         .map_err(|e| format!("{e:#}"))
 }
+
+// ============================================================================
+// S4 v1.6: 窗口关闭行为 — 最小化到托盘设置（REQ-WIN-003）
+// ============================================================================
+
+/// 获取「关闭窗口时最小化到托盘」设置（REQ-WIN-003 v1.6）。
+///
+/// 默认关闭（false）。开启后，点击窗口关闭按钮将隐藏窗口而非退出应用。
+#[tauri::command]
+pub async fn get_close_to_tray(state: State<'_, AppState>) -> Result<bool, String> {
+    get_close_to_tray_inner(state.inner()).await
+}
+
+/// 关闭到托盘设置读取逻辑（命令与集成测试复用）。
+pub async fn get_close_to_tray_inner(state: &AppState) -> Result<bool, String> {
+    let val = state
+        .storage
+        .get_setting("window.close_to_tray")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(val.is_some_and(|v| v == "true"))
+}
+
+/// 设置「关闭窗口时最小化到托盘」（REQ-WIN-003 v1.6）。
+///
+/// 持久化到 settings 表 `window.close_to_tray` 键。
+#[tauri::command]
+pub async fn set_close_to_tray(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    set_close_to_tray_inner(enabled, state.inner()).await
+}
+
+/// 关闭到托盘设置写入逻辑（命令与集成测试复用）。
+pub async fn set_close_to_tray_inner(enabled: bool, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .set_setting(
+            "window.close_to_tray",
+            if enabled { "true" } else { "false" },
+        )
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ─── RAG 检索参数（REQ-RAG-014）────────────────────────────────────────────
+
+/// 获取 RAG 检索参数（REQ-RAG-014）。
+///
+/// 从 settings 表读取 `rag.top_k` / `rag.score_threshold` /
+/// `rag.chunk_expansion_enabled` / `rag.chunk_expansion_window`，返回 `RagParams`。
+#[tauri::command]
+pub async fn get_rag_params(state: State<'_, AppState>) -> Result<RagParams, String> {
+    get_rag_params_inner(state.inner()).await
+}
+
+/// RAG 参数读取逻辑（命令与集成测试复用）。
+pub async fn get_rag_params_inner(state: &AppState) -> Result<RagParams, String> {
+    let top_k = state
+        .storage
+        .get_setting("rag.top_k")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let score_threshold = state
+        .storage
+        .get_setting("rag.score_threshold")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let chunk_expansion_enabled = state
+        .storage
+        .get_setting("rag.chunk_expansion_enabled")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let chunk_expansion_window = state
+        .storage
+        .get_setting("rag.chunk_expansion_window")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    let mut params = RagParams::default();
+    if let Some(v) = top_k
+        && let Ok(n) = v.parse::<usize>()
+    {
+        params.top_k = n;
+    }
+    if let Some(v) = score_threshold
+        && let Ok(f) = v.parse::<f32>()
+    {
+        params.score_threshold = f;
+    }
+    if let Some(v) = chunk_expansion_enabled {
+        params.chunk_expansion_enabled = v == "true";
+    }
+    if let Some(v) = chunk_expansion_window
+        && let Ok(n) = v.parse::<usize>()
+    {
+        params.chunk_expansion_window = n;
+    }
+    Ok(params.clamped())
+}
+
+/// 设置 RAG 检索参数（REQ-RAG-014）。
+///
+/// 持久化到 settings 表，对新查询生效。
+#[tauri::command]
+pub async fn set_rag_params(params: RagParams, state: State<'_, AppState>) -> Result<(), String> {
+    set_rag_params_inner(params, state.inner()).await
+}
+
+/// RAG 参数写入逻辑（命令与集成测试复用）。
+pub async fn set_rag_params_inner(params: RagParams, state: &AppState) -> Result<(), String> {
+    let params = params.clamped();
+    state
+        .storage
+        .set_setting("rag.top_k", &params.top_k.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting("rag.score_threshold", &params.score_threshold.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting(
+            "rag.chunk_expansion_enabled",
+            if params.chunk_expansion_enabled {
+                "true"
+            } else {
+                "false"
+            },
+        )
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting(
+            "rag.chunk_expansion_window",
+            &params.chunk_expansion_window.to_string(),
+        )
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ─── LLM 生成参数（REQ-RAG-015）────────────────────────────────────────────
+
+/// 获取 LLM 生成参数（REQ-RAG-015）。
+///
+/// 从 settings 表读取 `llm.temperature` / `llm.max_tokens` / `llm.top_p`。
+#[tauri::command]
+pub async fn get_generation_params(state: State<'_, AppState>) -> Result<GenerationParams, String> {
+    get_generation_params_inner(state.inner()).await
+}
+
+/// 生成参数读取逻辑（命令与集成测试复用）。
+pub async fn get_generation_params_inner(state: &AppState) -> Result<GenerationParams, String> {
+    let temperature = state
+        .storage
+        .get_setting("llm.temperature")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let max_tokens = state
+        .storage
+        .get_setting("llm.max_tokens")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let top_p = state
+        .storage
+        .get_setting("llm.top_p")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    let mut params = GenerationParams::default();
+    if let Some(v) = temperature
+        && let Ok(f) = v.parse::<f32>()
+    {
+        params.temperature = f;
+    }
+    if let Some(v) = max_tokens
+        && let Ok(n) = v.parse::<usize>()
+    {
+        params.max_tokens = n;
+    }
+    if let Some(v) = top_p
+        && let Ok(f) = v.parse::<f32>()
+    {
+        params.top_p = f;
+    }
+    Ok(params.clamped())
+}
+
+/// 设置 LLM 生成参数（REQ-RAG-015）。
+///
+/// 持久化到 settings 表，对新查询生效。
+#[tauri::command]
+pub async fn set_generation_params(
+    params: GenerationParams,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    set_generation_params_inner(params, state.inner()).await
+}
+
+/// 生成参数写入逻辑（命令与集成测试复用）。
+pub async fn set_generation_params_inner(
+    params: GenerationParams,
+    state: &AppState,
+) -> Result<(), String> {
+    let params = params.clamped();
+    state
+        .storage
+        .set_setting("llm.temperature", &params.temperature.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting("llm.max_tokens", &params.max_tokens.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting("llm.top_p", &params.top_p.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ============================================================
+// REQ-VEC-011 分块参数可视化配置
+// ============================================================
+
+/// 分块参数（REQ-VEC-011）。
+///
+/// 持久化到 settings 表 `vec.chunk_size` 和 `vec.chunk_overlap`。
+/// 新导入文档使用此参数分块；已索引文档不受影响。
+/// 范围：chunk_size 128-2048（默认 256），overlap 0-256（默认 32）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChunkParams {
+    /// 分块 token 窗口（128-2048，默认 256）
+    pub chunk_size: usize,
+    /// 重叠 token 数（0-256，默认 32，必须 < chunk_size）
+    pub overlap: usize,
+}
+
+impl Default for ChunkParams {
+    fn default() -> Self {
+        Self {
+            chunk_size: echomind_core::import::DEFAULT_CHUNK_TOKENS,
+            overlap: echomind_core::splitter::DEFAULT_OVERLAP_TOKENS,
+        }
+    }
+}
+
+impl ChunkParams {
+    /// 校验参数范围，超出范围时返回错误。
+    pub fn validate(&self) -> Result<(), String> {
+        if self.chunk_size < 128 || self.chunk_size > 2048 {
+            return Err(format!(
+                "VALIDATION: 分块大小必须在 128-2048 范围内（当前 {}）",
+                self.chunk_size
+            ));
+        }
+        if self.overlap > 256 {
+            return Err(format!(
+                "VALIDATION: 重叠大小必须在 0-256 范围内（当前 {}）",
+                self.overlap
+            ));
+        }
+        if self.overlap >= self.chunk_size {
+            return Err(format!(
+                "VALIDATION: 重叠大小必须小于分块大小（overlap={} >= chunk_size={}）",
+                self.overlap, self.chunk_size
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// 获取分块参数（REQ-VEC-011）。
+#[tauri::command]
+pub async fn get_chunk_params(state: State<'_, AppState>) -> Result<ChunkParams, String> {
+    get_chunk_params_inner(state.inner()).await
+}
+
+/// 获取分块参数逻辑（命令与集成测试复用）。
+pub async fn get_chunk_params_inner(state: &AppState) -> Result<ChunkParams, String> {
+    let chunk_size = state
+        .storage
+        .get_setting("vec.chunk_size")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(echomind_core::import::DEFAULT_CHUNK_TOKENS);
+    let overlap = state
+        .storage
+        .get_setting("vec.chunk_overlap")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(echomind_core::splitter::DEFAULT_OVERLAP_TOKENS);
+    Ok(ChunkParams {
+        chunk_size,
+        overlap,
+    })
+}
+
+/// 设置分块参数（REQ-VEC-011）。
+///
+/// 参数变更后新导入文档使用新参数；已索引文档不受影响（需手动重建索引）。
+#[tauri::command]
+pub async fn set_chunk_params(
+    params: ChunkParams,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    set_chunk_params_inner(params, state.inner()).await
+}
+
+/// 设置分块参数逻辑（命令与集成测试复用）。
+pub async fn set_chunk_params_inner(params: ChunkParams, state: &AppState) -> Result<(), String> {
+    params.validate()?;
+    state
+        .storage
+        .set_setting("vec.chunk_size", &params.chunk_size.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    state
+        .storage
+        .set_setting("vec.chunk_overlap", &params.overlap.to_string())
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ============================================================================
+// v1.13: 开机自启（REQ-WIN-004）
+// ============================================================================
+
+/// 获取开机自启状态。
+#[tauri::command]
+pub async fn get_autostart(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    get_autostart_inner(app, state.inner()).await
+}
+
+/// 获取开机自启状态逻辑（命令与集成测试复用）。
+pub async fn get_autostart_inner(app: tauri::AppHandle, state: &AppState) -> Result<bool, String> {
+    // 优先从 settings 表读取持久化状态
+    let persisted = state
+        .storage
+        .get_setting("app.autostart")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if let Some(val) = persisted {
+        return Ok(val == "true");
+    }
+    // 回退到 autostart 插件实际状态
+    use tauri_plugin_autostart::ManagerExt;
+    let autostart = app.autolaunch();
+    match autostart.is_enabled() {
+        Ok(enabled) => Ok(enabled),
+        Err(_) => Ok(false),
+    }
+}
+
+/// 设置开机自启。
+#[tauri::command]
+pub async fn set_autostart(
+    enabled: bool,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    set_autostart_inner(enabled, app, state.inner()).await
+}
+
+/// 设置开机自启逻辑（命令与集成测试复用）。
+pub async fn set_autostart_inner(
+    enabled: bool,
+    app: tauri::AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autostart = app.autolaunch();
+    if enabled {
+        autostart
+            .enable()
+            .map_err(|e| format!("AUTOSTART: 启用开机自启失败: {e}"))?;
+    } else {
+        autostart
+            .disable()
+            .map_err(|e| format!("AUTOSTART: 禁用开机自启失败: {e}"))?;
+    }
+    // 持久化到 settings 表
+    state
+        .storage
+        .set_setting("app.autostart", if enabled { "true" } else { "false" })
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ============================================================================
+// v1.13: 应用更新检查（REQ-HELP-004）
+// ============================================================================
+
+/// 检查 GitHub Releases 是否有新版本。
+#[tauri::command]
+pub async fn check_for_updates(
+    state: State<'_, AppState>,
+) -> Result<echomind_core::update_check::UpdateCheckResult, String> {
+    check_for_updates_inner(state.inner()).await
+}
+
+/// 检查更新逻辑（命令与集成测试复用）。
+///
+/// 24 小时内不重复检查。网络不可用时返回 has_update=false，不报错。
+///
+/// 铁律一合规：reqwest 使用 `.no_proxy()` 确保直连。
+pub async fn check_for_updates_inner(
+    state: &AppState,
+) -> Result<echomind_core::update_check::UpdateCheckResult, String> {
+    use echomind_core::update_check;
+
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    // 检查 24 小时内是否已检查过
+    let last_check = state
+        .storage
+        .get_setting("update.last_check")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    // 如果 auto_check 为 false 且 24 小时内已检查，跳过
+    let auto_check = state
+        .storage
+        .get_setting("update.auto_check")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .is_none_or(|v| v != "false");
+
+    if !auto_check && !update_check::should_check(last_check) {
+        return Ok(update_check::UpdateCheckResult {
+            has_update: false,
+            current_version: current_version.to_string(),
+            latest_version: current_version.to_string(),
+            release_notes: None,
+            download_url: None,
+        });
+    }
+
+    // 调用 GitHub Releases API（铁律一：no_proxy 直连）
+    let result = fetch_github_release(current_version).await;
+
+    // 更新最后检查时间
+    let now = update_check::current_timestamp();
+    let _ = state
+        .storage
+        .set_setting("update.last_check", &now.to_string())
+        .await;
+
+    match result {
+        Some(r) => Ok(r),
+        None => Ok(update_check::UpdateCheckResult {
+            has_update: false,
+            current_version: current_version.to_string(),
+            latest_version: current_version.to_string(),
+            release_notes: None,
+            download_url: None,
+        }),
+    }
+}
+
+/// GitHub Release 信息（反序列化 GitHub API 响应）。
+#[derive(Debug, serde::Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    body: Option<String>,
+    html_url: Option<String>,
+}
+
+/// GitHub API 请求超时（秒）。
+const GITHUB_API_TIMEOUT_SECS: u64 = 15;
+
+/// GitHub 仓库 releases API URL。
+const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/EchoMind/EchoMind/releases/latest";
+
+/// 调用 GitHub Releases API 检查新版本。
+///
+/// 网络不可用时返回 `None`，不报错。
+async fn fetch_github_release(
+    current_version: &str,
+) -> Option<echomind_core::update_check::UpdateCheckResult> {
+    use echomind_core::update_check;
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(GITHUB_API_TIMEOUT_SECS))
+        .build()
+        .ok()?;
+
+    let response = client
+        .get(GITHUB_RELEASES_API)
+        .header("User-Agent", "EchoMind-Update-Checker")
+        .send()
+        .await
+        .ok()?;
+
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let release: GitHubRelease = response.json().await.ok()?;
+
+    let latest_version = release.tag_name.trim_start_matches('v').to_string();
+    let has_update = update_check::is_newer_version(current_version, &latest_version);
+
+    Some(update_check::UpdateCheckResult {
+        has_update,
+        current_version: current_version.to_string(),
+        latest_version,
+        release_notes: release.body,
+        download_url: release.html_url,
+    })
+}
+
+/// 获取更新检查配置。
+#[tauri::command]
+pub async fn get_update_check_config(
+    state: State<'_, AppState>,
+) -> Result<echomind_core::update_check::UpdateCheckConfig, String> {
+    get_update_check_config_inner(state.inner()).await
+}
+
+/// 获取更新检查配置逻辑（命令与集成测试复用）。
+pub async fn get_update_check_config_inner(
+    state: &AppState,
+) -> Result<echomind_core::update_check::UpdateCheckConfig, String> {
+    let auto_check = state
+        .storage
+        .get_setting("update.auto_check")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .is_none_or(|v| v != "false");
+
+    let last_check = state
+        .storage
+        .get_setting("update.last_check")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    Ok(echomind_core::update_check::UpdateCheckConfig {
+        auto_check,
+        last_check,
+    })
+}
+
+/// 设置自动检查更新开关。
+#[tauri::command]
+pub async fn set_update_check_enabled(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    set_update_check_enabled_inner(enabled, state.inner()).await
+}
+
+/// 设置自动检查更新开关逻辑（命令与集成测试复用）。
+pub async fn set_update_check_enabled_inner(enabled: bool, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .set_setting("update.auto_check", if enabled { "true" } else { "false" })
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ------------------------------------------------------------------
+// 导入历史记录（REQ-ING-011）
+// ------------------------------------------------------------------
+
+/// 查询导入历史记录（最近 100 条，按时间倒序）。
+#[tauri::command]
+pub async fn get_import_history(
+    result_filter: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<echomind_models::ImportLogEntry>, String> {
+    state
+        .storage
+        .get_import_logs(result_filter.as_deref())
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 清空导入历史记录。
+#[tauri::command]
+pub async fn clear_import_history(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .storage
+        .clear_import_logs()
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ------------------------------------------------------------------
+// 智能模式（S5 审计 P0-1）
+// ------------------------------------------------------------------
+
+/// 智能模式开启时自动设置的优化项。
+///
+/// REQ-RAG-050（P2-7）：新增 RAG 检索参数调优：
+/// - top_k = 8（扩大候选池，DEFAULT_TOP_K 已为 8）
+/// - score_threshold = 0.05（降低过滤门槛，默认 0.0 → 0.05 在智能模式下更精准）
+/// - chunk_expansion_enabled = true（增加上下文窗口）
+const SMART_MODE_SETTINGS: &[(&str, &str)] = &[
+    ("rag.hybrid_search", "true"),
+    ("rag.rerank_enabled", "true"),
+    ("rag.hyde_enabled", "true"),
+    ("rag.graph_retriever_enabled", "true"),
+    ("rag.quality_gate_enabled", "true"),
+    ("compression.ratio", "2.0"),
+    ("rag.contextual_retrieval", "true"),
+    // REQ-RAG-050: RAG 检索参数调优（P2-7）
+    ("rag.top_k", "8"),
+    ("rag.score_threshold", "0.05"),
+    ("rag.chunk_expansion_enabled", "true"),
+];
+
+/// 设置智能模式开关。
+///
+/// 开启时：备份当前设置值到 `smart_mode_backup.*` 键，然后设置全部优化项。
+/// 关闭时：从 `smart_mode_backup.*` 键恢复用户手动设置值。
+#[tauri::command]
+pub async fn set_smart_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    set_smart_mode_inner(enabled, state.inner()).await
+}
+
+/// `set_smart_mode` 的逻辑实现（命令与集成测试复用）。
+pub async fn set_smart_mode_inner(enabled: bool, state: &AppState) -> Result<(), String> {
+    if enabled {
+        // 备份当前值
+        for &(key, _) in SMART_MODE_SETTINGS {
+            let current = state
+                .storage
+                .get_setting(key)
+                .await
+                .map_err(|e| format!("{e:#}"))?
+                .unwrap_or_else(|| "false".to_string());
+            let backup_key = format!("smart_mode_backup.{key}");
+            state
+                .storage
+                .set_setting(&backup_key, &current)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+        }
+        // 设置优化值
+        for &(key, val) in SMART_MODE_SETTINGS {
+            state
+                .storage
+                .set_setting(key, val)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+        }
+    } else {
+        // 恢复备份值
+        for &(key, _) in SMART_MODE_SETTINGS {
+            let backup_key = format!("smart_mode_backup.{key}");
+            let backup_val = state
+                .storage
+                .get_setting(&backup_key)
+                .await
+                .map_err(|e| format!("{e:#}"))?;
+            if let Some(val) = backup_val {
+                state
+                    .storage
+                    .set_setting(key, &val)
+                    .await
+                    .map_err(|e| format!("{e:#}"))?;
+            }
+        }
+    }
+
+    state
+        .storage
+        .set_setting("smart_mode.enabled", if enabled { "true" } else { "false" })
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 查询智能模式是否启用。
+#[tauri::command]
+pub async fn get_smart_mode(state: State<'_, AppState>) -> Result<bool, String> {
+    get_smart_mode_inner(state.inner()).await
+}
+
+/// `get_smart_mode` 的逻辑实现（命令与集成测试复用）。
+pub async fn get_smart_mode_inner(state: &AppState) -> Result<bool, String> {
+    // 默认启用（首次安装时无设置项，返回 true）
+    let val = state
+        .storage
+        .get_setting("smart_mode.enabled")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(val.is_none_or(|v| v != "false"))
+}
+
+// ============================================================================
+// REQ-VEC-017: 嵌入模型下载镜像源配置
+// ============================================================================
+
+/// 设置嵌入模型下载镜像源（REQ-VEC-017 AC-3）。
+///
+/// 持久化到 settings 表 `vec.mirror_source` 键。
+/// 支持的值：`auto` / `modelscope` / `hf-mirror` / `huggingface`
+///
+/// 切换镜像源后，下次模型下载时使用新源。已缓存文件不受影响。
+#[tauri::command]
+pub async fn set_mirror_source(source: String, state: State<'_, AppState>) -> Result<(), String> {
+    set_mirror_source_inner(&source, state.inner()).await
+}
+
+/// 镜像源设置写入逻辑（命令与集成测试复用）。
+pub async fn set_mirror_source_inner(source: &str, state: &AppState) -> Result<(), String> {
+    use echomind_infra::local_embedder::MirrorSource;
+    let mirror = MirrorSource::parse_str(source).ok_or_else(|| {
+        prefix_error(
+            ERR_VALIDATION,
+            &format!("无效的镜像源: {source}（可选: auto / modelscope / hf-mirror / huggingface）"),
+        )
+    })?;
+    state
+        .storage
+        .set_setting("vec.mirror_source", mirror.as_str())
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 获取当前镜像源配置（REQ-VEC-017 AC-3）。
+///
+/// 返回 `auto` / `modelscope` / `hf-mirror` / `huggingface`。
+/// 未配置时返回 `auto`。
+#[tauri::command]
+pub async fn get_mirror_source(state: State<'_, AppState>) -> Result<String, String> {
+    get_mirror_source_inner(state.inner()).await
+}
+
+/// 镜像源读取逻辑（命令与集成测试复用）。
+pub async fn get_mirror_source_inner(state: &AppState) -> Result<String, String> {
+    let val = state
+        .storage
+        .get_setting("vec.mirror_source")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(val.unwrap_or_else(|| "auto".to_string()))
+}
+
+// ============================================================================
+// S09: 统一设置命令 — update_setting(key, value) + get_setting(key)
+// ============================================================================
+
+/// 支持通过 `update_setting` 更新的设置键白名单。
+///
+/// 每个键映射到一个 `*_inner` 函数，实现类型解析 + 验证 + 持久化。
+/// 不在此白名单中的键返回 `ERR_VALIDATION` 错误（防止任意键注入）。
+const UPDATEABLE_KEYS: &[&str] = &[
+    "rag.hybrid_search",
+    "rag.rerank_enabled",
+    "rag.hyde_enabled",
+    "rag.agent_enabled",
+    "rag.coordinator_enabled",
+    "rag.sub_agent_enabled",
+    "vec.embedding_model",
+    "compression.ratio",
+    "rag.context_token_limit",
+    "mm.vlm_enabled",
+    "rag.progressive_injection",
+    "rag.speculative_enabled",
+    "rag.quality_gate_enabled",
+    "rag.graph_retriever_enabled",
+    "memory.enabled",
+    "rag.web_search_enabled",
+    "rag.contextual_retrieval",
+    "window.close_to_tray",
+    "ui.sidebar_collapsed",
+    "app.autostart",
+    "rag.retrieval_memory_enabled",
+    "update.auto_check",
+    "vec.mirror_source",
+];
+
+/// 统一设置命令（S09 IPC 精简）。
+///
+/// 将 ~20 个 `set_xxx` 命令合并为单一入口。前端通过 `settingsApi.update(key, value)` 调用。
+/// 内部按 `key` 分发到现有 `*_inner` 函数，复用全部验证逻辑。
+///
+/// # 参数
+/// - `key`: 设置键（必须在 `UPDATEABLE_KEYS` 白名单中）
+/// - `value`: 设置值（字符串，布尔值为 `"true"`/`"false"`，数字为字符串形式）
+/// - `app`: Tauri AppHandle（仅 `app.autostart` 需要，其他键不使用）
+///
+/// # 错误
+/// - `ERR_VALIDATION`: 不支持的设置键或值类型解析失败
+/// - 其他: 底层 `*_inner` 函数返回的错误
+#[tauri::command]
+pub async fn update_setting(
+    key: String,
+    value: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    update_setting_inner(&key, &value, &app, state.inner()).await
+}
+
+/// `update_setting` 的逻辑实现（命令与集成测试复用）。
+///
+/// 按 `key` match 分发到对应的 `*_inner` 函数。
+/// 布尔值通过 `value == "true"` 判断（宽松匹配：任何非 `"true"` 的值视为 `false`）。
+pub async fn update_setting_inner(
+    key: &str,
+    value: &str,
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
+    // 白名单检查
+    if !UPDATEABLE_KEYS.contains(&key) {
+        return Err(prefix_error(
+            ERR_VALIDATION,
+            &format!("不支持的设置键: {key}（可更新的键: {UPDATEABLE_KEYS:?}）"),
+        ));
+    }
+
+    let enabled = value == "true";
+
+    match key {
+        // ── 布尔开关类 ──
+        "rag.hybrid_search" => set_hybrid_search_inner(enabled, state).await,
+        "rag.rerank_enabled" => set_rerank_enabled_inner(enabled, state).await,
+        "rag.hyde_enabled" => set_hyde_enabled_inner(enabled, state).await,
+        "rag.agent_enabled" => set_agent_enabled_inner(enabled, state).await,
+        "rag.coordinator_enabled" => set_coordinator_mode_inner(enabled, state).await,
+        "rag.sub_agent_enabled" => set_sub_agent_enabled_inner(enabled, state).await,
+        "mm.vlm_enabled" => set_vlm_enabled_inner(enabled, state).await,
+        "rag.progressive_injection" => set_progressive_injection_inner(enabled, state).await,
+        "rag.speculative_enabled" => set_speculative_enabled_inner(enabled, state).await,
+        "rag.quality_gate_enabled" => set_quality_gate_enabled_inner(enabled, state).await,
+        "rag.graph_retriever_enabled" => set_graph_retriever_enabled_inner(enabled, state).await,
+        "memory.enabled" => set_memory_enabled_inner(enabled, state).await,
+        "rag.web_search_enabled" => set_web_search_enabled_inner(enabled, state).await,
+        "rag.contextual_retrieval" => set_contextual_retrieval_inner(enabled, state).await,
+        "window.close_to_tray" => set_close_to_tray_inner(enabled, state).await,
+        "ui.sidebar_collapsed" => set_sidebar_collapsed_inner(enabled, state).await,
+        "rag.retrieval_memory_enabled" => set_retrieval_memory_enabled_inner(enabled, state).await,
+        "update.auto_check" => set_update_check_enabled_inner(enabled, state).await,
+
+        // ── 数值类（需 parse） ──
+        "compression.ratio" => {
+            let ratio = value
+                .parse::<f32>()
+                .map_err(|_| prefix_error(ERR_VALIDATION, &format!("压缩比必须为数字: {value}")))?;
+            set_compression_ratio_inner(ratio, state).await
+        }
+        "rag.context_token_limit" => {
+            let limit = value.parse::<usize>().map_err(|_| {
+                prefix_error(ERR_VALIDATION, &format!("token 限制必须为正整数: {value}"))
+            })?;
+            set_context_token_limit_inner(limit, state).await
+        }
+
+        // ── 字符串类 ──
+        "vec.embedding_model" => set_embedding_model_inner(value, state).await,
+        "vec.mirror_source" => set_mirror_source_inner(value, state).await,
+
+        // ── 需要 AppHandle 的命令 ──
+        "app.autostart" => set_autostart_inner(enabled, app.clone(), state).await,
+
+        // 白名单检查已保证不会走到这里
+        _ => Err(prefix_error(
+            ERR_VALIDATION,
+            &format!("不支持的设置键: {key}"),
+        )),
+    }
+}
+
+/// 统一读取命令（S09 IPC 精简）。
+///
+/// 从 settings 表读取指定键的值，返回原始字符串。
+/// 复杂结构（如 `get_settings` 返回的 `SettingsPayload`）仍使用各自的专用命令。
+///
+/// # 参数
+/// - `key`: 设置键
+///
+/// # 返回
+/// 设置值的字符串形式。键不存在时返回空字符串。
+#[tauri::command]
+pub async fn get_setting(key: String, state: State<'_, AppState>) -> Result<String, String> {
+    get_setting_inner(&key, state.inner()).await
+}
+
+/// `get_setting` 的逻辑实现（命令与集成测试复用）。
+pub async fn get_setting_inner(key: &str, state: &AppState) -> Result<String, String> {
+    state
+        .storage
+        .get_setting(key)
+        .await
+        .map_err(|e| format!("{e:#}"))
+        .map(|v| v.unwrap_or_default())
+}
+
+// ============================================================================
+// S09: 已废弃的 #[tauri::command] 包装器（已从 generate_handler! 移除）
+// ============================================================================
+//
+// 以下旧 set_xxx 命令的 #[tauri::command] 包装器已从 generate_handler! 移除。
+// 它们的 *_inner 逻辑通过 update_setting 统一入口调用。
+// 前端已迁移到 settingsApi.update(key, value)。
+//
+// 被移除的命令清单（22 个）：
+//   set_hybrid_search, set_rerank_enabled, set_hyde_enabled, set_agent_enabled,
+//   set_coordinator_mode, set_sub_agent_enabled, set_embedding_model,
+//   set_compression_ratio, set_context_token_limit, set_vlm_enabled,
+//   set_progressive_injection, set_speculative_enabled, set_quality_gate_enabled,
+//   set_graph_retriever_enabled, set_memory_enabled, set_web_search_enabled,
+//   set_contextual_retrieval, set_close_to_tray, set_sidebar_collapsed,
+//   set_autostart, set_retrieval_memory_enabled, set_update_check_enabled

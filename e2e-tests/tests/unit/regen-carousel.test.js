@@ -19,7 +19,7 @@ import {
   getCarouselState,
   updateCarouselDisplay,
   renderCarouselControls,
-} from '../../../ui/src/regen-carousel.js';
+} from '../../../ui/src/chat-render.js';
 
 describe('Regen Carousel — regen-carousel.js', () => {
   let blockEl;

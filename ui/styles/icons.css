@@ -1,0 +1,77 @@
+/**
+ * EchoMind SVG inline 图标尺寸与状态样式（REQ-DS-004）。
+ *
+ * 尺寸三档：
+ *   .icon-sm  → 16px  — 列表项、按钮内小图标
+ *   .icon-md  → 20px  — 工具栏、面板标题
+ *   .icon-lg  → 24px  — 大按钮、空状态
+ *
+ * disabled 状态：
+ *   .icon-disabled  →  opacity: 0.4
+ *
+ * 图标继承 currentColor，与 Tailwind hover:text-accent 体系兼容。
+ * SVG 的 width/height 由 CSS 控制，不使用 HTML 属性。
+ */
+
+/* ============================================================
+   尺寸三档
+   ============================================================ */
+
+.icon-sm {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.icon-md {
+  width: 20px;
+  height: 20px;
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.icon-lg {
+  width: 24px;
+  height: 24px;
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   disabled 状态
+   ============================================================ */
+
+.icon-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* 按钮内的 SVG 继承 disabled 状态 */
+button:disabled .icon-sm,
+button:disabled .icon-md,
+button:disabled .icon-lg {
+  opacity: 0.4;
+}
+
+/* ============================================================
+   辅助样式
+   ============================================================ */
+
+/* SVG 默认填充方式：stroke 而非 fill（与 icons.js SVG_ATTRS 一致） */
+svg.icon-sm,
+svg.icon-md,
+svg.icon-lg {
+  fill: none;
+}
+
+/* fill 类图标（如 stop 方块）使用 fill="currentColor" */
+svg.icon-sm[fill="currentColor"],
+svg.icon-md[fill="currentColor"],
+svg.icon-lg[fill="currentColor"] {
+  fill: currentColor;
+  stroke: none;
+}

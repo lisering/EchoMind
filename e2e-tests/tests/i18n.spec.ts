@@ -88,7 +88,7 @@ test.describe('E2E-I18N 国际化功能（REQ-I18N-001~003）', () => {
   test('E2E-I18N-007 语言切换不丢失其他状态', async ({ page }) => {
     // 设置一些其他状态
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_hybrid_search', { enabled: true })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.hybrid_search', value: String(true) })
     );
     // 切换语言
     await page.evaluate(() =>

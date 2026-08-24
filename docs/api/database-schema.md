@@ -1,6 +1,6 @@
 # 数据库 Schema
 
-> **状态**：活跃 | **最后审阅**：2026-08-10（v3 全量同步 23 张表：新增 entities / propositions / summary_nodes / retrieval_memory / turn_active_versions / session_todos / scratch_logs / idempotency_records / budget_records / audit_log / embeddings_cache + messages.security_tainted 列；v2 新增 FTS5 虚拟表）
+> **状态**：活跃 | **最后审阅**：2026-08-16（v4 v2.0 S17 文档同步：新增 workspaces / conversation_bookmarks / import_logs 表文档，更新表总数 23→26 张表 + 2 FTS5 虚拟表；v3 全量同步 23 张表：新增 entities / propositions / summary_nodes / retrieval_memory / turn_active_versions / session_todos / scratch_logs / idempotency_records / budget_records / audit_log / embeddings_cache + messages.security_tainted 列；v2 新增 FTS5 虚拟表）
 >
 > 源码：`crates/infra/src/sqlite_storage.rs`。
 > 数据库文件：`<app_data_dir>/echomind.db`（SQLite + WAL 模式）。
@@ -23,6 +23,7 @@
 | `domain` | TEXT | | 领域分类标签（REQ-VEC-013；16 预定义领域之一，NULL=未分类） |
 | `summary` | TEXT | | 文档摘要（REQ-ING-019；LLM 生成 200-300 字，NULL=未生成或生成失败） |
 | `tags` | TEXT | NOT NULL DEFAULT '[]' | 用户自定义标签（REQ-ING-022；JSON 数组字符串，如 `["法律","重要"]`，默认空数组） |
+| `workspace_id` | TEXT | NOT NULL DEFAULT 'default' | 所属工作空间 ID（REQ-WS-001；旧数据迁移默认 `default`） |
 
 ### 1.2 chunks
 
@@ -49,6 +50,7 @@
 | `workspace_id` | TEXT | NOT NULL | 工作区标识（v1.0 固定 "default"） |
 | `title` | TEXT | NOT NULL | 会话标题（首轮问答后自动提取） |
 | `created_at` | INTEGER | NOT NULL | Unix 秒级时间戳 |
+| `sort_order` | INTEGER | NOT NULL DEFAULT 0 | 拖拽排序位置（REQ-IX-002 会话拖拽排序） |
 
 ### 1.5 messages
 
@@ -384,7 +386,49 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 - **验证完整性**：`verify_audit_chain()` 重放哈希链检测篡改
 - **关联需求**：REQ-SEC-015 审计日志哈希链
 
-### 1.23 embeddings_cache（嵌入缓存）
+### 1.23 workspaces（工作空间，REQ-WS-001）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PRIMARY KEY | UUID v4（默认工作空间 ID 为 `"default"`） |
+| `name` | TEXT | NOT NULL | 工作空间名称 |
+| `created_at` | INTEGER | NOT NULL | Unix 秒级时间戳 |
+
+- **初始化**：首次启动时自动插入 `default` 工作空间（`INSERT OR IGNORE`）
+- **关联需求**：REQ-WS-001 多知识库管理
+
+### 1.24 conversation_bookmarks（对话书签，REQ-RAG-047）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `conversation_id` | TEXT | PRIMARY KEY | 会话 ID |
+| `note` | TEXT | | 书签备注（可选） |
+| `created_at` | INTEGER | NOT NULL | 创建时间（Unix 秒级时间戳） |
+
+**索引**：`idx_bookmarks_created` (created_at)
+
+- **写入时机**：`add_bookmark` IPC 命令
+- **关联需求**：REQ-RAG-047 对话书签
+
+### 1.25 import_logs（导入历史，REQ-ING-011）
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | 自增 ID |
+| `timestamp` | INTEGER | NOT NULL | 导入时间戳 |
+| `file_name` | TEXT | NOT NULL | 导入文件名 |
+| `format` | TEXT | NOT NULL | 文件格式 |
+| `result` | TEXT | NOT NULL | 导入结果（success/failed/skipped） |
+| `error_message` | TEXT | | 错误信息（失败时填充） |
+| `file_size` | INTEGER | | 文件大小（字节） |
+
+**索引**：`idx_import_logs_timestamp` (timestamp)
+
+- **写入时机**：每次导入操作自动记录
+- **上限**：100 条，超过自动淘汰最旧记录
+- **关联需求**：REQ-ING-011 导入历史记录
+
+### 1.26 embeddings_cache（嵌入缓存）
 
 | 列 | 类型 | 约束 | 说明 |
 |---|---|---|---|
@@ -459,3 +503,32 @@ PRAGMA busy_timeout = 5000;
 - 避免阻塞 async executor
 - 数据库文件位于 `<app_data_dir>/echomind.db`
 - 测试可通过 `ECHOMIND_DATA_DIR` 环境变量重定向数据目录
+
+---
+
+## 5. 数据库迁移安全（REQ-DB-008）
+
+### 安全迁移流程
+
+`init_schema(pool, db_path)` 执行步骤：
+
+1. **创建表**（`CREATE TABLE IF NOT EXISTS`）
+2. **安全迁移**（`safe_migrate_schema`）：
+   - 检查是否有需要迁移的旧 schema（`needs_migration`）
+   - 备份 DB 文件 → `.bak`（`backup_database_file`）
+   - 执行 `migrate_schema`（ALTER TABLE + CREATE-COPY-DROP-RENAME）
+   - `PRAGMA integrity_check` 完整性检查
+   - 失败 → 从 `.bak` 恢复（`restore_from_backup`）
+   - 成功 → 清理 `.bak`（`cleanup_backup`）
+3. **创建索引**
+4. **创建 FTS5 虚拟表**
+5. **回填 FTS5 索引**（旧库升级场景）
+6. **创建审计日志表**
+7. **迁移后完整性检查**（`PRAGMA integrity_check`）
+
+### 备份文件
+
+- 路径：`<db_path>.bak`（与数据库同目录）
+- 权限：0600（Unix，仅所有者可读写）
+- 生命周期：迁移开始时创建 → 迁移成功后删除
+- 备份失败时降级为无备份模式（warning 日志，不阻塞迁移）

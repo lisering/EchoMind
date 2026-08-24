@@ -33,13 +33,25 @@ test.describe('记忆管理面板 (TC-MEM-UI)', () => {
   });
 
   test('TC-MEM-UI-002: 记忆按 tier 分组显示', async ({ page }) => {
-    // 验证三个 tier 列存在
-    const wingCol = page.locator('div[data-tier="wing"]');
-    const hallCol = page.locator('div[data-tier="hall"]');
-    const roomCol = page.locator('div[data-tier="room"]');
-    await expect(wingCol).toBeVisible();
-    await expect(hallCol).toBeVisible();
-    await expect(roomCol).toBeVisible();
+    // 验证三个 tier Tab 按钮存在（内容区只渲染当前激活的 tier）
+    const wingTab = page.locator('button.mem-tab-btn[data-tier="wing"]');
+    const hallTab = page.locator('button.mem-tab-btn[data-tier="hall"]');
+    const roomTab = page.locator('button.mem-tab-btn[data-tier="room"]');
+    await expect(wingTab).toBeVisible();
+    await expect(hallTab).toBeVisible();
+    await expect(roomTab).toBeVisible();
+
+    // 验证当前激活的 tier 内容区有 data-tier 属性
+    const activeContent = page.locator('#memTierContent div[data-tier]');
+    await expect(activeContent).toHaveCount(1);
+    // 默认激活 wing
+    await expect(activeContent).toHaveAttribute('data-tier', 'wing');
+
+    // 切换到 hall 验证内容更新
+    await hallTab.click();
+    await page.waitForTimeout(500);
+    const hallContent = page.locator('#memTierContent div[data-tier]');
+    await expect(hallContent).toHaveAttribute('data-tier', 'hall');
   });
 
   test('TC-MEM-UI-003: 提升记忆 tier', async ({ page }) => {

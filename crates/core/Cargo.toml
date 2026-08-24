@@ -1,6 +1,6 @@
 [package]
 name = "echomind-core"
-version = "0.1.0-alpha.1"
+version = "3.0.0"
 edition = "2024"
 license = "MIT"
 description = "EchoMind 六边形架构核心层：端口 Trait 与领域逻辑，禁止依赖任何具体实现"
@@ -14,7 +14,7 @@ pro = []
 echomind-models = { path = "../models" }
 echomind-prompt = { path = "../prompt" }
 anyhow = "1.0"
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1.0", features = ["sync", "time", "fs", "rt", "rt-multi-thread", "macros", "io-util"] }
 futures = "0.3"
 # 纯计算解析/分词库（无 I/O、无网络），经架构评审准入 core（见 SRS REQ-ARCH-000）
 pulldown-cmark = { version = "0.13", default-features = false }

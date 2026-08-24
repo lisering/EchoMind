@@ -16,6 +16,8 @@ import {
   displayDocName,
   docStatusOf,
   formatBytes,
+  formatNumber,
+  formatPercent,
   basename,
   extname,
   DOC_STATUS_STYLE,
@@ -101,6 +103,56 @@ describe('Utils — utils.js', () => {
 
     it('0 字节', () => {
       expect(formatBytes(0)).toBe('0 B');
+    });
+
+    // REQ-I18N-003：新增 GB / TB 单位支持
+    it('大于 1GB 显示 GB（REQ-I18N-003）', () => {
+      expect(formatBytes(2147483648)).toBe('2.0 GB');
+    });
+
+    it('大于 1TB 显示 TB（REQ-I18N-003）', () => {
+      expect(formatBytes(1099511627776)).toBe('1.0 TB');
+    });
+
+    it('边界值 1023 B 仍显示 B', () => {
+      expect(formatBytes(1023)).toBe('1023 B');
+    });
+
+    it('边界值 1024 B 显示 1.0 KB', () => {
+      expect(formatBytes(1024)).toBe('1.0 KB');
+    });
+  });
+
+  // REQ-I18N-003：数字与百分比格式化
+  describe('formatNumber（REQ-I18N-003）', () => {
+    it('千分位分隔符', () => {
+      expect(formatNumber(1234567)).toBe('1,234,567');
+    });
+
+    it('小数字千分位', () => {
+      expect(formatNumber(1234.56)).toBe('1,234.56');
+    });
+
+    it('小于 1000 无分隔符', () => {
+      expect(formatNumber(999)).toBe('999');
+    });
+  });
+
+  describe('formatPercent（REQ-I18N-003）', () => {
+    it('小数转百分比', () => {
+      expect(formatPercent(0.873)).toBe('87%');
+    });
+
+    it('整数百分比', () => {
+      expect(formatPercent(75)).toBe('75%');
+    });
+
+    it('0% 边界', () => {
+      expect(formatPercent(0)).toBe('0%');
+    });
+
+    it('100% 边界', () => {
+      expect(formatPercent(1)).toBe('100%');
     });
   });
 

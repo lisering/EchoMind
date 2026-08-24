@@ -1,14 +1,67 @@
 //! document 域 IPC 命令子模块（从 commands.rs 拆分，纯重构）。
 use super::*;
 
-/// 列出全部文档（知识库面板）。
+/// 列出全部文档（知识库面板，REQ-ING-008 排序支持）。
+///
+/// `sort_by`：排序字段（`imported_at` / `file_name` / `file_size`，默认 `imported_at`）
+/// `sort_order`：排序方向（`asc` / `desc`，默认 `desc`）
 #[tauri::command]
-pub async fn get_documents(state: State<'_, AppState>) -> Result<Vec<Document>, String> {
-    state
+pub async fn get_documents(
+    sort_by: Option<String>,
+    sort_order: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<Document>, String> {
+    let docs = state
         .storage
         .list_documents()
         .await
-        .map_err(|e| format!("{e:#}"))
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(sort_documents(
+        docs,
+        sort_by.as_deref(),
+        sort_order.as_deref(),
+    ))
+}
+
+/// 对文档列表排序（REQ-ING-008）。
+///
+/// `sort_by` 支持 `imported_at` / `file_name`，默认 `imported_at`。
+/// `sort_order` 支持 `asc` / `desc`，默认 `desc`。
+/// 未知 `sort_by` 值回退到 `imported_at`（白名单防注入）。
+pub fn sort_documents(
+    mut docs: Vec<Document>,
+    sort_by: Option<&str>,
+    sort_order: Option<&str>,
+) -> Vec<Document> {
+    use std::path::Path;
+    let by = sort_by.unwrap_or("imported_at");
+    let desc = sort_order.is_none_or(|o| o != "asc");
+
+    match by {
+        "file_name" => {
+            docs.sort_by(|a, b| {
+                let name_a = Path::new(&a.file_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let name_b = Path::new(&b.file_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                name_a.cmp(&name_b)
+            });
+        }
+        _ => {
+            // imported_at：按创建时间排序
+            docs.sort_by_key(|a| a.created_at);
+        }
+    }
+
+    if desc {
+        docs.reverse();
+    }
+
+    docs
 }
 
 /// 删除文档：级联清理 chunks / embeddings，并删除数据目录中的文件副本（REQ-ING-005）。
@@ -309,4 +362,509 @@ pub async fn filter_documents_by_tag_inner(
         .filter_documents_by_tag(tag)
         .await
         .map_err(|e| format!("{e:#}"))
+}
+
+/// 知识库统计仪表盘数据（REQ-KB-003 v1.5 + REQ-VEC-010 v1.16 增强）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct KbStats {
+    /// 文档总数
+    pub doc_count: usize,
+    /// 分块总数
+    pub chunk_count: usize,
+    /// 向量总数（REQ-VEC-010 v1.16 新增）
+    pub vector_count: usize,
+    /// 数据库文件大小（字节）
+    pub db_size_bytes: u64,
+    /// 领域分布（领域名, 文档数）
+    pub domain_distribution: Vec<(String, usize)>,
+    /// 格式分布（文件扩展名, 文档数）
+    pub format_distribution: Vec<(String, usize)>,
+    /// 标签热图（标签名, 文档数）
+    pub tags: Vec<(String, usize)>,
+    /// 索引状态分布（状态名, 文档数）（REQ-VEC-010 v1.16 新增）
+    pub status_distribution: Vec<(String, usize)>,
+}
+
+/// 获取知识库统计仪表盘数据（REQ-KB-003 v1.5）。
+///
+/// 聚合文档数/分块数/存储大小/领域分布/格式分布/标签热图。
+#[tauri::command]
+pub async fn get_kb_stats(state: State<'_, AppState>) -> Result<KbStats, String> {
+    get_kb_stats_inner(state.inner()).await
+}
+
+/// `get_kb_stats` 的逻辑实现（命令与集成测试复用）。
+pub async fn get_kb_stats_inner(state: &AppState) -> Result<KbStats, String> {
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let doc_count = docs.len();
+
+    let chunk_count = state
+        .storage
+        .count_chunks()
+        .await
+        .map_err(|e| format!("{e:#}"))
+        .unwrap_or(0);
+
+    // 向量总数（REQ-VEC-010 v1.16 新增）
+    let vector_count = state
+        .storage
+        .count_embeddings()
+        .await
+        .map_err(|e| format!("{e:#}"))
+        .unwrap_or(0);
+
+    // 数据库文件大小
+    let db_path = state.data_dir.join("echomind.db");
+    let db_size_bytes = tokio::fs::metadata(&db_path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    // 领域分布
+    let mut domain_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut format_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut status_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for doc in &docs {
+        let domain = doc.domain.clone().unwrap_or_else(|| "general".to_string());
+        *domain_map.entry(domain).or_insert(0) += 1;
+
+        // 从 file_path 提取扩展名
+        let ext = std::path::Path::new(&doc.file_path)
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_else(|| "unknown".to_string());
+        *format_map.entry(ext).or_insert(0) += 1;
+
+        // 索引状态分布（REQ-VEC-010 v1.16 新增）
+        let status_label = match &doc.status {
+            echomind_models::DocStatus::Pending => "pending",
+            echomind_models::DocStatus::Processing => "processing",
+            echomind_models::DocStatus::Indexed => "indexed",
+            echomind_models::DocStatus::Failed(_) => "failed",
+        };
+        *status_map.entry(status_label.to_string()).or_insert(0) += 1;
+    }
+
+    // 排序：按计数降序
+    let mut domain_distribution: Vec<(String, usize)> = domain_map.into_iter().collect();
+    domain_distribution.sort_by_key(|b| std::cmp::Reverse(b.1));
+
+    let mut format_distribution: Vec<(String, usize)> = format_map.into_iter().collect();
+    format_distribution.sort_by_key(|b| std::cmp::Reverse(b.1));
+
+    // 索引状态分布（固定顺序：pending → processing → indexed → failed）
+    let status_order = ["pending", "processing", "indexed", "failed"];
+    let status_distribution: Vec<(String, usize)> = status_order
+        .iter()
+        .map(|s| (s.to_string(), *status_map.get(*s).unwrap_or(&0)))
+        .collect();
+
+    // 标签热图
+    let tags = state
+        .storage
+        .list_all_tags()
+        .await
+        .map_err(|e| format!("{e:#}"))
+        .unwrap_or_default();
+
+    Ok(KbStats {
+        doc_count,
+        chunk_count,
+        vector_count,
+        db_size_bytes,
+        domain_distribution,
+        format_distribution,
+        tags,
+        status_distribution,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use echomind_models::DocStatus;
+
+    fn make_doc(id: &str, name: &str, created_at: i64) -> Document {
+        Document {
+            id: id.to_string(),
+            file_path: format!("/tmp/{name}"),
+            file_hash: format!("hash_{id}"),
+            status: DocStatus::Indexed,
+            created_at,
+            original_path: None,
+            domain: None,
+            summary: None,
+            tags: Vec::new(),
+            workspace_id: "default".to_string(),
+        }
+    }
+
+    /// TC-ING-SORT-001：默认排序 created_at desc（最新在前）
+    #[test]
+    fn test_sort_default_created_at_desc() {
+        let docs = vec![
+            make_doc("1", "old.md", 1000),
+            make_doc("2", "new.md", 3000),
+            make_doc("3", "mid.md", 2000),
+        ];
+        let sorted = sort_documents(docs, None, None);
+        assert_eq!(sorted[0].id, "2"); // 3000
+        assert_eq!(sorted[1].id, "3"); // 2000
+        assert_eq!(sorted[2].id, "1"); // 1000
+    }
+
+    /// TC-ING-SORT-002：file_name asc（A-Z 字母序）
+    #[test]
+    fn test_sort_file_name_asc() {
+        let docs = vec![
+            make_doc("1", "zebra.md", 1000),
+            make_doc("2", "apple.md", 3000),
+            make_doc("3", "mango.md", 2000),
+        ];
+        let sorted = sort_documents(docs, Some("file_name"), Some("asc"));
+        assert_eq!(sorted[0].file_path, "/tmp/apple.md");
+        assert_eq!(sorted[1].file_path, "/tmp/mango.md");
+        assert_eq!(sorted[2].file_path, "/tmp/zebra.md");
+    }
+
+    /// TC-ING-SORT-003：created_at asc（最早在前）
+    #[test]
+    fn test_sort_created_at_asc() {
+        let docs = vec![
+            make_doc("1", "old.md", 1000),
+            make_doc("2", "new.md", 3000),
+            make_doc("3", "mid.md", 2000),
+        ];
+        let sorted = sort_documents(docs, Some("imported_at"), Some("asc"));
+        assert_eq!(sorted[0].id, "1"); // 1000
+        assert_eq!(sorted[1].id, "3"); // 2000
+        assert_eq!(sorted[2].id, "2"); // 3000
+    }
+}
+
+// ------------------------------------------------------------------
+// 文档内容预览（REQ-ING-010）
+// ------------------------------------------------------------------
+
+/// 获取文档内容预览（REQ-ING-010）。
+///
+/// 返回文档元数据 + 前 500 字内容预览 + chunk 列表。
+#[tauri::command]
+pub async fn get_document_preview(
+    doc_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<DocumentPreview>, String> {
+    get_document_preview_inner(&doc_id, state.inner()).await
+}
+
+/// `get_document_preview` 的逻辑实现（命令与集成测试复用）。
+pub async fn get_document_preview_inner(
+    doc_id: &str,
+    state: &AppState,
+) -> Result<Option<DocumentPreview>, String> {
+    state
+        .storage
+        .get_document_preview(doc_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 获取文档全部分块（用于 PDF 导出，REQ-EXP-005）。
+///
+/// 返回按 sequence 排序的 chunk 列表。
+#[tauri::command]
+pub async fn get_document_chunks(
+    doc_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<echomind_models::Chunk>, String> {
+    let chunks = state
+        .storage
+        .list_chunks(&doc_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(chunks)
+}
+
+// ------------------------------------------------------------------
+// 文档原文导出（REQ-EXP-004）
+// ------------------------------------------------------------------
+
+/// 导出文档原始文件副本（REQ-EXP-004）。
+///
+/// 将数据目录中的文档副本复制到用户指定的目标路径。
+/// 导出的文件与导入时完全一致（字节级一致）。
+///
+/// # 参数
+/// - `doc_id`: 文档 ID
+/// - `dest_path`: 目标保存路径（由前端 Tauri save 对话框获取）
+#[tauri::command]
+pub async fn export_document_original(
+    doc_id: String,
+    dest_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    export_document_original_inner(&doc_id, &dest_path, state.inner()).await
+}
+
+/// `export_document_original` 的逻辑实现（命令与集成测试复用）。
+///
+/// 查找文档 → 获取 file_path → 复制到 dest_path。
+/// 文档不存在返回 Err；文件副本不存在返回 Err。
+pub async fn export_document_original_inner(
+    doc_id: &str,
+    dest_path: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let doc = docs
+        .into_iter()
+        .find(|d| d.id == doc_id)
+        .ok_or_else(|| format!("文档不存在: {doc_id}"))?;
+
+    let src = &doc.file_path;
+    if !std::path::Path::new(src).exists() {
+        return Err(format!("文档副本文件不存在: {src}"));
+    }
+
+    tokio::fs::copy(src, dest_path)
+        .await
+        .map_err(|e| format!("导出文件失败: {e}"))?;
+
+    Ok(())
+}
+
+// ============================================================================
+// P1-1: 磁盘空间检查与清理（磁盘满弹性设计）
+// ============================================================================
+
+/// 获取磁盘空间信息（P1-1）。
+///
+/// 返回数据目录所在磁盘的可用空间、总空间、使用率。
+/// 前端用于在设置面板或状态栏展示磁盘空间状态。
+#[tauri::command]
+pub async fn get_disk_space_info(state: State<'_, AppState>) -> Result<String, String> {
+    get_disk_space_info_inner(state.inner()).await
+}
+
+/// `get_disk_space_info` 的逻辑实现（命令与集成测试复用）。
+pub async fn get_disk_space_info_inner(state: &AppState) -> Result<String, String> {
+    let data_dir = state.data_dir.clone();
+    let info = tokio::task::spawn_blocking(move || {
+        echomind_infra::disk_space::get_disk_space_info(&data_dir)
+    })
+    .await
+    .map_err(|e| format!("磁盘空间检查任务失败: {e:#}"))?
+    .map_err(|e| format!("{e:#}"))?;
+
+    serde_json::to_string(&info).map_err(|e| format!("序列化磁盘空间信息失败: {e}"))
+}
+
+/// 清理临时文件释放磁盘空间（P1-1）。
+///
+/// 清理数据目录下的 .partial / .tmp 文件、孤立 .meta.json、旧日志文件，
+/// 并执行 WAL checkpoint 收缩 WAL 文件。
+/// 返回释放的字节数。
+#[tauri::command]
+pub async fn cleanup_disk_space(state: State<'_, AppState>) -> Result<u64, String> {
+    cleanup_disk_space_inner(state.inner()).await
+}
+
+/// `cleanup_disk_space` 的逻辑实现（命令与集成测试复用）。
+pub async fn cleanup_disk_space_inner(state: &AppState) -> Result<u64, String> {
+    let freed = state.storage.cleanup_for_disk_space(&state.data_dir).await;
+    Ok(freed)
+}
+
+/// 检查磁盘空间是否充足（P1-1）。
+///
+/// 前端可在导入大量文档前调用此命令预检磁盘空间。
+/// `required_bytes` 为预估所需空间（字节）。
+#[tauri::command]
+pub async fn check_disk_space(
+    required_bytes: u64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    check_disk_space_inner(required_bytes, state.inner()).await
+}
+
+/// `check_disk_space` 的逻辑实现（命令与集成测试复用）。
+pub async fn check_disk_space_inner(required_bytes: u64, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .check_disk_space(required_bytes)
+        .await
+        .map_err(|e| {
+            let msg = format!("{e:#}");
+            if msg.contains("DISK_FULL") {
+                msg
+            } else {
+                format!("STORAGE: 磁盘空间检查失败: {msg}")
+            }
+        })
+}
+
+// ====================================================================
+// 文档批量操作（REQ-ING-024 文档批量操作）
+// ====================================================================
+
+/// 批量删除文档（REQ-ING-024 AC-3）。
+///
+/// 在单个事务中批量删除文档 + FTS5 索引，全部成功或全部回滚。
+/// 删除后同时清理数据目录中的文件副本和缓存。
+#[tauri::command]
+pub async fn batch_delete_documents(
+    ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<BatchResult, String> {
+    batch_delete_documents_inner(ids, state.inner()).await
+}
+
+/// `batch_delete_documents` 的逻辑实现（命令与集成测试复用）。
+pub async fn batch_delete_documents_inner(
+    ids: Vec<String>,
+    state: &AppState,
+) -> Result<BatchResult, String> {
+    if ids.is_empty() {
+        return Ok(BatchResult::all_success(0));
+    }
+
+    // 先取文件路径（删除后无法回查）
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    let id_set: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
+    let file_paths: Vec<(String, String)> = docs
+        .iter()
+        .filter(|d| id_set.contains(d.id.as_str()))
+        .map(|d| (d.id.clone(), d.file_path.clone()))
+        .collect();
+
+    // 批量删除（事务保证全成功或全回滚）
+    state
+        .storage
+        .batch_delete_documents(&ids)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 清理文件副本和缓存（失败不阻塞）
+    for (doc_id, file_path) in &file_paths {
+        if let Err(err) = tokio::fs::remove_file(file_path).await {
+            warn!("文档副本清理失败（可忽略）: {file_path}: {err}");
+        }
+        if let Some(doc_name) = std::path::Path::new(file_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            && let Err(e) = state.cache.invalidate_by_doc(&doc_name).await
+        {
+            warn!("删除文档后失效缓存失败: {e:#}");
+        }
+        let _ = &doc_id; // doc_id 保留以备日志
+    }
+    state.step_cache.clear();
+
+    Ok(BatchResult::all_success(ids.len()))
+}
+
+/// 批量移动文档到目标工作空间（REQ-ING-024 AC-4）。
+///
+/// 在单个事务中批量更新 workspace_id。
+#[tauri::command]
+pub async fn batch_move_documents(
+    ids: Vec<String>,
+    target_workspace_id: String,
+    state: State<'_, AppState>,
+) -> Result<BatchResult, String> {
+    batch_move_documents_inner(ids, target_workspace_id, state.inner()).await
+}
+
+/// `batch_move_documents` 的逻辑实现（命令与集成测试复用）。
+pub async fn batch_move_documents_inner(
+    ids: Vec<String>,
+    target_workspace_id: String,
+    state: &AppState,
+) -> Result<BatchResult, String> {
+    if ids.is_empty() {
+        return Ok(BatchResult::all_success(0));
+    }
+
+    // 验证目标工作空间存在
+    let workspaces = state
+        .storage
+        .list_workspaces()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    if !workspaces.iter().any(|ws| ws.id == target_workspace_id) {
+        return Err(format!("目标知识库不存在: {target_workspace_id}"));
+    }
+
+    // 免费版配额检查
+    let is_pro = *state.is_pro().read().await;
+    if !is_pro {
+        let count = state
+            .storage
+            .count_documents_in_workspace(&target_workspace_id)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        if count + ids.len() >= echomind_core::import::FREE_TIER_MAX_FILES {
+            return Err(format!(
+                "LIMIT_REACHED: 目标知识库将达免费版上限（{} 个文件）",
+                echomind_core::import::FREE_TIER_MAX_FILES
+            ));
+        }
+    }
+
+    state
+        .storage
+        .batch_move_documents(&ids, &target_workspace_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 清空查询缓存
+    if let Err(e) = state.cache.clear_all().await {
+        tracing::warn!("批量迁移后清空查询缓存失败: {e:#}");
+    }
+
+    Ok(BatchResult::all_success(ids.len()))
+}
+
+/// 批量添加文档标签（REQ-ING-024 AC-5）。
+///
+/// 为多个文档批量添加多个标签（逗号分隔输入，去重幂等）。
+#[tauri::command]
+pub async fn batch_add_tags(
+    ids: Vec<String>,
+    tags: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<BatchResult, String> {
+    batch_add_tags_inner(ids, tags, state.inner()).await
+}
+
+/// `batch_add_tags` 的逻辑实现（命令与集成测试复用）。
+pub async fn batch_add_tags_inner(
+    ids: Vec<String>,
+    tags: Vec<String>,
+    state: &AppState,
+) -> Result<BatchResult, String> {
+    if ids.is_empty() || tags.is_empty() {
+        return Ok(BatchResult::all_success(0));
+    }
+
+    state
+        .storage
+        .batch_add_tags(&ids, &tags)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    Ok(BatchResult::all_success(ids.len()))
 }

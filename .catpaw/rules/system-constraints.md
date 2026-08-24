@@ -428,9 +428,9 @@ docs/sessions/
 
 1. **更新 `docs/sessions/CURRENT_STATE.md`** — 刷新测试数、已完成/待办列表、关键变更
 2. **追加 `docs/sessions/LOG.md`** — 在时间线末尾添加本次 session 摘要
-3. **创建 `docs/sessions/archive/` 归档** — 大型功能开发时创建详细归档记录
+3. **创建 `docs/sessions/archive/` 归档** — 大型功能开发或复盘分析时创建详细归档记录
 4. **如有源代码变更** — 同步更新软件资产文档对应章节
-5. **如有未完成功能** — 按 `docs/sessions/HANDOFF_TEMPLATE.md` 模板生成衔接提示词
+5. **无条件生成下个 Session 提示词** — 无论本次是功能开发、复盘分析、测试增强还是文档维护，**每次会话结束时都必须生成下个 Session 的衔接提示词文件**（`docs/sessions/NEXT_SESSION_*.md`）。提示词内容须包含：项目概要、上 Session 摘要、测试基线、下 Session 任务、约束、后续路径、关键文件索引
 6. **运行同步脚本** — 如有源代码变更（铁律十一）
 
 **Agent 不得在未完成上述步骤的情况下结束会话。**
@@ -865,13 +865,14 @@ el.className = 'bg-surface-2 text-text-primary';
 
 ## 约束版本
 
-- **版本**: v3.3
-- **最后更新**: 2026-08-08
+- **版本**: v3.4
+- **最后更新**: 2026-08-16
 - **变更说明**:
-  - v3.0: 新增铁律十六~二十，增强铁律二/五/七
-  - v3.1: 3 轮深度调研后增强——铁律二新增模糊测试+属性测试；铁律五新增 Miri UB 检测+`forbid(unsafe_code)`；铁律六新增供应链安全工具链；铁律十七新增 OpenTelemetry Stable+axe-core；铁律十八更新为 OWASP GenAI LLM Top 10 **2026**；新增铁律二十一 RAG 安全防护
-  - v3.2: 新增「Vibe Coding 全自动化测试体系」——分层测试门禁（L0~L4）+ AI Agent 行为规则（文件级命令优先/快照测试/HTTP Mock/突变测试/nextest/信任分级/3次失败规则）+ 测试工具链清单（10 工具）。来源：template-agenticide-vibecoding / vibe-coding-ai-rules / cargo-nextest / cargo-mutants / insta / cargo-llvm-cov / wiremock
-  - v3.3: 明确标注为 EchoMind（灵犀）项目专属约束，补充项目概要、技术栈、Crate 结构、依赖方向铁律
+- v3.0: 新增铁律十六~二十，增强铁律二/五/七
+- v3.1: 3 轮深度调研后增强——铁律二新增模糊测试+属性测试；铁律五新增 Miri UB 检测+`forbid(unsafe_code)`；铁律六新增供应链安全工具链；铁律十七新增 OpenTelemetry Stable+axe-core；铁律十八更新为 OWASP GenAI LLM Top 10 **2026**；新增铁律二十一 RAG 安全防护
+- v3.2: 新增「Vibe Coding 全自动化测试体系」——分层测试门禁（L0~L4）+ AI Agent 行为规则（文件级命令优先/快照测试/HTTP Mock/突变测试/nextest/信任分级/3次失败规则）+ 测试工具链清单（10 工具）。来源：template-agenticide-vibecoding / vibe-coding-ai-rules / cargo-nextest / cargo-mutants / insta / cargo-llvm-cov / wiremock
+- v3.3: 明确标注为 EchoMind（灵犀）项目专属约束，补充项目概要、技术栈、Crate 结构、依赖方向铁律
+- v3.4: 铁律十二增强——会话结束时「无条件生成下个 Session 提示词」（从条件生成改为强制行为，覆盖功能开发/复盘分析/测试增强/文档维护全部场景）
 - **适用范围**: **EchoMind（灵犀）项目** 全部开发活动（7 crate workspace + 前端 UI + E2E 测试）
 - **调研来源**:
   - **第 1 轮**: cargo-deny / RustSec Advisory DB / cargo-about / cargo-udeps / cargo-bloat / Safety Dance `#![forbid(unsafe_code)]` / cargo-miri / Rust Clippy 800+ lints

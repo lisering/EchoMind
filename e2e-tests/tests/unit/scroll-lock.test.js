@@ -19,8 +19,9 @@ import {
   shouldAutoScroll,
   resetScrollLock,
   createJumpToLatestButton,
+  createBackToTopButton,
   destroyScrollLock,
-} from '../../../ui/src/scroll-lock.js';
+} from '../../../ui/src/chat-utils.js';
 
 describe('Scroll Lock — scroll-lock.js', () => {
   let chatArea;
@@ -113,6 +114,51 @@ describe('Scroll Lock — scroll-lock.js', () => {
     it('按钮初始隐藏（display:none）', () => {
       const btn = createJumpToLatestButton();
       expect(btn.style.display).toBe('none');
+    });
+  });
+
+  describe('createBackToTopButton', () => {
+    it('创建带有 back-to-top class 的按钮', () => {
+      const btn = createBackToTopButton();
+      expect(btn).not.toBeNull();
+      expect(btn.className).toContain('back-to-top');
+    });
+
+    it('按钮不包含 jump-to-latest class（独立样式）', () => {
+      const btn = createBackToTopButton();
+      expect(btn.className).not.toContain('jump-to-latest');
+    });
+
+    it('按钮初始隐藏（hidden class）', () => {
+      const btn = createBackToTopButton();
+      expect(btn.classList.contains('hidden')).toBe(true);
+    });
+
+    it('按钮包含向上箭头 SVG', () => {
+      const btn = createBackToTopButton();
+      const svg = btn.querySelector('svg');
+      expect(svg).not.toBeNull();
+      // 验证是向上箭头（polyline points 包含 18 15 12 9 6 15）
+      const polyline = svg.querySelector('polyline');
+      expect(polyline).not.toBeNull();
+      expect(polyline.getAttribute('points')).toContain('18 15 12 9 6 15');
+    });
+
+    it('按钮无文字 span（纯图标）', () => {
+      const btn = createBackToTopButton();
+      const span = btn.querySelector('span');
+      expect(span).toBeNull();
+    });
+
+    it('按钮有 aria-label 属性', () => {
+      const btn = createBackToTopButton();
+      expect(btn.hasAttribute('aria-label')).toBe(true);
+      expect(btn.getAttribute('aria-label').length).toBeGreaterThan(0);
+    });
+
+    it('按钮 id 为 backToTopBtn', () => {
+      const btn = createBackToTopButton();
+      expect(btn.id).toBe('backToTopBtn');
     });
   });
 

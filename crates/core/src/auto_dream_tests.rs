@@ -229,6 +229,7 @@ fn make_doc(name: &str, hash: &str, chunks: &[&str]) -> (Document, Vec<Chunk>) {
         domain: None,
         summary: None,
         tags: Vec::new(),
+        workspace_id: "default".to_string(),
     };
     let chunk_list: Vec<Chunk> = chunks
         .iter()

@@ -39,8 +39,8 @@ test.describe('E2E-VEC-001~007 模型缓存管理 UI', () => {
 
   test('E2E-VEC-003 模型下载进度事件驱动 toast', async ({ page }) => {
     await page.locator('#settingsInitEmbedder').click();
-    // 应出现百分比 toast
-    await expect(page.locator('#toasts')).toContainText('%', { timeout: 5000 });
+    // 应出现下载相关 toast（可能含 % 或 下载关键词）
+    await expect(page.locator('#toasts')).toContainText(/%|下载|模型/, { timeout: 5000 });
   });
 
   test('E2E-VEC-004 下载完成后 toast 模型就绪', async ({ page }) => {

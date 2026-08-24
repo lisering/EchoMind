@@ -26,6 +26,7 @@ fn make_conversation(title: &str) -> Conversation {
         workspace_id: "default".to_string(),
         title: title.to_string(),
         created_at: 1753872000, // 2025-07-30 12:00:00 UTC
+        sort_order: 0,
     }
 }
 

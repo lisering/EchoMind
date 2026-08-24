@@ -4,13 +4,10 @@
 // AC-3: 搜索与筛选条件可组合使用，结果取交集
 // AC-4: 无匹配结果时显示「未找到匹配文档」空状态
 import { test, expect } from '@playwright/test';
-import { enterApp, importDocs, injectLocales, openKbModal, injectStub, uiUrl } from './helpers.mjs';
+import { setupPage, importDocs, injectLocales, openKbModal, injectStub, uiUrl } from './helpers.mjs';
 test.describe('E2E-ING-007 文档列表搜索与筛选', () => {
   test.beforeEach(async ({ page }) => {
-    await injectStub(page);
-    await injectLocales(page);
-    await page.goto(uiUrl);
-    await enterApp(page);
+    await setupPage(page);
     // 导入多个不同格式和名称的文档
     await importDocs(page, [
       '/mock/rust-guide.md',
@@ -59,8 +56,13 @@ test.describe('E2E-ING-007 文档列表搜索与筛选', () => {
     });
     await page.waitForTimeout(300);
 
+    // 展开筛选面板（#kbFilterPanel 默认隐藏）
+    await page.locator('#kbFilterToggle').click();
+    await page.waitForTimeout(200);
+
     // 选择「失败」筛选
     const statusFilter = page.locator('#docStatusFilter');
+    await statusFilter.waitFor({ state: 'visible', timeout: 5000 });
     await statusFilter.selectOption('Failed');
     await page.waitForTimeout(300);
 
@@ -81,7 +83,12 @@ test.describe('E2E-ING-007 文档列表搜索与筛选', () => {
     });
     await page.waitForTimeout(300);
 
+    // 展开筛选面板
+    await page.locator('#kbFilterToggle').click();
+    await page.waitForTimeout(200);
+
     const statusFilter = page.locator('#docStatusFilter');
+    await statusFilter.waitFor({ state: 'visible', timeout: 5000 });
     await statusFilter.selectOption('Indexed');
     await page.waitForTimeout(300);
 
@@ -102,9 +109,15 @@ test.describe('E2E-ING-007 文档列表搜索与筛选', () => {
     });
     await page.waitForTimeout(300);
 
+    // 展开筛选面板
+    await page.locator('#kbFilterToggle').click();
+    await page.waitForTimeout(200);
+
     // 搜索 "rust" + 状态 Indexed
     await page.locator('#docSearchInput').fill('rust');
-    await page.locator('#docStatusFilter').selectOption('Indexed');
+    const filterEl = page.locator('#docStatusFilter');
+    await filterEl.waitFor({ state: 'visible', timeout: 5000 });
+    await filterEl.selectOption('Indexed');
     await page.waitForTimeout(300);
 
     const visibleNames = await page.locator('#docList [data-doc-name]').evaluateAll((els) =>
@@ -118,9 +131,15 @@ test.describe('E2E-ING-007 文档列表搜索与筛选', () => {
   });
 
   test('AC-3b 搜索与格式筛选组合（取交集）', async ({ page }) => {
+    // 展开筛选面板
+    await page.locator('#kbFilterToggle').click();
+    await page.waitForTimeout(200);
+
     // 搜索 "rust" + 格式 .md
     await page.locator('#docSearchInput').fill('rust');
-    await page.locator('#docFormatFilter').selectOption('md');
+    const formatFilter = page.locator('#docFormatFilter');
+    await formatFilter.waitFor({ state: 'visible', timeout: 5000 });
+    await formatFilter.selectOption('md');
     await page.waitForTimeout(300);
 
     const visibleNames = await page.locator('#docList [data-doc-name]').evaluateAll((els) =>

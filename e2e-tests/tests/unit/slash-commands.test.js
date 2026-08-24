@@ -38,8 +38,8 @@ describe('Slash Commands — slash-commands.js', () => {
   });
 
   describe('SLASH_COMMANDS', () => {
-    it('TC-QA-027: 包含 6 个指令定义', () => {
-      expect(SLASH_COMMANDS).toHaveLength(6);
+    it('TC-QA-027: 包含 8 个指令定义', () => {
+      expect(SLASH_COMMANDS).toHaveLength(8);
     });
 
     it('TC-QA-027b: 每个指令含 name/label/icon 属性', () => {
@@ -50,7 +50,7 @@ describe('Slash Commands — slash-commands.js', () => {
       }
     });
 
-    it('TC-QA-027c: 包含 summary/compare/extract/translate/timeline/mindmap', () => {
+    it('TC-QA-027c: 包含 summary/compare/extract/translate/timeline/mindmap/web', () => {
       const names = SLASH_COMMANDS.map((c) => c.name);
       expect(names).toContain('summary');
       expect(names).toContain('compare');
@@ -58,6 +58,8 @@ describe('Slash Commands — slash-commands.js', () => {
       expect(names).toContain('translate');
       expect(names).toContain('timeline');
       expect(names).toContain('mindmap');
+      expect(names).toContain('web');
+      expect(names).toContain('agent');
     });
   });
 
@@ -76,7 +78,7 @@ describe('Slash Commands — slash-commands.js', () => {
 
     it('TC-QA-029: 输入仅 / 时返回全部指令', () => {
       const filtered = filterSlashCommands('/');
-      expect(filtered).toHaveLength(6);
+      expect(filtered).toHaveLength(8);
     });
 
     it('TC-QA-029b: 无匹配时返回空数组', () => {
@@ -95,7 +97,7 @@ describe('Slash Commands — slash-commands.js', () => {
       const filtered = filterSlashCommands('/');
       renderSlashCommandPanel(container, filtered);
       const items = container.querySelectorAll('.slash-command-item');
-      expect(items).toHaveLength(6);
+      expect(items).toHaveLength(8);
     });
 
     it('TC-QA-030b: 首项默认选中', () => {
@@ -147,6 +149,41 @@ describe('Slash Commands — slash-commands.js', () => {
       const selected = container.querySelector('.slash-command-selected');
       const items = container.querySelectorAll('.slash-command-item');
       expect(items[0]).toBe(selected);
+    });
+
+    it('TC-QA-032d: Home 跳转到首项（P2-4）', () => {
+      const filtered = filterSlashCommands('/');
+      renderSlashCommandPanel(container, filtered);
+      // 先导航到中间项
+      navigateSlashCommand(filtered, 'down');
+      navigateSlashCommand(filtered, 'down');
+      // Home 跳回首项
+      navigateSlashCommand(filtered, 'home');
+      const selected = container.querySelector('.slash-command-selected');
+      const items = container.querySelectorAll('.slash-command-item');
+      expect(items[0]).toBe(selected);
+    });
+
+    it('TC-QA-032e: End 跳转到末项（P2-4）', () => {
+      const filtered = filterSlashCommands('/');
+      renderSlashCommandPanel(container, filtered);
+      // End 跳到末项
+      navigateSlashCommand(filtered, 'end');
+      const selected = container.querySelector('.slash-command-selected');
+      const items = container.querySelectorAll('.slash-command-item');
+      expect(items[items.length - 1]).toBe(selected);
+    });
+
+    it('TC-QA-032f: 单项列表 Home/End 仍然生效（P2-4）', () => {
+      const filtered = filterSlashCommands('/sum');
+      renderSlashCommandPanel(container, filtered);
+      // 单项列表，Home/End 应该仍然工作（不 return）
+      navigateSlashCommand(filtered, 'home');
+      const selected = container.querySelector('.slash-command-selected');
+      expect(selected).not.toBeNull();
+      navigateSlashCommand(filtered, 'end');
+      const selected2 = container.querySelector('.slash-command-selected');
+      expect(selected2).not.toBeNull();
     });
   });
 

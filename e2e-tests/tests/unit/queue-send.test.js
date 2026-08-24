@@ -20,7 +20,7 @@ import {
   processQueue,
   clearQueue,
   isQueueMode,
-} from '../../../ui/src/queue-send.js';
+} from '../../../ui/src/chat-utils.js';
 import { setState, resetState } from '../../../ui/src/state.js';
 
 describe('Queue Send — queue-send.js', () => {

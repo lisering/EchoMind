@@ -13,6 +13,7 @@
 
 import { t } from './i18n.js';
 import { get } from './state.js';
+import { icon } from './utils.js';
 
 // ============================================================
 // 推荐问题生成（仅有文档时使用）
@@ -29,27 +30,81 @@ const DEFAULT_RECOMMENDATIONS = [
 ];
 
 /**
- * 根据知识库文档数生成推荐问题。
+ * 根据知识库文档名生成动态推荐问题（REQ-RAG-018 AC-3）。
  *
- * - 有文档时：返回通用探索性问题（总结/对比/提取）
- * - 无文档时：返回空数组（空知识库使用导入引导按钮，不显示推荐问题卡片）
+ * - 有文档时：基于文档名生成动态问题 + 通用探索性问题
+ * - 无文档时：返回空数组（空知识库使用导入引导按钮）
  *
  * @param {number} docCount - 知识库文档数
+ * @param {string[]} [docNames=[]] - 知识库文档名列表（可选）
  * @returns {string[]} 推荐问题文本数组
  */
-export function generateRecommendations(docCount) {
+export function generateRecommendations(docCount, docNames) {
   const hasDocs = docCount > 0;
   if (!hasDocs) return [];
+  const names = docNames || [];
+  const suggestions = [];
+
+  // 1. 基于文档名生成动态问题（取前 1-2 个文档）
+  if (names.length > 0) {
+    const firstName = stripExtension(names[0]);
+    suggestions.push(formatDocQuestion('summarize_doc', firstName));
+    if (names.length >= 2) {
+      const secondName = stripExtension(names[1]);
+      suggestions.push(formatDocQuestion('compare_docs', firstName, secondName));
+    } else {
+      suggestions.push(formatDocQuestion('key_topics_doc', firstName));
+    }
+  }
+
+  // 2. 补充通用探索性问题
   const keys = DEFAULT_RECOMMENDATIONS;
-  return keys.map((key) => {
+  for (const key of keys) {
+    if (suggestions.length >= 4) break;
     const i18nKey = `chat.empty_state_suggestion_${key}`;
     const text = t(i18nKey);
-    // 如果 i18n key 不存在（返回 key 本身），使用 fallback 文本
     if (text === i18nKey) {
-      return FALLBACK_SUGGESTIONS[key] || key;
+      suggestions.push(FALLBACK_SUGGESTIONS[key] || key);
+    } else {
+      suggestions.push(text);
     }
-    return text;
-  });
+  }
+
+  return suggestions.slice(0, 4);
+}
+
+/**
+ * 去除文件扩展名，保留文档名。
+ * @param {string} name - 文件名
+ * @returns {string} 去除扩展名后的文档名
+ */
+function stripExtension(name) {
+  if (!name) return '';
+  const lastDot = name.lastIndexOf('.');
+  if (lastDot > 0) return name.substring(0, lastDot);
+  return name;
+}
+
+/**
+ * 格式化基于文档名的推荐问题（REQ-RAG-018 AC-3）。
+ * @param {string} type - 问题类型
+ * @param {string} docName - 文档名
+ * @param {string} [docName2] - 第二个文档名（对比类）
+ * @returns {string} 格式化后的问题
+ */
+function formatDocQuestion(type, docName, docName2) {
+  const i18nKey = `chat.empty_state_suggestion_${type}`;
+  const template = t(i18nKey);
+  if (template !== i18nKey && docName2) {
+    return template.replace('{doc1}', docName).replace('{doc2}', docName2);
+  } else if (template !== i18nKey) {
+    return template.replace('{doc}', docName);
+  }
+  // fallback
+  if (type === 'summarize_doc') return `总结《${docName}》的核心要点`;
+  if (type === 'compare_docs' && docName2) return `对比《${docName}》和《${docName2}》的主要差异`;
+  if (type === 'key_topics_doc') return `《${docName}》涉及哪些关键主题？`;
+  return `总结当前知识库中的核心要点`;
 }
 
 /** i18n 缺失时的 fallback 文本 */
@@ -83,6 +138,7 @@ const FALLBACK_SUGGESTIONS = {
  * @param {Object} [opts] - 渲染选项
  * @param {number} [opts.docCount=0] - 知识库文档数
  * @param {number} [opts.chunkCount=0] - 知识库 chunk 数
+ * @param {string[]} [opts.docNames=[]] - 知识库文档名列表（REQ-RAG-018 AC-3 动态建议）
  * @param {boolean} [opts.encrypted=false] - 数据库是否已加密
  * @param {Function} [opts.onPickQuestion] - 点击推荐问题时的回调
  * @param {Function} [opts.onImport] - 点击导入按钮时的回调（空知识库时显示）
@@ -94,6 +150,7 @@ export function renderEmptyState(container, opts) {
   // 安全降级：opts 为 null/undefined 时使用默认值
   const docCount = opts?.docCount ?? get('docCount') ?? 0;
   const chunkCount = opts?.chunkCount ?? get('chunkCount') ?? 0;
+  const docNames = opts?.docNames ?? get('docNames') ?? [];
   const encrypted = opts?.encrypted ?? (get('securityState') !== 'unencrypted');
   const onPickQuestion = opts?.onPickQuestion;
   const onImport = opts?.onImport;
@@ -108,7 +165,7 @@ export function renderEmptyState(container, opts) {
   // Logo + tagline
   const logo = document.createElement('div');
   logo.className = 'empty-state-logo';
-  logo.textContent = '◈';
+  logo.innerHTML = icon('brand', 'lg');
   wrapper.appendChild(logo);
 
   const appName = document.createElement('div');
@@ -130,7 +187,7 @@ export function renderEmptyState(container, opts) {
   kbCard.className = 'empty-state-kb-card';
   const kbIcon = document.createElement('span');
   kbIcon.className = 'empty-state-card-icon';
-  kbIcon.textContent = '📚';
+  kbIcon.innerHTML = icon('book', 'md');
   kbCard.appendChild(kbIcon);
   const kbLabel = document.createElement('div');
   kbLabel.className = 'empty-state-card-label';
@@ -152,7 +209,7 @@ export function renderEmptyState(container, opts) {
   privacyCard.className = 'empty-state-privacy-card';
   const privacyIcon = document.createElement('span');
   privacyIcon.className = 'empty-state-card-icon';
-  privacyIcon.textContent = encrypted ? '🔒' : '🔓';
+  privacyIcon.innerHTML = encrypted ? icon('lock', 'md') : icon('unlock', 'md');
   privacyCard.appendChild(privacyIcon);
   const privacyLabel = document.createElement('div');
   privacyLabel.className = 'empty-state-card-label';
@@ -178,7 +235,7 @@ export function renderEmptyState(container, opts) {
 
   if (docCount > 0) {
     // ===== 有文档：显示推荐问题卡片 =====
-    const suggestions = generateRecommendations(docCount);
+    const suggestions = generateRecommendations(docCount, docNames);
     if (suggestions.length > 0) {
       const suggLabel = document.createElement('div');
       suggLabel.className = 'empty-state-suggestions-label';

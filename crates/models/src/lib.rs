@@ -5,6 +5,13 @@
 
 use serde::{Deserialize, Serialize};
 
+/// 默认工作空间 ID（REQ-WS-001）。
+///
+/// 旧文档和未指定工作空间的文档自动归属此工作空间。
+fn default_workspace_id() -> String {
+    "default".to_string()
+}
+
 /// 文档索引状态机：`Pending → Processing → Indexed / Failed(reason)`
 /// 对应 REQ-VEC-004 的生命周期定义。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +65,12 @@ pub struct Document {
     /// 支持按标签筛选文档列表。
     #[serde(default)]
     pub tags: Vec<String>,
+    /// 工作空间标识（REQ-WS-001 多知识库）。
+    ///
+    /// 默认为 `"default"`。多知识库模式下通过此字段隔离不同知识库的文档。
+    /// 旧数据迁移时自动设为 `"default"`。
+    #[serde(default = "default_workspace_id")]
+    pub workspace_id: String,
 }
 
 impl Document {
@@ -73,6 +86,7 @@ impl Document {
             domain: None,
             summary: None,
             tags: Vec::new(),
+            workspace_id: default_workspace_id(),
         }
     }
 
@@ -97,6 +111,7 @@ impl Document {
             domain: None,
             summary: None,
             tags: Vec::new(),
+            workspace_id: default_workspace_id(),
         }
     }
 }
@@ -127,6 +142,52 @@ impl Chunk {
             sequence,
         }
     }
+}
+
+/// 文档内容预览（REQ-ING-010）。
+///
+/// 包含文档元数据、前 500 字内容预览、以及 chunk 列表（每个 chunk 含 sequence + 前 200 字内容）。
+/// 用于文档管理面板中点击文档名时弹出预览面板。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentPreview {
+    /// 文档 ID
+    pub id: String,
+    /// 文件路径
+    pub file_path: String,
+    /// 索引状态
+    pub status: DocStatus,
+    /// 创建时间（Unix 秒级时间戳）
+    pub created_at: i64,
+    /// 文档领域分类（如有）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub domain: Option<String>,
+    /// 文档摘要（如有）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub summary: Option<String>,
+    /// 用户标签
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// 内容指纹
+    pub file_hash: String,
+    /// 前 500 字内容预览（从 chunks 拼接）
+    pub content_preview: String,
+    /// Chunk 列表（每个含 sequence + 前 200 字内容）
+    pub chunks: Vec<ChunkPreview>,
+    /// Chunk 总数
+    pub chunk_count: usize,
+}
+
+/// Chunk 预览项（REQ-ING-010）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkPreview {
+    /// 分块 ID
+    pub id: String,
+    /// 文档内顺序号
+    pub sequence: usize,
+    /// 前 200 字内容
+    pub content_preview: String,
+    /// token 计数
+    pub token_count: usize,
 }
 
 /// 检索命中结果（对应 REQ-RAG-002 引用回溯）。
@@ -547,6 +608,8 @@ pub struct Conversation {
     pub title: String,
     /// 创建时间（Unix 秒级时间戳）
     pub created_at: i64,
+    /// 用户自定义排序序号（REQ-IX-002 拖拽排序；0 = 按创建时间倒序默认排序）
+    pub sort_order: i64,
 }
 
 impl Conversation {
@@ -554,6 +617,7 @@ impl Conversation {
     pub fn new(workspace_id: String, title: String) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
+            sort_order: 0,
             workspace_id,
             title,
             created_at: chrono::Utc::now().timestamp(),
@@ -567,8 +631,54 @@ impl Conversation {
             workspace_id,
             title,
             created_at: chrono::Utc::now().timestamp(),
+            sort_order: 0,
         }
     }
+}
+
+/// 知识库/工作空间（REQ-WS-001 多知识库创建与切换）。
+///
+/// 每个工作空间拥有独立的文档集和会话列表，通过 `workspace_id` 字段隔离。
+/// 默认工作空间 ID 为 `"default"`，用户可创建多个自定义知识库。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    /// 工作空间唯一标识（UUID v4 或 `"default"`）
+    pub id: String,
+    /// 知识库显示名称
+    pub name: String,
+    /// 创建时间（Unix 秒级时间戳）
+    pub created_at: i64,
+}
+
+impl Workspace {
+    /// 创建新工作空间：自动生成 UUID 与时间戳。
+    pub fn new(name: String) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            created_at: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    /// 以指定 ID 构造（用于默认工作空间 `"default"`）。
+    pub fn with_id(id: String, name: String) -> Self {
+        Self {
+            id,
+            name,
+            created_at: chrono::Utc::now().timestamp(),
+        }
+    }
+}
+
+/// 工作空间数据量预览（REQ-WS-003 删除前确认对话框）。
+///
+/// 删除工作空间前查询将级联清理的数据量，前端展示给用户确认。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceStats {
+    /// 文档数量
+    pub document_count: usize,
+    /// 会话数量
+    pub conversation_count: usize,
 }
 
 /// 对话全文搜索结果（REQ-RAG-040）。
@@ -590,6 +700,45 @@ pub struct MessageSearchResult {
     pub score: f64,
     /// 消息创建时间（Unix 秒级时间戳）
     pub created_at: i64,
+}
+
+/// 全局搜索结果组（REQ-IX-008）。
+///
+/// 包含四类搜索结果，每组按相关性排序后截断到 `limit` 条。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobalSearchResults {
+    /// 匹配的对话消息列表（FTS5 BM25 排序）
+    pub messages: Vec<MessageSearchResult>,
+    /// 匹配的文档列表（文件名 + 摘要 LIKE 匹配）
+    pub documents: Vec<DocumentSearchResult>,
+    /// 匹配的实体列表（entity_text LIKE 匹配）
+    pub entities: Vec<EntitySearchResult>,
+}
+
+/// 文档搜索结果（REQ-IX-008）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentSearchResult {
+    /// 文档 ID
+    pub doc_id: String,
+    /// 文件路径
+    pub file_path: String,
+    /// 文档摘要（可能为空）
+    pub summary: Option<String>,
+    /// 匹配类型："title" 或 "summary"
+    pub match_type: String,
+}
+
+/// 实体搜索结果（REQ-IX-008）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntitySearchResult {
+    /// 实体文本
+    pub entity_text: String,
+    /// 实体类型
+    pub entity_type: String,
+    /// 关联的 chunk ID
+    pub chunk_id: String,
+    /// 关联的文档 ID
+    pub doc_id: String,
 }
 
 /// 持久化提示接纳（B05 Durable Prompt Admission）。
@@ -815,6 +964,82 @@ pub struct LlmConfig {
     pub base_url: String,
     /// 模型名（如 gpt-4o-mini / deepseek-chat / qwen2.5）
     pub model: String,
+}
+
+/// RAG 检索参数（REQ-RAG-014）：用户可配置的检索行为参数。
+///
+/// 所有字段经 `clamp()` 保证合法范围。设置表键：`rag.top_k` / `rag.score_threshold` /
+/// `rag.chunk_expansion_enabled` / `rag.chunk_expansion_window`。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RagParams {
+    /// 检索 top-k 值（范围 1-20，默认 8）
+    pub top_k: usize,
+    /// 最低相似度阈值（范围 0.0-1.0，默认 0.0 即不过滤）
+    pub score_threshold: f32,
+    /// Chunk Expansion 开关（默认 true，启用后扩展相邻 chunk 提供上下文）
+    pub chunk_expansion_enabled: bool,
+    /// Chunk Expansion 窗口大小（范围 0-3，默认 1，每侧扩展的相邻 chunk 数）
+    pub chunk_expansion_window: usize,
+}
+
+impl Default for RagParams {
+    fn default() -> Self {
+        Self {
+            top_k: 8,
+            score_threshold: 0.0,
+            chunk_expansion_enabled: true,
+            chunk_expansion_window: 1,
+        }
+    }
+}
+
+impl RagParams {
+    /// 将参数钳制到合法范围。
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            top_k: self.top_k.clamp(1, 20),
+            score_threshold: self.score_threshold.clamp(0.0, 1.0),
+            chunk_expansion_enabled: self.chunk_expansion_enabled,
+            chunk_expansion_window: self.chunk_expansion_window.clamp(0, 3),
+        }
+    }
+}
+
+/// LLM 生成参数（REQ-RAG-015）：用户可配置的 LLM 生成行为参数。
+///
+/// 经 `OpenAIProvider` 传递到 OpenAI 兼容 API 请求体。
+/// 设置表键：`llm.temperature` / `llm.max_tokens` / `llm.top_p`。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GenerationParams {
+    /// 采样温度（范围 0.0-2.0，默认 0.7）
+    pub temperature: f32,
+    /// 最大生成 token 数（范围 256-8192，默认 4096）
+    pub max_tokens: usize,
+    /// nucleus sampling 概率阈值（范围 0.0-1.0，默认 1.0 即不过滤）
+    pub top_p: f32,
+}
+
+impl Default for GenerationParams {
+    fn default() -> Self {
+        Self {
+            temperature: 0.7,
+            max_tokens: 4096,
+            top_p: 1.0,
+        }
+    }
+}
+
+impl GenerationParams {
+    /// 将参数钳制到合法范围。
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            temperature: self.temperature.clamp(0.0, 2.0),
+            max_tokens: self.max_tokens.clamp(256, 8192),
+            top_p: self.top_p.clamp(0.0, 1.0),
+        }
+    }
 }
 
 /// get_settings 返回载荷（REQ-UI-008；api_key 仅以脱敏形式返回，安全官要求）。
@@ -1516,6 +1741,27 @@ pub struct BudgetStats {
     pub spent_today: f64,
     /// 剩余可用金额（USD，daily_limit <= 0 时为无穷大）
     pub remaining: f64,
+}
+
+/// 导入历史记录条目（REQ-ING-011）。
+///
+/// 记录每次导入操作的时间戳、文件名、格式、结果（成功/失败/跳过）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportLogEntry {
+    /// 记录 ID
+    pub id: i64,
+    /// Unix 时间戳（秒）
+    pub timestamp: i64,
+    /// 文件名
+    pub file_name: String,
+    /// 文件格式（扩展名）
+    pub format: String,
+    /// 导入结果：success / failed / skipped
+    pub result: String,
+    /// 失败原因（仅 result=failed 时有值）
+    pub error_message: Option<String>,
+    /// 文件大小（字节）
+    pub file_size: Option<i64>,
 }
 
 /// 速率限制统计。
@@ -2623,10 +2869,10 @@ impl StripConfig {
     }
 }
 
-/// Strip 操作结果（REQ-RAG-046）。
+/// Strip 操作结果（REQ-RAG-046 + DS-03 Session Strip）。
 ///
 /// 记录 strip 操作的执行结果。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StripResult {
     /// 被移除的消息数量
     pub stripped_count: usize,
@@ -2636,6 +2882,12 @@ pub struct StripResult {
     pub stripped_message_ids: Vec<String>,
     /// 估算的 token 节省量（4 字符 ≈ 1 token）
     pub estimated_tokens_saved: usize,
+    /// 生成的摘要文本（DS-03 扩展；空串表示未生成摘要）
+    #[serde(default)]
+    pub summary: String,
+    /// 保留的消息数量（DS-03 扩展）
+    #[serde(default)]
+    pub kept_count: usize,
 }
 
 impl StripResult {
@@ -2646,6 +2898,8 @@ impl StripResult {
             summary_inserted: false,
             stripped_message_ids: Vec::new(),
             estimated_tokens_saved: 0,
+            summary: String::new(),
+            kept_count: 0,
         }
     }
 }
@@ -2674,10 +2928,558 @@ impl StripPreview {
     }
 }
 
-/// 缓存设置新增到 SettingsPayload（REQ-PERF-001）。
+/// 对话书签（REQ-RAG-047）。
 ///
-/// 通过 `get_settings` 返回给前端，前端据此渲染缓存设置 UI。
-/// 通过 `save_settings` 持久化到 settings 表。
+/// 用户可将重要对话或特定消息标记为书签，支持自定义备注。
+/// 持久化到 `conversation_bookmarks` 表。
+///
+/// 兼容两种书签模式：
+/// - **会话级书签**（REQ-RAG-047）：`message_id` 为 `None`，标记整个会话
+/// - **消息级书签**（REQ-RAG-053）：`message_id` 为 `Some(msg_id)`，标记特定 AI 回答消息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationBookmark {
+    /// 书签所属会话 ID
+    pub conversation_id: String,
+    /// 书签备注（可选，用户自定义）
+    pub note: Option<String>,
+    /// 创建时间戳（Unix 秒）
+    pub created_at: i64,
+    /// 消息级书签：关联的消息 ID（REQ-RAG-053）。
+    /// `None` 表示会话级书签（向后兼容），`Some(msg_id)` 表示消息级书签。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    /// 消息级书签：消息内容摘要（前 50 字，REQ-RAG-053）。
+    /// 仅消息级书签使用，会话级为 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+impl ConversationBookmark {
+    /// 创建新会话级书签（向后兼容）。
+    pub fn new(conversation_id: String) -> Self {
+        Self {
+            conversation_id,
+            note: None,
+            created_at: chrono::Utc::now().timestamp(),
+            message_id: None,
+            summary: None,
+        }
+    }
+
+    /// 创建新消息级书签（REQ-RAG-053）。
+    ///
+    /// `summary` 自动截取前 50 字符。
+    pub fn new_message(conversation_id: String, message_id: String, content: &str) -> Self {
+        let summary: String = content.chars().take(50).collect();
+        Self {
+            conversation_id,
+            note: None,
+            created_at: chrono::Utc::now().timestamp(),
+            message_id: Some(message_id),
+            summary: Some(summary),
+        }
+    }
+
+    /// 设置备注。
+    pub fn with_note(mut self, note: String) -> Self {
+        self.note = Some(note);
+        self
+    }
+
+    /// 是否为消息级书签。
+    pub fn is_message_bookmark(&self) -> bool {
+        self.message_id.is_some()
+    }
+}
+
+/// 批量操作结果（REQ-ING-024 文档批量操作）。
+///
+/// 记录批量删除/移动/标签操作的成功与失败统计。
+/// 失败的文档 ID 收集到 `failed_ids` 中，便于前端针对性提示。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchResult {
+    /// 成功操作的文档数
+    pub success_count: usize,
+    /// 失败操作的文档数
+    pub failed_count: usize,
+    /// 失败的文档 ID 列表
+    pub failed_ids: Vec<String>,
+}
+
+impl BatchResult {
+    /// 创建全成功的 BatchResult。
+    pub fn all_success(count: usize) -> Self {
+        Self {
+            success_count: count,
+            failed_count: 0,
+            failed_ids: Vec::new(),
+        }
+    }
+
+    /// 从结果列表构建 BatchResult。
+    pub fn from_results(results: Vec<(String, Result<(), String>)>) -> Self {
+        let mut success_count = 0;
+        let mut failed_ids = Vec::new();
+        for (id, result) in results {
+            match result {
+                Ok(()) => success_count += 1,
+                Err(_) => failed_ids.push(id),
+            }
+        }
+        let failed_count = failed_ids.len();
+        Self {
+            success_count,
+            failed_count,
+            failed_ids,
+        }
+    }
+}
+
+// 缓存设置新增到 SettingsPayload（REQ-PERF-001）。
+//
+// 通过 `get_settings` 返回给前端，前端据此渲染缓存设置 UI。
+// 通过 `save_settings` 持久化到 settings 表。
+// ============================================================
+// RAG 评估数据集（REQ-RAG-048）
+// ============================================================
+
+/// RAG 评估数据集中的单个评估样本（REQ-RAG-048）。
+///
+/// 每个样本定义了一个查询及其对应的 ground truth（标准答案）和
+/// 相关文档/chunk ID 列表，用于端到端检索质量评估。
+///
+/// # 字段
+/// - `query`：用户查询文本
+/// - `ground_truth`：标准答案（用于 Context Recall 指标）
+/// - `relevant_doc_ids`：相关文档 ID 列表
+/// - `relevant_chunk_ids`：相关 chunk ID 列表
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RagEvalDatasetSample {
+    /// 用户查询文本
+    pub query: String,
+    /// 标准答案（ground truth）
+    pub ground_truth: String,
+    /// 相关文档 ID 列表
+    #[serde(default)]
+    pub relevant_doc_ids: Vec<String>,
+    /// 相关 chunk ID 列表
+    #[serde(default)]
+    pub relevant_chunk_ids: Vec<String>,
+}
+
+impl RagEvalDatasetSample {
+    /// 创建新的评估样本。
+    pub fn new(query: String, ground_truth: String) -> Self {
+        Self {
+            query,
+            ground_truth,
+            relevant_doc_ids: Vec::new(),
+            relevant_chunk_ids: Vec::new(),
+        }
+    }
+
+    /// 设置相关文档 ID 列表。
+    pub fn with_doc_ids(mut self, doc_ids: Vec<String>) -> Self {
+        self.relevant_doc_ids = doc_ids;
+        self
+    }
+
+    /// 设置相关 chunk ID 列表。
+    pub fn with_chunk_ids(mut self, chunk_ids: Vec<String>) -> Self {
+        self.relevant_chunk_ids = chunk_ids;
+        self
+    }
+}
+
+/// RAG 评估数据集（REQ-RAG-048）。
+///
+/// 包含多个评估样本，用于端到端检索质量评估。
+/// JSON 格式，可序列化/反序列化，可扩展、可复现。
+///
+/// # 字段
+/// - `name`：数据集名称
+/// - `description`：数据集描述
+/// - `samples`：评估样本列表
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RagEvalDataset {
+    /// 数据集名称
+    pub name: String,
+    /// 数据集描述
+    #[serde(default)]
+    pub description: String,
+    /// 评估样本列表
+    pub samples: Vec<RagEvalDatasetSample>,
+}
+
+impl RagEvalDataset {
+    /// 创建新的评估数据集。
+    pub fn new(name: String, samples: Vec<RagEvalDatasetSample>) -> Self {
+        Self {
+            name,
+            description: String::new(),
+            samples,
+        }
+    }
+
+    /// 设置数据集描述。
+    pub fn with_description(mut self, description: String) -> Self {
+        self.description = description;
+        self
+    }
+
+    /// 获取样本数量。
+    pub fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// 是否为空数据集。
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty()
+    }
+
+    /// 序列化为 JSON 字符串。
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// 从 JSON 字符串反序列化。
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+}
+
+// ============================================================
+// 嵌入模型对比评估（REQ-VEC-018）
+// ============================================================
+
+/// 嵌入模型对比评估请求（REQ-VEC-018）。
+///
+/// 用户选择 2-3 个嵌入模型，对同一文档集进行嵌入并对比检索质量。
+///
+/// # 字段
+/// - `model_names`：参与对比的嵌入模型名称列表（如 `["all-MiniLM-L6-v2", "bge-small-en-v1.5"]`）
+/// - `top_k`：每个查询检索的 top-k 结果数（默认 5）
+/// - `dataset_json`：自定义评估数据集 JSON 字符串（`None` 时使用内置示例数据集）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbedComparisonRequest {
+    /// 参与对比的嵌入模型名称列表
+    pub model_names: Vec<String>,
+    /// 每个查询检索的 top-k 结果数
+    #[serde(default = "default_top_k")]
+    pub top_k: usize,
+    /// 自定义评估数据集 JSON（None 时使用内置示例数据集）
+    pub dataset_json: Option<String>,
+}
+
+/// 默认 top_k 值。
+fn default_top_k() -> usize {
+    5
+}
+
+/// 嵌入模型评估指标分数（REQ-VEC-018）。
+///
+/// 每个模型在三个检索质量指标上的平均分数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbedMetricScores {
+    /// 命中率（Hit Rate），[0.0, 1.0]
+    pub hit_rate: f32,
+    /// 平均倒数排名（MRR），[0.0, 1.0]
+    pub mrr: f32,
+    /// 归一化折扣累积增益（NDCG），[0.0, 1.0]
+    pub ndcg: f32,
+}
+
+impl EmbedMetricScores {
+    /// 创建零分数实例。
+    pub fn zero() -> Self {
+        Self {
+            hit_rate: 0.0,
+            mrr: 0.0,
+            ndcg: 0.0,
+        }
+    }
+
+    /// 从指标列表中提取 Hit Rate / MRR / NDCG 三个分数的平均值。
+    pub fn from_metrics_avg(metrics: &[Vec<RagEvalMetric>]) -> Self {
+        if metrics.is_empty() {
+            return Self::zero();
+        }
+
+        let mut hit_sum = 0.0f32;
+        let mut mrr_sum = 0.0f32;
+        let mut ndcg_sum = 0.0f32;
+        let mut hit_count = 0usize;
+        let mut mrr_count = 0usize;
+        let mut ndcg_count = 0usize;
+
+        for sample_metrics in metrics {
+            for m in sample_metrics {
+                match m.metric_type {
+                    RagMetricType::HitRate => {
+                        hit_sum += m.score;
+                        hit_count += 1;
+                    }
+                    RagMetricType::MRR => {
+                        mrr_sum += m.score;
+                        mrr_count += 1;
+                    }
+                    RagMetricType::NDCG => {
+                        ndcg_sum += m.score;
+                        ndcg_count += 1;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Self {
+            hit_rate: if hit_count > 0 {
+                hit_sum / hit_count as f32
+            } else {
+                0.0
+            },
+            mrr: if mrr_count > 0 {
+                mrr_sum / mrr_count as f32
+            } else {
+                0.0
+            },
+            ndcg: if ndcg_count > 0 {
+                ndcg_sum / ndcg_count as f32
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
+/// 单个嵌入模型的对比评估结果（REQ-VEC-018）。
+///
+/// 包含模型名称、向量维度、三指标分数和评估样本数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbedComparisonResult {
+    /// 模型名称
+    pub model_name: String,
+    /// 向量维度
+    pub dim: usize,
+    /// 三指标平均分数
+    pub metrics: EmbedMetricScores,
+    /// 评估样本数
+    pub sample_count: usize,
+}
+
+// ============================================================================
+// MCP 协议数据模型（REQ-ARCH-016 MCP 协议适配器 Phase 1）
+// ============================================================================
+
+/// MCP 传输类型（REQ-ARCH-016 AC-2/AC-3）。
+///
+/// - `Stdio`：通过子进程 stdin/stdout 通信（本地工具服务器）
+/// - `Sse`：通过 HTTP + Server-Sent Events 通信（远程工具服务器）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum McpTransportType {
+    /// stdio 传输（启动子进程 JSON-RPC 通信）
+    #[default]
+    Stdio,
+    /// SSE 传输（HTTP + Server-Sent Events JSON-RPC 通信）
+    Sse,
+}
+
+impl McpTransportType {
+    /// 转为字符串表示。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Stdio => "stdio",
+            Self::Sse => "sse",
+        }
+    }
+
+    /// 从字符串解析传输类型。
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "stdio" => Some(Self::Stdio),
+            "sse" => Some(Self::Sse),
+            _ => None,
+        }
+    }
+}
+
+/// MCP 服务器配置（REQ-ARCH-016 AC-1）。
+///
+/// 描述一个外部 MCP 服务器的连接配置。存储在 settings 表 `mcp.servers` 键中（JSON 数组）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// 服务器唯一标识（UUID v4）
+    pub id: String,
+    /// 服务器显示名称
+    pub name: String,
+    /// 传输类型
+    pub transport: McpTransportType,
+    /// stdio 传输：可执行文件路径（如 `npx`、`node`、`python3`）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub command: Option<String>,
+    /// stdio 传输：命令行参数
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub args: Vec<String>,
+    /// stdio 传输：环境变量
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub env: Vec<(String, String)>,
+    /// SSE 传输：服务器 URL
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub url: Option<String>,
+    /// SSE 传输：认证头（如 Bearer token）
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub headers: Vec<(String, String)>,
+    /// 是否启用
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// 默认返回 `true`（用于 serde `default` 属性）。
+/// 复用已有的 pub fn default_true()（line 1344）。
+impl McpServerConfig {
+    /// 创建新的 stdio 传输 MCP 服务器配置。
+    pub fn new_stdio(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        command: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            transport: McpTransportType::Stdio,
+            command: Some(command.into()),
+            args: Vec::new(),
+            env: Vec::new(),
+            url: None,
+            headers: Vec::new(),
+            enabled: true,
+        }
+    }
+
+    /// 创建新的 SSE 传输 MCP 服务器配置。
+    pub fn new_sse(id: impl Into<String>, name: impl Into<String>, url: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            transport: McpTransportType::Sse,
+            command: None,
+            args: Vec::new(),
+            env: Vec::new(),
+            url: Some(url.into()),
+            headers: Vec::new(),
+            enabled: true,
+        }
+    }
+
+    /// 验证配置完整性。
+    ///
+    /// 返回 `Ok(())` 表示配置有效，`Err(message)` 表示缺失必填字段。
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("服务器名称不能为空".to_string());
+        }
+        if self.id.trim().is_empty() {
+            return Err("服务器 ID 不能为空".to_string());
+        }
+        match self.transport {
+            McpTransportType::Stdio => {
+                if self
+                    .command
+                    .as_deref()
+                    .map(str::trim)
+                    .unwrap_or("")
+                    .is_empty()
+                {
+                    return Err("stdio 传输需要指定 command（可执行文件路径）".to_string());
+                }
+            }
+            McpTransportType::Sse => {
+                if self.url.as_deref().map(str::trim).unwrap_or("").is_empty() {
+                    return Err("SSE 传输需要指定 url（服务器地址）".to_string());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// MCP 工具定义（REQ-ARCH-016 AC-4）。
+///
+/// 描述一个由 MCP 服务器暴露的工具，可被 Agent 调用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpTool {
+    /// 工具名称（MCP 服务器内唯一）
+    pub name: String,
+    /// 工具描述
+    #[serde(default)]
+    pub description: String,
+    /// 输入参数 JSON Schema（JSON 字符串）
+    #[serde(default)]
+    pub input_schema: String,
+    /// 来源服务器 ID
+    pub server_id: String,
+    /// 来源服务器名称
+    pub server_name: String,
+}
+
+/// MCP 工具调用结果（REQ-ARCH-016 AC-5）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolCallResult {
+    /// 工具名称
+    pub tool_name: String,
+    /// 来源服务器 ID
+    pub server_id: String,
+    /// 调用是否成功
+    pub success: bool,
+    /// 输出内容（成功时为结果文本，失败时为错误信息）
+    pub content: String,
+    /// 是否为错误结果
+    #[serde(default)]
+    pub is_error: bool,
+}
+
+/// MCP 服务器连接状态（REQ-ARCH-016 AC-6）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum McpConnectionStatus {
+    /// 已连接
+    Connected,
+    /// 已断开
+    #[default]
+    Disconnected,
+    /// 连接错误
+    Error,
+}
+
+impl McpConnectionStatus {
+    /// 转为字符串表示。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Connected => "connected",
+            Self::Disconnected => "disconnected",
+            Self::Error => "error",
+        }
+    }
+}
+
+/// MCP 服务器状态信息（REQ-ARCH-016 AC-6）。
+///
+/// 包含服务器配置与当前连接状态，用于前端状态显示。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerStatus {
+    /// 服务器配置
+    pub config: McpServerConfig,
+    /// 连接状态
+    pub status: McpConnectionStatus,
+    /// 错误信息（仅 status == Error 时有值）
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error_message: Option<String>,
+    /// 已注册工具数量
+    #[serde(default)]
+    pub tool_count: usize,
+}
+
 #[cfg(test)]
 mod llm_model_tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -3248,7 +4050,7 @@ mod session_todo_tests {
 #[cfg(test)]
 mod provenance_tag_tests {
     #![allow(clippy::unwrap_used)]
-    use super::ProvenanceTag;
+    use super::{GenerationParams, ProvenanceTag, RagParams, StripResult};
 
     /// TC-MODEL-PROV-001：new() 创建的 ProvenanceTag 字段正确
     #[test]
@@ -3300,5 +4102,88 @@ mod provenance_tag_tests {
         let json = serde_json::to_string(&tag).unwrap();
         let deserialized: ProvenanceTag = serde_json::from_str(&json).unwrap();
         assert_eq!(tag, deserialized);
+    }
+
+    /// TC-RAG-PARAMS-001：RagParams 默认值
+    #[test]
+    fn test_rag_params_default() {
+        let params = RagParams::default();
+        assert_eq!(params.top_k, 8);
+        assert!((params.score_threshold - 0.0).abs() < f32::EPSILON);
+        assert!(params.chunk_expansion_enabled);
+        assert_eq!(params.chunk_expansion_window, 1);
+    }
+
+    /// TC-RAG-PARAMS-002：RagParams clamp 超范围值
+    #[test]
+    fn test_rag_params_clamped() {
+        let params = RagParams {
+            top_k: 100,
+            score_threshold: -1.5,
+            chunk_expansion_enabled: false,
+            chunk_expansion_window: 10,
+        };
+        let clamped = params.clamped();
+        assert_eq!(clamped.top_k, 20);
+        assert!((clamped.score_threshold - 0.0).abs() < f32::EPSILON);
+        assert!(!clamped.chunk_expansion_enabled);
+        assert_eq!(clamped.chunk_expansion_window, 3);
+    }
+
+    /// TC-RAG-PARAMS-003：RagParams serde 往返
+    #[test]
+    fn test_rag_params_serde_roundtrip() {
+        let params = RagParams::default();
+        let json = serde_json::to_string(&params).unwrap();
+        let deserialized: RagParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(params, deserialized);
+    }
+
+    /// TC-LLM-PARAMS-001：GenerationParams 默认值
+    #[test]
+    fn test_generation_params_default() {
+        let params = GenerationParams::default();
+        assert!((params.temperature - 0.7).abs() < f32::EPSILON);
+        assert_eq!(params.max_tokens, 4096);
+        assert!((params.top_p - 1.0).abs() < f32::EPSILON);
+    }
+
+    /// TC-LLM-PARAMS-002：GenerationParams clamp 超范围值
+    #[test]
+    fn test_generation_params_clamped() {
+        let params = GenerationParams {
+            temperature: 5.0,
+            max_tokens: 100,
+            top_p: 2.5,
+        };
+        let clamped = params.clamped();
+        assert!((clamped.temperature - 2.0).abs() < f32::EPSILON);
+        assert_eq!(clamped.max_tokens, 256);
+        assert!((clamped.top_p - 1.0).abs() < f32::EPSILON);
+    }
+
+    /// TC-LLM-PARAMS-003：GenerationParams serde 往返
+    #[test]
+    fn test_generation_params_serde_roundtrip() {
+        let params = GenerationParams::default();
+        let json = serde_json::to_string(&params).unwrap();
+        let deserialized: GenerationParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(params, deserialized);
+    }
+
+    /// TC-STRIP-RESULT-001：StripResult serde 往返
+    #[test]
+    fn test_strip_result_serde_roundtrip() {
+        let result = StripResult {
+            stripped_count: 10,
+            summary_inserted: true,
+            stripped_message_ids: vec!["msg-1".to_string(), "msg-2".to_string()],
+            estimated_tokens_saved: 500,
+            summary: "用户讨论了 Rust 异步编程和 Tauri 框架".to_string(),
+            kept_count: 6,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: StripResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(result, deserialized);
     }
 }

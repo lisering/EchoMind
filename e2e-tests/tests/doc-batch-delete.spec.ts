@@ -99,4 +99,60 @@ test.describe('E2E-ING-009 批量删除文档', () => {
     const remaining = page.locator('#docList [data-doc-name]');
     await expect(remaining).toHaveCount(0);
   });
+
+  // v1.5 S2 补充测试 — 边界场景覆盖
+  test('AC-5 退出多选模式恢复常规视图', async ({ page }) => {
+    await page.locator('#kbSelectToggle').click();
+    await page.waitForTimeout(200);
+    await expect(page.locator('#kbBatchBar')).toBeVisible();
+
+    // 点击取消按钮退出多选
+    await page.locator('#kbBatchCancel').click();
+    await page.waitForTimeout(200);
+
+    // 批量操作栏应隐藏
+    await expect(page.locator('#kbBatchBar')).toBeHidden();
+    // 复选框应消失
+    const checkboxes = page.locator('#docList input[type="checkbox"]');
+    await expect(checkboxes).toHaveCount(0);
+    // 文档仍存在
+    const items = page.locator('#docList [data-doc-name]');
+    await expect(items).toHaveCount(3);
+  });
+
+  test('AC-6 部分删除保留剩余文档', async ({ page }) => {
+    await page.locator('#kbSelectToggle').click();
+    await page.waitForTimeout(200);
+
+    // 仅勾选第 1 和第 3 个文档
+    await page.locator('#docList input[type="checkbox"]').nth(0).click();
+    await page.locator('#docList input[type="checkbox"]').nth(2).click();
+    await page.waitForTimeout(100);
+
+    // 批量删除
+    await page.locator('#kbBatchDelete').click();
+    await expect(page.locator('#confirmDialog')).toBeVisible({ timeout: 3000 });
+    await page.waitForTimeout(600);
+    await page.locator('#confirmDialog button[data-role="confirm"]').click();
+    await page.waitForTimeout(500);
+
+    // 应剩 1 个文档
+    const remaining = page.locator('#docList [data-doc-name]');
+    await expect(remaining).toHaveCount(1);
+  });
+
+  test('AC-7 空选时不触发批量删除', async ({ page }) => {
+    await page.locator('#kbSelectToggle').click();
+    await page.waitForTimeout(200);
+
+    // 不勾选任何文档，直接点击批量删除
+    await page.locator('#kbBatchDelete').click();
+    await page.waitForTimeout(300);
+
+    // 确认对话框不应出现
+    await expect(page.locator('#confirmDialog')).toBeHidden();
+    // 文档仍存在
+    const items = page.locator('#docList [data-doc-name]');
+    await expect(items).toHaveCount(3);
+  });
 });

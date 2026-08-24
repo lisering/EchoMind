@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { extractEntities, generateFollowups, renderFollowups, removeFollowups, renderFollowupSuggestions } from '../../../ui/src/followup.js';
+import { extractEntities, generateFollowups, renderFollowups, removeFollowups, renderFollowupSuggestions } from '../../../ui/src/chat-render.js';
 
 // ============================================================
 // DOM 环境设置

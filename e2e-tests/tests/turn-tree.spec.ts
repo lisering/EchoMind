@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { enterApp, injectLocales, injectStub, uiUrl } from './helpers.mjs';
+import { enterApp, injectLocales, injectStub, uiUrl, openToolsDropdown, clickToolButton } from './helpers.mjs';
 
 test.describe('对话分支/版本树（REQ-RAG-039）', () => {
   test.beforeEach(async ({ page }) => {
@@ -10,7 +10,8 @@ test.describe('对话分支/版本树（REQ-RAG-039）', () => {
   });
 
   test('TC-RAG-BRANCH-001: 分支树按钮存在且点击打开面板', async ({ page }) => {
-    // 验证按钮存在
+    // S5 P1-1: branchTreeBtn 收纳到工具下拉菜单
+    await openToolsDropdown(page);
     const btn = page.locator('#branchTreeBtn');
     await expect(btn).toBeVisible();
 
@@ -38,7 +39,7 @@ test.describe('对话分支/版本树（REQ-RAG-039）', () => {
     });
 
     // 点击分支树按钮
-    await page.locator('#branchTreeBtn').click();
+    await clickToolButton(page, 'branchTreeBtn');
 
     // 验证空状态提示
     const emptyEl = page.locator('.conversation-tree-empty');
@@ -81,7 +82,7 @@ test.describe('对话分支/版本树（REQ-RAG-039）', () => {
     });
 
     // 点击分支树按钮
-    await page.locator('#branchTreeBtn').click();
+    await clickToolButton(page, 'branchTreeBtn');
 
     // 验证面板打开
     const panel = page.locator('#conversationTreePanel');
@@ -137,7 +138,7 @@ test.describe('对话分支/版本树（REQ-RAG-039）', () => {
       };
     });
 
-    await page.locator('#branchTreeBtn').click();
+    await clickToolButton(page, 'branchTreeBtn');
 
     const panel = page.locator('#conversationTreePanel');
     await expect(panel).toBeVisible();

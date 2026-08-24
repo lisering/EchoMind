@@ -1,6 +1,6 @@
 # Settings 键与 Tauri 事件参考
 
-> **状态**：活跃 | **最后审阅**：2026-08-10（v9 新增 Q01-Q11/B05-B08/B09-B10/S69-S70 设置键：security.posture / rag.contextual_retrieval 等；v8 新增 `llm.kv_cache_enabled` 设置键；v7 新增 `llm.paged_attn` / `llm.block_size` / `llm.gpu_memory_ctx` / `llm.sampling` 设置键）
+> **状态**：活跃 | **最后审阅**：2026-08-16（v11 v2.0 S17 文档同步：新增 `update.auto_check` / `smart_mode` / `workspace.current` 设置键；v10 新增 v1.6 `ui.close_to_tray` 设置键；v9 新增 Q01-Q11/B05-B08/B09-B10/S69-S70 设置键：security.posture / rag.contextual_retrieval 等；v8 新增 `llm.kv_cache_enabled` 设置键；v7 新增 `llm.paged_attn` / `llm.block_size` / `llm.gpu_memory_ctx` / `llm.sampling` 设置键）
 >
 > 本文档记录 SQLite `settings` 表的所有键名、用途与值格式，以及所有 Tauri 事件。
 > 源码：`crates/tauri-app/src/state.rs`、`crates/tauri-app/src/commands.rs`、`crates/infra/src/sqlite_storage.rs`。
@@ -20,7 +20,7 @@
 | `mm.vlm_enabled` | `"true"` / `"false"` / 不存在 | VLM 图片理解增强开关（REQ-MM-003；默认关闭，用户主动开启后图片发送到 BYOK LLM 端点） | `set_vlm_enabled` 命令（前端设置面板开关） | `AppState::vision_provider()` 每次调用时检查，支持运行时切换 |
 | `rag.hybrid_search` | `"true"` / `"false"` / 不存在 | 混合检索开关（REQ-RAG-010；默认启用，向量+关键词 RRF 融合检索；关闭后退化为纯向量检索） | `set_hybrid_search` 命令（前端设置面板开关） | `chat_inner` 每次调用时读取，构建 `HybridRetriever` 时传入 `set_hybrid_enabled()` |
 | `rag.hyde_enabled` | `"true"` / `"false"` / 不存在 | HyDE 查询改写开关（REQ-RAG-021；默认关闭，启用后向量检索使用 LLM 生成的假设性答案文档嵌入；关键词检索仍用原始查询） | `set_hyde_enabled` 命令（前端设置面板开关） | `chat_inner` 每次调用时读取，构建 `HybridRetriever` 时注入 `HydeRewriter` |
-| `vec.embedding_model` | `"all-MiniLM-L6-v2"` / `"bge-small-zh-v1.5"` / `"e5-small-v2"` / `"custom:{name}"` / 不存在 | 嵌入模型标识（REQ-VEC-012 + REQ-VEC-014；默认 `all-MiniLM-L6-v2`，切换后销毁 embedder 实例，下次 `embedder()` 用新模型初始化；`custom:{name}` 前缀表示使用用户上传的自定义 ONNX 模型，Pro 门控） | `set_embedding_model` 命令（前端设置面板下拉选择 / `switchToCustomModel` 函数） | `AppState::embedder()` / `init_embedder_with_progress()` 初始化时读取；`ModelStore::parse_embedding_model()` 解析 `custom:` 前缀 |
+| `vec.embedding_model` | `"all-MiniLM-L6-v2"` / `"bge-small-en-v1.5"` / `"bge-small-zh-v1.5"` / `"e5-small-v2"` / `"bge-base-en-v1.5"` / `"bge-m3"` / `"custom:{name}"` / 不存在 | 嵌入模型标识（REQ-VEC-012 + REQ-VEC-014 + REQ-VEC-015；默认 `all-MiniLM-L6-v2`，推荐 `bge-small-en-v1.5`；切换后销毁 embedder 实例，下次 `embedder()` 用新模型初始化；`bge-m3` 1024-dim 多语言；`custom:{name}` 前缀表示使用用户上传的自定义 ONNX 模型，Pro 门控） | `set_embedding_model` 命令（前端设置面板下拉选择 / `switchToCustomModel` 函数） | `AppState::embedder()` / `init_embedder_with_progress()` 初始化时读取；`ModelStore::parse_embedding_model()` 解析 `custom:` 前缀 |
 | `sync.watched_folders` | JSON 数组字符串 | 监听文件夹列表（REQ-SYNC-001；`[{path, last_synced_at}, ...]`） | `add_watched_folder` / `remove_watched_folder` 命令 | `get_watched_folders` 命令读取 |
 | `rag.rerank_enabled` | `"true"` / `"false"` / 不存在 | Cross-Encoder 重排序开关（REQ-RAG-020；默认关闭，启用后 RRF 融合后插入 bge-reranker-base 精排阶段） | `set_rerank_enabled` 命令（前端设置面板开关） | `chat_inner` 每次调用时读取 |
 | `rag.agent_enabled` | `"true"` / `"false"` / 不存在 | Agentic RAG 多步推理开关（REQ-RAG-022；默认关闭，启用后走 ReAct 循环 Thought→Action→Observation） | `set_agent_enabled` 命令（前端设置面板开关） | `chat_inner` 每次调用时读取 |
@@ -29,6 +29,7 @@
 | `ui.locale` | `"zh-CN"` / `"en"` / 不存在 | 界面语言偏好（REQ-I18N-001；默认 `zh-CN`） | `set_locale` 命令（前端设置面板下拉） | `get_locale` 命令 + 前端 i18n 模块启动时读取 |
 | `ui.sidebar_collapsed` | `"true"` / `"false"` / 不存在 | 侧栏折叠状态（REQ-NAV-001 AC-4；默认 `false` 展开） | `set_sidebar_collapsed` 命令（前端 `toggleSidebar()` 调用） | `get_sidebar_collapsed` 命令 + 前端 `restoreSidebarState()` 启动时读取 |
 | `ui.theme` | `"dark"` / `"light"` / `"system"` / 不存在 | 界面主题模式（REQ-UI-011；默认 `dark` 暗色主题。`light` 为浅色主题，`system` 跟随 `prefers-color-scheme` 自动切换） | `set_theme` 命令（前端设置面板「外观」区域三选一） | `get_theme` 命令 + 前端 `initTheme()` 启动时读取 |
+| `ui.close_to_tray` | `"true"` / `"false"` / 不存在 | 窗口关闭行为（REQ-WIN-003；默认 `false`，关闭窗口直接退出。`true` 时关闭窗口最小化到系统托盘而非退出，窗口 `CloseRequested` 事件被拦截执行 `prevent_close()` + `window.hide()`） | `set_close_to_tray` 命令（前端设置面板 toggle 开关） | `get_close_to_tray` 命令 + `lib.rs` 窗口事件处理器读取 |
 | `voice.rate` | 数字字符串（如 `"1.0"`）/ 不存在 | TTS 朗读语速（REQ-RAG-035；范围 0.5~2.0，默认 1.0。存储在 localStorage，不经过后端 IPC） | 前端 `initVoiceSettings()` 设置面板滑块 | 前端 `getVoiceRate()` 朗读时读取 |
 | `export.pdf_page_size` | `"A4"` / `"Letter"` / 不存在 | PDF 导出页面大小（REQ-EXP-005；默认 `A4`。存储在 localStorage，不经过后端 IPC） | 前端 `initPdfExportSettings()` 设置面板下拉 | 前端 `getPdfPageSize()` 导出时读取 |
 | `export.pdf_include_sources` | `"true"` / `"false"` / 不存在 | PDF 导出是否包含引用来源（REQ-EXP-005；默认 `true`。存储在 localStorage，不经过后端 IPC） | 前端 `initPdfExportSettings()` 设置面板 toggle | 前端 `getPdfIncludeSources()` 导出时读取 |
@@ -61,6 +62,7 @@
 | `rag.sub_agent_enabled` | `"true"` / `"false"` / 不存在 | 子代理舰队开关（REQ-RAG-025 扩展；默认 `false`，启用后 Coordinator Research 阶段每个子查询由独立 SubAgent 处理，通过 mailbox 消息传递协调。**仅在 `rag.coordinator_enabled` 为 true 时生效**） | `set_sub_agent_enabled` 命令 | `chat_inner` 从 `get_settings_batch` 读取 → `CoordinatorEngine::with_sub_agent_timeout(120)` |
 | `rag.web_search_enabled` | `"true"` / `"false"` / 不存在 | 网页搜索集成开关（REQ-RAG-036；默认 `false`，启用后当本地检索 top-1 score < 0.3 阈值时自动调用 DuckDuckGo Instant Answer API 搜索互联网，结果通过 RRF 融合到本地检索（Web 权重 0.4），搜索失败优雅降级为仅本地结果） | `set_web_search_enabled` 命令（前端输入区 toggle 开关） | `chat_inner` 从 `get_settings_batch` 读取 → `DuckDuckGoProvider::new()` → `web_search::search_and_fuse()` |
 | `rag.contextual_retrieval` | `"true"` / `"false"` / 不存在 | Contextual Retrieval 开关（REQ-RAG-041；默认 `true`，嵌入时拼接文档名上下文前缀 `build_contextual_text(doc_name, chunk_content)`，使向量包含文档上下文信息，检索失败率 ↓49%（Anthropic Contextual Retrieval 论文）。关闭后嵌入使用纯 chunk content。变更后需调用 `rebuild_contextual_embeddings` 重建已有向量） | `set_contextual_retrieval` 命令（性能优化设置面板 toggle 开关） | `embed_document_chunks()` 条件化嵌入文本 + `rebuild_contextual_embeddings` IPC 重建 |
+| `rag.late_chunking` | `"true"` / `"false"` / 不存在 | Late Chunking 开关（REQ-RAG-049；默认 `false`，嵌入时拼接文档前 500 字符摘要 `build_late_chunking_text(doc_prefix, chunk_content)`，使 chunk 向量包含全文语义上下文（Jina AI 2024 Late Chunking 技术）。与 Contextual Retrieval 可组合。变更后需调用 `rebuild_all_embeddings` 重建已有向量） | `set_late_chunking` 命令（性能优化设置面板） | `embed_document_chunks()` 条件化嵌入文本 + `rebuild_all_embeddings` IPC 重建 |
 | `log.level` | `"debug"` / `"info"` / `"warn"` / `"error"` / 不存在 | 日志级别（REQ-OBS-001；默认 `info`，可在设置面板切换为 `debug`） | `set_log_level` 命令 | `LocalLogger::init()` 启动时读取 + `set_level()` 运行时切换 |
 | `window.x` | 整数字符串（如 `"100"`）/ 不存在 | 窗口左上角 X 坐标（REQ-WIN-001-AC-3；关闭时保存，启动恢复） | `lib.rs save_window_state()` | `lib.rs restore_window_state()` |
 | `window.y` | 整数字符串（如 `"200"`）/ 不存在 | 窗口左上角 Y 坐标（REQ-WIN-001-AC-3） | `lib.rs save_window_state()` | `lib.rs restore_window_state()` |
@@ -72,6 +74,10 @@
 | `stt.base_url` | URL 字符串 / 不存在 | 语音转写 API 端点（REQ-RAG-034） | `set_stt_config` 命令 | `transcribe_audio` 命令读取 |
 | `stt.model` | 模型名字符串 / 不存在 | 语音转写模型名（REQ-RAG-034；默认 `whisper-1`） | `set_stt_config` 命令 | `transcribe_audio` 命令读取 |
 | `stt.language` | 语言代码 / 不存在 | 语音转写语言提示（REQ-RAG-034；如 `zh` / `en`，可选） | `set_stt_config` 命令 | `transcribe_audio` 命令读取 |
+| `update.auto_check` | `"true"` / `"false"` / 不存在 | 应用更新自动检查开关（REQ-HELP-004；默认 `false`，启用后启动时自动检查 GitHub Releases 新版本） | `update_setting` 命令（S09 统一设置） | `check_for_updates` 命令启动时读取 |
+| `smart_mode` | `"true"` / `"false"` / 不存在 | 智能模式开关（S5 审计 P0-1；默认 `false`，启用后自动开启混合搜索 + Rerank + HyDE + 知识图谱 + 质量门控 + 压缩 2x 等最佳实践配置） | `set_smart_mode` 命令 | `chat_inner` 从 `get_settings_batch` 读取 |
+| `workspace.current` | 工作空间 ID 字符串 / 不存在 | 当前活动工作空间 ID（REQ-WS-001；默认 `default`） | `switch_workspace` 命令 | `AppState::new()` 启动恢复 |
+| `ui.autostart` | `"true"` / `"false"` / 不存在 | 开机自启动开关（REQ-WIN-004；默认 `false`） | `update_setting` 命令（S09 统一设置） | `get_autostart` 命令读取 |
 
 ### 1.1 API Key 加密存储（REQ-SEC-001 / REQ-UI-008）
 
@@ -161,3 +167,33 @@ abort_chat 调用
   → chat_done()
   → persist_exchange() 保存已生成内容
 ```
+
+---
+
+## 4. MCP 服务器配置（REQ-ARCH-016）
+
+### 4.1 设置键
+
+| 键 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `mcp.servers` | String (JSON) | `"[]"` | MCP 服务器配置列表（JSON 数组，每个元素为 `McpServerConfig`） |
+
+### 4.2 McpServerConfig 结构
+
+```json
+{
+  "id": "uuid-v4",
+  "name": "文件系统",
+  "transport": "stdio",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+  "env": [["FOO", "bar"]],
+  "url": null,
+  "headers": [],
+  "enabled": true
+}
+```
+
+- **stdio 传输**：`command`（可执行文件路径）+ `args`（参数列表）+ `env`（环境变量）
+- **SSE 传输**：`url`（服务器 URL）+ `headers`（认证头）
+- 验证：stdio 需 `command`，SSE 需 `url`，`name` 不可为空

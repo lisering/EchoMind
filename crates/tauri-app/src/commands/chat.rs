@@ -10,6 +10,10 @@ use echomind_core::budget::estimate_cost_usd;
 ///
 /// **Panic 安全**：使用 `catch_unwind` 捕获 `chat_inner` 中的 panic（如 ONNX 运行时崩溃），
 /// 确保前端始终收到 `chat_error` 事件，不会永久停留在「初始化向量化引擎」阶段。
+///
+/// **S5: SessionCoordinator** — `session_coordinator.run()` 包装对话执行，
+/// 同一 conversation_id 的请求串行化（防止并发写入消息历史损坏），
+/// 不同 conversation_id 并发执行互不阻塞。
 #[tauri::command]
 pub async fn chat(
     app: AppHandle,
@@ -20,43 +24,105 @@ pub async fn chat(
     version: Option<i32>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // Panic 恢复：捕获 chat_inner 中的 panic，确保前端不会卡死在等待状态
-    let inner_future = std::panic::AssertUnwindSafe(chat_inner(
-        &app,
-        &query,
-        &history,
-        &conversation_id,
-        turn_group.as_deref(),
-        version,
-        state.inner(),
-    ));
-    let result = inner_future
-        .catch_unwind()
-        .await
-        .map_err(|panic_payload| {
-            let msg = panic_payload
-                .downcast_ref::<&str>()
-                .copied()
-                .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
-                .unwrap_or("未知 panic");
-            format!("UNKNOWN: 对话引擎内部错误（panic）: {msg}")
-        })
-        .and_then(|r| r);
+    let state_inner = state.inner();
 
-    if let Err(err) = &result {
-        // REQ-ERR-001：确保所有错误都携带分类前缀
-        let classified = if has_error_prefix(err) {
-            err.clone()
+    // S5: SessionCoordinator — 会话级串行化
+    let coord = state_inner.session_coordinator.clone();
+
+    // Clone owned data for Fn closure（每次调用需 clone）
+    let app_c = app.clone();
+    let query_c = query.clone();
+    let history_c = history.clone();
+    let conv_id_c = conversation_id.clone();
+    let tg_c = turn_group.clone();
+    let ver_c = version;
+
+    let coord_result = coord
+        .run(&conversation_id, move || {
+            let app = app_c.clone();
+            let query = query_c.clone();
+            let history = history_c.clone();
+            let conv_id = conv_id_c.clone();
+            let tg = tg_c.clone();
+            let ver = ver_c;
+            async move {
+                // Panic 恢复：捕获 chat_inner 中的 panic
+                let inner_future = std::panic::AssertUnwindSafe(chat_inner(
+                    &app,
+                    &query,
+                    &history,
+                    &conv_id,
+                    tg.as_deref(),
+                    ver,
+                    state_inner,
+                ));
+                inner_future
+                    .catch_unwind()
+                    .await
+                    .map_err(|panic_payload| {
+                        let msg = panic_payload
+                            .downcast_ref::<&str>()
+                            .copied()
+                            .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                            .unwrap_or("未知 panic");
+                        anyhow::anyhow!("UNKNOWN: 对话引擎内部错误（panic）: {msg}")
+                    })
+                    .and_then(|r| r.map_err(|e| anyhow::anyhow!(e)))
+            }
+        })
+        .await;
+
+    // 转换 anyhow::Result<()> → Result<(), String>
+    coord_result.map_err(|e| {
+        let err_str = e.to_string();
+        if has_error_prefix(&err_str) {
+            err_str
         } else {
-            prefix_error(ERR_UNKNOWN, err)
-        };
-        // 不再 emit chat_error 事件：Err 返回值已由前端 invoke().catch() 处理。
-        // 此前同时 emit + return Err 导致前端显示两个重复 toast（Bug: 双重报告）。
-        // chat_error 事件仅保留给 chat_inner 内部「非致命错误 + Ok(())」场景
-        // （如「知识库中未找到相关内容」），避免与 Err 返回重复。
-        return Err(classified);
+            prefix_error(ERR_UNKNOWN, &err_str)
+        }
+    })?;
+
+    Ok(())
+}
+
+/// REQ-PERF-018：合并图扩展结果到标准检索结果（确定性，纯函数）。
+///
+/// 并行与串行路径复用同一合并逻辑，保证结果一致：
+/// - 已存在的 chunk：保留较高分数（图扩展可能发现更高置信度的路径）
+/// - 新 chunk：追加到结果列表
+/// - 重新按分数降序排序，截断 `top_k * 2`
+///
+/// # 参数
+/// - `rr`: 标准检索结果（原地修改）
+/// - `graph_results`: 图扩展结果
+/// - `top_k`: 截断基准
+pub(crate) fn merge_graph_results(
+    rr: &mut Vec<RetrievalResult>,
+    graph_results: Vec<RetrievalResult>,
+    top_k: usize,
+) {
+    if graph_results.is_empty() {
+        return;
     }
-    result
+    let existing_ids: std::collections::HashSet<String> =
+        rr.iter().map(|r| r.chunk.id.clone()).collect();
+    for gr in graph_results {
+        if existing_ids.contains(&gr.chunk.id) {
+            if let Some(existing) = rr.iter_mut().find(|r| r.chunk.id == gr.chunk.id)
+                && gr.score > existing.score
+            {
+                existing.score = gr.score;
+            }
+        } else {
+            rr.push(gr);
+        }
+    }
+    rr.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    rr.truncate(top_k * 2);
 }
 
 /// 对话编排（命令与集成测试复用）：空库拦截 → 配置检查 → 引擎初始化 → 检索对话 → 落库。
@@ -91,6 +157,17 @@ pub async fn chat_inner<R: Runtime>(
         ));
     }
 
+    // 演示模式检测（REQ-RAG-051）：无需 LLM Key，使用关键词匹配模板回复
+    let demo_mode = state
+        .storage
+        .get_setting("rag.demo_mode")
+        .await
+        .map(|v| v.is_some_and(|v| v == "true"))
+        .unwrap_or(false);
+    if demo_mode {
+        return handle_demo_mode(app, query, state, conversation_id, turn_group, version).await;
+    }
+
     let llm_config = state
         .llm_config()
         .read()
@@ -105,7 +182,11 @@ pub async fn chat_inner<R: Runtime>(
     // 「初始化向量化引擎」。现增加两层保护：
     //   1. 进度回调：未初始化时通过 `init_embedder_with_progress` 推送下载进度到前端
     //   2. 超时保护：`tokio::time::timeout` 包装初始化调用，超时后返回 `EMBED:` 错误
+    //
+    // **P2-6 弹性降级**：嵌入引擎初始化失败/超时时不再直接返回错误，而是降级到
+    // 纯关键词搜索（BM25）模式。用户仍可获取基于关键词的 RAG 回答，并收到降级提示。
     emit_chat_phase(app, "preparing", "初始化向量化引擎…");
+    let mut embedding_degraded = false;
     if !state.embedder_initialized().await {
         // 慢路径：首次初始化，推送下载进度到前端
         let app_for_progress = app.clone();
@@ -122,23 +203,36 @@ pub async fn chat_inner<R: Runtime>(
         match init_result {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
-                return Err(format!("EMBED: 向量化引擎不可用: {e:#}"));
+                // P2-6：降级到关键词搜索模式（不返回错误）
+                warn!("向量化引擎不可用，降级为关键词搜索: {e:#}");
+                embedding_degraded = true;
+                emit_chat_phase(app, "preparing", "向量化引擎不可用，降级为关键词搜索…");
             }
             Err(_) => {
-                return Err(format!(
-                    "EMBED: 向量化引擎初始化超时（{timeout_secs} 秒），\
-                     请检查网络连接后重试。如在境内，可在设置中手动初始化向量化引擎\
-                     （镜像源自动回退）"
-                ));
+                // P2-6：超时也降级到关键词搜索模式
+                warn!("向量化引擎初始化超时（{timeout_secs}s），降级为关键词搜索");
+                embedding_degraded = true;
+                emit_chat_phase(app, "preparing", "向量化引擎超时，降级为关键词搜索…");
             }
         }
     }
-    let embedder = state
-        .embedder()
-        .await
-        .map_err(|e| prefix_error(ERR_EMBED, &format!("向量化引擎不可用: {e:#}")))?;
-    let embedder = embedder.clone();
-    debug!("chat_inner embedder ready: {}ms", t0.elapsed().as_millis());
+    let embedder = if !embedding_degraded {
+        match state.embedder().await {
+            Ok(e) => {
+                let e = e.clone();
+                debug!("chat_inner embedder ready: {}ms", t0.elapsed().as_millis());
+                Some(e)
+            }
+            Err(e) => {
+                // P2-6：embedder 获取失败也降级
+                warn!("向量化引擎获取失败，降级为关键词搜索: {e:#}");
+                embedding_degraded = true;
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // 兜底：会话不存在时幂等创建（正常流程前端先 create_conversation）
     let conversation = Conversation::with_id(
@@ -171,6 +265,9 @@ pub async fn chat_inner<R: Runtime>(
             "rag.graph_retriever_enabled",
             "rag.quality_gate_enabled",
             "rag.web_search_enabled",
+            "rag.top_k",
+            "rag.score_threshold",
+            "rag.chunk_expansion_enabled",
             "memory.enabled",
             "cache.enabled",
             "cache.ttl_secs",
@@ -182,6 +279,25 @@ pub async fn chat_inner<R: Runtime>(
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
+
+    // REQ-RAG-014：检索参数从 settings 读取（可配置）
+    let rag_top_k = settings_map
+        .get("rag.top_k")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_TOP_K)
+        .clamp(1, 20);
+    let rag_score_threshold = settings_map
+        .get("rag.score_threshold")
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    let rag_chunk_expansion_enabled = settings_map
+        .get("rag.chunk_expansion_enabled")
+        .is_none_or(|&v| v != "false");
+    debug!(
+        "RAG params: top_k={}, score_threshold={:.2}, chunk_expansion={}",
+        rag_top_k, rag_score_threshold, rag_chunk_expansion_enabled
+    );
 
     // **性能优化（秒出答案）**：查询嵌入只计算一次，复用于 L1 语义缓存、
     // L3 检索缓存和向量检索，避免 3 次冗余 ONNX 推理（省 ~100-200ms）。
@@ -199,15 +315,17 @@ pub async fn chat_inner<R: Runtime>(
         .get("cache.ttl_secs")
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(86400);
+    #[allow(clippy::needless_late_init)] // 三分支延迟初始化，clippy 1.98+ 新 lint
     let query_embedding_result: Option<Vec<f32>>;
 
-    if cache_enabled {
+    if cache_enabled && !embedding_degraded {
         let semantic_threshold = settings_map
             .get("cache.semantic_threshold")
             .and_then(|v| v.parse::<f32>().ok())
-            .unwrap_or(0.92);
+            // REQ-PERF-020：用户未显式设置时使用反馈校准后的动态阈值（默认 0.92）
+            .unwrap_or_else(|| state.cache.current_semantic_threshold());
 
-        // L0 精确匹配（哈希，无嵌入开销）→ 未命中再走 L1 语义匹配（需查询嵌入）
+        // L0 精确匹配（哈希，无嵌入开销） → 未命中再走 L1 语义匹配（需查询嵌入）
         let exact_hit = state
             .cache
             .lookup_exact(&query_hash(query), cache_ttl_secs, cache_now)
@@ -218,7 +336,10 @@ pub async fn chat_inner<R: Runtime>(
             (exact_hit, None)
         } else {
             // **性能优化**：嵌入计算一次，后续 L3 缓存查找和向量检索复用
+            // P2-6：embedding_degraded 时不会走到这里（外层 if 已过滤）
             let emb = embedder
+                .as_ref()
+                .ok_or_else(|| prefix_error(ERR_EMBED, "向量化引擎不可用"))?
                 .embed(query)
                 .await
                 .map_err(|e| prefix_error(ERR_EMBED, &format!("查询向量化失败: {e:#}")))?;
@@ -266,61 +387,23 @@ pub async fn chat_inner<R: Runtime>(
             return Ok(());
         }
         query_embedding_result = emb;
-    } else {
+    } else if !embedding_degraded {
         // 缓存禁用：在 embedder 被 move 进 retriever 之前预计算嵌入
         query_embedding_result = Some(
             embedder
+                .as_ref()
+                .ok_or_else(|| prefix_error(ERR_EMBED, "向量化引擎不可用"))?
                 .embed(query)
                 .await
                 .map_err(|e| prefix_error(ERR_EMBED, &format!("查询向量化失败: {e:#}")))?,
         );
+    } else {
+        // P2-6：嵌入降级模式，无查询嵌入
+        query_embedding_result = None;
     }
-    // query_embedding_result 现在持有预计算的查询嵌入（Some）或未计算（None，仅 L0 命中但无答案场景，理论上不发生）
+    // query_embedding_result 现在持有预计算的查询嵌入（Some）或未计算（None）
     let query_embedding = query_embedding_result;
 
-    let retriever = {
-        let hybrid_enabled = settings_map
-            .get("rag.hybrid_search")
-            // 默认启用混合检索（未设置时视为 true）
-            .is_none_or(|&v| v != "false");
-        let rerank_enabled = settings_map
-            .get("rag.rerank_enabled")
-            // **性能优化**：默认关闭重排序（省 ~200ms Cross-Encoder 推理）。
-            // 重排序提升精度但增加延迟，用户可在设置中显式启用。
-            .is_some_and(|&v| v == "true");
-        let hyde_enabled = settings_map
-            .get("rag.hyde_enabled")
-            // 默认关闭 HyDE 查询改写（未设置时视为 false）
-            .is_some_and(|&v| v == "true");
-        let mut r = HybridRetriever::new(embedder, state.storage.clone());
-        r.set_hybrid_enabled(hybrid_enabled);
-        if rerank_enabled {
-            // 懒加载 Cross-Encoder 重排序引擎（首次启用触发模型下载 ~280MB）。
-            // **降级策略**：模型不可用（未下载/下载失败）时不阻塞对话，
-            // 仅告警并继续走无重排的混合检索（精度略降，功能可用）。
-            match state.reranker().await {
-                Ok(reranker) => {
-                    r.set_reranker(Some(Arc::new(reranker.clone())));
-                }
-                Err(e) => {
-                    warn!("重排序引擎不可用，降级为无重排检索: {e:#}");
-                }
-            }
-        }
-        if hyde_enabled {
-            // HyDE 查询改写（REQ-RAG-021）：使用用户 LLM 配置生成假设性答案文档
-            // 复用已有 LLM 配置（api_key / base_url / model），无额外模型下载
-            match HydeRewriter::new(
-                llm_config.api_key.clone(),
-                llm_config.base_url.clone(),
-                llm_config.model.clone(),
-            ) {
-                Ok(rewriter) => r.set_rewriter(Some(Arc::new(rewriter))),
-                Err(e) => warn!("HyDE 改写器初始化失败，跳过查询改写: {e:#}"),
-            }
-        }
-        r
-    };
     // Q11：使用 LlmRouter 路由到正确的后端（借鉴 QM HarnessRouter）
     // Router 根据 fallback（由 set_llm_mode 更新）和 per-conversation last_mode 决策
     let (llm_choice, router_verdict) = state
@@ -359,6 +442,156 @@ pub async fn chat_inner<R: Runtime>(
         usage_handle = Some(p.usage_handle());
         LlmProvider::Remote(p)
     };
+
+    // P2-6：嵌入降级路径 — 纯关键词搜索（BM25）+ 简单 RAG prompt + LLM 流式对话
+    //
+    // 当 ONNX 嵌入引擎初始化失败/超时时，不阻塞用户对话。降级为纯关键词检索，
+    // 精度略低于向量检索但功能可用。前端通过 chat_phase 事件收到降级提示。
+    if embedding_degraded {
+        emit_chat_phase(app, "retrieving", "关键词搜索中（向量检索降级）…");
+        let keyword_results = state
+            .storage
+            .keyword_search(query, rag_top_k)
+            .await
+            .map_err(|e| prefix_error(ERR_STORAGE, &format!("关键词检索失败: {e:#}")))?;
+
+        if keyword_results.is_empty() {
+            // 关键词也未命中
+            emit_chat_error(app, "知识库中未找到相关内容".to_string());
+            emit_chat_done(app, None);
+            return Ok(());
+        }
+
+        let sources = keyword_results.clone();
+        emit_chat_sources(app, &sources);
+
+        // 构建 RAG prompt（简化版：关键词检索结果 + 历史 + 查询）
+        let context_text: String = sources
+            .iter()
+            .enumerate()
+            .map(|(i, r)| format!("[{}] {}\n{}", i + 1, r.doc_name, r.chunk.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let system_prompt = format!(
+            "你是一个知识库助手。请根据以下检索到的资料片段回答用户问题。\
+             如果资料中没有答案，请如实告知。\n\n\
+             ⚠️ 当前为关键词搜索降级模式（向量检索不可用），检索精度可能降低。\n\n\
+             参考资料：\n{context_text}"
+        );
+
+        // 上下文压缩（复用已有逻辑：compact_smart 异步压缩）
+        let max_context_tokens = settings_map
+            .get("rag.context_token_limit")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(4096);
+        let compaction = CompactionEngine::new(&provider);
+        let compaction_result = compaction
+            .compact_smart(
+                history,
+                max_context_tokens,
+                &echomind_compact::VerbatimTailConfig::default(),
+            )
+            .await
+            .map_err(|e| prefix_error(ERR_LLM, &format!("上下文压缩失败: {e:#}")))?;
+        let compacted_history = &compaction_result.history;
+
+        emit_chat_phase(app, "generating", "正在生成回答…");
+        let stream = provider
+            .chat_stream(&system_prompt, compacted_history, query)
+            .await
+            .map_err(|e| classify_llm_error(&format!("{e:#}")))?;
+
+        let abort_token = state.abort_token_for(conversation_id).await;
+        let result =
+            forward_stream_tracked(app, stream, abort_token, usage_handle, state, llm_mode)
+                .await
+                .map_err(|e| classify_llm_error(&e))?;
+        record_token_usage_inner(state, &result.token_usage).await;
+
+        persist_exchange(
+            state,
+            conversation_id,
+            query,
+            &result.content,
+            Some(sources),
+            None,
+            turn_group,
+            version,
+        )
+        .await?;
+        state.clear_abort(conversation_id).await;
+        return Ok(());
+    }
+
+    // ── 正常路径（嵌入可用）──
+
+    let retriever = {
+        let hybrid_enabled = settings_map
+            .get("rag.hybrid_search")
+            // 默认启用混合检索（未设置时视为 true）
+            .is_none_or(|&v| v != "false");
+        let rerank_enabled = settings_map
+            .get("rag.rerank_enabled")
+            // **性能优化**：默认关闭重排序（省 ~200ms Cross-Encoder 推理）。
+            // 重排序提升精度但增加延迟，用户可在设置中显式启用。
+            .is_some_and(|&v| v == "true");
+        let hyde_enabled = settings_map
+            .get("rag.hyde_enabled")
+            // 默认关闭 HyDE 查询改写（未设置时视为 false）
+            .is_some_and(|&v| v == "true");
+        // P2-6：降级路径已提前 return，此处 embedder 必为 Some
+        let emb = embedder
+            .as_ref()
+            .ok_or_else(|| prefix_error(ERR_EMBED, "向量化引擎不可用（降级路径未正确触发）"))?
+            .clone();
+        let mut r = HybridRetriever::new(emb, state.storage.clone());
+        r.set_hybrid_enabled(hybrid_enabled);
+        if rerank_enabled {
+            // 懒加载 Cross-Encoder 重排序引擎（首次启用触发模型下载 ~280MB）。
+            // **降级策略**：模型不可用（未下载/下载失败）时不阻塞对话，
+            // 仅告警并继续走无重排的混合检索（精度略降，功能可用）。
+            match state.reranker().await {
+                Ok(reranker) => {
+                    r.set_reranker(Some(Arc::new(reranker.clone())));
+                }
+                Err(e) => {
+                    warn!("重排序引擎不可用，降级为无重排检索: {e:#}");
+                }
+            }
+        }
+        if hyde_enabled {
+            // HyDE 查询改写（REQ-RAG-021）：使用用户 LLM 配置生成假设性答案文档
+            // 复用已有 LLM 配置（api_key / base_url / model），无额外模型下载
+            match HydeRewriter::new(
+                llm_config.api_key.clone(),
+                llm_config.base_url.clone(),
+                llm_config.model.clone(),
+            ) {
+                Ok(rewriter) => r.set_rewriter(Some(Arc::new(rewriter))),
+                Err(e) => warn!("HyDE 改写器初始化失败，跳过查询改写: {e:#}"),
+            }
+        }
+        r
+    };
+
+    // S4: Q06/S71 Shadow Screen 集成 — Strict 模式下对用户 query 执行 LLM 安全分类。
+    //
+    // Shadow 筛查**不影响**对话流（安全隔离），仅收集 agree/disagree 统计。
+    // LLM 不可用 / 超时 5s → 降级为 Unscreened，不阻断对话。
+    {
+        let posture = echomind_core::security::SecurityPosture::from_u8(
+            state
+                .security_posture
+                .load(std::sync::atomic::Ordering::SeqCst),
+        );
+        echomind_core::security::execute_shadow_screen(
+            posture,
+            query,
+            &provider,
+            &state.shadow_screen_collector,
+        )
+        .await;
+    }
 
     // REQ-RAG-017：对话上下文长度管理 — 压缩超限历史消息（替代纯截断策略）
     // 复用上方批量读取的 settings_map（避免再次 DB 查询）
@@ -399,6 +632,16 @@ pub async fn chat_inner<R: Runtime>(
 
     let compaction = CompactionEngine::new(&provider);
 
+    // Q04：修复悬空 tool_call（借鉴 QM healDanglingCalls）
+    //
+    // Agent 模式下 tool_call 被中断时（如用户取消、进程崩溃），
+    // assistant 消息中包含 Action 但后续没有对应的 Observation。
+    // 在压缩前自动补全 [interrupted] 占位消息，确保压缩后的历史
+    // 不会包含半完成的 ReAct 循环。
+    let mut healed_history = history.to_vec();
+    echomind_compact::heal_dangling_calls(&mut healed_history);
+    let history: &[ChatMessage] = &healed_history;
+
     // Q03：双阈值压缩配置（借鉴 QM COMPACT_SOFT/HARD_FRACTION）
     // Soft 阈值（70%）触发后台异步压缩（不阻塞当前轮次）
     // Hard 阈值（90%）触发同步压缩（阻塞兜底）
@@ -417,49 +660,81 @@ pub async fn chat_inner<R: Runtime>(
     let compaction_trigger = compaction.check_compaction_needed(history, &dual_config);
 
     // Q03：Background 触发 — 后台异步压缩（不阻塞当前轮次）
+    // S68：使用 schedule_background_compaction 统一封装 try_acquire + run + release
     if compaction_trigger.is_background() {
-        let conv_id = conversation_id.to_string();
-        let acquired = echomind_compact::try_acquire_background_compaction(
-            &conv_id,
-            std::sync::Arc::clone(&state.compaction_pending),
-        )
-        .await;
-        if acquired {
-            // 后台压缩：创建新 provider（不借用当前 provider），spawn 异步任务
-            let bg_history = history.to_vec();
-            let bg_max_tokens = context_token_limit;
-            let bg_pending = std::sync::Arc::clone(&state.compaction_pending);
-            let bg_conv_id = conv_id;
-            let bg_mode = llm_mode;
-            // 后台压缩在独立 async 块中执行，错误被吞咽（不影响对话）
-            // Remote 路径：创建新 OpenAIProvider；Local 路径：从 state 获取引擎
-            if bg_mode == LlmMode::Local {
-                #[cfg(feature = "pro")]
-                {
-                    let bg_engine = state.local_llm().await.ok();
-                    tokio::spawn(async move {
-                        if let Some(engine) = bg_engine {
-                            echomind_compact::run_background_compaction(
+        let bg_history = history.to_vec();
+        let bg_max_tokens = context_token_limit;
+        let bg_pending = std::sync::Arc::clone(&state.compaction_pending);
+        let bg_conv_id = conversation_id.to_string();
+        let bg_mode = llm_mode;
+
+        if bg_mode == LlmMode::Local {
+            #[cfg(feature = "pro")]
+            {
+                if let Ok(engine) = state.local_llm().await {
+                    // S68：schedule_background_compaction 处理 try_acquire，
+                    // 返回的 future 包含 run + release（自动管理锁）。
+                    // 由于 LLMProvider async fn in trait 的 future 不保证 Send，
+                    // 无法直接 tokio::spawn 返回的 future。
+                    // 改为：在主流程调用 schedule 做 try_acquire（极速），
+                    // 然后用具体类型 spawn run + release。
+                    if echomind_compact::schedule_background_compaction(
+                        bg_conv_id.clone(),
+                        bg_history.clone(),
+                        bg_max_tokens,
+                        engine,
+                        bg_pending.clone(),
+                    )
+                    .await
+                    .is_some()
+                    {
+                        // try_acquire 成功，spawn run + release
+                        let bg_engine = state.local_llm().await.ok();
+                        tokio::spawn(async move {
+                            if let Some(engine) = bg_engine {
+                                echomind_compact::run_background_compaction(
+                                    &bg_conv_id,
+                                    &bg_history,
+                                    bg_max_tokens,
+                                    &engine,
+                                )
+                                .await;
+                            } else {
+                                warn!("后台压缩：本地 LLM 引擎不可用，跳过");
+                            }
+                            echomind_compact::release_background_compaction(
                                 &bg_conv_id,
-                                &bg_history,
-                                bg_max_tokens,
-                                &engine,
+                                bg_pending,
                             )
                             .await;
-                        } else {
-                            warn!("后台压缩：本地 LLM 引擎不可用，跳过");
-                        }
-                        echomind_compact::release_background_compaction(&bg_conv_id, bg_pending)
-                            .await;
-                    });
+                        });
+                    }
+                } else {
+                    warn!("后台压缩：本地 LLM 引擎不可用，跳过");
                 }
-                #[cfg(not(feature = "pro"))]
-                {
-                    let _ = (&bg_conv_id, &bg_history, bg_max_tokens, &bg_pending);
-                    echomind_compact::release_background_compaction(&bg_conv_id, bg_pending).await;
-                }
-            } else {
-                let bg_config = llm_config.clone();
+            }
+            #[cfg(not(feature = "pro"))]
+            {
+                let _ = (bg_conv_id, bg_history, bg_max_tokens, bg_pending);
+            }
+        } else {
+            // Remote 路径：创建新 OpenAIProvider 后调度
+            let bg_config = llm_config.clone();
+            if let Ok(bg_provider) = OpenAIProvider::new(
+                bg_config.api_key.clone(),
+                bg_config.base_url.clone(),
+                bg_config.model.clone(),
+            ) && echomind_compact::schedule_background_compaction(
+                bg_conv_id.clone(),
+                bg_history.clone(),
+                bg_max_tokens,
+                bg_provider,
+                bg_pending.clone(),
+            )
+            .await
+            .is_some()
+            {
+                // try_acquire 成功，spawn run + release
                 tokio::spawn(async move {
                     match OpenAIProvider::new(
                         bg_config.api_key.clone(),
@@ -518,7 +793,11 @@ pub async fn chat_inner<R: Runtime>(
             // 命中：跳过检索，仅执行上下文压缩
             let cr = if compaction_trigger.is_synchronous() {
                 compaction
-                    .compact(history, context_token_limit)
+                    .compact_smart(
+                        history,
+                        context_token_limit,
+                        &echomind_compact::VerbatimTailConfig::default(),
+                    )
                     .await
                     .map_err(|e| prefix_error(ERR_LLM, &format!("上下文压缩失败: {e:#}")))?
             } else {
@@ -535,7 +814,13 @@ pub async fn chat_inner<R: Runtime>(
             // Q03：Synchronous 触发 → 调用 compact()；None/Background → 跳过压缩
             let compact_fut = async {
                 if compaction_trigger.is_synchronous() {
-                    compaction.compact(history, context_token_limit).await
+                    compaction
+                        .compact_smart(
+                            history,
+                            context_token_limit,
+                            &echomind_compact::VerbatimTailConfig::default(),
+                        )
+                        .await
                 } else {
                     Ok(echomind_models::CompactionResult {
                         history: history.to_vec(),
@@ -549,56 +834,38 @@ pub async fn chat_inner<R: Runtime>(
                 match &query_embedding {
                     Some(emb) => {
                         retriever
-                            .retrieve_with_embedding(query, emb, DEFAULT_TOP_K)
+                            .retrieve_with_embedding(query, emb, rag_top_k)
                             .await
                     }
-                    None => retriever.retrieve(query, DEFAULT_TOP_K).await,
+                    None => retriever.retrieve(query, rag_top_k).await,
                 }
             };
-            let (cr, rr) = tokio::join!(compact_fut, retrieve_fut);
+            // REQ-PERF-018：图扩展与主检索并行执行（BFS 图遍历与向量+BM25 互不依赖）。
+            // 图扩展仅在标准 RAG 路径（非 coordinator/agent/speculative）且启用时执行。
+            let graph_fut = async {
+                if graph_retriever_enabled {
+                    let graph_retriever =
+                        echomind_core::graph_retriever::GraphRetriever::new(state.storage.clone());
+                    graph_retriever.expand(query, rag_top_k).await
+                } else {
+                    Ok(Vec::<RetrievalResult>::new())
+                }
+            };
+            let (cr, rr, graph_result) = tokio::join!(compact_fut, retrieve_fut, graph_fut);
             let cr = cr.map_err(|e| prefix_error(ERR_LLM, &format!("上下文压缩失败: {e:#}")))?;
             let mut rr = rr.map_err(|e| classify_llm_error(&format!("检索失败: {e:#}")))?;
 
             // REQ-RAG-027：知识图谱图遍历检索 — 沿实体关系图边扩展到关联 chunk
             // 图扩展作为 RRF 融合的第四路检索通道，为标准检索结果提供图扩展加成。
-            // 仅在标准 RAG 路径（非 coordinator/agent/speculative）且启用时执行。
+            // REQ-PERF-018：图扩展已在检索阶段并行完成，此处仅做确定性合并。
             if graph_retriever_enabled && !rr.is_empty() {
-                let graph_retriever =
-                    echomind_core::graph_retriever::GraphRetriever::new(state.storage.clone());
-                match graph_retriever.expand(query, DEFAULT_TOP_K).await {
+                match graph_result {
                     Ok(graph_results) if !graph_results.is_empty() => {
                         debug!(
                             "图扩展返回 {} 个关联 chunk，合并到检索结果",
                             graph_results.len()
                         );
-                        // 合并图扩展结果到标准检索结果：
-                        // - 已存在的 chunk：保留较高分数（图扩展可能发现更高置信度的路径）
-                        // - 新 chunk：追加到结果列表
-                        use std::collections::HashSet;
-                        let existing_ids: HashSet<String> =
-                            rr.iter().map(|r| r.chunk.id.clone()).collect();
-                        for gr in graph_results {
-                            if existing_ids.contains(&gr.chunk.id) {
-                                // 已存在：boost 分数（取最大值）
-                                if let Some(existing) =
-                                    rr.iter_mut().find(|r| r.chunk.id == gr.chunk.id)
-                                    && gr.score > existing.score
-                                {
-                                    existing.score = gr.score;
-                                }
-                            } else {
-                                // 新 chunk：追加
-                                rr.push(gr);
-                            }
-                        }
-                        // 重新按分数降序排序
-                        rr.sort_by(|a, b| {
-                            b.score
-                                .partial_cmp(&a.score)
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        });
-                        // 截取 top_k
-                        rr.truncate(DEFAULT_TOP_K * 2);
+                        merge_graph_results(&mut rr, graph_results, rag_top_k);
                     }
                     Ok(_) => {
                         debug!("图扩展无结果，保持标准检索结果");
@@ -607,6 +874,10 @@ pub async fn chat_inner<R: Runtime>(
                         warn!("图扩展失败，降级为标准检索: {e:#}");
                     }
                 }
+            }
+            // REQ-RAG-014：用户可配置的分数阈值过滤
+            if rag_score_threshold > 0.0 {
+                rr.retain(|r| r.score >= rag_score_threshold);
             }
             // 写入 L3 缓存：复用预计算嵌入（不再重新 embed）
             if cache_enabled
@@ -623,7 +894,11 @@ pub async fn chat_inner<R: Runtime>(
         (
             if compaction_trigger.is_synchronous() {
                 compaction
-                    .compact(history, context_token_limit)
+                    .compact_smart(
+                        history,
+                        context_token_limit,
+                        &echomind_compact::VerbatimTailConfig::default(),
+                    )
                     .await
                     .map_err(|e| prefix_error(ERR_LLM, &format!("上下文压缩失败: {e:#}")))?
             } else {
@@ -690,9 +965,10 @@ pub async fn chat_inner<R: Runtime>(
                     Some(reasoning_collector.clone()),
                 );
                 let abort_token = state.abort_token_for(conversation_id).await;
-                let result = forward_stream(app, stream, abort_token, None)
-                    .await
-                    .map_err(|e| classify_llm_error(&e))?;
+                let result =
+                    forward_stream_tracked(app, stream, abort_token, None, state, llm_mode)
+                        .await
+                        .map_err(|e| classify_llm_error(&e))?;
                 record_token_usage_inner(state, &result.token_usage).await;
                 // REQ-PERF-001：正常回答写入查询缓存（下次相同/相似问题秒回）
                 write_query_cache(state, query, &result.content, &sources, conversation_id).await;
@@ -765,9 +1041,10 @@ pub async fn chat_inner<R: Runtime>(
                     Some(reasoning_collector.clone()),
                 );
                 let abort_token = state.abort_token_for(conversation_id).await;
-                let result = forward_stream(app, stream, abort_token, None)
-                    .await
-                    .map_err(|e| classify_llm_error(&e))?;
+                let result =
+                    forward_stream_tracked(app, stream, abort_token, None, state, llm_mode)
+                        .await
+                        .map_err(|e| classify_llm_error(&e))?;
                 // 记录 token 用量到累计计数器
                 record_token_usage_inner(state, &result.token_usage).await;
                 // REQ-PERF-001：正常回答写入查询缓存（下次相同/相似问题秒回）
@@ -1051,9 +1328,10 @@ pub async fn chat_inner<R: Runtime>(
         );
 
         let abort_token = state.abort_token_for(conversation_id).await;
-        let result = forward_stream(app, stream, abort_token, usage_handle)
-            .await
-            .map_err(|e| classify_llm_error(&e))?;
+        let result =
+            forward_stream_tracked(app, stream, abort_token, usage_handle, state, llm_mode)
+                .await
+                .map_err(|e| classify_llm_error(&e))?;
         // 记录 token 用量到累计计数器
         record_token_usage_inner(state, &result.token_usage).await;
         // 正常结束或被中断：均已生成内容照常落库（REQ-RAG-005/006）
@@ -1085,9 +1363,67 @@ pub async fn chat_inner<R: Runtime>(
     }
 }
 
+/// 首 token 超时（秒）：P2-5 弹性设计增强。
+///
+/// 如果 LLM 端点在 60 秒内未返回任何 token，判定为连接异常（而非正常思考延迟），
+/// 提前返回 `NETWORK:` 错误，避免用户等待 300s 整体超时。
+///
+/// 300s 整体超时仍由 reqwest client `.timeout()` 兜底（防网络层永久挂起）。
+const FIRST_TOKEN_TIMEOUT_SECS: u64 = 60;
+
+/// 包装 `forward_stream` 并跟踪远程 LLM 成功/失败（P2-2 弹性降级）。
+///
+/// 当 `llm_mode == Remote` 时：
+/// - 成功完成（`completed == true`）：调用 `record_remote_success()` 重置计数
+/// - 失败（`Err`）：调用 `record_remote_failure()`，如果达到阈值自动切换到 Local
+///   并通过 `llm_fallback` 事件通知前端
+/// - 中断（`completed == false`）：不记录成功也不记录失败（用户主动取消）
+///
+/// Local 模式不触发任何跟踪。
+async fn forward_stream_tracked<R: Runtime>(
+    app: &AppHandle<R>,
+    stream: futures::stream::BoxStream<'static, anyhow::Result<String>>,
+    abort_token: tokio_util::sync::CancellationToken,
+    usage_handle: Option<std::sync::Arc<tokio::sync::Mutex<Option<TokenUsage>>>>,
+    state: &AppState,
+    llm_mode: LlmMode,
+) -> Result<ForwardResult, String> {
+    let result = forward_stream(app, stream, abort_token, usage_handle).await;
+
+    // P2-2：仅跟踪 Remote 模式的成功/失败
+    if llm_mode == LlmMode::Remote {
+        match &result {
+            Ok(fr) if fr.completed => {
+                // 成功完成：重置计数
+                state.llm_router.record_remote_success();
+            }
+            Ok(_) => {
+                // 中断（completed=false）：用户主动取消，不计为失败
+            }
+            Err(_) => {
+                // 失败：递增计数，达阈值自动切换
+                let switched = state.llm_router.record_remote_failure().await;
+                if switched {
+                    let _ = app.emit(
+                        "llm_fallback",
+                        "远程 LLM 连续失败 3 次，已自动切换到本地模型",
+                    );
+                    info!("远程 LLM 连续失败 3 次，已自动切换 fallback 到 Local 模式");
+                }
+            }
+        }
+    }
+
+    result
+}
+
 /// 将 token 流逐条转发为 chat_token；abort 令牌触发立即中断（丢弃流即中止 HTTP 连接）。
 ///
 /// `usage_handle` 在流消费完毕后从中读取 API 报告的 token 用量并随 `chat_done` 事件推送前端。
+///
+/// **P2-5 首 token 超时**：在收到第一个 token 之前，如果 `FIRST_TOKEN_TIMEOUT_SECS`
+/// 秒内无数据到达，返回 `NETWORK:` 前缀错误（"LLM 首次响应超时"），避免用户等待
+/// 300s 整体超时。收到首 token 后此超时不再触发。
 pub async fn forward_stream<R: Runtime>(
     app: &AppHandle<R>,
     mut stream: BoxStream<'static, anyhow::Result<String>>,
@@ -1097,36 +1433,85 @@ pub async fn forward_stream<R: Runtime>(
     let mut content = String::new();
     let mut completed = false;
     let t_first_token = std::time::Instant::now();
-    let mut first_token_logged = false;
 
-    loop {
-        tokio::select! {
-            biased;
-            _ = abort_token.cancelled() => break,
-            item = stream.next() => {
-            match item {
-                None => {
-                    completed = true;
-                    break;
-                }
-                Some(Ok(token)) => {
-                    if !first_token_logged {
-                        debug!(
-                            "forward_stream first token: {}ms (from forward_stream start)",
-                            t_first_token.elapsed().as_millis()
-                        );
-                        first_token_logged = true;
-                    }
-                    content.push_str(&token);
-                    emit_chat_token(app, token);
-                }
-                Some(Err(err)) => {
-                    // Bug #3 修复：流式错误时补发 chat_done 事件，防止前端永久卡在 streaming 状态
-                    // （此前直接 return Err 跳过了下方的 emit_chat_done，前端收不到完成信号）
+    // P2-5：首 token 超时检测。
+    // 在收到第一个 token 之前，用 tokio::time::timeout 包装 stream.next()。
+    // 收到首 token 后直接使用裸 stream.next()（不再有超时分支）。
+    // 300s 整体超时仍由 reqwest client `.timeout()` 兜底。
+    let first_token_deadline = std::time::Duration::from_secs(FIRST_TOKEN_TIMEOUT_SECS);
+
+    // 阶段 1：等待首 token（带 60s 超时）
+    let first_item = tokio::select! {
+        biased;
+        _ = abort_token.cancelled() => {
+            // 在首 token 到达前被中断
+            emit_chat_done(app, None);
+            return Ok(ForwardResult {
+                completed: false,
+                content: String::new(),
+                token_usage: None,
+            });
+        }
+        result = tokio::time::timeout(first_token_deadline, stream.next()) => {
+            match result {
+                Ok(item) => item,
+                Err(_) => {
+                    // P2-5：首 token 超时
+                    emit_chat_error(app, "LLM 响应超时，请检查网络或 API 状态".to_string());
                     emit_chat_done(app, None);
-                    return Err(format!("{err:#}"));
+                    return Err(format!(
+                        "NETWORK: LLM 首次响应超时（{FIRST_TOKEN_TIMEOUT_SECS}s 无数据），请检查网络连接或 API 端点状态"
+                    ));
                 }
             }
+        }
+    };
+
+    // 处理首 token
+    match first_item {
+        None => {
+            // 流在首 token 前就结束了（空响应）
+            completed = true;
+        }
+        Some(Ok(token)) => {
+            debug!(
+                "forward_stream first token: {}ms (from forward_stream start)",
+                t_first_token.elapsed().as_millis()
+            );
+            content.push_str(&token);
+            emit_chat_token(app, token);
+        }
+        Some(Err(err)) => {
+            // Bug #3 修复：流式错误时补发 chat_done 事件
+            emit_chat_done(app, None);
+            return Err(format!("{err:#}"));
+        }
+    }
+
+    // 阶段 2：首 token 已收到，后续 token 无首 token 超时（300s 整体超时由 reqwest 兜底）
+    if !completed {
+        loop {
+            tokio::select! {
+                biased;
+                _ = abort_token.cancelled() => break,
+                item = stream.next() => {
+                match item {
+                    None => {
+                        completed = true;
+                        break;
+                    }
+                    Some(Ok(token)) => {
+                        content.push_str(&token);
+                        emit_chat_token(app, token);
+                    }
+                    Some(Err(err)) => {
+                        // Bug #3 修复：流式错误时补发 chat_done 事件，防止前端永久卡在 streaming 状态
+                        // （此前直接 return Err 跳过了下方的 emit_chat_done，前端收不到完成信号）
+                        emit_chat_done(app, None);
+                        return Err(format!("{err:#}"));
+                    }
+                }
+                }
             }
         }
     }
@@ -1362,6 +1747,17 @@ pub async fn save_text_file_inner(path: &str, content: &str) -> Result<(), Strin
         .map_err(|e| format!("文件保存失败: {e:#}"))
 }
 
+/// 读取文本文件内容（REQ-EXP-003 辅助命令）。
+///
+/// 前端通过 Tauri dialog 的 open 对话框获取文件路径后调用本命令读取文件。
+/// 文件以 UTF-8 编码读取。
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String, String> {
+    tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| format!("文件读取失败: {e:#}"))
+}
+
 /// 记录单次对话的 token 用量到累计计数器。
 ///
 /// 在 `forward_stream` 返回后由 `chat_inner` 调用。读取 settings 表中的累计计数器，
@@ -1370,29 +1766,31 @@ pub async fn record_token_usage_inner(state: &AppState, usage: &Option<TokenUsag
     let Some(usage) = usage else {
         return; // 本地推理模式无 usage 数据，跳过
     };
-    // 读取现有累计值
-    let cur_prompt: u64 = state
+    // 性能优化：3 次串行 get_setting → 1 次批量读取
+    let settings = state
         .storage
-        .get_setting("usage.total_prompt_tokens")
+        .get_settings_batch(&[
+            "usage.total_prompt_tokens",
+            "usage.total_completion_tokens",
+            "usage.exchange_count",
+        ])
         .await
-        .ok()
-        .flatten()
+        .unwrap_or_default();
+    let settings_map: std::collections::HashMap<&str, &str> = settings
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+
+    let cur_prompt: u64 = settings_map
+        .get("usage.total_prompt_tokens")
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
-    let cur_completion: u64 = state
-        .storage
-        .get_setting("usage.total_completion_tokens")
-        .await
-        .ok()
-        .flatten()
+    let cur_completion: u64 = settings_map
+        .get("usage.total_completion_tokens")
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
-    let cur_exchange: u32 = state
-        .storage
-        .get_setting("usage.exchange_count")
-        .await
-        .ok()
-        .flatten()
+    let cur_exchange: u32 = settings_map
+        .get("usage.exchange_count")
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(0);
 
@@ -1402,34 +1800,22 @@ pub async fn record_token_usage_inner(state: &AppState, usage: &Option<TokenUsag
     let new_total = new_prompt + new_completion;
     let new_exchange = cur_exchange.saturating_add(1);
 
-    // 写回（容错：失败仅日志，不阻断主流程）
+    // 性能优化：4 次串行 set_setting → 1 次批量事务写入（容错：失败仅日志）
+    let prompt_str = new_prompt.to_string();
+    let completion_str = new_completion.to_string();
+    let total_str = new_total.to_string();
+    let exchange_str = new_exchange.to_string();
     if let Err(e) = state
         .storage
-        .set_setting("usage.total_prompt_tokens", &new_prompt.to_string())
+        .set_settings_batch(&[
+            ("usage.total_prompt_tokens", prompt_str.as_str()),
+            ("usage.total_completion_tokens", completion_str.as_str()),
+            ("usage.total_tokens", total_str.as_str()),
+            ("usage.exchange_count", exchange_str.as_str()),
+        ])
         .await
     {
-        warn!("记录 token 用量失败(prompt): {e:#}");
-    }
-    if let Err(e) = state
-        .storage
-        .set_setting("usage.total_completion_tokens", &new_completion.to_string())
-        .await
-    {
-        warn!("记录 token 用量失败(completion): {e:#}");
-    }
-    if let Err(e) = state
-        .storage
-        .set_setting("usage.total_tokens", &new_total.to_string())
-        .await
-    {
-        warn!("记录 token 用量失败(total): {e:#}");
-    }
-    if let Err(e) = state
-        .storage
-        .set_setting("usage.exchange_count", &new_exchange.to_string())
-        .await
-    {
-        warn!("记录 token 用量失败(exchange): {e:#}");
+        warn!("记录 token 用量失败: {e:#}");
     }
 
     // Q08: 记录预算使用情况（QM 借鉴）
@@ -1573,10 +1959,14 @@ pub async fn set_token_budget_inner(budget: u64, state: &AppState) -> Result<(),
 // B05: Durable Prompt Admission — 持久化提示接纳 IPC 命令
 // ==================================================================
 
-/// 接纳用户输入（B05 Durable Prompt Admission）。
+// ============================================================================
+// Durable Prompt Admission（B05）— S10: 开发者工具门控
+// ============================================================================
+
+/// 接收待处理输入（B05 Durable Prompt Admission）。
 ///
-/// 将用户消息持久化到 `pending_inputs` 表，但不加入消息历史。
-/// 在安全边界点（如流式生成完成后）通过 `promote_input` 提升为正式消息。
+/// 将用户输入存入 `pending_inputs` 表，等待后续提升为正式消息。
+/// 投递模式 `steer` 优先中断当前生成，`queue` 排队等待。
 ///
 /// # 参数
 /// - `conversation_id`: 所属会话 ID
@@ -1585,6 +1975,7 @@ pub async fn set_token_budget_inner(budget: u64, state: &AppState) -> Result<(),
 ///
 /// # 返回
 /// 新创建的接纳记录 ID。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn admit_input(
     conversation_id: String,
@@ -1616,6 +2007,7 @@ pub async fn admit_input_inner(
 ///
 /// # 参数
 /// - `input_id`: 接纳记录 ID
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn promote_input(input_id: String, state: State<'_, AppState>) -> Result<(), String> {
     promote_input_inner(&input_id, state.inner()).await
@@ -1637,6 +2029,7 @@ pub async fn promote_input_inner(input_id: &str, state: &AppState) -> Result<(),
 ///
 /// # 参数
 /// - `conversation_id`: 所属会话 ID
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_pending_inputs(
     conversation_id: String,
@@ -1658,10 +2051,11 @@ pub async fn get_pending_inputs_inner(
 }
 
 // ============================================================================
-// Session Todo 持久化（B08 会话待办持久化，REQ-RAG-044）
+// Session Todo 持久化（B08 会话待办持久化，REQ-RAG-044）— S10: 开发者工具门控
 // ============================================================================
 
 /// 创建会话 Todo 项（REQ-RAG-044）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn add_session_todo(
     conversation_id: String,
@@ -1690,6 +2084,7 @@ pub async fn add_session_todo_inner(
 }
 
 /// 更新 Todo 状态（REQ-RAG-044）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn update_todo_status(
     todo_id: String,
@@ -1716,6 +2111,7 @@ pub async fn update_todo_status_inner(
 }
 
 /// 获取会话 Todo 列表（REQ-RAG-044）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_session_todos(
     conversation_id: String,
@@ -1737,6 +2133,7 @@ pub async fn get_session_todos_inner(
 }
 
 /// 删除单个 Todo 项（REQ-RAG-044）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn delete_session_todo(
     todo_id: String,
@@ -1755,6 +2152,7 @@ pub async fn delete_session_todo_inner(todo_id: &str, state: &AppState) -> Resul
 }
 
 /// 删除会话的全部 Todo 项（REQ-RAG-044）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn delete_session_todos(
     conversation_id: String,
@@ -1773,4 +2171,345 @@ pub async fn delete_session_todos_inner(
         .delete_session_todos(conversation_id)
         .await
         .map_err(|e| format!("{e:#}"))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::assertions_on_constants
+    )]
+
+    use super::FIRST_TOKEN_TIMEOUT_SECS;
+    use super::merge_graph_results;
+    use echomind_models::{Chunk, RetrievalResult};
+
+    /// 辅助：构造带指定分数与 chunk_id 的 RetrievalResult。
+    fn mk_result(id: &str, score: f32) -> RetrievalResult {
+        RetrievalResult {
+            chunk: Chunk {
+                id: id.to_string(),
+                doc_id: "doc".to_string(),
+                content: String::new(),
+                token_count: 1,
+                sequence: 0,
+            },
+            score,
+            doc_name: "doc.md".to_string(),
+        }
+    }
+
+    /// TC-PARALLEL-001：合并已有 chunk 保留较高分数 + 新 chunk 追加 + 降序截断。
+    #[test]
+    fn tc_parallel_001_merge_boosts_and_appends() {
+        let mut rr = vec![mk_result("a", 0.8), mk_result("b", 0.5)];
+        let graph = vec![mk_result("a", 0.9), mk_result("c", 0.7)];
+
+        merge_graph_results(&mut rr, graph, 3);
+
+        // a 分数从 0.8 → 0.9，c 追加，截断 3*2=6（不截断 3 项）
+        assert_eq!(rr.len(), 3);
+        assert_eq!(rr[0].chunk.id, "a", "a 分数提升后应排第一");
+        assert!((rr[0].score - 0.9).abs() < 1e-6);
+        assert_eq!(rr[1].chunk.id, "c");
+        assert_eq!(rr[2].chunk.id, "b");
+    }
+
+    /// TC-PARALLEL-002：空图结果不修改标准检索结果（确定性）。
+    #[test]
+    fn tc_parallel_002_empty_graph_noop() {
+        let mut rr = vec![mk_result("a", 0.8), mk_result("b", 0.5)];
+        merge_graph_results(&mut rr, vec![], 3);
+        assert_eq!(rr.len(), 2);
+        assert_eq!(rr[0].chunk.id, "a");
+    }
+
+    /// TC-PARALLEL-003：截断 top_k*2 生效。
+    #[test]
+    fn tc_parallel_003_truncates_to_2k() {
+        let mut rr = (0..5)
+            .map(|i| mk_result(&format!("r{i}"), 0.9 - i as f32 * 0.1))
+            .collect::<Vec<_>>();
+        let graph = (0..3)
+            .map(|i| mk_result(&format!("g{i}"), 0.5 - i as f32 * 0.05))
+            .collect::<Vec<_>>();
+        merge_graph_results(&mut rr, graph, 3);
+        assert_eq!(rr.len(), 6, "截断为 top_k*2 = 6");
+        // 分数降序
+        for w in rr.windows(2) {
+            assert!(w[0].score >= w[1].score);
+        }
+    }
+
+    /// TC-FIRST-TOKEN-001: 首 token 超时常量应为 60 秒。
+    #[test]
+    fn tc_first_token_001_timeout_is_60_secs() {
+        assert_eq!(FIRST_TOKEN_TIMEOUT_SECS, 60, "首 token 超时应为 60 秒");
+    }
+
+    /// TC-FIRST-TOKEN-002: 首 token 超时应小于整体超时 300 秒。
+    #[test]
+    fn tc_first_token_002_less_than_overall_timeout() {
+        // 整体超时 REQUEST_TIMEOUT_SECS = 300s（定义在 openai_provider.rs）
+        // 首 token 超时必须 < 整体超时，否则永远不会触发
+        assert!(
+            FIRST_TOKEN_TIMEOUT_SECS < 300,
+            "首 token 超时 ({FIRST_TOKEN_TIMEOUT_SECS}s) 必须小于整体超时 (300s)"
+        );
+    }
+
+    /// TC-FIRST-TOKEN-003: 首 token 超时应 ≥ 30 秒（容忍慢 API）。
+    #[test]
+    fn tc_first_token_003_at_least_30_secs() {
+        // 30s 下限：DeepSeek/OpenAI 等远程 API 在高负载时首 token 可能 10-20s
+        assert!(
+            FIRST_TOKEN_TIMEOUT_SECS >= 30,
+            "首 token 超时应 ≥ 30s（容忍慢 API），实际: {FIRST_TOKEN_TIMEOUT_SECS}s"
+        );
+    }
+}
+
+// ============================================================================
+// REQ-RAG-051: 无 Key 演示模式
+// ============================================================================
+
+/// 演示模式预设回答模板（基于关键词匹配）。
+///
+/// 用户无需 API Key 即可体验基础 RAG 功能。根据查询关键词匹配预设回答。
+fn demo_mode_response(query: &str) -> String {
+    let q = query.to_lowercase();
+
+    // 关键词匹配规则
+    if q.contains("echomind") || q.contains("什么是") || q.contains("介绍") {
+        "EchoMind 是一款本地优先的智能知识库助手，采用 RAG（检索增强生成）技术，\
+         让你可以在不泄露数据的前提下，与自己的文档对话。\n\n\
+         核心特性：\n\
+         - 本地嵌入：文档向量化在本地完成，不上传云端\n\
+         - BYOK：自带 API Key，使用你自己的 LLM 端点\n\
+         - 混合检索：向量 + 关键词双路检索，精度更高\n\
+         - Agent 模式：复杂问题自动多步推理\n\n\
+         > 当前为演示模式，配置 API Key 后可解锁完整 AI 对话功能。"
+            .to_string()
+    } else if q.contains("rag") || q.contains("检索增强") || q.contains("原理") {
+        "RAG（Retrieval-Augmented Generation，检索增强生成）是一种 AI 技术，\
+         它先从知识库中检索相关文档片段，然后将这些片段作为上下文传给 LLM 生成回答。\n\n\
+         优势：\n\
+         - 减少幻觉：LLM 基于检索到的事实回答，而非凭空生成\n\
+         - 知识更新：只需更新知识库，无需重新训练模型\n\
+         - 数据隐私：文档留在本地，不进入模型训练\n\n\
+         > 当前为演示模式，配置 API Key 后可体验真实 RAG 对话。"
+            .to_string()
+    } else if q.contains("隐私") || q.contains("安全") || q.contains("数据") {
+        "EchoMind 的隐私安全设计：\n\n\
+         1. 本地优先：文档解析、分块、向量化全在本地完成\n\
+         2. BYOK 模式：使用你自己的 API Key，我们不触碰你的数据\n\
+         3. 无追踪：不收集任何用户数据，不嵌入分析 SDK\n\
+         4. 开源审计：代码完全开源，可自行审计验证\n\n\
+         > 当前为演示模式回答。配置 API Key 后可进行真实对话。"
+            .to_string()
+    } else {
+        format!(
+            "你好！你问的是「{query}」。\n\n\
+             当前处于演示模式，我只能基于预设模板回答关于 EchoMind、RAG 技术和隐私安全的问题。\n\n\
+             配置 API Key 后，我可以基于你的知识库文档进行真实的 RAG 检索和回答。\n\n\
+             试试问我：\n\
+             - 「什么是 EchoMind？」\n\
+             - 「RAG 的原理是什么？」\n\
+             - 「隐私安全如何保障？」"
+        )
+    }
+}
+
+/// 演示模式对话处理（REQ-RAG-051 AC-3）。
+///
+/// 跳过 LLM 调用，使用关键词匹配模板回复。仍执行关键词检索以展示 RAG 检索来源。
+async fn handle_demo_mode<R: Runtime>(
+    app: &AppHandle<R>,
+    query: &str,
+    state: &AppState,
+    conversation_id: &str,
+    turn_group: Option<&str>,
+    version: Option<i32>,
+) -> Result<(), String> {
+    emit_chat_phase(app, "retrieving", "演示模式：关键词检索中…");
+
+    // 关键词检索（不依赖向量化引擎，避免模型下载）
+    let results = state
+        .storage
+        .keyword_search(query, 5)
+        .await
+        .map_err(|e| prefix_error(ERR_STORAGE, &format!("关键词检索失败: {e:#}")))?;
+
+    // 推送检索来源
+    if !results.is_empty() {
+        emit_chat_sources(app, &results);
+    }
+
+    emit_chat_phase(app, "generating", "演示模式：生成回答中…");
+
+    // 生成预设回答
+    let answer = demo_mode_response(query);
+
+    // 逐字推送（模拟流式输出）
+    for ch in answer.chars() {
+        emit_chat_token(app, ch.to_string());
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // 落库
+    if turn_group.is_none() {
+        let user_msg = ChatMessage {
+            id: None,
+            role: "user".to_string(),
+            content: query.to_string(),
+            sources: None,
+            reasoning: None,
+            turn_group: turn_group.map(|s| s.to_string()),
+            version,
+        };
+        let _ = state.storage.add_message(conversation_id, &user_msg).await;
+    }
+
+    let assistant_msg = ChatMessage {
+        id: None,
+        role: "assistant".to_string(),
+        content: answer,
+        sources: if results.is_empty() {
+            None
+        } else {
+            Some(results.clone())
+        },
+        reasoning: None,
+        turn_group: turn_group.map(|s| s.to_string()),
+        version,
+    };
+    let _ = state
+        .storage
+        .add_message(conversation_id, &assistant_msg)
+        .await;
+
+    emit_chat_done(app, None);
+    Ok(())
+}
+
+/// 检查是否处于演示模式（REQ-RAG-051 AC-1）。
+///
+/// 从 settings 表读取 `rag.demo_mode` 键。
+#[tauri::command]
+pub async fn is_demo_mode(state: State<'_, AppState>) -> Result<bool, String> {
+    is_demo_mode_inner(state.inner()).await
+}
+
+/// 演示模式查询逻辑（命令与集成测试复用）。
+pub async fn is_demo_mode_inner(state: &AppState) -> Result<bool, String> {
+    let val = state
+        .storage
+        .get_setting("rag.demo_mode")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(val.is_some_and(|v| v == "true"))
+}
+
+/// 退出演示模式（REQ-RAG-051 AC-5）。
+///
+/// 设置 `rag.demo_mode = false` 并清除示例文档。
+#[tauri::command]
+pub async fn exit_demo_mode(state: State<'_, AppState>) -> Result<(), String> {
+    exit_demo_mode_inner(state.inner()).await
+}
+
+/// 退出演示模式逻辑（命令与集成测试复用）。
+pub async fn exit_demo_mode_inner(state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .set_setting("rag.demo_mode", "false")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 清除示例文档（标记为 demo 的文档）
+    let docs = state
+        .storage
+        .list_documents()
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    for doc in docs {
+        if doc.file_path.starts_with("demo://") {
+            let _ = state.storage.delete_document(&doc.id).await;
+        }
+    }
+
+    Ok(())
+}
+
+/// 加载示例文档（REQ-RAG-051 AC-2）。
+///
+/// 将 3 个预设示例文档导入知识库，标记为 `[Demo]` 前缀。
+#[tauri::command]
+pub async fn load_demo_documents(state: State<'_, AppState>) -> Result<(), String> {
+    load_demo_documents_inner(state.inner()).await
+}
+
+/// 加载示例文档逻辑（命令与集成测试复用）。
+pub async fn load_demo_documents_inner(state: &AppState) -> Result<(), String> {
+    let demo_docs = [
+        (
+            "[Demo] EchoMind 介绍",
+            "EchoMind 是一款本地优先的智能知识库助手，采用 RAG（检索增强生成）技术。\n\n\
+             核心特性：\n\
+             - 本地嵌入：文档向量化在本地完成，不上传云端\n\
+             - BYOK：自带 API Key，使用你自己的 LLM 端点\n\
+             - 混合检索：向量 + 关键词双路检索，精度更高\n\
+             - Agent 模式：复杂问题自动多步推理\n\n\
+             EchoMind 让你可以在不泄露数据的前提下，与自己的文档对话。",
+        ),
+        (
+            "[Demo] RAG 技术概述",
+            "RAG（Retrieval-Augmented Generation，检索增强生成）是一种 AI 技术。\n\n\
+             工作流程：\n\
+             1. 文档分块：将长文档切分为语义连贯的小段落\n\
+             2. 向量化：用嵌入模型将文本转为向量\n\
+             3. 检索：用户提问时，从向量库中检索最相关的片段\n\
+             4. 生成：将检索到的片段作为上下文传给 LLM 生成回答\n\n\
+             优势：减少幻觉、知识更新快、数据隐私保护。",
+        ),
+        (
+            "[Demo] 隐私安全说明",
+            "EchoMind 的隐私安全设计：\n\n\
+             1. 本地优先：文档解析、分块、向量化全在本地完成\n\
+             2. BYOK 模式：使用你自己的 API Key，我们不触碰你的数据\n\
+             3. 无追踪：不收集任何用户数据，不嵌入分析 SDK\n\
+             4. 开源审计：代码完全开源，可自行审计验证\n\n\
+             你的文档数据始终留在本地，查询时仅将检索到的片段发送到你配置的 LLM 端点。",
+        ),
+    ];
+
+    for (title, content) in &demo_docs {
+        // 使用 Document::new 创建文档（自动生成 UUID + 时间戳）
+        let mut doc = echomind_models::Document::new(
+            format!("demo://{title}"),
+            // 简单 hash（演示模式不需要精确去重）
+            format!("demo_{:x}", md5::Md5::digest(content.as_bytes())),
+        );
+        doc.status = echomind_models::DocStatus::Indexed;
+        let _ = state.storage.add_document(&doc).await;
+
+        // 创建单个 chunk（演示模式不做向量嵌入，仅存文本供关键词检索）
+        let chunk = echomind_models::Chunk::new(
+            doc.id.clone(),
+            content.to_string(),
+            content.split_whitespace().count(),
+            0,
+        );
+        let _ = state.storage.add_chunk(&chunk).await;
+    }
+
+    // 设置演示模式标志
+    state
+        .storage
+        .set_setting("rag.demo_mode", "true")
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    Ok(())
 }

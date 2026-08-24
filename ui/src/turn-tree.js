@@ -394,7 +394,7 @@ export async function openConversationTreePanel() {
     <div class="conversation-tree-content">
       <div class="conversation-tree-header">
         <h3 class="conversation-tree-title"></h3>
-        <button class="conversation-tree-close" aria-label="close">×</button>
+        <button class="conversation-tree-close" aria-label="${t('common.close') || 'close'}"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
       <div class="conversation-tree-body">
         <div class="conversation-tree-loading"></div>

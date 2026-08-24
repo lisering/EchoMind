@@ -171,3 +171,4 @@ AI 引擎在每次任务中按角色视角协同工作。各角色**严禁越位
 | v1.8.0 | 2026-08-08 | 铁律扩展至 20 条：新增铁律十六~二十（AI 代码审查 / 结构化日志 / LLM 安全 / 错误弹性 / Agent 行为规范），增强铁律二/五/七。来源：vibe-coding-ai-rules / SoloDawn / OWASP / agent-best-practices 等业界最新实践 | TPM / Chief Architect |
 | v1.9.0 | 2026-08-08 | 铁律扩展至 21 条：3 轮深度调研后新增铁律二十一 RAG 安全防护，增强铁律二/五/六/十七/十八。来源：OWASP GenAI LLM Top 10 2026 / cargo-miri / OpenSSF Scorecard / cargo-fuzz | TPM / Chief Architect |
 | v2.0.0 | 2026-08-08 | 铁律二新增「Vibe Coding 全自动化测试体系」——分层测试门禁（L0~L4）+ AI Agent 行为规则 + 测试工具链清单（10 工具）。来源：template-agenticide-vibecoding / vibe-coding-ai-rules / cargo-nextest / cargo-mutants / insta / cargo-llvm-cov / wiremock | TPM / Chief Architect |
+| v2.1.0 | 2026-08-16 | 铁律十二增强——会话结束时「无条件生成下个 Session 提示词」（从条件生成改为强制行为，覆盖功能开发/复盘分析/测试增强/文档维护全部场景）。system-constraints.md 版本 v3.3→v3.4 | TPM / Chief Architect |

@@ -18,7 +18,7 @@ import { invoke, listen } from './ipc.js';
 import { t } from './i18n.js';
 import { createFocusTrap } from './focus-trap.js';
 import { toast, toastError } from './toast.js';
-import { Z_INDEX, zClass } from './zindex.js';
+import { Z_INDEX, zClass } from './panel-stack.js';
 import { pushPanel, removePanel } from './panel-stack.js';
 
 /** Dream 面板 Focus Trap 实例 */

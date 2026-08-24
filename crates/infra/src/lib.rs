@@ -1,6 +1,11 @@
 //! EchoMind 适配器层（六边形架构 infra）：SQLite 持久化、本地向量化引擎。
 //! 本 crate 实现 `crates/core` 定义的端口 Trait，依赖方向：infra → core，严禁反转。
 
+/// 磁盘空间检查模块（P1-1）：跨平台磁盘可用空间检查 + 临时文件清理。
+///
+/// R3 复盘发现磁盘满是最大弹性缺口（评分 2/10）。本模块提供预防性检查
+/// 和自动清理，避免 SQLite 写入时遇到 SQLITE_FULL 错误。
+pub mod disk_space;
 /// DuckDuckGo Instant Answer API 适配器（REQ-RAG-036）：免费网页搜索，无需 API Key。
 pub mod duckduckgo_provider;
 /// 文件监听器（REQ-SYNC-003）：基于 notify + notify-debouncer-full 的跨平台实时文件监听。
@@ -12,6 +17,8 @@ pub mod local_embedder;
 pub mod local_logger;
 pub mod local_reranker;
 /// 本地 LLM 模型文件管理器（REQ-LLM-004）：下载、删除、列表本地 GGUF 模型。
+/// MCP 传输层实现（REQ-ARCH-016 AC-2/AC-3）：`StdioTransport` + `SseTransport`。
+pub mod mcp_transport;
 pub mod model_manager;
 pub mod openai_provider;
 /// 性能基准测试框架（借鉴 Zed `util_macros::perf`）：统一计时、吞吐量计算、断言。
@@ -43,7 +50,13 @@ pub mod gemv_kernel;
 /// 独立于 candle-core 的 GGUF 格式解析器，支持 mmap 零拷贝读取。
 #[cfg(feature = "pro")]
 pub mod gguf_reader;
-#[cfg(feature = "pro")]
+/// HNSW 近似最近邻索引（REQ-NFR-005 + REQ-PERF-013）。
+///
+/// 基于 `hnsw_rs` crate（Malkov & Yashunin 2016/2018 论文纯 Rust 实现），
+/// 将向量检索复杂度从 O(n) 暴力扫描降至 O(log n)。
+///
+/// **已从 Pro 下沉到 Free**（REQ-PERF-013）：大知识库（>500 chunks）自动使用 HNSW，
+/// 小知识库保持全量扫描（阈值切换，无需用户配置）。
 pub mod hnsw_index;
 /// KV cache 序列化/反序列化（Phase 4 Session 24）。
 ///
@@ -98,6 +111,9 @@ pub mod wasm_executor;
 #[cfg(feature = "pro")]
 pub mod weight_repack;
 
+/// bge-m3 多语言嵌入模型 TDD 测试（REQ-VEC-015）。
+#[cfg(test)]
+mod bge_m3_tests;
 /// ColBERT 多向量嵌入测试（REQ-PERF-008, Pro feature）。
 #[cfg(all(test, feature = "pro"))]
 mod colbert_embedder_tests;
@@ -107,6 +123,9 @@ mod embedder_tests;
 mod gemv_kernel_tests;
 #[cfg(all(test, feature = "pro"))]
 mod gguf_reader_tests;
+/// HNSW 向量索引下沉 Free TDD 测试（REQ-PERF-013）。
+#[cfg(test)]
+mod hnsw_free_tests;
 #[cfg(test)]
 mod hyde_rewriter_tests;
 #[cfg(all(test, feature = "pro"))]
@@ -136,6 +155,12 @@ mod prompt_cache_tests;
 mod quant_blocks_tests;
 #[cfg(test)]
 mod storage_tests;
+/// 嵌入模型下载境内加速 TDD 测试（REQ-VEC-017, v2.3）。
+#[cfg(test)]
+mod vec_accel_tests;
+/// 向量缓存正确性修复 + 归一化点积 TDD 测试（REQ-PERF-016/017, v2.2）。
+#[cfg(test)]
+mod vec_cache_tests;
 #[cfg(all(test, feature = "pro"))]
 mod weight_repack_tests;
 

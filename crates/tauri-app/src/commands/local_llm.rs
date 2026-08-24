@@ -186,10 +186,17 @@ pub async fn set_llm_mode(mode: String, state: State<'_, AppState>) -> Result<()
 /// 模式切换逻辑（命令与集成测试复用）。
 ///
 /// S14：切换到 local 模式后后台预热模型，消除首次对话卡顿。
+/// Free 用户切换到 Local 模式被 Pro 门控拦截。
 pub async fn set_llm_mode_inner(mode: String, state: &AppState) -> Result<(), String> {
     let llm_mode = match mode.as_str() {
         "remote" => LlmMode::Remote,
-        "local" => LlmMode::Local,
+        "local" => {
+            // Pro 门控：Free 用户不能切换到 Local 模式
+            if !*state.is_pro().read().await {
+                return Err("PRO_REQUIRED: Local LLM 模式需要 Pro 授权".to_string());
+            }
+            LlmMode::Local
+        }
         _ => return Err(format!("无效的 LLM 模式: {mode}（可选: remote / local）")),
     };
     state
@@ -254,7 +261,12 @@ pub async fn set_local_model(filename: String, state: State<'_, AppState>) -> Re
 /// 本地模型设置逻辑（命令与集成测试复用）。
 ///
 /// S14：设置完成后后台预热模型，消除首次对话卡顿。
+/// Free 用户被 Pro 门控拦截。
 pub async fn set_local_model_inner(filename: String, state: &AppState) -> Result<(), String> {
+    // Pro 门控：Free 用户不能设置本地模型
+    if !*state.is_pro().read().await {
+        return Err("PRO_REQUIRED: 本地模型设置需要 Pro 授权".to_string());
+    }
     state
         .storage
         .set_setting("llm.local_model", &filename)

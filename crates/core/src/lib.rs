@@ -10,9 +10,14 @@
 
 /// Agentic RAG 多步推理引擎（REQ-RAG-022）：ReAct 范式 Thought→Action→Observation 循环。
 pub mod agent;
+/// AgentEngine Sans-IO 状态机（B-03 借鉴 Rig `AgentRun`）：决策与 IO 分离，可独立单元测试。
+pub mod agent_run;
 /// 文档一致性审计引擎：全量扫描式矛盾检测（REQ-AUDIT-001~005）。
 #[cfg(feature = "pro")]
 pub mod audit;
+/// 审计对 + Turn-Enclosed 模块（DH-04 借鉴 DeepSeek Harness Turn-Enclosed Audit）：
+/// 每次 turn 生成 start/end 审计对，验证完整性。
+pub mod audit_pair;
 /// 后台空闲整理引擎：重复文档检测、跨文档矛盾发现、整理建议生成。
 pub mod auto_dream;
 /// 预算追踪和速率限制（QM 借鉴）：LLM API 费用控制和请求限流。
@@ -29,8 +34,13 @@ pub mod code_executor;
 pub mod concurrency;
 /// 多代理协调引擎（REQ-RAG-025）：Research→Synthesis→Implementation→Verification 四阶段。
 pub mod coordinator;
+/// Coordinator 策略注册表（DH-03 借鉴 DeepSeek Harness SubagentRuntime Provider 注册表）：
+/// 多个协调策略共存，按名字查找，能力验证在执行前完成。
+pub mod coordinator_strategy;
 /// 领域画像自动分类（REQ-VEC-013）：16 领域嵌入质心分类。
 pub mod domain;
+/// 嵌入模型对比评估（REQ-VEC-018）：多模型嵌入 + 检索质量对比。
+pub mod embed_comparison;
 /// 数据库加密模块（Argon2id 密钥派生 + SQLCipher 加密 + 暴力破解防护 + 密码强度检测）。
 pub mod encryption;
 /// NER 实体抽取器（REQ-PERF-006）：纯规则 + 正则，零 LLM/模型依赖。
@@ -41,6 +51,8 @@ pub mod errors;
 pub mod event_stream;
 /// 对话导出模块：会话 → Markdown 文件（REQ-EXP-001）。
 pub mod export;
+/// FinishReason 归一化枚举（借鉴 Rig `FinishReason`）：归一化 provider 停止原因 + `reconcile_with_output()` + `is_truncated()`。
+pub mod finish_reason;
 /// 知识图谱高级分析引擎（REQ-RAG-027 Session 5）：最短路径 + 社区检测 + 度中心性。
 pub mod graph_analyzer;
 /// 知识图谱导出模块（REQ-EXP-006）：GraphML + JSON-LD 双格式导出。
@@ -54,7 +66,12 @@ pub mod hybrid_retriever;
 /// 幂等性存储 + 统一周期任务抽象：防重复操作（文件同步/AutoDream）+ 后台任务管理。
 pub mod idempotency;
 pub mod import;
+/// Late Chunking 上下文感知嵌入（REQ-RAG-049）：借鉴 Jina AI 2024 Late Chunking
+/// 技术，在嵌入阶段为 chunk 注入文档级上下文前缀。
+pub mod late_chunking;
 pub mod license;
+/// LLM API 类型化错误（B-02 借鉴 Rig ProviderResponseError）：保留原始 HTTP Status + Body。
+pub mod llm_api_error;
 /// 多协议 LLM 适配（B10 LLM Protocol Types，REQ-ARCH-012）：
 /// LLM 协议类型枚举 + 协议感知 Provider trait。
 pub mod llm_protocol;
@@ -62,6 +79,11 @@ pub mod llm_protocol;
 /// 按对话或用户偏好动态切换 LLM 后端，切换时通知重置会话状态。
 pub mod llm_router;
 pub mod loader;
+/// MCP（Model Context Protocol）协议适配器（REQ-ARCH-016）：
+/// MCP 客户端 JSON-RPC 通信（stdio + SSE transport），工具注册表，安全沙箱。
+pub mod mcp;
+/// Memory Policy + Compactor + DemotionHook 三层抽象（B-07 借鉴 Rig Memory 体系）。
+pub mod memory_policy;
 /// 持久化记忆系统（REQ-RAG-032）：借鉴 IfAI 三层记忆 Wing/Hall/Room + Bamboo-agent 上下文压缩。
 ///
 /// 三层记忆架构：
@@ -75,11 +97,15 @@ pub mod memory_store;
 /// 语义分块器：段落→句子→子句递归分割，保留代码块完整性。
 /// MMR 多样性重排（借鉴 OpenMontage corpus.py）：Maximal Marginal Relevance。
 pub mod mmr_diversifier;
+/// 性能指标采集（REQ-OBS-002）：关键操作耗时追踪。
+pub mod perf_metrics;
 /// Permission 细粒度控制（B11 Permission Rule Engine，REQ-ARCH-011）：
 /// Wildcard 匹配的 RBAC 权限规则引擎（Allow / Deny / Ask）。
 pub mod permission;
 /// 流水线阶段门控（借鉴 OpenMontage checkpoint.py）：前置检查 + 人审门控 + 历史记录。
 pub mod pipeline_checkpoint;
+/// PortableTool Trait（B-05 借鉴 Rig PortableTool）：context-free 工具抽象，工具注册解耦。
+pub mod portable_tool;
 pub mod privacy;
 /// 渐进式上下文注入（REQ-PERF-010）：按需注入 chunk，LLM 上下文足够时停止追加。
 pub mod progressive_injector;
@@ -93,6 +119,9 @@ pub mod quality_gate;
 /// RAG 评估指标系统（REQ-RAG-045，RAGAS 风格）：
 /// 纯 Rust 检索指标 + LLM-as-Judge 生成指标。
 pub mod rag_eval;
+/// RAG 评估数据集与端到端检索质量评估（REQ-RAG-048）：
+/// 标准评估数据集 + run_retrieval_eval 管线。
+pub mod rag_eval_dataset;
 /// 自进化检索记忆（REQ-PERF-012）：记录检索方法效果，自适应选择最佳策略。
 pub mod retrieval_memory;
 /// 检索质量门控（借鉴 OpenMontage slideshow_risk.py）：多维度评分 + verdict 系统。
@@ -133,6 +162,10 @@ pub mod sync;
 pub mod tool_output;
 /// 轻量 RAG 链路追踪系统（S70：Cherry Studio 借鉴 — span 级耗时追踪）。
 pub mod trace;
+/// 类型安全 Hook 系统（B-04 借鉴 Rig AgentHook）：每事件一 Action 类型，编译期拒绝不合法组合。
+pub mod typed_hook;
+/// 应用更新检查（REQ-HELP-004）：GitHub Releases 版本比较。
+pub mod update_check;
 /// VLM 分级图表理解提示词（REQ-MM-005）：4 级精度策略集中定义。
 #[cfg(feature = "pro")]
 pub mod vlm_prompt;
@@ -201,10 +234,10 @@ pub mod wiki_link_parser;
 pub mod workflow;
 
 use echomind_models::{
-    ChatMessage, Chunk, CodeExecutorConfig, CodeSymbol, Conversation, DocStatus, Document,
-    EntityRelation, ExecutionResult, MemoryEntry, MemoryTier, MessageSearchResult, PendingInput,
-    Proposition, RetrievalResult, ScratchLogEntry, SessionTodo, SummaryNode, SymbolKind,
-    TodoStatus, TurnActiveVersion, WikiLink,
+    ChatMessage, Chunk, ChunkPreview, CodeExecutorConfig, CodeSymbol, Conversation, DocStatus,
+    Document, DocumentPreview, EntityRelation, ExecutionResult, GlobalSearchResults, MemoryEntry,
+    MemoryTier, MessageSearchResult, PendingInput, Proposition, RetrievalResult, ScratchLogEntry,
+    SessionTodo, SummaryNode, SymbolKind, TodoStatus, TurnActiveVersion, WikiLink,
 };
 use futures::stream::BoxStream;
 
@@ -276,17 +309,47 @@ pub trait Storage: Send + Sync {
     /// 按内容指纹查找文档（REQ-ING-004 去重）。
     async fn find_document_by_hash(&self, hash: &str) -> anyhow::Result<Option<Document>>;
 
+    /// 按文件名查找文档（REQ-ING-012 同名不同内容检测）。
+    ///
+    /// 在文档列表中查找 `file_path` 以 `-{name}` 结尾的文档。
+    /// file_path 格式为 `{data_dir}/documents/{hash}-{filename}`，
+    /// 因此匹配 `-{name}` 后缀可正确识别同名文档。
+    /// 默认实现通过 `list_documents` 遍历过滤；生产实现可覆盖为 SQL LIKE 查询。
+    async fn find_document_by_name(&self, name: &str) -> anyhow::Result<Option<Document>> {
+        let docs = self.list_documents().await?;
+        let suffix = format!("-{name}");
+        Ok(docs.into_iter().find(|d| d.file_path.ends_with(&suffix)))
+    }
+
     /// 统计已入库文档总数（REQ-LIC-001 配额判定）。
     async fn count_documents(&self) -> anyhow::Result<usize>;
 
     /// 统计已入库分块总数（REQ-OBS-002 诊断信息导出）。
     async fn count_chunks(&self) -> anyhow::Result<usize>;
 
+    /// 统计已入库向量总数（REQ-VEC-010 索引统计仪表盘）。
+    ///
+    /// 默认实现返回 0；生产实现覆盖为 SQL COUNT。
+    async fn count_embeddings(&self) -> anyhow::Result<usize> {
+        Ok(0)
+    }
+
     /// 崩溃恢复（REQ-DB-001）：将上次会话遗留的 Processing 僵尸文档置为 Failed，返回清理条数。
     async fn cleanup_zombies(&self) -> anyhow::Result<usize>;
 
     /// 写入设置项（REQ-UI-008；敏感值由实现方负责加密存储）。
     async fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()>;
+
+    /// 批量写入多个设置项（性能优化：单次事务替代 N 次串行 set_setting）。
+    ///
+    /// 默认实现逐个调用 `set_setting`（N 次 spawn_blocking）；
+    /// 生产实现应覆盖为单次事务批量 INSERT OR REPLACE。
+    async fn set_settings_batch(&self, pairs: &[(&str, &str)]) -> anyhow::Result<()> {
+        for &(key, value) in pairs {
+            self.set_setting(key, value).await?;
+        }
+        Ok(())
+    }
 
     /// 读取设置项（REQ-UI-008）。
     async fn get_setting(&self, key: &str) -> anyhow::Result<Option<String>>;
@@ -331,6 +394,91 @@ pub trait Storage: Send + Sync {
         Ok(self.list_conversations(workspace_id).await?.len())
     }
 
+    // ========================================================================
+    // 工作空间管理（REQ-WS-001 多知识库创建与切换）
+    // ========================================================================
+
+    /// 创建工作空间（REQ-WS-001）。
+    ///
+    /// 插入 `workspaces` 表。重复 ID 忽略（幂等）。
+    /// 默认实现为空操作（兼容旧版 MockStorage）；生产实现必须覆盖。
+    async fn create_workspace(
+        &self,
+        _workspace: &echomind_models::Workspace,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 列出全部工作空间（按创建时间正序，REQ-WS-001 AC-1）。
+    ///
+    /// 默认实现返回单个默认工作空间（兼容旧版）；生产实现必须覆盖。
+    async fn list_workspaces(&self) -> anyhow::Result<Vec<echomind_models::Workspace>> {
+        Ok(vec![echomind_models::Workspace::with_id(
+            "default".to_string(),
+            "Default".to_string(),
+        )])
+    }
+
+    /// 重命名工作空间（REQ-WS-003 AC-1/AC-2）。
+    ///
+    /// 默认实现为空操作；生产实现必须覆盖。
+    async fn rename_workspace(&self, _id: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 删除工作空间（REQ-WS-003 AC-4 级联清理）。
+    ///
+    /// 删除指定工作空间及其全部文档、chunks、向量、会话、消息。
+    /// 默认实现为空操作；生产实现必须覆盖。
+    async fn delete_workspace(&self, _id: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 获取工作空间数据量预览（REQ-WS-003 AC-3 删除确认对话框）。
+    ///
+    /// 返回该工作空间的文档数和会话数，用于删除前确认对话框展示。
+    /// 默认实现返回零值；生产实现必须覆盖。
+    async fn get_workspace_stats(
+        &self,
+        _id: &str,
+    ) -> anyhow::Result<echomind_models::WorkspaceStats> {
+        Ok(echomind_models::WorkspaceStats {
+            document_count: 0,
+            conversation_count: 0,
+        })
+    }
+
+    /// 统计工作空间文档数（REQ-WS-001 AC-4 数据隔离）。
+    ///
+    /// 默认实现返回全部文档数；生产实现应覆盖为按 workspace_id 过滤。
+    async fn count_documents_in_workspace(&self, _workspace_id: &str) -> anyhow::Result<usize> {
+        self.count_documents().await
+    }
+
+    /// 列出工作空间文档（REQ-WS-001 AC-3 切换后同步刷新）。
+    ///
+    /// 默认实现返回全部文档；生产实现应覆盖为按 workspace_id 过滤。
+    async fn list_documents_in_workspace(
+        &self,
+        _workspace_id: &str,
+    ) -> anyhow::Result<Vec<Document>> {
+        self.list_documents().await
+    }
+
+    /// 迁移文档到目标工作空间（REQ-WS-004 跨知识库迁移）。
+    ///
+    /// 仅更新 `documents.workspace_id`，chunks / 向量 / propositions 等通过
+    /// 外键关联文档 ID 自动归属新工作空间，无需额外修改。
+    ///
+    /// 默认实现为空操作（返回 Ok(())）；生产实现应覆盖为 SQL UPDATE。
+    async fn migrate_document(
+        &self,
+        _doc_id: &str,
+        _target_workspace_id: &str,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     /// 删除会话（外键级联清理其消息）。
     async fn delete_conversation(&self, id: &str) -> anyhow::Result<()>;
 
@@ -345,6 +493,14 @@ pub trait Storage: Send + Sync {
 
     /// 更新会话标题（首轮问答后自动提取）。
     async fn update_conversation_title(&self, id: &str, title: &str) -> anyhow::Result<()>;
+
+    /// 批量更新会话排序（REQ-IX-002 拖拽排序持久化）。
+    ///
+    /// 接收有序的会话 ID 列表，按列表顺序为每个会话设置递增的 `sort_order`。
+    /// 排序后 `list_conversations` 返回结果按 `sort_order ASC, created_at DESC` 排序。
+    async fn reorder_conversations(&self, _ordered_ids: &[String]) -> anyhow::Result<()> {
+        Ok(())
+    }
 
     /// 写入一条消息。
     async fn add_message(&self, conversation_id: &str, message: &ChatMessage)
@@ -456,6 +612,73 @@ pub trait Storage: Send + Sync {
     /// 列出文档全部分块（按 sequence 正序，嵌入写入链路用，REQ-VEC-003）。
     async fn list_chunks(&self, doc_id: &str) -> anyhow::Result<Vec<Chunk>>;
 
+    /// 获取文档内容预览（REQ-ING-010）。
+    ///
+    /// 返回文档元数据 + 前 500 字内容预览 + chunk 列表（每个含 sequence + 前 200 字）。
+    /// 默认实现通过 `list_chunks` 拼接内容预览；生产实现可覆盖为单次 SQL 查询。
+    async fn get_document_preview(&self, doc_id: &str) -> anyhow::Result<Option<DocumentPreview>> {
+        // 查找文档
+        let docs = self.list_documents().await?;
+        let doc = docs.into_iter().find(|d| d.id == doc_id);
+        let Some(doc) = doc else { return Ok(None) };
+
+        // 获取 chunks
+        let chunks = self.list_chunks(doc_id).await?;
+        let chunk_count = chunks.len();
+
+        // 拼接前 500 字内容预览
+        let mut content_preview = String::new();
+        for chunk in &chunks {
+            if content_preview.len() >= 500 {
+                break;
+            }
+            if !content_preview.is_empty() {
+                content_preview.push(' ');
+            }
+            content_preview.push_str(&chunk.content);
+        }
+        // 截断到 500 字（按字符边界）
+        let preview_chars: Vec<char> = content_preview.chars().collect();
+        let limit = 500.min(preview_chars.len());
+        content_preview = preview_chars[..limit].iter().collect();
+        if chunk_count > 0 && content_preview.len() >= 500 {
+            content_preview.push('…');
+        }
+
+        // 构建 chunk 预览列表（每个前 200 字）
+        let chunk_previews: Vec<ChunkPreview> = chunks
+            .iter()
+            .map(|chunk| {
+                let cp_chars: Vec<char> = chunk.content.chars().collect();
+                let cp_limit = 200.min(cp_chars.len());
+                let mut cp: String = cp_chars[..cp_limit].iter().collect();
+                if cp_chars.len() > 200 {
+                    cp.push('…');
+                }
+                ChunkPreview {
+                    id: chunk.id.clone(),
+                    sequence: chunk.sequence,
+                    content_preview: cp,
+                    token_count: chunk.token_count,
+                }
+            })
+            .collect();
+
+        Ok(Some(DocumentPreview {
+            id: doc.id,
+            file_path: doc.file_path,
+            status: doc.status,
+            created_at: doc.created_at,
+            domain: doc.domain,
+            summary: doc.summary,
+            tags: doc.tags,
+            file_hash: doc.file_hash,
+            content_preview,
+            chunks: chunk_previews,
+            chunk_count,
+        }))
+    }
+
     /// 删除指定文档的全部分块与向量（保留文档记录，REQ-VEC-005 重试索引用）。
     /// 外键级联自动清理 embeddings；文档记录本身不受影响。
     async fn delete_chunks_by_doc(&self, doc_id: &str) -> anyhow::Result<()>;
@@ -484,6 +707,24 @@ pub trait Storage: Send + Sync {
         _limit: usize,
     ) -> anyhow::Result<Vec<MessageSearchResult>> {
         Ok(Vec::new())
+    }
+
+    /// 全局搜索（REQ-IX-008）：统一搜索消息 + 文档 + 实体。
+    ///
+    /// 返回 `GlobalSearchResults`，包含三组搜索结果，每组最多 `limit` 条。
+    /// 空查询返回空列表，不返回 Err。
+    ///
+    /// 默认实现返回空结果（不支持全局搜索的适配器）。
+    async fn global_search(
+        &self,
+        _query: &str,
+        _limit: usize,
+    ) -> anyhow::Result<GlobalSearchResults> {
+        Ok(GlobalSearchResults {
+            messages: Vec::new(),
+            documents: Vec::new(),
+            entities: Vec::new(),
+        })
     }
 
     /// 按内容指纹查找缓存的嵌入向量（全尺度性能优化）。
@@ -632,6 +873,53 @@ pub trait Storage: Send + Sync {
     /// 默认实现返回空 Vec；生产适配器应覆盖为 SQL `WHERE tags LIKE` 查询。
     async fn filter_documents_by_tag(&self, _tag: &str) -> anyhow::Result<Vec<Document>> {
         Ok(Vec::new())
+    }
+
+    // ------------------------------------------------------------------
+    // 文档批量操作（REQ-ING-024 文档批量操作）
+    // ------------------------------------------------------------------
+
+    /// 批量删除文档（REQ-ING-024 AC-3）。
+    ///
+    /// 在单个事务中执行批量 DELETE，全部成功或全部回滚。
+    /// 级联清理 chunks / embeddings / FTS5 索引。
+    ///
+    /// 默认实现逐条调用 `delete_document`；生产适配器应覆盖为单事务批量 DELETE。
+    async fn batch_delete_documents(&self, doc_ids: &[String]) -> anyhow::Result<()> {
+        for id in doc_ids {
+            self.delete_document(id).await?;
+        }
+        Ok(())
+    }
+
+    /// 批量移动文档到目标工作空间（REQ-ING-024 AC-4）。
+    ///
+    /// 在单个事务中批量更新 `workspace_id`，全部成功或全部回滚。
+    ///
+    /// 默认实现逐条调用 `migrate_document`；生产适配器应覆盖为单事务批量 UPDATE。
+    async fn batch_move_documents(
+        &self,
+        doc_ids: &[String],
+        target_workspace_id: &str,
+    ) -> anyhow::Result<()> {
+        for id in doc_ids {
+            self.migrate_document(id, target_workspace_id).await?;
+        }
+        Ok(())
+    }
+
+    /// 批量添加文档标签（REQ-ING-024 AC-5）。
+    ///
+    /// 为多个文档批量添加多个标签（去重幂等）。
+    ///
+    /// 默认实现逐条调用 `add_document_tag`；生产适配器应覆盖为单事务批量操作。
+    async fn batch_add_tags(&self, doc_ids: &[String], tags: &[String]) -> anyhow::Result<()> {
+        for doc_id in doc_ids {
+            for tag in tags {
+                self.add_document_tag(doc_id, tag).await?;
+            }
+        }
+        Ok(())
     }
 
     /// 批量写入实体索引（REQ-PERF-006 实体链接增强）。
@@ -1327,9 +1615,93 @@ pub trait Storage: Send + Sync {
     ) -> anyhow::Result<()> {
         Ok(())
     }
-}
 
-/// 大模型端口（对应 REQ-RAG-001/007）：token 级流式输出。
+    // ------------------------------------------------------------------
+    // 导入历史记录（REQ-ING-011）
+    // ------------------------------------------------------------------
+
+    /// 写入一条导入历史记录。
+    ///
+    /// 记录每次导入操作的时间戳、文件名、格式、结果（成功/失败/跳过）。
+    /// 历史记录上限 100 条，超过自动淘汰最旧记录。
+    async fn add_import_log(
+        &self,
+        _file_name: &str,
+        _format: &str,
+        _result: &str,
+        _error_message: Option<&str>,
+        _file_size: Option<i64>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 查询导入历史记录（最近 100 条，按时间倒序）。
+    ///
+    /// 可选按结果筛选（success / failed / skipped）。
+    async fn get_import_logs(
+        &self,
+        _result_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<echomind_models::ImportLogEntry>> {
+        Ok(Vec::new())
+    }
+
+    /// 清空导入历史记录。
+    async fn clear_import_logs(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // 对话书签（REQ-RAG-047）
+    // ------------------------------------------------------------------
+
+    /// 添加对话书签（REQ-RAG-047 AC-1/AC-2 + REQ-RAG-053 消息级）。
+    ///
+    /// 将指定会话标记为书签，可附带备注。
+    /// `message_id` / `summary` 为 `Some` 时表示消息级书签（REQ-RAG-053）。
+    /// 默认实现为空操作；生产适配器应覆盖为 SQL INSERT OR REPLACE。
+    async fn add_bookmark(
+        &self,
+        _conversation_id: &str,
+        _note: Option<&str>,
+        _message_id: Option<&str>,
+        _summary: Option<&str>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 移除对话书签（REQ-RAG-047 AC-5）。
+    ///
+    /// 默认实现为空操作；生产适配器应覆盖为 SQL DELETE。
+    async fn remove_bookmark(&self, _conversation_id: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// 列出全部书签（REQ-RAG-047 AC-3/AC-4 + REQ-RAG-053）。
+    ///
+    /// 返回所有书签列表（含会话级和消息级），按创建时间倒序排列。
+    /// 默认实现返回空 Vec；生产适配器应覆盖为 SQL SELECT。
+    async fn list_bookmarks(&self) -> anyhow::Result<Vec<echomind_models::ConversationBookmark>> {
+        Ok(vec![])
+    }
+
+    /// 检查指定会话是否已加书签（REQ-RAG-047 AC-2 图标显示）。
+    ///
+    /// 默认实现返回 false；生产适配器应覆盖为 SQL SELECT。
+    async fn is_bookmarked(&self, _conversation_id: &str) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+
+    /// 查询指定消息的书签（REQ-RAG-053）。
+    ///
+    /// 返回 `Some(bookmark)` 表示该消息已加书签，`None` 表示未加书签。
+    /// 默认实现返回 None；生产适配器应覆盖为 SQL SELECT。
+    async fn get_message_bookmark(
+        &self,
+        _message_id: &str,
+    ) -> anyhow::Result<Option<echomind_models::ConversationBookmark>> {
+        Ok(None)
+    }
+}
 pub trait LLMProvider: Send + Sync {
     /// 发起流式对话；返回的流在首个 token 到达前即应建立，逐 token 产出增量文本。
     async fn chat_stream(
@@ -2071,6 +2443,8 @@ pub trait CodeExecutor: Send + Sync {
 }
 
 #[cfg(test)]
+mod active_gate_tests;
+#[cfg(test)]
 mod agent_tests;
 #[cfg(all(test, feature = "pro"))]
 mod audit_tests;
@@ -2097,6 +2471,11 @@ mod entity_extractor_tests;
 #[cfg(test)]
 mod export_tests;
 #[cfg(test)]
+mod finish_reason_tests;
+
+#[cfg(test)]
+mod embed_comparison_tests;
+#[cfg(test)]
 mod graph_analyzer_tests;
 #[cfg(test)]
 mod graph_export_tests;
@@ -2111,6 +2490,8 @@ mod idempotency_tests;
 #[cfg(test)]
 mod import_tests;
 #[cfg(test)]
+mod late_chunking_tests;
+#[cfg(test)]
 mod license_tests;
 #[cfg(test)]
 mod llm_aux_tests;
@@ -2121,6 +2502,8 @@ mod loader_tests;
 #[cfg(test)]
 mod memory_store_tests;
 #[cfg(test)]
+mod perf_optim_tests;
+#[cfg(test)]
 mod progressive_injector_tests;
 #[cfg(test)]
 mod prompt_compressor_tests;
@@ -2130,6 +2513,8 @@ mod property_tests;
 mod proposition_splitter_tests;
 #[cfg(test)]
 mod quality_gate_tests;
+#[cfg(test)]
+mod rag_eval_dataset_tests;
 #[cfg(test)]
 mod rag_eval_tests;
 #[cfg(test)]

@@ -19,22 +19,45 @@ import { invoke, listen } from './ipc.js';
 import { toast, toastError } from './toast.js';
 import { renderRichContent } from './markdown.js';
 import { t } from './i18n.js';
-import { runGuard, canSend, requireIdle, requirePro } from './guards.js';
-import { removeCaret } from './caret.js';
-import { initScrollLock } from './scroll-lock.js';
+import { runGuard, canSend, requireIdle, requirePro } from './action.js';
+import { removeCaret, registerChatActions } from './chat-render.js';
+import { initScrollLock, createBackToTopButton, createJumpToLatestButton, notifyNewMessage } from './chat-utils.js';
 import { classifyError, renderErrorCard } from './error-detail.js';
+
+// ============================================================
+// 屏幕阅读器状态播报（REQ-A11Y-004）
+// ============================================================
+
+/**
+ * 向屏幕阅读器播报状态消息（REQ-A11Y-004 AC-1/AC-2/AC-3）。
+ * 更新 #srStatus aria-live="polite" 区域。
+ * @param {string} message - 播报消息文本
+ */
+function announceStatus(message) {
+  const sr = $('srStatus');
+  if (sr) sr.textContent = message;
+}
+
+/**
+ * 向屏幕阅读器播报错误消息（REQ-A11Y-004 AC-4）。
+ * 更新 #srError aria-live="assertive" 区域。
+ * @param {string} message - 错误描述
+ */
+function announceError(message) {
+  const sr = $('srError');
+  if (sr) sr.textContent = message;
+}
 import { updateContextUsage, renderContextBar, getContextLevel } from './context-bar.js';
 import { filterSlashCommands, renderSlashCommandPanel, navigateSlashCommand, getSelectedSlashCommand, applySlashCommand, removeSlashCommandPanel, processSlashCommand } from './slash-commands.js';
 import { extractDocMentions, getDocFilter, renderDocMentionPopup, insertDocMention, removeDocMentionPopup, filterDocuments } from './doc-mention.js';
-import { navigateCarousel, updateCarouselDisplay, addCarouselVersion } from './regen-carousel.js';
-import { createFeedbackButtons } from './feedback.js';
-import { enqueueQuery, processQueue, updateSendButton, clearQueue } from './queue-send.js';
-import { updateInputUI } from './guards.js';
-import { recordInput, resetHistoryNav, saveDraft } from './input-history.js';
-import { renderFollowupSuggestions } from './followup.js';
+import { navigateCarousel, updateCarouselDisplay, addCarouselVersion } from './chat-render.js';
+import { createFeedbackButtons, detectAndReportImplicit, resetFeedbackTracking } from './feedback.js';
+import { enqueueQuery, processQueue, updateSendButton, clearQueue } from './chat-utils.js';
+import { updateInputUI } from './action.js';
+import { recordInput, resetHistoryNav, saveDraft } from './input-utils.js';
+import { renderFollowupSuggestions } from './chat-render.js';
 import { buildHistoryFromTurns, updateVersionAssistant } from './turn-tree.js';
 import { renderBranchPagination, removeBranchPagination } from './message-edit.js';
-import { detectAndReportImplicit, resetFeedbackTracking } from './retrieval-feedback.js';
 
 // 从 chat-render.js 导入渲染函数（构建后拼接在同一作用域）
 import { updateModelPill, resetChatArea, hideEmptyState, appendBlock, appendUserBlock,
@@ -61,6 +84,18 @@ let _chatErrorHandled = false;
  * 中断标志：chat_error 中断消息设置，让 chat_done 以 false（非正常完成）处理。
  */
 let _chatAborted = false;
+
+/**
+* P1-3: /web 命令临时启用网页搜索标志。
+* 在 chat_done 后恢复为 false 并关闭网页搜索。
+*/
+let _tempWebSearch = false;
+
+/**
+* P1-4: /agent 命令临时启用 Agent 模式标志。
+* 在 chat_done 后恢复为 false 并关闭 Agent 模式。
+*/
+let _tempAgent = false;
 
 /**
  * 启动看门狗计时器。
@@ -239,7 +274,70 @@ export function finalizeStream(ok) {
 /**
  * 发送用户问题：追加 user Block、初始化 assistant Block、调用 chat IPC 启动流式对话。
  */
+/** 上次发送时间戳（ms）— 用于冷却期判断 */
+let _lastSendTime = 0;
+/** 冷却期（ms）— 两次发送之间的最小间隔 */
+const SEND_COOLDOWN_MS = 800;
+
+// ============================================================
+// P2-1：流恢复机制（autoResume）
+// ============================================================
+
+/** localStorage 存储键：未完成的流状态 */
+const STREAM_STATE_KEY = 'echomind_stream_state';
+
+/**
+ * 保存流状态到 localStorage（在 send() 中调用）。
+ * @param {string} conversationId - 会话 ID
+ * @param {string} query - 用户查询
+ */
+function _saveStreamState(conversationId, query) {
+  try {
+    localStorage.setItem(STREAM_STATE_KEY, JSON.stringify({
+      conversationId,
+      query,
+      timestamp: Date.now(),
+    }));
+  } catch (_) { /* 隐私模式 */ }
+}
+
+/**
+ * 清除流状态（在 chat_done / chat_error 中调用）。
+ */
+function _clearStreamState() {
+  try {
+    localStorage.removeItem(STREAM_STATE_KEY);
+  } catch (_) { /* 隐私模式 */ }
+}
+
+/**
+ * 检查是否有未完成的流（页面加载时调用）。
+ * 如果流状态存在且不超过 5 分钟，显示恢复提示。
+ */
+export function checkStreamResume() {
+  try {
+    const raw = localStorage.getItem(STREAM_STATE_KEY);
+    if (!raw) return null;
+    const state = JSON.parse(raw);
+    if (!state || !state.conversationId) return null;
+    // 超过 5 分钟的流状态视为过期
+    if (Date.now() - (state.timestamp || 0) > 5 * 60 * 1000) {
+      localStorage.removeItem(STREAM_STATE_KEY);
+      return null;
+    }
+    return state;
+  } catch (_) { return null; }
+}
+
 export async function send() {
+  // P1-3：操作过快限制 — 冷却期内阻止发送
+  const now = Date.now();
+  if (now - _lastSendTime < SEND_COOLDOWN_MS && !get('streaming')) {
+    const remaining = Math.ceil((SEND_COOLDOWN_MS - (now - _lastSendTime)) / 1000 * 10) / 10;
+    toast(t('chat.cooldown_hint', { seconds: remaining }) || `操作过快，请等待 ${remaining}s`, 'warning');
+    return;
+  }
+  _lastSendTime = now;
   let query;
   try {
     const input = $('queryInput');
@@ -263,9 +361,26 @@ export async function send() {
     input.style.height = '48px';
     resetHistoryNav();
     // S56：快捷指令展开 — /command query → promptTemplate.replace('{query}', query)
+    // P1-3: /web 命令特殊处理 — 临时启用网页搜索，不展开 prompt
     const slashResult = processSlashCommand(query);
+    _tempWebSearch = false;
+    _tempAgent = false;
     if (slashResult.matched) {
-      query = slashResult.text;
+      if (slashResult.command?.name === 'web') {
+        // /web 命令：使用原始查询，临时启用网页搜索
+        _tempWebSearch = true;
+        try {
+          await invoke('update_setting', { key: 'rag.web_search_enabled', value: 'true' });
+        } catch (_e) { /* 网页搜索可能不可用，静默降级 */ }
+      } else if (slashResult.command?.name === 'agent') {
+        // /agent 命令：使用原始查询，临时启用 Agent 模式
+        _tempAgent = true;
+        try {
+          await invoke('update_setting', { key: 'rag.agent_enabled', value: 'true' });
+        } catch (_e) { /* Agent 模式可能不可用，静默降级 */ }
+      } else {
+        query = slashResult.text;
+      }
     }
     // REQ-PERF-012 扩展：隐式反馈采集 — 检测与上一轮查询的相似度
     detectAndReportImplicit(query, false);
@@ -304,6 +419,8 @@ export async function send() {
   startChatWatchdog();
   _chatErrorHandled = false;
   _chatAborted = false;
+  // P2-1：保存流状态（用于页面刷新后恢复检测）
+  _saveStreamState(get('currentConversationId'), query);
 
   try {
     await invoke('chat', {
@@ -583,6 +700,12 @@ function handleErrorAction(action, queryContext) {
       $('settingsBtn')?.click();
       toast(t('chat.error_action_switch_hint') || '请在设置中切换推理模式', 'info');
       break;
+    case 'upgrade_pro':
+      $('settingsBtn')?.click();
+      break;
+    case 'compress_history':
+      toast(t('chat.error_action_compress_hint', '正在压缩历史记录…') || '正在压缩历史记录…', 'info');
+      break;
     default:
       break;
   }
@@ -602,6 +725,17 @@ export function initChatEventListeners(callbacks) {
   const chatArea = $('chatArea');
   if (chatArea) {
     initScrollLock(chatArea);
+    // REQ-NAV-005：添加「回到顶部」浮动按钮
+    const chatWrapper = chatArea.parentElement;
+    if (chatWrapper && !document.getElementById('backToTopBtn')) {
+      const backToTopBtn = createBackToTopButton();
+      chatWrapper.appendChild(backToTopBtn);
+    }
+    // 确保 jump-to-latest 按钮也存在
+    if (chatWrapper && !document.querySelector('.jump-to-latest:not(#backToTopBtn)')) {
+      const jumpBtn = createJumpToLatestButton();
+      chatWrapper.appendChild(jumpBtn);
+    }
   }
 
   listen('audit_phase', (e) => {
@@ -617,8 +751,29 @@ export function initChatEventListeners(callbacks) {
   listen('chat_phase', (e) => {
     const p = e.payload;
     const el = get('currentAssistantEl');
+    // REQ-ERR-002 AC-2：重试期间显示"重连中…（n/3）"
+    if (p.phase === 'retrying') {
+      const attempt = p.attempt || 1;
+      const maxRetries = p.max_retries || 3;
+      const retryMsg = t('chat.retrying', '重连中…（{n}/{m}）')
+        .replace('{n}', String(attempt))
+        .replace('{m}', String(maxRetries));
+      if (el && el._thinkingPanel) {
+        el._thinkingPanel.update(retryMsg, 'retrying');
+        el._thinkingPanel.appendStage(retryMsg);
+      }
+      const textEl = el?.querySelector('.thinking-text');
+      if (textEl) textEl.textContent = retryMsg;
+      $('inputHint').textContent = retryMsg;
+      resetChatWatchdog();
+      return;
+    }
     if (el) {
       if (el._thinkingPanel) {
+        // 首次 chat_phase 时记录思考开始时间（用于耗时计算）
+        if (!el._thinkingPanel.isFirstTokenReceived()) {
+          el._thinkingPanel.startThinking();
+        }
         // 需求 5：传 phase 触发图标流转（preparing→时钟 / retrieving→放大镜 / generating→星星）
         el._thinkingPanel.update(p.message, p.phase);
         el._thinkingPanel.appendStage(p.message);
@@ -627,6 +782,10 @@ export function initChatEventListeners(callbacks) {
       if (textEl) textEl.textContent = p.message;
     }
     $('inputHint').textContent = p.message;
+    // 屏幕阅读器播报：流式回答开始时播报（REQ-A11Y-004 AC-2）
+    if (p.phase === 'generating' || p.phase === 'preparing') {
+      announceStatus(t('chat.sr_generating', 'Generating answer...'));
+    }
     resetChatWatchdog();
   });
 
@@ -637,11 +796,31 @@ export function initChatEventListeners(callbacks) {
     }
   });
 
+  // REQ-RAG-052: Agent 步骤可视化 — 监听 agent_step 事件
+  listen('agent_step', (e) => {
+    const el = get('currentAssistantEl');
+    if (el && el._thinkingPanel) {
+      const step = e.payload;
+      // 展开面板以显示步骤
+      el._thinkingPanel.expand();
+      el._thinkingPanel.appendAgentStep(step);
+      // 更新进度条
+      if (step.iteration) {
+        el._thinkingPanel.setAgentProgress(step.iteration, 5);
+      }
+    }
+  });
+
   listen('chat_token', (e) => {
     const el = get('currentAssistantEl');
     if (el) {
       if (el._thinkingPanel) {
-        // 标记思考完成，但不强制折叠（用户可能已展开面板实时查看推理过程）
+        // 标记已收到首个 token（AWAITING_FIRST_CHANGE → GENERATING 过渡）
+        if (!el._thinkingPanel.isFirstTokenReceived()) {
+          el._thinkingPanel.markFirstTokenReceived();
+        }
+        // 标记思考完成（显示耗时），但不强制折叠（用户可能已展开面板实时查看推理过程）
+        // setComplete 现在是 async（含 ensureMinLoadingDelay），但不阻塞 token 渲染
         el._thinkingPanel.setComplete();
       }
       const thinking = el.querySelector('.thinking-indicator');
@@ -664,6 +843,8 @@ export function initChatEventListeners(callbacks) {
 
   listen('chat_error', (e) => {
     clearChatWatchdog();
+    // P2-1：清除流状态
+    _clearStreamState();
     _chatErrorHandled = true;
     const msg = String(e.payload);
     if (msg.includes('已中断') || msg.includes('aborted') || msg.includes('Aborted')) {
@@ -688,6 +869,8 @@ export function initChatEventListeners(callbacks) {
         });
       }
       toastError(`${errorInfo.title}：${errorInfo.reason}`);
+      // 屏幕阅读器播报错误（REQ-A11Y-004 AC-4）
+      announceError(`${errorInfo.title}：${errorInfo.reason}`);
       finalizeStream(false);
       setInputState('error', sanitizeError(msg));
     }
@@ -695,6 +878,23 @@ export function initChatEventListeners(callbacks) {
 
   listen('chat_done', async (e) => {
     clearChatWatchdog();
+    // P2-1：清除流状态
+    _clearStreamState();
+    // P1-3: /web 命令完成后恢复网页搜索状态
+    if (_tempWebSearch) {
+      _tempWebSearch = false;
+      try { await invoke('update_setting', { key: 'rag.web_search_enabled', value: 'false' }); } catch (_e) { /* 静默 */ }
+    }
+    // P1-4: /agent 命令完成后恢复 Agent 模式状态
+    if (_tempAgent) {
+      _tempAgent = false;
+      try { await invoke('update_setting', { key: 'rag.agent_enabled', value: 'false' }); } catch (_e) { /* 静默 */ }
+    }
+    // P0-3: 强制检索重生成完成后恢复混合搜索状态
+    if (typeof window !== 'undefined' && window.__echomindRegenForceSearch) {
+      window.__echomindRegenForceSearch = false;
+      try { await invoke('update_setting', { key: 'rag.hybrid_search', value: 'false' }); } catch (_e) { /* 静默 */ }
+    }
     const usage = e.payload;
     const el = get('currentAssistantEl');
     if (el) {
@@ -706,12 +906,16 @@ export function initChatEventListeners(callbacks) {
     _chatAborted = false;
     finalizeStream(!wasAborted);
     setInputState('idle');
+    // 屏幕阅读器播报：回答完成（REQ-A11Y-004 AC-3）
+    if (!wasAborted) {
+      announceStatus(t('chat.sr_answer_complete', 'Answer complete'));
+    }
     if (usage && usage.total_tokens) {
       const hint = $('inputHint');
       if (hint) {
         const badge = document.createElement('span');
         badge.className = 'text-slate-400';
-        badge.textContent = `📊 ${usage.prompt_tokens}↑ ${usage.completion_tokens}↓ = ${usage.total_tokens} tokens`;
+        badge.innerHTML = `<svg class="icon-sm inline-block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> ${usage.prompt_tokens}↑ ${usage.completion_tokens}↓ = ${usage.total_tokens} tokens`;
         hint.replaceChildren(badge);
       }
       const totalTokens = usage.total_tokens || 0;
@@ -735,6 +939,11 @@ export function initChatEventListeners(callbacks) {
     } else {
       await onChatDone?.();
     }
+  });
+
+  // P2-2: 远程 LLM 连续失败 → 自动切换本地模型通知
+  listen('llm_fallback', () => {
+    toast(t('chat.llm_fallback') || '远程 LLM 连续失败，已切换到本地模型', 'warning');
   });
 
   listen('doc-status-changed', (e) => {
@@ -850,3 +1059,7 @@ export function initChatEventListeners(callbacks) {
     });
   }
 }
+
+// V3.1 P4-2：向 chat-render 注入发送动作（解除双向循环依赖——
+// chat-render 不再 import chat，依赖方向变为 chat → chat-render 单向 + 运行时注册）
+registerChatActions({ send, sendFromEdit });

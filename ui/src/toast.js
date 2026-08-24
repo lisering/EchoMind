@@ -24,6 +24,8 @@ const ERROR_PREFIX_MESSAGES = {
   PARSE: { kind: 'error', msgKey: 'errors.parse' },
   EMBED: { kind: 'error', msgKey: 'errors.embed' },
   STORAGE: { kind: 'error', msgKey: 'errors.storage' },
+  DISK_FULL: { kind: 'error', msgKey: 'errors.disk_full' },
+  RATE_LIMIT: { kind: 'warning', msgKey: 'errors.rate_limit' },
   UNKNOWN: { kind: 'error', msgKey: 'errors.unknown' },
 };
 
@@ -66,6 +68,8 @@ export function toastSuccess(message) {
  * - `PARSE:` → error「文件解析失败」
  * - `EMBED:` → error「向量化失败」
  * - `STORAGE:` → error「存储异常」
+ * - `DISK_FULL:` → error「磁盘空间不足，请清理文件」
+ * - `RATE_LIMIT:` → warning「请求过于频繁，请稍后重试」
  * - `VALIDATION:` → warning（显示原始消息）
  * - `LIMIT_REACHED:` / `PRO_REQUIRED:` → 原样返回（调用方负责弹出付费墙）
  * - `UNKNOWN:` → error「未知错误」

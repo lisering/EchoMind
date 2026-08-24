@@ -334,11 +334,12 @@ test.describe('REQ-KB-001 全局快捷键体系验收', () => {
     // 或至少应用仍保持可见（非崩溃）
     await expect(page.locator('#app')).toBeVisible();
 
-    // 如果 newChat() 被调用，聊天区应显示空状态引导页（包含 ◈ 图标）
-    const hasEmptyState = await page.evaluate(() => {
+    // 如果 newChat() 被调用，聊天区应显示空状态引导页
+    const hasEmptyState = await page.evaluate((before) => {
       const chatArea = document.getElementById('chatArea');
-      return chatArea?.innerHTML.includes('◈') || chatArea?.innerHTML !== chatAreaBefore;
-    });
+      // 空状态包含 .empty-state-wrapper 或内容已变化
+      return chatArea?.innerHTML.includes('empty-state-wrapper') || chatArea?.innerHTML !== before;
+    }, chatAreaBefore);
     // 至少应有变化或空状态（放宽断言，因为 newChat 可能因为 mock 环境差异表现不同）
     expect(hasEmptyState, '⌘N 应触发 newChat（聊天区应重置为空状态或内容变化）').toBe(true);
   });

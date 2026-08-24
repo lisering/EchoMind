@@ -159,23 +159,28 @@ test.describe('E2E-ERR 错误处理与恢复', () => {
     // 导入文档
     await importDocs(page, ['/mock/err-refresh.md']);
 
-    // 刷新页面
+    // 刷新页面（injectStub 的 addInitScript 在 reload 后仍然有效）
     await page.reload();
     await page.waitForTimeout(500);
 
-    // 应用应重新加载（需要重新进入）
+    // 应用应重新加载 — injectStub 重新初始化 state，enterApp 需要重新走向导
     const wizard = page.locator('#wizard');
-    if (await wizard.isVisible()) {
+    if (await wizard.isVisible({ timeout: 3000 }).catch(() => false)) {
       await page.locator('#wizKey').fill('sk-e2e-mock');
       await page.locator('#wizStart').click();
+      await page.locator('#wizardStep3').waitFor({ state: 'visible', timeout: 15000 });
+      await page.locator('#wizFinish').click();
     }
 
-    await expect(page.locator('#app')).toBeVisible();
+    await expect(page.locator('#app')).toBeVisible({ timeout: 15000 });
   });
 
   // ─── 无效 License ───
 
   test('E2E-ERR-013 无效 License 激活失败', async ({ page }) => {
+    // 设置 Free 模式以触发付费墙
+    await page.evaluate(() => { window.__state.isPro = false; });
+
     // 触发付费墙
     await page.evaluate(() => window.__mock.simulateDragDrop(['/mock/paper.pdf']));
     await expect(page.locator('#paywall')).toBeVisible({ timeout: 5000 });

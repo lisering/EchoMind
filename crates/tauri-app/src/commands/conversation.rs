@@ -292,6 +292,29 @@ pub async fn delete_conversation_inner(id: &str, state: &AppState) -> Result<(),
     Ok(())
 }
 
+/// 重命名会话（REQ-IX-001：右键菜单「重命名」功能）。
+#[tauri::command]
+pub async fn rename_conversation(
+    id: String,
+    title: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    rename_conversation_inner(&id, &title, state.inner()).await
+}
+
+/// 重命名会话逻辑（命令与集成测试复用）。
+pub async fn rename_conversation_inner(
+    id: &str,
+    title: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    state
+        .storage
+        .update_conversation_title(id, title)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// 停止生成：触发指定会话的中断令牌，流循环立即 break 并中止网络拉取。
 ///
 /// 本地 LLM 模式（Pro）下额外调用 `LocalLlmEngine::abort()`，使 mistral.rs
@@ -589,7 +612,50 @@ pub async fn search_conversations_inner(
         .map_err(|e| format!("{e:#}"))
 }
 
+// ============================================================================
+// 全局搜索增强（REQ-IX-008, S90）
+// ============================================================================
+
+/// 全局搜索 IPC 命令（REQ-IX-008）。
+///
+/// 统一搜索消息（FTS5）+ 文档（文件名/摘要 LIKE）+ 实体（entity_text LIKE）。
+/// 返回 `GlobalSearchResults`，前端按类型分组展示并支持点击跳转。
+///
+/// # 参数
+/// - `query`: 搜索关键词
+/// - `limit`: 每组返回结果数量上限（默认 5）
+///
+/// # 返回
+/// `GlobalSearchResults` — 包含三组搜索结果。
+#[tauri::command]
+pub async fn global_search(
+    query: String,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<GlobalSearchResults, String> {
+    let limit = limit.unwrap_or(5);
+    global_search_inner(&query, limit, state.inner()).await
+}
+
+/// 全局搜索逻辑（命令与集成测试复用）。
+pub async fn global_search_inner(
+    query: &str,
+    limit: usize,
+    state: &AppState,
+) -> Result<GlobalSearchResults, String> {
+    state
+        .storage
+        .global_search(query, limit)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ============================================================================
+// Session Strip（REQ-RAG-046）— S10: 开发者工具门控
+// ============================================================================
+
 /// Session Strip：按索引范围移除消息（REQ-RAG-046）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn strip_messages(
     conversation_id: String,
@@ -631,6 +697,7 @@ pub async fn strip_messages_inner(
 }
 
 /// Session Strip：保留最后 N 条消息（REQ-RAG-046）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn strip_keeping_recent(
     conversation_id: String,
@@ -669,6 +736,7 @@ pub async fn strip_keeping_recent_inner(
 }
 
 /// Session Strip：预览将被移除的消息（REQ-RAG-046）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn preview_strip(
     conversation_id: String,
@@ -687,6 +755,202 @@ pub async fn preview_strip_inner(
     state: &AppState,
 ) -> Result<StripPreview, String> {
     SessionStripper::preview(&state.storage, conversation_id, from_index, to_index)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ------------------------------------------------------------------
+// 单条消息删除（REQ-RAG-013）
+// ------------------------------------------------------------------
+
+/// 删除单条消息（REQ-RAG-013）。
+///
+/// 若 `message_id` 为 user 消息，则连带删除下一条 assistant 消息（保持问答对完整性）。
+/// 若为 assistant 消息，仅删除该条。
+#[tauri::command]
+pub async fn delete_message(
+    conversation_id: String,
+    message_id: String,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    delete_message_inner(&conversation_id, &message_id, state.inner()).await
+}
+
+/// `delete_message` 的逻辑实现（命令与集成测试复用）。
+///
+/// 返回实际删除的消息数（1 或 2）。
+pub async fn delete_message_inner(
+    conversation_id: &str,
+    message_id: &str,
+    state: &AppState,
+) -> Result<usize, String> {
+    // 获取会话全部消息，找到目标消息
+    let messages = state
+        .storage
+        .list_messages(conversation_id)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 找到目标消息索引
+    let target_idx = messages
+        .iter()
+        .position(|m| m.id.as_deref() == Some(message_id))
+        .ok_or_else(|| format!("消息不存在: {message_id}"))?;
+
+    let target = &messages[target_idx];
+    let mut ids_to_delete = vec![message_id.to_string()];
+
+    // 若为 user 消息，查找下一条 assistant 消息一并删除
+    if target.role == "user"
+        && let Some(next) = messages.get(target_idx + 1)
+        && next.role == "assistant"
+        && let Some(ref next_id) = next.id
+    {
+        ids_to_delete.push(next_id.clone());
+    }
+
+    let count = ids_to_delete.len();
+    state
+        .storage
+        .delete_messages_by_ids(conversation_id, &ids_to_delete)
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+    Ok(count)
+}
+
+/// 批量更新会话排序（REQ-IX-002 拖拽排序持久化）。
+///
+/// 接收有序的会话 ID 列表，按列表顺序设置递增 sort_order。
+#[tauri::command]
+pub async fn reorder_conversations(
+    ordered_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    reorder_conversations_inner(ordered_ids, state.inner()).await
+}
+
+/// `reorder_conversations` 的逻辑实现（命令与集成测试复用）。
+pub async fn reorder_conversations_inner(
+    ordered_ids: Vec<String>,
+    state: &AppState,
+) -> Result<(), String> {
+    state
+        .storage
+        .reorder_conversations(&ordered_ids)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+// ==================================================================
+// 对话书签（REQ-RAG-047）
+// ==================================================================
+
+/// 添加对话书签（REQ-RAG-047 AC-1/AC-2 + REQ-RAG-053 消息级）。
+#[tauri::command]
+pub async fn add_bookmark(
+    conversation_id: String,
+    note: Option<String>,
+    message_id: Option<String>,
+    summary: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    add_bookmark_inner(
+        &conversation_id,
+        note.as_deref(),
+        message_id.as_deref(),
+        summary.as_deref(),
+        state.inner(),
+    )
+    .await
+}
+
+/// `add_bookmark` 的逻辑实现。
+pub async fn add_bookmark_inner(
+    conversation_id: &str,
+    note: Option<&str>,
+    message_id: Option<&str>,
+    summary: Option<&str>,
+    state: &AppState,
+) -> Result<(), String> {
+    state
+        .storage
+        .add_bookmark(conversation_id, note, message_id, summary)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 移除对话书签（REQ-RAG-047 AC-5）。
+#[tauri::command]
+pub async fn remove_bookmark(
+    conversation_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    remove_bookmark_inner(&conversation_id, state.inner()).await
+}
+
+/// `remove_bookmark` 的逻辑实现。
+pub async fn remove_bookmark_inner(conversation_id: &str, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .remove_bookmark(conversation_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 列出全部书签（REQ-RAG-047 AC-3/AC-4）。
+#[tauri::command]
+pub async fn list_bookmarks(
+    state: State<'_, AppState>,
+) -> Result<Vec<echomind_models::ConversationBookmark>, String> {
+    list_bookmarks_inner(state.inner()).await
+}
+
+/// `list_bookmarks` 的逻辑实现。
+pub async fn list_bookmarks_inner(
+    state: &AppState,
+) -> Result<Vec<echomind_models::ConversationBookmark>, String> {
+    state
+        .storage
+        .list_bookmarks()
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 检查指定会话是否已加书签（REQ-RAG-047 AC-2）。
+#[tauri::command]
+pub async fn is_bookmarked(
+    conversation_id: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    is_bookmarked_inner(&conversation_id, state.inner()).await
+}
+
+/// `is_bookmarked` 的逻辑实现。
+pub async fn is_bookmarked_inner(conversation_id: &str, state: &AppState) -> Result<bool, String> {
+    state
+        .storage
+        .is_bookmarked(conversation_id)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 查询指定消息的书签（REQ-RAG-053）。
+#[tauri::command]
+pub async fn get_message_bookmark(
+    message_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<echomind_models::ConversationBookmark>, String> {
+    get_message_bookmark_inner(&message_id, state.inner()).await
+}
+
+/// `get_message_bookmark` 的逻辑实现。
+pub async fn get_message_bookmark_inner(
+    message_id: &str,
+    state: &AppState,
+) -> Result<Option<echomind_models::ConversationBookmark>, String> {
+    state
+        .storage
+        .get_message_bookmark(message_id)
         .await
         .map_err(|e| format!("{e:#}"))
 }

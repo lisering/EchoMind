@@ -16,7 +16,7 @@ import { invoke } from './ipc.js';
 import { t } from './i18n.js';
 import { createFocusTrap } from './focus-trap.js';
 import { toast, toastError, toastSuccess } from './toast.js';
-import { Z_INDEX, zClass } from './zindex.js';
+import { Z_INDEX, zClass } from './panel-stack.js';
 import { pushPanel, removePanel } from './panel-stack.js';
 
 /** 符号类型 → 图标映射 */

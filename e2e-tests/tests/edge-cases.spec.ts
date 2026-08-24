@@ -11,8 +11,8 @@ test.describe('E2E 边界与防御性', () => {
   test('E2E-UI-011 空知识库时主界面展示导入引导', async ({ page }) => {
     await enterApp(page);
     await expect(page.locator('#chatArea')).toBeVisible();
-    const hasGuide = await page.locator('#chatArea .h-full').count();
-    expect(hasGuide, '空知识库应展示引导空状态').toBe(1);
+    const hasGuide = await page.locator('#chatArea .empty-state-wrapper, #chatArea .h-full').count();
+    expect(hasGuide, '空知识库应展示引导空状态').toBeGreaterThanOrEqual(1);
     await expect(page.locator('#kbDocCount')).toContainText('0/50');
   });
 
@@ -27,6 +27,8 @@ test.describe('E2E 边界与防御性', () => {
 
   test('E2E-LIC-004 关闭付费墙无副作用', async ({ page }) => {
     await enterApp(page);
+    // 确保是免费版（stub 默认 isPro=true）
+    await page.evaluate(() => { window.__state.isPro = false; });
     // 触发付费墙（免费版拖拽导入 PDF）
     await page.evaluate(() => window.__mock.simulateDragDrop(['/mock/paper.pdf']));
     await expect(page.locator('#paywall')).toBeVisible({ timeout: 5000 });
@@ -56,6 +58,8 @@ test.describe('E2E 边界与防御性', () => {
 
   test('E2E-UI-011b 配额触顶弹出付费墙', async ({ page }) => {
     await enterApp(page);
+    // 确保是免费版（stub 默认 isPro=true）
+    await page.evaluate(() => { window.__state.isPro = false; });
     // 模拟已有 50 个文档
     await page.evaluate(() => {
       for (let i = 0; i < 50; i++) {

@@ -28,6 +28,7 @@ import { invoke } from './ipc.js';
  * @property {string} icon - 图标 emoji
  * @property {string} promptTemplate - 发送给 LLM 的 prompt 模板（{query} 为占位符）
  * @property {boolean} [isCustom] - 是否为自定义模板（S56）
+ * @property {boolean} [isSkill] - 是否为 Skill 技能（B09 v1.8）
  * @property {string} [id] - 自定义模板 ID（S56）
  */
 
@@ -37,43 +38,57 @@ export const SLASH_COMMANDS = [
     name: 'summary',
     label: 'chat.slash_summary',
     desc: 'chat.slash_summary_desc',
-    icon: '📝',
+    icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>',
     promptTemplate: '请总结以下内容的核心要点：{query}',
   },
   {
     name: 'compare',
     label: 'chat.slash_compare',
     desc: 'chat.slash_compare_desc',
-    icon: '⚖️',
+    icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M5 21h14"/><path d="M3 8h4l2-5"/><path d="M17 8h4l-2-5"/><circle cx="7" cy="8" r="1.5"/><circle cx="17" cy="8" r="1.5"/></svg>',
     promptTemplate: '请对比以下内容的异同：{query}',
   },
   {
     name: 'extract',
     label: 'chat.slash_extract',
     desc: 'chat.slash_extract_desc',
-    icon: '🔍',
+    icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>',
     promptTemplate: '请从以下内容中提取关键信息/条款：{query}',
   },
   {
     name: 'translate',
     label: 'chat.slash_translate',
     desc: 'chat.slash_translate_desc',
-    icon: '🌐',
+    icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
     promptTemplate: '请将以下内容翻译：{query}',
   },
   {
     name: 'timeline',
     label: 'chat.slash_timeline',
     desc: 'chat.slash_timeline_desc',
-    icon: '📅',
+    icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
     promptTemplate: '请从以下内容中生成时间线：{query}',
   },
   {
     name: 'mindmap',
     label: 'chat.slash_mindmap',
     desc: 'chat.slash_mindmap_desc',
-    icon: '🧠',
+    icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>',
     promptTemplate: '请从以下内容中生成思维导图（Mermaid 格式）：{query}',
+  },
+  {
+    name: 'web',
+    label: 'chat.slash_web',
+    desc: 'chat.slash_web_desc',
+    icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+    promptTemplate: '请结合网页搜索结果回答以下问题：{query}',
+  },
+  {
+    name: 'agent',
+    label: 'chat.slash_agent',
+    desc: 'chat.slash_agent_desc',
+    icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v1a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4z"/><path d="M5 12h14M12 8v8"/></svg>',
+    promptTemplate: '{query}',
   },
 ];
 
@@ -86,6 +101,53 @@ let _customCommands = [];
 
 /** @type {boolean} 是否已加载过自定义模板 */
 let _customLoaded = false;
+
+// ============================================================
+// B09 Skill 加载（v1.8：从 {data_dir}/skills/ 发现 slash: true 的技能）
+// ============================================================
+
+/** @type {SlashCommand[]} Skill 缓存 */
+let _skillCommands = [];
+
+/** @type {boolean} 是否已加载过 Skill */
+let _skillsLoaded = false;
+
+/**
+ * 从后端加载 Skill 文件（B09 v1.8）。
+ *
+ * 调用 `discover_skills` IPC 扫描 `{data_dir}/skills/` 目录中的 `.md` 文件，
+ * 仅返回 `slash: true` 的技能。转换为 SlashCommand 格式并缓存。
+ * 失败时静默降级为空列表（不影响系统指令和自定义模板）。
+ *
+ * @returns {Promise<SlashCommand[]>} Skill 指令列表
+ */
+export async function loadSkills() {
+  try {
+    const skills = await invoke('discover_skills');
+    _skillCommands = (skills || []).map((skill) => ({
+      name: skill.name,
+      label: skill.description || `chat.slash_${skill.name}`,
+      desc: skill.description || 'chat.slash_skill_desc',
+      icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+      promptTemplate: skill.content + '\n\n---\n用户问题: {query}',
+      isSkill: true,
+    }));
+    _skillsLoaded = true;
+  } catch (_) {
+    // 静默降级：后端不可用时仅使用系统指令和自定义模板
+    _skillCommands = [];
+    _skillsLoaded = true;
+  }
+  return _skillCommands;
+}
+
+/**
+ * 重置 Skill 缓存。
+ */
+export function resetSkills() {
+  _skillCommands = [];
+  _skillsLoaded = false;
+}
 
 /**
  * 从后端加载自定义快捷指令模板（S56）。
@@ -131,7 +193,7 @@ export function resetCustomTemplates() {
  * @returns {SlashCommand[]} 合并后的指令列表
  */
 export function getAllCommands() {
-  return [...SLASH_COMMANDS, ..._customCommands];
+  return [...SLASH_COMMANDS, ..._customCommands, ..._skillCommands];
 }
 
 // ============================================================
@@ -235,6 +297,14 @@ export function renderSlashCommandPanel(container, filtered, onSelect) {
         badge.title = t('chat.slash_custom') || '自定义';
         name.appendChild(badge);
       }
+      // Skill 显示角标（B09 v1.8）
+      if (cmd.isSkill) {
+        const badge = document.createElement('span');
+        badge.className = 'slash-command-badge';
+        badge.innerHTML = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>';
+        badge.title = t('chat.slash_skill') || 'Skill';
+        name.appendChild(badge);
+      }
 
       const desc = document.createElement('span');
       desc.className = 'slash-command-desc';
@@ -285,24 +355,32 @@ function updateSelectedVisual(panel, filtered) {
 // ============================================================
 
 /**
- * 键盘导航选中项（上/下）。
+ * 键盘导航选中项（上/下/首/末）。
  *
  * - 'down' → 选中下一项，末项时回绕到首项
  * - 'up' → 选中上一项，首项时回绕到末项
+ * - 'home' → 跳转到首项（P2-4）
+ * - 'end' → 跳转到末项（P2-4）
  *
  * @param {SlashCommand[]} filtered - 过滤后的指令列表
- * @param {'up'|'down'} direction - 导航方向
+ * @param {'up'|'down'|'home'|'end'} direction - 导航方向
  * @returns {void}
  */
 export function navigateSlashCommand(filtered, direction) {
   if (!filtered || filtered.length === 0) return;
 
-  if (filtered.length === 1) return;
+  if (filtered.length === 1 && direction !== 'home' && direction !== 'end') return;
 
   if (direction === 'down') {
     _selectedIndex = (_selectedIndex + 1) % filtered.length;
-  } else {
+  } else if (direction === 'up') {
     _selectedIndex = (_selectedIndex - 1 + filtered.length) % filtered.length;
+  } else if (direction === 'home') {
+    _selectedIndex = 0;
+  } else if (direction === 'end') {
+    _selectedIndex = filtered.length - 1;
+  } else {
+    return;
   }
 
   // 更新视觉（使用模块级引用，避免多面板冲突）

@@ -12,9 +12,10 @@
 
 import { setState, get } from './state.js';
 import { $, getSubPhaseLabel, formatBytes } from './utils.js';
-import { invoke, listen, openDialog } from './ipc.js';
+import { invoke, listen, openDialog, importApi } from './ipc.js';
 import { toast, toastError } from './toast.js';
-import { showPaywall } from './paywall.js';
+import { showPaywall } from './wizard.js';
+import { showConfirmDialog } from './confirm-dialog.js';
 import { t } from './i18n.js';
 
 /**
@@ -160,7 +161,35 @@ export async function importPaths(paths, onImportDone) {
     if (onImportDone) await onImportDone();
   } catch (err) {
     const msg = String(err);
-    if (msg.includes('PRO_REQUIRED') || msg.includes('LIMIT_REACHED')) {
+    // REQ-ING-012：同名不同内容冲突 → 弹出替换确认
+    if (msg.startsWith('CONFLICT:')) {
+      const parts = msg.split(':');
+      const oldDocId = parts[1] || '';
+      const fileName = parts.slice(2).join(':') || '';
+      // 恢复输入状态（导入被中断）
+      setState({ streaming: false });
+      const confirmed = await showConfirmDialog({
+        title: t('import.replace_title'),
+        body: t('import.replace_confirm', { name: fileName }),
+        confirmText: t('import.replace_btn'),
+        cancelText: t('common.cancel'),
+        danger: false,
+      });
+      if (confirmed) {
+        // 用户确认替换：调用 replace_document
+        showImportProgress(1);
+        try {
+          await importApi.replaceDocument(filteredPaths[0], oldDocId);
+          toast(t('import.replace_success', { name: fileName }), 'success');
+          if (onImportDone) await onImportDone();
+        } catch (replaceErr) {
+          toastError(String(replaceErr));
+        } finally {
+          hideImportProgress();
+        }
+      }
+      // 用户取消 → 跳过该文件
+    } else if (msg.includes('PRO_REQUIRED') || msg.includes('LIMIT_REACHED')) {
       // PDF 付费门 / 配额触顶 → 弹出付费墙
       const reason = msg.split(':').slice(1).join(':').trim() || t('paywall.reason_default');
       showPaywall(reason);

@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { showCaret, removeCaret, isCaretActive } from '../../../ui/src/caret.js';
+import { showCaret, removeCaret, isCaretActive } from '../../../ui/src/chat-render.js';
 
 describe('Stream Caret — caret.js', () => {
   let container;

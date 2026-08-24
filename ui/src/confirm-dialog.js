@@ -15,7 +15,7 @@
 
 import { t } from './i18n.js';
 import { createFocusTrap } from './focus-trap.js';
-import { Z_INDEX, zClass } from './zindex.js';
+import { Z_INDEX, zClass } from './panel-stack.js';
 import { pushPanel, removePanel } from './panel-stack.js';
 
 /** @type {HTMLElement|null} 当前活动对话框的 DOM 根节点 */
@@ -91,6 +91,7 @@ function _onKeyDown(e) {
  * @param {string} [opts.confirmText] - 确认按钮文案（默认 "确认"）
  * @param {string} [opts.cancelText] - 取消按钮文案（默认 "取消"）
  * @param {boolean} [opts.danger=true] - 是否为危险操作（确认按钮红色变体）
+ * @param {string|HTMLElement} [opts.customContent] - 自定义内容（下拉选择/输入框，REQ-ING-024）
  * @returns {Promise<boolean>} 用户选择结果（true=确认, false=取消）
  *
  * @example
@@ -104,7 +105,7 @@ function _onKeyDown(e) {
  * // 执行删除...
  */
 export function showConfirmDialog(opts = {}) {
-  const { title = '', body = '', confirmText, cancelText, danger = true } = opts;
+  const { title = '', body = '', confirmText, cancelText, danger = true, customContent = null } = opts;
 
   // 如果已有对话框打开，先关闭旧的（视为取消）
   if (_activeDialog) {
@@ -147,7 +148,7 @@ export function showConfirmDialog(opts = {}) {
     if (danger) {
       const icon = document.createElement('div');
       icon.className = 'text-3xl mb-2 text-amber-400';
-      icon.textContent = '⚠️';
+      icon.innerHTML = '<svg class="icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
       container.appendChild(icon);
     }
 
@@ -170,6 +171,18 @@ export function showConfirmDialog(opts = {}) {
       const spacer = document.createElement('div');
       spacer.className = 'mb-4';
       container.appendChild(spacer);
+    }
+
+    // 自定义内容（REQ-ING-024：批量移动下拉选择、批量标签输入框）
+    if (customContent) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'mb-4';
+      if (typeof customContent === 'string') {
+        wrapper.innerHTML = customContent;
+      } else if (customContent instanceof HTMLElement) {
+        wrapper.appendChild(customContent);
+      }
+      container.appendChild(wrapper);
     }
 
     // 按钮行

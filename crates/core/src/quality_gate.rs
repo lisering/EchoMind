@@ -1,4 +1,4 @@
-//! RAG 质量门控系统（借鉴 StoryMoss 加权评分门控，REQ-RAG-028）。
+//! RAG 质量门控系统（借鉴 StoryMoss 加权评分门控，REQ-RAG-028 + REQ-PERF-014）。
 //!
 //! 检索后评估结果质量，低质量时触发降级策略：
 //! - 检索覆盖率（top-1 分数归一化）：最高分 chunk 的分数是否足够高
@@ -17,6 +17,15 @@
 //! 当前版本仅做评估 + 日志记录（`PassThrough`）。
 //! `ExpandTopK`（扩大 top-k 后重试）和 `WarnUser`（提示用户查询不够明确）
 //! 由 `chat_inner` 在外部处理，因为需要重新检索或前端交互。
+//!
+//! ## 主动干预（REQ-PERF-014）
+//!
+//! 在原有评估+日志的基础上，新增主动干预能力：
+//! - `should_retry()`：评估质量评分是否低于阈值，决定是否需要增强重试
+//! - `build_enhanced_config()`：生成增强检索参数（扩大 top_k + 启用 HyDE + 启用 Rerank）
+//! - `RetryDecision`：重试决策（是否重试 + 原因）
+//! - `RetryOutcome`：重试结果（原始分数 → 重试分数 + 改善幅度）
+//! - 最大重试次数 = 1（防无限重试 + 控制延迟）
 
 use echomind_models::RetrievalResult;
 
@@ -175,4 +184,175 @@ fn compute_score_variance(results: &[RetrievalResult]) -> f32 {
     let mean = scores.iter().sum::<f32>() / n;
     let variance = scores.iter().map(|s| (s - mean).powi(2)).sum::<f32>() / n;
     variance.sqrt()
+}
+
+// ============================================================================
+// 主动干预模块（REQ-PERF-014）
+// ============================================================================
+
+/// 主动门控配置（REQ-PERF-014）。
+///
+/// 控制何时触发增强重试以及增强策略的参数。
+#[derive(Debug, Clone)]
+pub struct ActiveGateConfig {
+    /// 触发重试的质量分数阈值（低于此值时触发）。
+    /// 默认 0.6，与 `GATE_PASS_THRESHOLD` 一致。
+    pub retry_threshold: f32,
+    /// top_k 扩大倍数（如 3.0 = 扩大到 3 倍）。
+    /// 默认 3.0，扩大检索范围以找到更多候选。
+    pub enhanced_top_k_multiplier: f32,
+    /// 重试时是否启用 HyDE 查询改写。
+    /// 默认 true，通过假设性答案改写查询提升语义匹配。
+    pub enable_hyde: bool,
+    /// 重试时是否启用 Cross-Encoder 重排序。
+    /// 默认 true，对扩大后的候选集精排。
+    pub enable_rerank: bool,
+    /// 最大重试次数（默认 1，防无限重试 + 控制延迟）。
+    pub max_retries: usize,
+}
+
+impl Default for ActiveGateConfig {
+    fn default() -> Self {
+        Self {
+            retry_threshold: GATE_PASS_THRESHOLD,
+            enhanced_top_k_multiplier: 3.0,
+            enable_hyde: true,
+            enable_rerank: true,
+            max_retries: 1,
+        }
+    }
+}
+
+/// 重试决策。
+///
+/// 评估质量评分后，决定是否需要增强重试。
+#[derive(Debug, Clone)]
+pub struct RetryDecision {
+    /// 是否应该重试
+    pub should_retry: bool,
+    /// 决策原因（人类可读）
+    pub reason: String,
+}
+
+/// 增强检索配置。
+///
+/// 由 `build_enhanced_config()` 生成，用于指导增强重试的检索参数。
+#[derive(Debug, Clone)]
+pub struct EnhancedRetrievalConfig {
+    /// 增强后的 top_k（原始 top_k × multiplier）
+    pub enhanced_top_k: usize,
+    /// 是否启用 HyDE 查询改写
+    pub enable_hyde: bool,
+    /// 是否启用 Cross-Encoder 重排序
+    pub enable_rerank: bool,
+}
+
+/// 重试结果。
+///
+/// 记录原始检索和增强重试的质量对比，用于日志和可观测性。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RetryOutcome {
+    /// 原始检索的加权质量分数
+    pub original_score: f32,
+    /// 重试后的加权质量分数
+    pub retry_score: f32,
+    /// 质量改善幅度（retry_score - original_score）
+    pub improvement: f32,
+    /// 是否实际执行了重试
+    pub retried: bool,
+}
+
+/// 判断是否应该触发增强重试。
+///
+/// 当质量评分未通过门控（`!score.passed`）且未超过最大重试次数时，返回 `should_retry = true`。
+///
+/// # 参数
+/// - `score`: 质量评分结果（由 `evaluate()` 产生）
+/// - `config`: 主动门控配置
+///
+/// # 返回
+/// `RetryDecision` 包含 `should_retry` 布尔值和原因说明。
+pub fn should_retry(score: &GateScore, config: &ActiveGateConfig) -> RetryDecision {
+    should_retry_with_count(score, config, 0)
+}
+
+/// 判断是否应该触发增强重试（带已重试计数）。
+///
+/// 在 `should_retry()` 基础上增加 `current_retry` 参数，用于防止无限重试。
+///
+/// # 参数
+/// - `score`: 质量评分结果
+/// - `config`: 主动门控配置
+/// - `current_retry`: 当前已重试次数（0 = 首次，1 = 已重试一次）
+///
+/// # 返回
+/// `RetryDecision`：当 `current_retry >= max_retries` 时返回 `should_retry = false`。
+pub fn should_retry_with_count(
+    score: &GateScore,
+    config: &ActiveGateConfig,
+    current_retry: usize,
+) -> RetryDecision {
+    if current_retry >= config.max_retries {
+        return RetryDecision {
+            should_retry: false,
+            reason: format!("已达最大重试次数 {}，不再重试", config.max_retries),
+        };
+    }
+
+    if !score.passed {
+        return RetryDecision {
+            should_retry: true,
+            reason: format!(
+                "质量分数 {:.3} 低于阈值 {:.3}，触发增强重试",
+                score.weighted, config.retry_threshold
+            ),
+        };
+    }
+
+    RetryDecision {
+        should_retry: false,
+        reason: format!("质量分数 {:.3} 通过门控", score.weighted),
+    }
+}
+
+/// 构建增强检索配置。
+///
+/// 根据主动门控配置生成增强检索参数：扩大 top_k + 启用 HyDE + 启用 Rerank。
+///
+/// # 参数
+/// - `config`: 主动门控配置
+/// - `original_top_k`: 原始 top_k 值
+///
+/// # 返回
+/// `EnhancedRetrievalConfig` 包含增强后的参数。
+pub fn build_enhanced_config(
+    config: &ActiveGateConfig,
+    original_top_k: usize,
+) -> EnhancedRetrievalConfig {
+    let enhanced_top_k = (original_top_k as f32 * config.enhanced_top_k_multiplier) as usize;
+    EnhancedRetrievalConfig {
+        enhanced_top_k: enhanced_top_k.max(original_top_k),
+        enable_hyde: config.enable_hyde,
+        enable_rerank: config.enable_rerank,
+    }
+}
+
+/// 构建重试结果。
+///
+/// 比较原始检索和增强重试的质量分数，计算改善幅度。
+///
+/// # 参数
+/// - `original_score`: 原始检索的加权质量分数
+/// - `retry_score`: 重试后的加权质量分数
+/// - `retried`: 是否实际执行了重试
+///
+/// # 返回
+/// `RetryOutcome` 包含对比信息。
+pub fn build_retry_outcome(original_score: f32, retry_score: f32, retried: bool) -> RetryOutcome {
+    RetryOutcome {
+        original_score,
+        retry_score,
+        improvement: retry_score - original_score,
+        retried,
+    }
 }

@@ -100,11 +100,20 @@ test.describe('E2E-TOAST-001~007 Toast 系统行为', () => {
   });
 
   test('E2E-TOAST-006 toastError 自动脱敏 API Key', async ({ page }) => {
-    // 模拟后端错误含 API Key（使用无连字符格式以匹配 sanitizeError 正则）
+    // 模拟后端错误含 API Key（通过 chatError 状态触发错误）
     await page.evaluate(() => {
-      const listeners = window.__state.listeners['chat_error'] || [];
-      listeners.forEach((cb) => cb({ payload: 'LLM API 错误 (HTTP 401): sk-abcdefghijklmnop123456 无效' }));
+      window.__state.chatError = 'LLM API 错误 (HTTP 401): sk-abcdefghijklmnop123456 无效';
     });
+    // 导入文档并发送消息触发 chat 错误
+    await page.locator('#kbBtn').click();
+    await expect(page.locator('#kbModal')).toBeVisible({ timeout: 3000 });
+    await page.evaluate(() =>
+      window.__TAURI__.core.invoke('import_files', { paths: ['/mock/toast-test.md'] })
+    );
+    await page.waitForTimeout(300);
+    await page.locator('#kbCloseBtn').click();
+    await page.locator('#queryInput').fill('触发错误');
+    await page.locator('#sendBtn').click();
 
     await expect(page.locator('#toasts')).toContainText('401', { timeout: 5000 });
     // 检查最后一条 toast（错误 toast）
@@ -117,11 +126,20 @@ test.describe('E2E-TOAST-001~007 Toast 系统行为', () => {
   });
 
   test('E2E-TOAST-007 toastError 自动脱敏用户路径', async ({ page }) => {
-    // 模拟错误含用户路径
+    // 模拟错误含用户路径（通过 chatError 状态触发错误）
     await page.evaluate(() => {
-      const listeners = window.__state.listeners['chat_error'] || [];
-      listeners.forEach((cb) => cb({ payload: '文件读取失败：/Users/john/Desktop/file.md 不存在' }));
+      window.__state.chatError = '文件读取失败：/Users/john/Desktop/file.md 不存在';
     });
+    // 导入文档并发送消息触发 chat 错误
+    await page.locator('#kbBtn').click();
+    await expect(page.locator('#kbModal')).toBeVisible({ timeout: 3000 });
+    await page.evaluate(() =>
+      window.__TAURI__.core.invoke('import_files', { paths: ['/mock/toast-test2.md'] })
+    );
+    await page.waitForTimeout(300);
+    await page.locator('#kbCloseBtn').click();
+    await page.locator('#queryInput').fill('触发路径错误');
+    await page.locator('#sendBtn').click();
 
     await expect(page.locator('#toasts')).toContainText('文件读取失败', { timeout: 5000 });
     // 检查最后一条 toast（错误 toast）

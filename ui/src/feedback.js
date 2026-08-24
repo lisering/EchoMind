@@ -8,12 +8,16 @@
  * 4. 反馈数据存储到 localStorage，不发送到云端
  * 5. 已反馈的消息按钮高亮
  *
+ * 另含检索质量自学习反馈采集（原 retrieval-feedback.js，REQ-PERF-012 扩展）。
+ *
  * 设计参考：QA_UI_DESIGN_PROPOSAL.md §4.14 点赞/踩反馈
  * AC-QA-013：点赞/踩反馈机制
  */
 
 import { t } from './i18n.js';
-import { reportThumbsUp, reportThumbsDown } from './retrieval-feedback.js';
+import { invoke } from './ipc.js';
+import { getState } from './state.js';
+import { getToggleState } from './input-toggles.js';
 
 // ============================================================
 // 常量定义
@@ -29,6 +33,123 @@ export const FEEDBACK_REASONS = {
   FORMAT: 'format',
   OTHER: 'other',
 };
+
+// ============================================================
+// 检索质量自学习反馈采集（原 retrieval-feedback.js）
+// ============================================================
+
+/** 上一轮查询文本（用于相似度比较） */
+let _lastQuery = null;
+
+/** 上一轮是否为编辑重发模式 */
+let _lastWasEdit = false;
+
+/**
+ * 推断当前使用的检索方法（与后端 chat_inner 逻辑一致）。
+ * @returns {string} 检索方法标识：'vector_only' | 'hybrid' | 'hybrid_rerank'
+ */
+export function inferRetrievalMethod() {
+  const hybridEnabled = getToggleState('hybrid');
+  const rerankEnabled = getState().rerankEnabled || false;
+
+  if (!hybridEnabled) return 'vector_only';
+  if (rerankEnabled) return 'hybrid_rerank';
+  return 'hybrid';
+}
+
+/**
+ * 计算两个查询文本的相似度（Jaccard 词重叠率）。
+ * @param {string} a - 查询 A
+ * @param {string} b - 查询 B
+ * @returns {number} 相似度 0.0-1.0
+ */
+export function textSimilarity(a, b) {
+  if (!a || !b) return 0.0;
+  const tokensA = new Set(a.toLowerCase().split(/\s+|(?<=[\u4e00-\u9fff])|(?=[\u4e00-\u9fff])/).filter(Boolean));
+  const tokensB = new Set(b.toLowerCase().split(/\s+|(?<=[\u4e00-\u9fff])|(?=[\u4e00-\u9fff])/).filter(Boolean));
+  if (tokensA.size === 0 || tokensB.size === 0) return 0.0;
+  let intersection = 0;
+  for (const tk of tokensA) {
+    if (tokensB.has(tk)) intersection++;
+  }
+  const union = tokensA.size + tokensB.size - intersection;
+  return union > 0 ? intersection / union : 0.0;
+}
+
+/**
+ * 上报用户反馈信号到后端。
+ * @param {string} query - 用户查询文本
+ * @param {string} method - 检索方法标识
+ * @param {string} feedbackType - 反馈类型
+ * @returns {Promise<void>}
+ */
+export async function reportFeedback(query, method, feedbackType) {
+  try {
+    await invoke('record_retrieval_feedback', {
+      signal: {
+        query,
+        method,
+        feedback: feedbackType,
+        timestamp: Math.floor(Date.now() / 1000),
+      },
+    });
+  } catch (e) {
+    console.debug('[retrieval-feedback] 上报失败（静默）:', e);
+  }
+}
+
+/**
+ * 检测并上报隐式反馈信号。
+ * @param {string} newQuery - 新查询文本
+ * @param {boolean} isEdit - 是否为编辑重发模式
+ */
+export function detectAndReportImplicit(newQuery, isEdit = false) {
+  if (!_lastQuery) {
+    _lastQuery = newQuery;
+    _lastWasEdit = isEdit;
+    return;
+  }
+
+  const method = inferRetrievalMethod();
+  const similarity = textSimilarity(_lastQuery, newQuery);
+
+  if (isEdit || _lastWasEdit) {
+    reportFeedback(_lastQuery, method, 'edit_and_resend');
+  } else if (similarity > 0.6) {
+    reportFeedback(_lastQuery, method, 'retry_with_different_method');
+  } else if (similarity < 0.3) {
+    reportFeedback(_lastQuery, method, 'accepted');
+  }
+
+  _lastQuery = newQuery;
+  _lastWasEdit = isEdit;
+}
+
+/**
+ * 显式反馈：用户点赞。
+ * @param {string} query - 被点赞回答对应的查询文本
+ */
+export function reportThumbsUp(query) {
+  const method = inferRetrievalMethod();
+  reportFeedback(query, method, 'thumbs_up');
+}
+
+/**
+ * 显式反馈：用户点踩。
+ * @param {string} query - 被点踩回答对应的查询文本
+ */
+export function reportThumbsDown(query) {
+  const method = inferRetrievalMethod();
+  reportFeedback(query, method, 'thumbs_down');
+}
+
+/**
+ * 重置反馈跟踪状态（新对话时调用）。
+ */
+export function resetFeedbackTracking() {
+  _lastQuery = null;
+  _lastWasEdit = false;
+}
 
 // ============================================================
 // 类型定义（JSDoc）

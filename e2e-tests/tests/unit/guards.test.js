@@ -21,7 +21,7 @@ import {
   runGuard,
   updateInputUI,
   syncChatInputState,
-} from '../../../ui/src/guards.js';
+} from '../../../ui/src/action.js';
 
 // Mock DOM
 document.body.innerHTML = `
@@ -43,7 +43,7 @@ vi.mock('../../../ui/src/toast.js', () => ({
 }));
 
 // Mock queue-send getQueueSize
-vi.mock('../../../ui/src/queue-send.js', () => ({
+vi.mock('../../../ui/src/chat-utils.js', () => ({
   getQueueSize: () => 0,
 }));
 

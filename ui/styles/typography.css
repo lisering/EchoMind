@@ -140,9 +140,27 @@
 /* 兼容旧 .source-chip 样式 */
 .source-chip { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(var(--accent-rgb),0.08); color: var(--accent); border: 1px solid rgba(var(--accent-rgb),0.15); transition: background 0.3s; cursor: pointer; }
 .source-chip:hover { background: rgba(var(--accent-rgb),0.18); }
+
 /* --- 消息操作栏 --- */
-.msg-actions { display: flex; gap: 4px; margin-top: 8px; opacity: 1; }
+/* DeepSeek 实测：ds-button 28×28px + border-radius 4096px（胶囊形）
+ * color rgb(129,133,140) + cursor pointer
+ * __background 子元素 position:absolute + background-color 过渡 0.2s
+ * __icon 子元素 16×16px + color 过渡 0.3s
+ * 按钮组 opacity 过渡 0.2s cubic-bezier(0.4,0,0.2,1) */
+.msg-actions { display: flex; gap: 2px; padding: 12px 0 10px; opacity: 1; transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
 /* 操作栏始终可见 */
 /* 用户消息外部操作栏右对齐（用 Tailwind 工具类 flex justify-end 实现） */
-.msg-action-btn { font-size: 11px; padding: 3px 7px; border-radius: 9999px; background: transparent; color: var(--text-secondary); border: 1px solid transparent; cursor: pointer; transition: all 0.15s; }
-.msg-action-btn:hover { background: rgba(var(--accent-rgb),0.1); color: var(--accent); border-color: rgba(var(--accent-rgb),0.2); }
+.msg-action-btn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--text-tertiary);
+  border: none;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.msg-action-btn:hover { background: var(--surface-2); color: var(--text-primary); }
+.msg-action-btn:active { transform: scale(0.95); }
+.msg-action-btn:disabled { opacity: 0.45; cursor: not-allowed; color: var(--text-quaternary); }

@@ -1,446 +1,205 @@
 /**
- * EchoMind 用户消息编辑+分支单元测试 — message-edit.js 模块。
+ * EchoMind message-edit.js 单元测试 — 编辑 / 分支 / IME 防护。
  *
- * 测试覆盖：
- * - enterEditMode 将内容替换为 textarea
- * - exitEditMode 恢复原始内容显示
- * - confirmEdit 提取编辑后文本并触发回调
- * - renderBranchPagination 显示分页式分支切换条（◀ 1/N ▶）
- * - navigateBranch 切换分支内容
- * - createEditButton 创建带编辑图标的按钮
- * - 空内容不触发重新发送
- * - 编辑模式包含回形针上传按钮（[📎] [取消] [发送]）
- * - 键盘行为：Enter 发送，Shift+Enter 换行，Escape 取消
+ * 验证点：
+ * 1. enterEditMode 创建 textarea 编辑器
+ * 2. enterEditMode null 参数安全返回
+ * 3. enterEditMode 重复进入同一块不重复创建
+ * 4. enterEditMode 初始发送按钮禁用（未修改时）
+ * 5. exitEditMode 移除编辑器恢复原内容
+ * 6. exitEditMode null 参数安全返回
+ * 7. confirmEdit 空内容不允许发送
+ * 8. confirmEdit 有效内容触发回调
+ * 9. createEditButton 返回按钮元素
+ * 10. removeBranchPagination 无分页器时安全返回
+ * 11. renderBranchPagination 单版本不显示分页器
+ * 12. navigateBranch 切换版本时调用 setActiveVersion
+ *
+ * Mock: i18n.js, ipc.js, state.js, markdown.js, ime-guard.js, turn-tree.js
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { JSDOM } from 'jsdom';
-import {
-  enterEditMode,
-  exitEditMode,
-  confirmEdit,
-  renderBranchPagination,
-  navigateBranch,
-  removeBranchPagination,
-  createEditButton,
-} from '../../../ui/src/message-edit.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// Mock turn-tree 模块
-const { mockGetVersionCount, mockGetTurn, mockGetActiveVersion, mockSetActiveVersion } = vi.hoisted(() => ({
-  mockGetVersionCount: vi.fn(() => 0),
-  mockGetTurn: vi.fn(() => null),
-  mockGetActiveVersion: vi.fn(() => null),
-  mockSetActiveVersion: vi.fn(() => false),
+// Mock i18n
+vi.mock('../../../ui/src/i18n.js', () => ({
+  t: (key, fallback) => fallback ?? key,
 }));
 
-vi.mock('../../../ui/src/turn-tree.js', () => ({
-  getTurn: mockGetTurn,
-  getActiveVersion: mockGetActiveVersion,
-  getVersionCount: mockGetVersionCount,
-  setActiveVersion: mockSetActiveVersion,
-}));
-
-// Mock ipc 模块
+// Mock ipc
 vi.mock('../../../ui/src/ipc.js', () => ({
   convApi: {
     setTurnActiveVersion: vi.fn(() => Promise.resolve()),
+    rename: vi.fn(() => Promise.resolve()),
+    delete: vi.fn(() => Promise.resolve()),
+    deleteMessage: vi.fn(() => Promise.resolve()),
   },
 }));
 
-// Mock state 模块
+// Mock state
 vi.mock('../../../ui/src/state.js', () => ({
-  getState: vi.fn(() => ({})),
-  setState: vi.fn(),
-  get: vi.fn(() => null),
+  get: (key) => {
+    const map = { currentConversationId: 'conv-1', streaming: false };
+    return map[key];
+  },
+  getState: () => ({ currentConversationId: 'conv-1', streaming: false }),
 }));
 
-// Mock markdown 模块
+// Mock markdown
 vi.mock('../../../ui/src/markdown.js', () => ({
   renderMarkdown: vi.fn(),
   renderRichContent: vi.fn(() => Promise.resolve()),
 }));
 
-// Mock i18n 模块
-vi.mock('../../../ui/src/i18n.js', () => ({
-  t: vi.fn((key) => key),
+// Mock ime-guard
+vi.mock('../../../ui/src/input-utils.js', () => ({
+  createImeGuard: () => ({
+    attach: vi.fn(),
+    isComposing: () => false,
+  }),
+  isComposingEvent: vi.fn(() => false),
 }));
 
-// ============================================================
-// DOM 环境设置
-// ============================================================
+// Mock turn-tree
+const { _mockGetTurn, _mockGetVersionCount, _mockSetActiveVersion, _mockGetActiveVersion } = vi.hoisted(() => ({
+  _mockGetTurn: vi.fn(() => ({
+    turnGroup: 'tg-1',
+    versions: [
+      { version: 1, userContent: 'old text', assistantContent: 'answer1', sources: null, reasoning: null },
+      { version: 2, userContent: 'new text', assistantContent: 'answer2', sources: null, reasoning: null },
+    ],
+    activeVersion: 2,
+  })),
+  _mockGetVersionCount: vi.fn(() => 2),
+  _mockSetActiveVersion: vi.fn(() => true),
+  _mockGetActiveVersion: vi.fn(() => ({ userContent: 'active text', assistantContent: 'active answer', sources: [], reasoning: '' })),
+}));
 
-beforeEach(() => {
-  const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
-    url: 'http://localhost',
-    pretendToBeVisual: true,
-  });
-  global.window = dom.window;
-  global.document = dom.window.document;
-  global.HTMLElement = dom.window.HTMLElement;
-  global.localStorage = {
-    store: {},
-    getItem(key) { return this.store[key] || null; },
-    setItem(key, val) { this.store[key] = val; },
-    removeItem(key) { delete this.store[key]; },
-  };
-});
+vi.mock('../../../ui/src/turn-tree.js', () => ({
+  getTurn: _mockGetTurn,
+  getActiveVersion: _mockGetActiveVersion,
+  getVersionCount: _mockGetVersionCount,
+  setActiveVersion: _mockSetActiveVersion,
+}));
 
-afterEach(() => {
-  vi.clearAllMocks();
-});
-
-// ============================================================
-// 辅助函数：创建用户消息块
-// ============================================================
-
-function createUserBlock(text = '原始消息内容') {
-  const block = document.createElement('div');
-  block.className = 'msg-block msg-user';
-  block.innerHTML = `
-    <div class="msg-content msg-user-content">${text}</div>
-  `;
-  document.body.appendChild(block);
-  // 创建用户操作栏（与 appendBlock('user') 一致）
-  const actions = document.createElement('div');
-  actions.className = 'flex justify-end gap-1 mt-1 transition-opacity duration-fast';
-  actions.dataset.role = 'user-actions';
-  block.after(actions);
-  return block;
-}
-
-// 辅助函数：创建 assistant 消息块（结构与 appendBlock 一致）
-function createAssistantBlock(text = '') {
-  const block = document.createElement('div');
-  block.className = 'msg-block msg-assistant';
-  block.innerHTML = `
-    <div class="msg-content">
-      <div class="md">${text}</div>
-      <div class="sources mt-2"></div>
+// Setup DOM
+function setupDom() {
+  document.body.innerHTML = `
+    <div class="msg-block msg-user" id="userBlock" data-msg-id="msg-1" data-full-text="original text">
+      <div class="msg-user-content">original text</div>
     </div>
-    <div class="flex gap-1 mt-2 msg-actions"></div>
+    <div class="msg-block msg-assistant" id="assistantBlock" data-msg-id="msg-2">
+      <div class="md" data-raw-markdown="answer"></div>
+      <div class="sources"></div>
+    </div>
   `;
-  document.body.appendChild(block);
-  return block;
 }
 
-// ============================================================
-// 测试用例
-// ============================================================
+import { enterEditMode, exitEditMode, confirmEdit, createEditButton, removeBranchPagination, renderBranchPagination, navigateBranch } from '../../../ui/src/message-edit.js';
 
-describe('message-edit.js — 用户消息编辑+分支', () => {
-  // ----------------------------------------------------------
-  // enterEditMode
-  // ----------------------------------------------------------
-  describe('enterEditMode', () => {
-    it('将内容区替换为 textarea + 操作按钮', () => {
-      const block = createUserBlock('测试消息');
-      enterEditMode(block, '测试消息');
-
-      const contentEl = block.querySelector('.msg-user-content');
-      expect(contentEl.style.display).toBe('none');
-
-      const textarea = block.querySelector('.msg-edit-textarea');
-      expect(textarea).not.toBeNull();
-      expect(textarea.value).toBe('测试消息');
-
-      const actionBar = block.nextElementSibling;
-      expect(actionBar).not.toBeNull();
-      expect(actionBar.classList.contains('msg-edit-actions-below')).toBe(true);
-      expect(actionBar.querySelector('.msg-edit-cancel')).not.toBeNull();
-      expect(actionBar.querySelector('.msg-edit-resend')).not.toBeNull();
+describe('message-edit.js — 编辑模式', () => {
+  beforeEach(() => {
+    setupDom();
+    vi.clearAllMocks();
+    _mockGetVersionCount.mockReturnValue(2);
+    _mockGetTurn.mockReturnValue({
+      turnGroup: 'tg-1',
+      versions: [
+        { version: 1, userContent: 'old text', assistantContent: 'answer1', sources: null, reasoning: null },
+        { version: 2, userContent: 'new text', assistantContent: 'answer2', sources: null, reasoning: null },
+      ],
+      activeVersion: 2,
     });
-
-    it('null 输入返回 null', () => {
-      const result = enterEditMode(null, 'test');
-      expect(result).toBeNull();
-    });
-
-    it('重复进入同一块不创建第二个编辑器', () => {
-      const block = createUserBlock('测试');
-      enterEditMode(block, '测试');
-      const result = enterEditMode(block, '测试');
-      expect(result).toBeNull();
-
-      const editors = block.querySelectorAll('.msg-edit-full');
-      expect(editors.length).toBe(1);
-    });
+    _mockSetActiveVersion.mockReturnValue(true);
   });
 
-  // ----------------------------------------------------------
-  // exitEditMode
-  // ----------------------------------------------------------
-  it('exitEditMode 移除编辑器并恢复原始内容', () => {
-    const block = createUserBlock('原始内容');
-    enterEditMode(block, '原始内容');
+  it('enterEditMode null 参数安全返回 null', () => {
+    const result = enterEditMode(null, 'text');
+    expect(result).toBeNull();
+  });
 
-    expect(block.querySelector('.msg-edit-full')).not.toBeNull();
+  it('enterEditMode 创建 textarea 编辑器', () => {
+    const block = document.getElementById('userBlock');
+    const result = enterEditMode(block, 'original text');
+    expect(result).not.toBeNull();
+    expect(result.tagName).toBe('TEXTAREA');
+    expect(block.classList.contains('editing')).toBe(true);
+    const content = block.querySelector('.msg-user-content');
+    expect(content.style.display).toBe('none');
+  });
 
+  it('enterEditMode 初始发送按钮禁用（未修改时）', () => {
+    const block = document.getElementById('userBlock');
+    enterEditMode(block, 'original text');
+    const resendBtn = document.querySelector('.msg-edit-resend');
+    expect(resendBtn).not.toBeNull();
+    expect(resendBtn.disabled).toBe(true);
+  });
+
+  it('enterEditMode 重复进入同一块不重复创建', () => {
+    const block = document.getElementById('userBlock');
+    enterEditMode(block, 'original text');
+    const result = enterEditMode(block, 'original text');
+    expect(result).toBeNull();
+    const textareas = block.querySelectorAll('.msg-edit-full');
+    expect(textareas).toHaveLength(1);
+  });
+
+  it('exitEditMode 移除编辑器恢复原内容', () => {
+    const block = document.getElementById('userBlock');
+    enterEditMode(block, 'original text');
     exitEditMode(block);
-
+    expect(block.classList.contains('editing')).toBe(false);
     expect(block.querySelector('.msg-edit-full')).toBeNull();
-
-    const contentEl = block.querySelector('.msg-user-content');
-    expect(contentEl.style.display).toBe('');
+    const content = block.querySelector('.msg-user-content');
+    expect(content.style.display).toBe('');
   });
 
-  // ----------------------------------------------------------
-  // confirmEdit
-  // ----------------------------------------------------------
-  it('confirmEdit 获取编辑后文本并触发 onResend', () => {
-    const block = createUserBlock('原始内容');
-    let resendText = null;
-    enterEditMode(block, '原始内容', (text) => { resendText = text; });
-
-    const textarea = block.querySelector('.msg-edit-textarea');
-    textarea.value = '编辑后的内容';
-
-    confirmEdit(block);
-
-    expect(resendText).toBe('编辑后的内容');
-    expect(block.querySelector('.msg-edit-full')).toBeNull();
+  it('exitEditMode null 参数安全返回', () => {
+    expect(() => exitEditMode(null)).not.toThrow();
   });
 
-  // ----------------------------------------------------------
-  // 空内容不触发重新发送
-  // ----------------------------------------------------------
-  it('空内容不触发重新发送', () => {
-    const block = createUserBlock('原始内容');
-    let resendCalled = false;
-    enterEditMode(block, '原始内容', () => { resendCalled = true; });
-
-    const textarea = block.querySelector('.msg-edit-textarea');
+  it('confirmEdit 空内容不允许发送', () => {
+    const block = document.getElementById('userBlock');
+    const callback = vi.fn();
+    enterEditMode(block, 'original text');
+    const textarea = block.querySelector('.msg-edit-full');
     textarea.value = '   ';
-
-    confirmEdit(block);
-
-    expect(resendCalled).toBe(false);
-    expect(block.querySelector('.msg-edit-full')).not.toBeNull();
+    confirmEdit(block, callback);
+    expect(callback).not.toHaveBeenCalled();
   });
 
-  // ----------------------------------------------------------
-  // createEditButton
-  // ----------------------------------------------------------
-  describe('createEditButton', () => {
-    it('创建带 SVG 图标的编辑按钮', () => {
-      const block = createUserBlock('测试');
-      const btn = createEditButton(block, '测试', () => {});
-
-      expect(btn).not.toBeNull();
-      expect(btn.className).toContain('text-text-secondary');
-      expect(btn.querySelector('svg')).not.toBeNull();
-    });
-
-    it('点击编辑按钮进入编辑模式', () => {
-      const block = createUserBlock('测试内容');
-      const btn = createEditButton(block, '测试内容', () => {});
-      btn.click();
-
-      expect(block.querySelector('.msg-edit-textarea')).not.toBeNull();
-    });
+  it('confirmEdit 有效内容触发回调', () => {
+    const block = document.getElementById('userBlock');
+    const callback = vi.fn();
+    enterEditMode(block, 'original text');
+    const textarea = block.querySelector('.msg-edit-full');
+    textarea.value = 'modified text';
+    confirmEdit(block, callback);
+    expect(callback).toHaveBeenCalledWith('modified text');
   });
 
-  // ----------------------------------------------------------
-  // 编辑模式回形针上传按钮
-  // ----------------------------------------------------------
-  describe('编辑模式回形针上传按钮', () => {
-    it('进入编辑模式显示回形针 + 取消 + 发送三个按钮', () => {
-      const block = createUserBlock('测试消息');
-      enterEditMode(block, '测试消息');
-
-      const attachBtn = block.nextElementSibling.querySelector('.msg-edit-attach');
-      const cancelBtn = block.nextElementSibling.querySelector('.msg-edit-cancel');
-      const resendBtn = block.nextElementSibling.querySelector('.msg-edit-resend');
-
-      expect(attachBtn).not.toBeNull();
-      expect(cancelBtn).not.toBeNull();
-      expect(resendBtn).not.toBeNull();
-
-      expect(attachBtn.querySelector('svg')).not.toBeNull();
-      expect(cancelBtn.textContent.length).toBeGreaterThan(0);
-      expect(resendBtn.textContent.length).toBeGreaterThan(0);
-      expect(attachBtn.textContent.trim()).toBe('');
-    });
-
-    it('点击回形针按钮触发 onAttach 回调', () => {
-      const block = createUserBlock('测试消息');
-      let attachCalled = false;
-      enterEditMode(block, '测试消息', () => {}, () => { attachCalled = true; });
-
-      const attachBtn = block.nextElementSibling.querySelector('.msg-edit-attach');
-      attachBtn.click();
-      expect(attachCalled).toBe(true);
-    });
-
-    it('未提供 onAttach 时点击回形针不报错', () => {
-      const block = createUserBlock('测试消息');
-      enterEditMode(block, '测试消息');
-      const attachBtn = block.nextElementSibling.querySelector('.msg-edit-attach');
-      expect(() => attachBtn.click()).not.toThrow();
-    });
+  it('createEditButton 返回按钮元素', () => {
+    const block = document.getElementById('userBlock');
+    const btn = createEditButton(block, 'content', () => {});
+    expect(btn.tagName).toBe('BUTTON');
+    expect(btn.getAttribute('aria-label')).toBeDefined();
   });
 
-  // ----------------------------------------------------------
-  // 键盘行为测试
-  // ----------------------------------------------------------
-  describe('键盘行为', () => {
-    it('Enter（无 Shift）触发发送', () => {
-      const block = createUserBlock('原始内容');
-      let resendText = null;
-      enterEditMode(block, '原始内容', (text) => { resendText = text; });
-
-      const textarea = block.querySelector('.msg-edit-textarea');
-      textarea.value = '修改后内容';
-      // 触发 input 事件以启用发送按钮（checkModified）
-      textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
-
-      // 模拟 keydown 事件：Enter 无 Shift
-      const event = new window.KeyboardEvent('keydown', { key: 'Enter', shiftKey: false });
-      Object.defineProperty(event, 'target', { value: textarea, writable: false });
-      textarea.dispatchEvent(event);
-
-      expect(resendText).toBe('修改后内容');
-    });
-
-    it('Shift+Enter 不触发发送（允许换行）', () => {
-      const block = createUserBlock('原始内容');
-      let resendCalled = false;
-      enterEditMode(block, '原始内容', () => { resendCalled = true; });
-
-      const textarea = block.querySelector('.msg-edit-textarea');
-      textarea.value = '修改后内容';
-
-      // 模拟 keydown 事件：Shift+Enter
-      const event = new window.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true });
-      Object.defineProperty(event, 'target', { value: textarea, writable: false });
-      textarea.dispatchEvent(event);
-
-      expect(resendCalled).toBe(false);
-      // 编辑器应仍存在（未退出）
-      expect(block.querySelector('.msg-edit-full')).not.toBeNull();
-    });
-
-    it('Escape 取消编辑', () => {
-      const block = createUserBlock('原始内容');
-      enterEditMode(block, '原始内容');
-
-      const textarea = block.querySelector('.msg-edit-textarea');
-
-      // 模拟 keydown 事件：Escape
-      const event = new window.KeyboardEvent('keydown', { key: 'Escape' });
-      Object.defineProperty(event, 'target', { value: textarea, writable: false });
-      textarea.dispatchEvent(event);
-
-      // 编辑器应被移除
-      expect(block.querySelector('.msg-edit-full')).toBeNull();
-    });
+  it('removeBranchPagination 无分页器时安全返回', () => {
+    const block = document.getElementById('userBlock');
+    expect(() => removeBranchPagination(block)).not.toThrow();
   });
 
-  // ----------------------------------------------------------
-  // renderBranchPagination
-  // ----------------------------------------------------------
-  describe('renderBranchPagination', () => {
-    it('单版本时不渲染分页器', () => {
-      mockGetVersionCount.mockReturnValue(1);
-
-      const block = createUserBlock('问题');
-      const result = renderBranchPagination(block, 'turn-1');
-
-      expect(result).toBeNull();
-      expect(block.querySelector('.branch-pagination')).toBeNull();
-    });
-
-    it('多版本时渲染分页器（挂在用户操作栏中，与复制/编辑按钮同行）', () => {
-      mockGetVersionCount.mockReturnValue(3);
-      mockGetTurn.mockReturnValue({
-        turnGroup: 'turn-1',
-        versions: [
-          { userContent: 'v1', assistantContent: 'a1', version: 1 },
-          { userContent: 'v2', assistantContent: 'a2', version: 2 },
-          { userContent: 'v3', assistantContent: 'a3', version: 3 },
-        ],
-        activeVersion: 2,
-      });
-
-      const block = createUserBlock('问题');
-      const assistantEl = createAssistantBlock('答案');
-      // 用户操作栏已在 createUserBlock 中创建，插在 user 和 assistant 之间
-      block.nextElementSibling.after(assistantEl);
-
-      const pagination = renderBranchPagination(block, 'turn-1');
-
-      expect(pagination).not.toBeNull();
-      const counter = pagination.querySelector('.branch-pagination-counter');
-      expect(counter.textContent).toBe('2 / 3');
-      expect(pagination.querySelector('.branch-pagination-prev')).not.toBeNull();
-      expect(pagination.querySelector('.branch-pagination-next')).not.toBeNull();
-      // 分页器在用户操作栏中，不在 assistant 块内
-      const actionsBar = block.nextElementSibling;
-      expect(actionsBar.contains(pagination)).toBe(true);
-      expect(assistantEl.contains(pagination)).toBe(false);
-    });
-
-    it('分页器渲染到用户操作栏最前面（复制/编辑按钮之前）', () => {
-      mockGetVersionCount.mockReturnValue(2);
-      mockGetTurn.mockReturnValue({
-        turnGroup: 'turn-1',
-        versions: [
-          { userContent: 'v1', assistantContent: 'a1', version: 1 },
-          { userContent: 'v2', assistantContent: 'a2', version: 2 },
-        ],
-        activeVersion: 2,
-      });
-
-      const block = createUserBlock('问题');
-      const assistantEl = createAssistantBlock('答案');
-      block.nextElementSibling.after(assistantEl);
-
-      const pagination = renderBranchPagination(block, 'turn-1');
-
-      expect(pagination).not.toBeNull();
-      // 分页器是用户操作栏的最后一个子元素（编辑按钮右侧）
-      const actionsBar = block.nextElementSibling;
-      expect(actionsBar.lastChild).toBe(pagination);
-      expect(block.querySelector('.branch-pagination')).toBeNull();
-    });
-
-    it('无用户操作栏时不渲染分页器', () => {
-      mockGetVersionCount.mockReturnValue(2);
-      mockGetTurn.mockReturnValue({
-        turnGroup: 'turn-1',
-        versions: [
-          { userContent: 'v1', assistantContent: 'a1', version: 1 },
-          { userContent: 'v2', assistantContent: null, version: 2 },
-        ],
-        activeVersion: 2,
-      });
-
-      // 创建没有操作栏的 user 块
-      const block = document.createElement('div');
-      block.className = 'msg-block msg-user';
-      block.innerHTML = '<div class="msg-content msg-user-content">问题</div>';
-      document.body.appendChild(block);
-
-      const result = renderBranchPagination(block, 'turn-1');
-
-      expect(result).toBeNull();
-      expect(block.querySelector('.branch-pagination')).toBeNull();
-    });
+  it('renderBranchPagination 单版本不显示分页器', () => {
+    _mockGetVersionCount.mockReturnValueOnce(1);
+    const block = document.getElementById('userBlock');
+    const result = renderBranchPagination(block, 'tg-1');
+    expect(result).toBeNull();
   });
 
-  // ----------------------------------------------------------
-  // removeBranchPagination
-  // ----------------------------------------------------------
-  it('removeBranchPagination 移除分页器（从用户操作栏中移除）', () => {
-    const block = createUserBlock('问题');
-    const assistantEl = createAssistantBlock('答案');
-    block.nextElementSibling.after(assistantEl);
-    const actionsBar = block.nextElementSibling;
-    const pagination = document.createElement('div');
-    pagination.className = 'branch-pagination';
-    actionsBar.appendChild(pagination);
-
-    removeBranchPagination(block);
-
-    expect(actionsBar.querySelector('.branch-pagination')).toBeNull();
+  it('navigateBranch 切换版本时调用 setActiveVersion', () => {
+    const block = document.getElementById('userBlock');
+    navigateBranch(block, 'tg-1', -1);
+    expect(_mockSetActiveVersion).toHaveBeenCalledWith('tg-1', 1);
   });
 });

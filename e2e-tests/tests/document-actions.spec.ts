@@ -29,7 +29,7 @@ test.describe('E2E-DOC-001~006 文档操作按钮', () => {
 
     const docItem = page.locator('#docList [data-doc-name="actions.md"]');
     await docItem.hover();
-    const retryBtn = docItem.locator('button[data-action="retry"]');
+    const retryBtn = docItem.locator('button[title*="重试"], button[title*="retry"], button[title*="Retry"]');
     await expect(retryBtn).toBeVisible();
   });
 
@@ -45,7 +45,7 @@ test.describe('E2E-DOC-001~006 文档操作按钮', () => {
 
     const docItem = page.locator('#docList [data-doc-name="actions.md"]');
     await docItem.hover();
-    await docItem.locator('button[data-action="retry"]').click();
+    await docItem.locator('button[title*="重试"], button[title*="retry"], button[title*="Retry"]').click();
 
     // toast 提示（locale 无关：检查关键词 retry / 重试）
     await expect(page.locator('#toasts')).toContainText(/retry|重试/i, { timeout: 5000 });
@@ -54,15 +54,15 @@ test.describe('E2E-DOC-001~006 文档操作按钮', () => {
   test('E2E-DOC-003 Indexed 文档不显示重试按钮', async ({ page }) => {
     const docItem = page.locator('#docList [data-doc-name="actions.md"]');
     await docItem.hover();
-    const retryBtn = docItem.locator('button[data-action="retry"]');
+    const retryBtn = docItem.locator('button[title*="重试"], button[title*="retry"], button[title*="Retry"]');
     // Indexed 状态下重试按钮应隐藏（display: none）
-    await expect(retryBtn).toBeHidden();
+    await expect(retryBtn).toHaveCSS('display', 'none');
   });
 
   test('E2E-DOC-004 删除按钮交互与 toast', async ({ page }) => {
     const docItem = page.locator('#docList [data-doc-name="actions.md"]');
     await docItem.hover();
-    await docItem.locator('button[data-action="delete"]').click();
+    await docItem.locator('button[title*="删除"], button[title*="delete"], button[title*="Delete"]').click();
 
     // toast 提示（locale 无关：检查关键词 delete / 已删除）
     await expect(page.locator('#toasts')).toContainText(/delete|已删除/i, { timeout: 5000 });
@@ -86,16 +86,17 @@ test.describe('E2E-DOC-001~006 文档操作按钮', () => {
 
     const docItem = page.locator('#docList [data-doc-name="actions.md"]');
     await docItem.hover();
-    const auditBtn = docItem.locator('button[data-action="audit"]');
-    await expect(auditBtn).toBeVisible();
+    const auditBtn = docItem.locator('button[title*="审计"], button[title*="audit"], button[title*="Audit"]');
+    // 检查 display 不为 none（Pro 版 + Indexed 状态下应显示）
+    await expect(auditBtn).toHaveCSS('display', 'block');
   });
 
   test('E2E-DOC-006 免费版不显示审计按钮', async ({ page }) => {
     // 确保是免费版
     const docItem = page.locator('#docList [data-doc-name="actions.md"]');
     await docItem.hover();
-    const auditBtn = docItem.locator('button[data-action="audit"]');
-    await expect(auditBtn).toBeHidden();
+    const auditBtn = docItem.locator('button[title*="审计"], button[title*="audit"], button[title*="Audit"]');
+    await expect(auditBtn).toHaveCSS('display', 'none');
   });
 
   test('E2E-DOC-007 Processing 状态文档不显示审计按钮', async ({ page }) => {
@@ -115,7 +116,7 @@ test.describe('E2E-DOC-001~006 文档操作按钮', () => {
 
     const docItem = page.locator('#docList [data-doc-name="actions.md"]');
     await docItem.hover();
-    const auditBtn = docItem.locator('button[data-action="audit"]');
-    await expect(auditBtn).toBeHidden();
+    const auditBtn = docItem.locator('button[title*="审计"], button[title*="audit"], button[title*="Audit"]');
+    await expect(auditBtn).toHaveCSS('display', 'none');
   });
 });

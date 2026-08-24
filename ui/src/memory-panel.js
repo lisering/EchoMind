@@ -14,6 +14,7 @@
 
 import { $ } from './utils.js';
 import { invoke } from './ipc.js';
+import { memoryExtApi } from './ipc.js';
 import { t } from './i18n.js';
 import { toast, toastError, toastSuccess } from './toast.js';
 import { showConfirmDialog } from './confirm-dialog.js';
@@ -99,6 +100,33 @@ export async function renderMemorySettings(container) {
       <div id="memTierContent">
         ${renderTierContent(TIER_CONFIG.find(tg => tg.key === _activeTier), allMemories.filter(m => m.tier === _activeTier))}
       </div>
+
+      <!-- Scratch 层整合 + Burst Buffer（S2 复盘接线） -->
+      <div class="border-t border-border-subtle pt-3 mt-3 space-y-2" id="memExtSection">
+        <div class="flex items-center justify-between">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-xs font-medium" data-i18n="memory.consolidation">Scratch 整合</span>
+            <span class="text-[11px] text-text-tertiary" data-i18n="memory.consolidation_desc">手动触发 Scratch 层 LLM 整合</span>
+          </div>
+          <button id="btnTriggerConsolidation" class="shrink-0 ml-3 px-2.5 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-surface-3 transition-colors" data-i18n="memory.trigger">触发</button>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-xs font-medium" data-i18n="memory.scratch_logs">Scratch 日志</span>
+            <span class="text-[11px] text-text-tertiary" data-i18n="memory.scratch_logs_desc">查看临时记忆日志</span>
+          </div>
+          <button id="btnViewScratchLogs" class="shrink-0 ml-3 px-2.5 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-surface-3 transition-colors" data-i18n="memory.view_logs">查看</button>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span class="text-xs font-medium" data-i18n="memory.burst_buffer">Burst Buffer</span>
+            <span class="text-[11px] text-text-tertiary" id="burstBufferStatus" data-i18n="memory.burst_buffer_idle">空闲</span>
+          </div>
+          <button id="btnFlushBurstBuffer" class="shrink-0 ml-3 px-2.5 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-surface-3 transition-colors" data-i18n="memory.flush">Flush</button>
+        </div>
+      </div>
     </div>
   `;
 
@@ -178,6 +206,7 @@ function renderMemoryCard(mem, tier) {
           ? `<button class="mem-promote-btn text-xs px-2 py-0.5 rounded text-accent hover:bg-accent/10 transition-colors" data-mem-id="${mem.id}">${t('memory.promote')}</button>`
           : ''
         }
+        <button class="mem-pin-btn text-xs px-2 py-0.5 rounded text-text-tertiary hover:text-accent hover:bg-accent/10 transition-colors" data-mem-id="${mem.id}" data-i18n="memory.pin">📌</button>
         <button class="mem-delete-btn text-xs px-2 py-0.5 rounded text-text-quaternary hover:text-red-400 hover:bg-red-400/10 transition-colors" data-mem-id="${mem.id}">${t('memory.delete')}</button>
       </div>
     </div>
@@ -199,7 +228,7 @@ function initMemoryHandlers(memoryEnabled, allMemories) {
       const newEnabled = !enabled;
       updateMemToggle(toggle, newEnabled);
       try {
-        await invoke('set_memory_enabled', { enabled: newEnabled });
+        await invoke('update_setting', { key: 'memory.enabled', value: String(newEnabled) });
         toast(newEnabled ? t('memory.toggle') + ': ON' : t('memory.toggle') + ': OFF', 'success');
       } catch (err) {
         updateMemToggle(toggle, !newEnabled);
@@ -251,6 +280,85 @@ function initMemoryHandlers(memoryEnabled, allMemories) {
     };
   });
 
+  // 固定记忆（S2 复盘接线：pin_memory）
+  containerQuerySelectorAll('.mem-pin-btn').forEach((btn) => {
+    btn.onclick = async () => {
+      const memId = btn.dataset.memId;
+      try {
+        await memoryExtApi.pin(memId);
+        toastSuccess(t('memory.pinned', '已固定'));
+      } catch (err) {
+        toastError(err);
+      }
+    };
+  });
+
+  // 触发 Scratch 整合（S2 复盘接线：trigger_memory_consolidation）
+  const btnConsolidate = $('btnTriggerConsolidation');
+  if (btnConsolidate) {
+    btnConsolidate.onclick = async () => {
+      btnConsolidate.textContent = t('memory.consolidating', '整合中…');
+      btnConsolidate.disabled = true;
+      try {
+        const result = await memoryExtApi.triggerConsolidation();
+        toastSuccess(t('memory.consolidation_done', '整合完成') + (result ? `: ${JSON.stringify(result)}` : ''));
+        await renderMemorySettings($('memorySettingsContainer'));
+      } catch (err) {
+        toastError(err);
+      } finally {
+        btnConsolidate.textContent = t('memory.trigger', '触发');
+        btnConsolidate.disabled = false;
+      }
+    };
+  }
+
+  // 查看 Scratch 日志（S2 复盘接线：get_scratch_logs）
+  const btnScratchLogs = $('btnViewScratchLogs');
+  if (btnScratchLogs) {
+    btnScratchLogs.onclick = async () => {
+      try {
+        const logs = await memoryExtApi.getScratchLogs(50);
+        showScratchLogsDialog(logs);
+      } catch (err) {
+        toastError(err);
+      }
+    };
+  }
+
+  // Burst Buffer 状态 + Flush（S2 复盘接线：get_burst_buffer_status / flush_memory_burst_buffer）
+  const burstStatusEl = $('burstBufferStatus');
+  const btnFlush = $('btnFlushBurstBuffer');
+  const loadBurstStatus = async () => {
+    if (!burstStatusEl) return;
+    try {
+      const status = await memoryExtApi.getBurstBufferStatus();
+      const pending = status?.pending_count || 0;
+      const total = status?.total_turns || 0;
+      burstStatusEl.textContent = pending > 0
+        ? `${t('memory.burst_pending', '待处理')}: ${pending} / ${total}`
+        : t('memory.burst_buffer_idle', '空闲');
+    } catch (_) {
+      // 静默降级
+    }
+  };
+  loadBurstStatus();
+  if (btnFlush) {
+    btnFlush.onclick = async () => {
+      btnFlush.textContent = t('memory.flushing', '处理中…');
+      btnFlush.disabled = true;
+      try {
+        await memoryExtApi.flushBurstBuffer();
+        toastSuccess(t('memory.flush_done', 'Burst Buffer 已清空'));
+        await loadBurstStatus();
+      } catch (err) {
+        toastError(err);
+      } finally {
+        btnFlush.textContent = t('memory.flush', 'Flush');
+        btnFlush.disabled = false;
+      }
+    };
+  }
+
   // 清空 tier
   containerQuerySelectorAll('.mem-clear-btn').forEach((btn) => {
     btn.onclick = async () => {
@@ -297,4 +405,43 @@ function updateMemToggle(toggle, enabled) {
     toggle.setAttribute('aria-checked', 'false');
     if (knob) knob.classList.remove('translate-x-5');
   }
+}
+
+/**
+ * 显示 Scratch 日志对话框（S2 复盘接线）。
+ * @param {Array} logs - scratch 日志列表
+ */
+function showScratchLogsDialog(logs) {
+  const dialog = document.createElement('div');
+  dialog.className = 'fixed inset-0 flex items-center justify-center bg-black/50 backdrop-blur-[4px]';
+  dialog.style.zIndex = '9000';
+  dialog.innerHTML = `
+    <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[600px] w-[90%] max-h-[80vh] overflow-y-auto">
+      <h3 class="text-lg font-semibold px-6 pt-6 m-0 flex items-center gap-2"><svg class="icon-md shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg> Scratch 日志</h3>
+      <div class="px-6 py-4">
+        ${(!logs || logs.length === 0) ? `
+          <p class="text-sm text-text-quaternary text-center py-8">暂无 Scratch 日志</p>
+        ` : logs.map(log => {
+          const time = log.created_at ? new Date(log.created_at).toLocaleString() : '-';
+          return `
+            <div class="bg-surface-2 rounded-lg p-3 mb-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs text-text-quaternary">${time}</span>
+                <span class="text-xs text-text-tertiary">${log.date || '-'}</span>
+              </div>
+              <p class="text-sm text-text-primary m-0">${log.content || '-'}</p>
+            </div>
+          `;
+        }).join('')}
+      </div>
+      <div class="flex justify-end px-6 pb-6">
+        <button class="px-3.5 py-2.5 text-sm font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" id="scratchLogsCloseBtn">关闭</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+  dialog.querySelector('#scratchLogsCloseBtn').onclick = () => dialog.remove();
+  dialog.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') dialog.remove();
+  });
 }

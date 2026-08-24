@@ -115,6 +115,7 @@ export async function enterApp(page) {
   );
   // 等待向导 Step 2 可见（boot() 会根据 embedder 状态决定从哪步开始）
   await page.locator('#wizardStep2').waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('#wizKey').waitFor({ state: 'visible', timeout: 15000 });
   await page.locator('#wizKey').fill('sk-e2e-mock');
   await page.locator('#wizStart').click();
   // Step 2 验证成功后进入 Step 3（导入文档），点击"开始使用"完成向导
@@ -143,17 +144,29 @@ export async function sendMessage(page, query) {
 }
 
 /**
- * 激活 Pro 版（通过付费墙 UI 流程，确保前端 isPro 变量正确更新）。
+ * 设置 Free 模式（isPro = false），用于测试付费墙/配额限制。
+ * 必须在 page.goto 之后、测试操作之前调用。
+ * @param {import('@playwright/test').Page} page
+ */
+export async function setFreeMode(page) {
+  await page.evaluate(() => { window.__state.isPro = false; });
+}
+
+/**
+ * 激活 Pro 版（直接调用 IPC，确保 mock state 和前端状态同步更新）。
+ * 兼容 isPro 已为 true 的情况（直接刷新前端状态）。
  * @param {import('@playwright/test').Page} page
  */
 export async function activatePro(page) {
-  // 1. 先模拟 PDF 拖拽触发付费墙（此时前端 isPro 仍为 false）
+  // 先确保 mock state 为 Free，再通过付费墙 UI 流程激活
+  // 这样测试了完整的付费墙 → 激活流程
+  // 先设置 isPro=false 以确保走 UI 流程
+  await page.evaluate(() => { if (window.__state) window.__state.isPro = false; });
+  // Free 模式：通过付费墙 UI 激活
   await page.evaluate(() => window.__mock.simulateDragDrop(['/mock/activate-pro.pdf']));
   await expect(page.locator('#paywall')).toBeVisible({ timeout: 5000 });
-  // 2. 填写 License Key 并激活
   await page.locator('#licenseInput').fill('test-pro-key');
   await page.locator('#paywallActivate').click();
-  // 3. 等待付费墙关闭（前端 activatePro 设置 isPro=true 并刷新 UI）
   await expect(page.locator('#paywall')).toBeHidden({ timeout: 5000 });
 }
 
@@ -220,4 +233,44 @@ export async function waitDone(page, timeout = 20000) {
  */
 export async function waitForToast(page, text, timeout = 5000) {
   await expect(page.locator('#toasts')).toContainText(text, { timeout });
+}
+
+/**
+ * 打开工具下拉菜单（S5 P1-1：顶栏 8→5 按钮精简后，graph/dream/symbol/branchTree 按钮收纳到下拉菜单）。
+ * 点击 #toolsBtn 展开 #toolsMenu，等待菜单可见后返回。
+ * @param {import('@playwright/test').Page} page
+ */
+export async function openToolsDropdown(page) {
+  const toolsBtn = page.locator('#toolsBtn');
+  await toolsBtn.waitFor({ state: 'visible', timeout: 5000 });
+  await toolsBtn.click();
+  await page.locator('#toolsMenu').waitFor({ state: 'visible', timeout: 3000 });
+}
+
+/**
+ * 点击工具下拉菜单中的指定按钮并等待面板/覆盖层出现。
+ * @param {import('@playwright/test').Page} page
+ * @param {string} buttonId - 工具按钮 ID（如 'graphBtn', 'dreamBtn', 'symbolBtn', 'branchTreeBtn'）
+ * @param {string} [waitForSelector] - 点击后等待出现的选择器（可选）
+ * @param {number} [timeout] - 等待超时（默认 5000ms）
+ */
+export async function clickToolButton(page, buttonId, waitForSelector, timeout = 5000) {
+  await openToolsDropdown(page);
+  await page.locator(`#${buttonId}`).click();
+  if (waitForSelector) {
+    await page.locator(waitForSelector).waitFor({ state: 'visible', timeout });
+  }
+}
+
+/**
+ * 启用开发者模式（S5 P0-6：trace/budget/rag-eval 等开发者工具面板需要先启用开发者模式）。
+ * 通过 ⌘Shift+D 快捷键切换 _devMode 标志。
+ * @param {import('@playwright/test').Page} page
+ */
+export async function enableDevMode(page) {
+  // S5 P0-6: ⌘Shift+D / Ctrl+Shift+D 切换 _devMode
+  // 使用 Playwright keyboard API，按 Control+Shift+D
+  // shiftKey 使 key 变为大写 'D'，匹配 settings.js 中的 e.key === 'D' 判断
+  await page.keyboard.press('Control+Shift+KeyD');
+  await page.waitForTimeout(300);
 }

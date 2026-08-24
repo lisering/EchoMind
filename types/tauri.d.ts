@@ -63,6 +63,8 @@ interface Window {
   __ECHOMIND_WATCHDOG_TIMEOUT_MS__?: number;
   /** E2E 测试用 Tauri mock 标记 */
   __ECHOMIND_MOCK__?: boolean;
+  /** 右键菜单重新生成调用（REQ-IX-001） */
+  __echomindSend?: () => Promise<void>;
   /** E2E 测试 mock 状态对象 */
   __mock?: { state?: Record<string, unknown> };
   /** 确认对话框全局函数（E2E 测试 + 内联 onclick 需要） */
@@ -88,8 +90,12 @@ interface Window {
   resumeAllRecovery?: () => Promise<void>;
   discardAllRecovery?: () => Promise<void>;
   clearCompletedDownloads?: () => void;
-  /** 主题切换全局函数（设置面板调用，REQ-UI-011） */
-  setTheme?: (theme: string) => Promise<void>;
+/** 主题切换全局函数（设置面板调用，REQ-UI-011） */
+setTheme?: (theme: string) => Promise<void>;
+/** REQ-RAG-051: 退出演示模式（LLM 配置保存后调用） */
+exitDemoModeIfActive?: () => Promise<void>;
+  /** P0-3：强制检索重生成标记（chat_done 后恢复混合搜索状态） */
+  __echomindRegenForceSearch?: boolean;
 }
 
 // Global ambient declarations (no export = script scope)

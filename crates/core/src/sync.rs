@@ -196,6 +196,10 @@ impl<S: Storage + Clone> SyncService<S> {
                             // 内容重复（已被其他路径导入），跳过
                             result.skipped += 1;
                         }
+                        Ok(crate::import::ImportOutcome::NameConflict { .. }) => {
+                            // 同名不同内容：同步场景自动跳过
+                            result.skipped += 1;
+                        }
                         Err(e) => {
                             result
                                 .errors
@@ -229,6 +233,10 @@ impl<S: Storage + Clone> SyncService<S> {
                         }
                         Ok(crate::import::ImportOutcome::SkippedDuplicate(_)) => {
                             // 内容重复（已被手动导入过），跳过
+                            result.skipped += 1;
+                        }
+                        Ok(crate::import::ImportOutcome::NameConflict { .. }) => {
+                            // 同名不同内容：同步场景自动跳过（不提示用户替换）
                             result.skipped += 1;
                         }
                         Err(e) => {

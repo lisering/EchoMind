@@ -38,15 +38,37 @@ pub async fn import_files_inner<R: Runtime>(
     state: &AppState,
 ) -> Result<Vec<String>, String> {
     let is_pro = *state.is_pro().read().await;
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
+    // REQ-WS-002：获取当前工作空间 ID，配额按工作空间独立计算
+    let workspace_id = crate::commands::workspace::get_current_workspace_inner(state)
+        .await
+        .unwrap_or_else(|_| "default".to_string());
+    // REQ-VEC-011：从 settings 表读取分块参数
+    let chunk_params = crate::commands::settings::get_chunk_params_inner(state)
+        .await
+        .unwrap_or_default();
+    let service = if chunk_params.chunk_size != echomind_core::import::DEFAULT_CHUNK_TOKENS {
+        let mut svc = ImportService::with_chunk_tokens(
+            state.storage.clone(),
+            state.data_dir.clone(),
+            chunk_params.chunk_size,
+        );
+        svc.workspace_id = workspace_id.clone();
+        svc
+    } else {
+        ImportService::with_workspace(state.storage.clone(), state.data_dir.clone(), workspace_id)
+    };
     let mut imported = Vec::new();
 
+    // REQ-ING-023：文件夹拖拽导入 — 检测路径是否为目录，
+    // 若是则递归遍历子目录中所有支持格式的文件。
+    let expanded_paths = expand_folder_paths(paths);
+
     // REQ-ING-006：导入进度与取消
-    let total = paths.len();
+    let total = expanded_paths.len();
     let cancel_flag = state.import_cancel_flag();
     state.reset_import_cancel(); // 开始前重置取消标志
 
-    for (idx, raw_path) in paths.iter().enumerate() {
+    for (idx, raw_path) in expanded_paths.iter().enumerate() {
         let name = display_name(raw_path);
 
         // 检查取消标志（文件边界退出，已完成部分保留，不产生半成品索引）
@@ -239,6 +261,18 @@ pub async fn import_files_inner<R: Runtime>(
             Ok(ImportOutcome::SkippedDuplicate(_)) => {
                 emit_status(app, "done", format!("内容已存在，跳过导入：{name}"));
             }
+            Ok(ImportOutcome::NameConflict {
+                old_doc_id,
+                file_name,
+            }) => {
+                // REQ-ING-012：同名不同内容，返回冲突信息供前端确认
+                emit_status(
+                    app,
+                    "conflict",
+                    format!("文件已存在但内容不同：{file_name}"),
+                );
+                return Err(format!("CONFLICT:{old_doc_id}:{file_name}"));
+            }
             Err(err) => {
                 // REQ-ERR-001：未携带前缀的导入错误统一标记为 STORAGE
                 let msg = err.to_string();
@@ -262,7 +296,150 @@ pub async fn import_files_inner<R: Runtime>(
     Ok(imported)
 }
 
-/// Pro 版 PDF 多模态索引（REQ-MM-004）：文本提取 → 图片渲染 → OCR → VLM 增强 → 分块入库。
+/// 替换文档（REQ-ING-012）：删除旧文档 + 重新导入新文件 + 完整索引管线。
+///
+/// 用户导入同名不同内容文件时，前端收到 `CONFLICT:{old_doc_id}:{file_name}` 错误，
+/// 弹出确认对话框。用户确认后调用此命令完成替换。
+#[tauri::command]
+pub async fn replace_document(
+    app: AppHandle,
+    file_path: String,
+    old_doc_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    replace_document_inner(&app, &file_path, &old_doc_id, state.inner()).await
+}
+
+/// 替换文档逻辑（命令与集成测试复用）。
+pub async fn replace_document_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    file_path: &str,
+    old_doc_id: &str,
+    state: &AppState,
+) -> Result<String, String> {
+    let is_pro = *state.is_pro().read().await;
+    // REQ-WS-002：获取当前工作空间 ID
+    let workspace_id = crate::commands::workspace::get_current_workspace_inner(state)
+        .await
+        .unwrap_or_else(|_| "default".to_string());
+    let service =
+        ImportService::with_workspace(state.storage.clone(), state.data_dir.clone(), workspace_id);
+    let name = display_name(file_path);
+
+    // 替换：删除旧文档 → 重新导入
+    match service
+        .replace_and_import(file_path, old_doc_id, is_pro)
+        .await
+    {
+        Ok(ImportOutcome::Imported(doc)) => {
+            // 执行索引（与 import_files_inner 相同的管线）
+            let index_result = {
+                #[cfg(feature = "pro")]
+                {
+                    let ext_lower = Path::new(&doc.file_path)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.to_lowercase())
+                        .unwrap_or_default();
+                    let is_pdf = ext_lower == "pdf";
+                    let is_code = matches!(ext_lower.as_str(), "rs" | "ts" | "tsx" | "py" | "go");
+                    if is_pdf && is_pro {
+                        index_pdf_multimodal(app, &service, &doc, state, &name).await
+                    } else if is_code && is_pro {
+                        emit_status(app, "indexing", format!("正在索引代码符号：{name}"));
+                        let engine = SymbolEngine;
+                        service
+                            .index_document_with_symbols(&doc, &engine)
+                            .await
+                            .map_err(|e| format!("{e:#}"))
+                    } else {
+                        emit_status_with_phase(
+                            app,
+                            "indexing",
+                            format!("正在分块索引：{name}"),
+                            Some("splitting"),
+                        );
+                        service
+                            .index_document(&doc)
+                            .await
+                            .map_err(|e| format!("{e:#}"))
+                    }
+                }
+                #[cfg(not(feature = "pro"))]
+                {
+                    emit_status_with_phase(
+                        app,
+                        "indexing",
+                        format!("正在分块索引：{name}"),
+                        Some("splitting"),
+                    );
+                    service
+                        .index_document(&doc)
+                        .await
+                        .map_err(|e| format!("{e:#}"))
+                }
+            };
+
+            match index_result {
+                Ok(()) => {
+                    emit_status_with_phase(
+                        app,
+                        "indexing",
+                        "正在加载向量化引擎…".to_string(),
+                        Some("loading_model"),
+                    );
+                    match embed_document_chunks(app, state, &doc.id, &name).await {
+                        Ok(count) => {
+                            emit_status(app, "done", format!("替换完成：{name}（{count} 向量）"));
+                            // 清空查询缓存
+                            if let Err(e) = state.cache.clear_all().await {
+                                warn!("替换后清空查询缓存失败: {e:#}");
+                            }
+                            state.step_cache.clear();
+                            Ok(doc.id)
+                        }
+                        Err(err) => {
+                            let _ = state
+                                .storage
+                                .update_doc_status(
+                                    &doc.id,
+                                    DocStatus::Failed(prefix_error(
+                                        ERR_EMBED,
+                                        &format!("向量化失败: {err}"),
+                                    )),
+                                )
+                                .await;
+                            emit_status(
+                                app,
+                                "error",
+                                prefix_error(ERR_EMBED, &format!("向量化失败：{name}（{err}）")),
+                            );
+                            Err(prefix_error(ERR_EMBED, &format!("替换失败：{err}")))
+                        }
+                    }
+                }
+                Err(err) => {
+                    emit_status(
+                        app,
+                        "error",
+                        prefix_error(ERR_PARSE, &format!("索引失败：{name}（{err}）")),
+                    );
+                    Err(prefix_error(ERR_PARSE, &format!("替换失败：{err}")))
+                }
+            }
+        }
+        Ok(ImportOutcome::SkippedDuplicate(_)) => Err("内容与现有文档相同，无需替换".to_string()),
+        Ok(ImportOutcome::NameConflict { .. }) => Err("仍有同名冲突，请重试".to_string()),
+        Err(err) => {
+            let msg = err.to_string();
+            if has_error_prefix(&msg) {
+                Err(msg)
+            } else {
+                Err(prefix_error(ERR_STORAGE, &format!("替换失败：{msg}")))
+            }
+        }
+    }
+}
 #[cfg(feature = "pro")]
 async fn index_pdf_multimodal<R: Runtime>(
     app: &AppHandle<R>,
@@ -368,13 +545,46 @@ pub(crate) async fn embed_document_chunks<R: Runtime>(
     // REQ-RAG-041 Contextual Retrieval：嵌入时拼接文档名上下文前缀（build_contextual_text），
     // 使向量包含文档上下文信息，提升检索精度（Anthropic Contextual Retrieval：失败率 ↓49%）。
     // 当 contextual_retrieval_enabled = false 时，使用纯 chunk 文本嵌入（不含文档名前缀）。
+    //
+    // REQ-RAG-049 Late Chunking：嵌入时拼接文档前缀摘要（前 500 字符），使 chunk 向量
+    // 包含全文语义上下文（Jina AI 2024 Late Chunking 技术）。与 Contextual Retrieval
+    // 可组合：Late Chunking 前缀 + 文档名前缀 + chunk 内容。
     let use_contextual = state.contextual_retrieval_enabled;
+    let use_late_chunking = state.late_chunking_enabled;
+
+    // Late Chunking：提取文档前缀摘要
+    let doc_prefix = if use_late_chunking {
+        // 从已入库的 chunks 拼接文档全文，提取前 500 字符作为上下文前缀
+        let all_chunks = state
+            .storage
+            .list_chunks(doc_id)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        let full_text: String = all_chunks
+            .iter()
+            .map(|c| c.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        extract_doc_prefix(&full_text, 500)
+    } else {
+        String::new()
+    };
+
     for batch in chunks.chunks(EMBED_BATCH_SIZE) {
         // 构建嵌入文本 + 计算内容指纹
         let texts_and_hashes: Vec<(String, String)> = batch
             .iter()
             .map(|c| {
-                let text = if use_contextual {
+                // 嵌入文本构建优先级：Late Chunking + Contextual Retrieval > Contextual Retrieval > 纯 chunk
+                let text = if use_late_chunking && !doc_prefix.is_empty() {
+                    // Late Chunking 开启：文档前缀 + (可选)文档名前缀 + chunk 内容
+                    if use_contextual {
+                        let contextual = build_contextual_text(doc_name, &c.content);
+                        build_late_chunking_text(&doc_prefix, &contextual)
+                    } else {
+                        build_late_chunking_text(&doc_prefix, &c.content)
+                    }
+                } else if use_contextual {
                     build_contextual_text(doc_name, &c.content)
                 } else {
                     c.content.clone()
@@ -713,4 +923,238 @@ pub async fn clear_model_cache(
     .await
     .map_err(|e| format!("缓存清理任务失败: {e:#}"))?;
     Ok(freed)
+}
+
+// ------------------------------------------------------------------
+// 索引重建（REQ-VEC-009）
+// ------------------------------------------------------------------
+
+/// 重建已索引文档的索引（REQ-VEC-009）。
+///
+/// 删除该文档的全部 chunks 与向量，重新执行解析 → 分块 → 嵌入 → 存储链路。
+/// 适用于嵌入模型升级或分块策略变更后重新索引。
+/// 重建期间文档状态标记为 Processing，重建完成后恢复 Indexed。
+///
+/// 内部复用 `retry_index_inner` 逻辑（清理旧 chunks → 重新索引 + 嵌入）。
+#[tauri::command]
+pub async fn rebuild_index(
+    app: AppHandle,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    rebuild_index_inner(&app, &id, state.inner()).await
+}
+
+/// `rebuild_index` 的逻辑实现（命令与集成测试复用）。
+///
+/// 封装 `retry_index_inner`，语义上表示「重建索引」而非「重试失败」。
+/// 适用于 Indexed 状态文档的主动重建。
+pub async fn rebuild_index_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    doc_id: &str,
+    state: &AppState,
+) -> Result<(), String> {
+    retry_index_inner(app, doc_id, state).await
+}
+
+// ------------------------------------------------------------------
+// 文件夹拖拽导入（REQ-ING-023）
+// ------------------------------------------------------------------
+
+/// 跳过的隐藏目录名。
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    ".DS_Store",
+    "__pycache__",
+    ".svn",
+    ".hg",
+    "target",
+    "dist",
+    "build",
+    ".idea",
+    ".vscode",
+];
+
+/// 递归遍历深度上限。
+const MAX_DEPTH: usize = 5;
+
+/// 展开路径列表：如果路径是目录，递归遍历其中所有支持格式的文件。
+///
+/// REQ-ING-023：文件夹拖拽导入
+/// - 递归遍历深度上限 5 层
+/// - 跳过隐藏文件和目录（`.git` / `node_modules` / `.DS_Store` 等）
+/// - 文件扩展名必须在 ALLOWED_EXTENSIONS 中
+fn expand_folder_paths(paths: &[String]) -> Vec<String> {
+    let mut result = Vec::new();
+    for path in paths {
+        let p = std::path::Path::new(path);
+        if p.is_dir() {
+            traverse_dir(p, 0, &mut result);
+        } else if p.is_file() {
+            result.push(path.clone());
+        }
+    }
+    result
+}
+
+/// 递归遍历目录，收集所有支持格式的文件。
+fn traverse_dir(dir: &std::path::Path, depth: usize, result: &mut Vec<String>) {
+    if depth >= MAX_DEPTH {
+        return;
+    }
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // 跳过隐藏文件和目录
+        if name_str.starts_with('.') || SKIP_DIRS.contains(&name_str.as_ref()) {
+            continue;
+        }
+
+        if path.is_dir() {
+            traverse_dir(&path, depth + 1, result);
+        } else if path.is_file() {
+            // 仅收集支持格式的文件
+            if let Some(ext) = path.extension().and_then(|e| e.to_str())
+                && echomind_core::import::ALLOWED_EXTENSIONS.contains(&ext)
+                && let Some(path_str) = path.to_str()
+            {
+                result.push(path_str.to_string());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod folder_import_tests {
+    use super::*;
+
+    /// TC-ING-FOLDER-001: 文件夹展开 — 目录中的支持格式文件被收集
+    #[test]
+    fn tc_ing_folder_001_dir_expands_to_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path();
+
+        // 创建测试文件
+        std::fs::write(dir_path.join("test1.md"), "# Test 1").unwrap();
+        std::fs::write(dir_path.join("test2.txt"), "Test 2").unwrap();
+        std::fs::write(dir_path.join("readme.md"), "# README").unwrap();
+
+        let paths = vec![dir_path.to_str().unwrap().to_string()];
+        let expanded = expand_folder_paths(&paths);
+
+        assert!(expanded.len() >= 3, "应收集 3 个支持格式的文件");
+        assert!(
+            expanded.iter().any(|p| p.ends_with("test1.md")),
+            "应包含 test1.md"
+        );
+    }
+
+    /// TC-ING-FOLDER-002: 递归深度上限 5 层
+    #[test]
+    fn tc_ing_folder_002_max_depth_5() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut current = dir.path().to_path_buf();
+
+        // 创建 6 层深度目录（超过 MAX_DEPTH=5）
+        for i in 0..7 {
+            current = current.join(format!("level{i}"));
+            std::fs::create_dir_all(&current).unwrap();
+        }
+        std::fs::write(current.join("deep.md"), "# Deep").unwrap();
+
+        let paths = vec![dir.path().to_str().unwrap().to_string()];
+        let expanded = expand_folder_paths(&paths);
+
+        // 深度 6+ 的文件不应被收集
+        assert!(
+            !expanded.iter().any(|p| p.ends_with("deep.md")),
+            "超过 MAX_DEPTH 的文件不应被收集"
+        );
+    }
+
+    /// TC-ING-FOLDER-003: 跳过隐藏文件和目录
+    #[test]
+    fn tc_ing_folder_003_skip_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path();
+
+        // 创建正常文件
+        std::fs::write(dir_path.join("visible.md"), "# Visible").unwrap();
+
+        // 创建隐藏文件
+        std::fs::write(dir_path.join(".hidden.md"), "# Hidden").unwrap();
+
+        // 创建跳过目录
+        std::fs::create_dir_all(dir_path.join(".git")).unwrap();
+        std::fs::write(dir_path.join(".git").join("config.md"), "# Git config").unwrap();
+
+        std::fs::create_dir_all(dir_path.join("node_modules")).unwrap();
+        std::fs::write(dir_path.join("node_modules").join("lib.md"), "# Lib").unwrap();
+
+        let paths = vec![dir_path.to_str().unwrap().to_string()];
+        let expanded = expand_folder_paths(&paths);
+
+        assert!(
+            expanded.iter().any(|p| p.ends_with("visible.md")),
+            "正常文件应被收集"
+        );
+        assert!(
+            !expanded.iter().any(|p| p.contains(".hidden")),
+            "隐藏文件不应被收集"
+        );
+        assert!(
+            !expanded.iter().any(|p| p.contains(".git")),
+            ".git 目录中的文件不应被收集"
+        );
+        assert!(
+            !expanded.iter().any(|p| p.contains("node_modules")),
+            "node_modules 目录中的文件不应被收集"
+        );
+    }
+
+    /// TC-ING-FOLDER-004: 非目录路径直接保留
+    #[test]
+    fn tc_ing_folder_004_file_path_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("single.md");
+        std::fs::write(&file_path, "# Single").unwrap();
+
+        let paths = vec![file_path.to_str().unwrap().to_string()];
+        let expanded = expand_folder_paths(&paths);
+
+        assert_eq!(expanded.len(), 1, "单个文件路径应直接保留");
+    }
+
+    /// TC-ING-FOLDER-005: 混合路径（文件 + 目录）
+    #[test]
+    fn tc_ing_folder_005_mixed_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path();
+
+        // 目录中有文件
+        std::fs::write(dir_path.join("in_dir.md"), "# In Dir").unwrap();
+
+        // 独立文件
+        let standalone = dir_path.join("standalone.txt");
+        std::fs::write(&standalone, "Standalone").unwrap();
+
+        let paths = vec![
+            dir_path.to_str().unwrap().to_string(),
+            standalone.to_str().unwrap().to_string(),
+        ];
+        let expanded = expand_folder_paths(&paths);
+
+        // 目录展开的文件 + 独立文件
+        assert!(expanded.len() >= 2, "应包含目录展开的文件和独立文件");
+    }
 }

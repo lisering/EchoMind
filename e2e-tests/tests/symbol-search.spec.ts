@@ -9,16 +9,17 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { setupPage } from './helpers.mjs';
+import { setupPage, clickToolButton } from './helpers.mjs';
 
 test.describe('符号搜索面板 (TC-SYM-UI)', () => {
   test.beforeEach(async ({ page }) => {
     await setupPage(page);
-    await page.waitForSelector('#symbolBtn', { timeout: 5000 });
+    // S5 P1-1: symbolBtn 收纳到工具下拉菜单
+    await page.waitForSelector('#toolsBtn', { timeout: 5000 });
   });
 
   test('TC-SYM-UI-001: 符号搜索框输入', async ({ page }) => {
-    await page.locator('#symbolBtn').click();
+    await clickToolButton(page, 'symbolBtn');
     await expect(page.locator('#symbolSearchOverlay')).toBeVisible({ timeout: 5000 });
 
     const input = page.locator('#symbolSearchInput');
@@ -35,7 +36,7 @@ test.describe('符号搜索面板 (TC-SYM-UI)', () => {
   });
 
   test('TC-SYM-UI-002: 搜索结果展示', async ({ page }) => {
-    await page.locator('#symbolBtn').click();
+    await clickToolButton(page, 'symbolBtn');
     await expect(page.locator('#symbolSearchOverlay')).toBeVisible({ timeout: 5000 });
 
     // 等待初始加载（空查询返回全部符号）
@@ -48,7 +49,7 @@ test.describe('符号搜索面板 (TC-SYM-UI)', () => {
   });
 
   test('TC-SYM-UI-003: 点击结果跳转', async ({ page }) => {
-    await page.locator('#symbolBtn').click();
+    await clickToolButton(page, 'symbolBtn');
     await expect(page.locator('#symbolSearchOverlay')).toBeVisible({ timeout: 5000 });
 
     // 等待结果加载
@@ -62,7 +63,7 @@ test.describe('符号搜索面板 (TC-SYM-UI)', () => {
   });
 
   test('TC-SYM-UI-004: 重建索引按钮存在', async ({ page }) => {
-    await page.locator('#symbolBtn').click();
+    await clickToolButton(page, 'symbolBtn');
     await expect(page.locator('#symbolSearchOverlay')).toBeVisible({ timeout: 5000 });
 
     const rebuildBtn = page.locator('#symbolRebuildBtn');

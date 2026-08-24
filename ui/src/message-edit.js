@@ -24,6 +24,7 @@ import { convApi } from './ipc.js';
 import { get } from './state.js';
 import { renderMarkdown } from './markdown.js';
 import { renderRichContent } from './markdown.js';
+import { createImeGuard, isComposingEvent } from './input-utils.js';
 
 // ============================================================
 // 状态管理
@@ -76,8 +77,8 @@ export function enterEditMode(blockEl, originalContent, onResend, onAttach) {
   blockEl.dataset.editingOriginal = originalContent;
   // 测量原始内容高度（必须在任何 DOM 修改之前，保证高度精确）
   const contentHeight = contentEl.offsetHeight;
-  // 编辑态下消息块 padding 归零、textarea 撑满外框（p-4=16px 上下 + 1px 边框×2）
-  const baseHeight = contentHeight + 34;
+  // 就地编辑：textarea 保持气泡的 padding/bg/radius，高度与气泡内容一致
+  const baseHeight = contentHeight;
   // 隐藏原始内容：仅 display:none（不参与布局），由 textarea 以完全相同的
   // 高度接管其文档流位置 → 消息块尺寸不变 → 零布局抖动
   contentEl.style.display = 'none';
@@ -87,7 +88,7 @@ export function enterEditMode(blockEl, originalContent, onResend, onAttach) {
     nextSibling.style.visibility = 'hidden';
   }
 
-  // textarea 直接放到消息块中，padding 为 0、行高/字号与原始内容一致
+  // textarea 保持气泡样式（bg/radius/padding/max-width 右对齐），就地编辑
   const textarea = document.createElement('textarea');
   textarea.className = 'msg-edit-textarea msg-edit-full';
   textarea.value = originalContent;
@@ -112,11 +113,11 @@ export function enterEditMode(blockEl, originalContent, onResend, onAttach) {
   // 回形针按钮（文档上传）
   const attachBtn = document.createElement('button');
   attachBtn.className =
-    'msg-edit-btn msg-edit-attach p-1.5 rounded-md text-text-secondary hover:text-accent hover:bg-accent/10 transition-colors duration-fast';
+    'msg-edit-btn msg-edit-attach msg-action-btn';
   attachBtn.title = t('chat.edit_attach') || '上传文档';
   attachBtn.setAttribute('aria-label', t('chat.edit_attach') || '上传文档');
   attachBtn.innerHTML =
-    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
   attachBtn.onclick = () => {
     if (_onAttachCallback) _onAttachCallback();
   };
@@ -140,18 +141,28 @@ export function enterEditMode(blockEl, originalContent, onResend, onAttach) {
   resendBtn.disabled = true; // 初始禁用：未修改时不允许重发
   resendBtn.onclick = () => confirmEdit(blockEl);
 
+    // IME 组合防护：中文/日文输入法组合期间不更新按钮状态
+  const imeGuard = createImeGuard();
+  imeGuard.attach(textarea);
+
   // 监听内容变化：仅当内容被修改后才启用发送按钮
+  // IME 组合期间（compositionstart → compositionend）忽略 input 事件，
+  // 避免用户正在选词时发送按钮就被启用
   const checkModified = () => {
+    if (imeGuard.isComposing()) return; // IME 组合中，不更新按钮状态
     const modified = textarea.value.trim() !== originalContent.trim();
     resendBtn.disabled = !modified || !textarea.value.trim();
   };
   textarea.addEventListener('input', checkModified);
-
+  // compositionend 后需要手动触发一次检查（因为 input 事件被跳过了）
+  textarea.addEventListener('compositionend', checkModified);
   // 键盘行为与聊天输入框完全一致：
   // - Enter（无 Shift）→ 发送（仅在内容修改后生效）
   // - Shift+Enter → 换行（浏览器默认行为，不拦截）
   // - Escape → 取消编辑
+  // - IME 组合中的 Enter 是「确认候选词」而非「发送」，必须忽略
   textarea.addEventListener('keydown', (e) => {
+    if (isComposingEvent(e)) return; // IME 组合中，忽略 Enter/Escape
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault(); // 阻止默认换行
       if (!resendBtn.disabled) confirmEdit(blockEl);
@@ -609,10 +620,10 @@ export function removeBranchPagination(blockEl) {
  */
 export function createEditButton(blockEl, content, onResend, onAttach) {
   const editBtn = document.createElement('button');
-  editBtn.className = 'p-1.5 rounded-md text-text-secondary hover:text-accent hover:bg-accent/10 transition-colors duration-fast';
+  editBtn.className = 'msg-action-btn';
   editBtn.title = t('chat.edit') || '编辑';
   editBtn.setAttribute('aria-label', t('chat.edit') || '编辑');
-  editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  editBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
   editBtn.onclick = () => {
     // 读取当前显示的版本内容（版本切换后 dataset.fullText 已更新，闭包里的 content 可能过期）
     const current = blockEl.dataset.fullText || content;

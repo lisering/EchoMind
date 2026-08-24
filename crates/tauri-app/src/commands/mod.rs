@@ -33,23 +33,25 @@ use echomind_core::errors::{
 use echomind_core::export::{export_conversation_to_markdown, sanitize_filename};
 use echomind_core::hybrid_retriever::HybridRetriever;
 use echomind_core::import::{ImportOutcome, ImportService};
+use echomind_core::late_chunking::{build_late_chunking_text, extract_doc_prefix};
 use echomind_core::license::verify_license;
 use echomind_core::retriever::build_contextual_text;
 use echomind_core::session_strip::SessionStripper;
+use echomind_core::skill::Skill;
 use echomind_core::step_cache::StepCache as _;
 use echomind_infra::duckduckgo_provider::DuckDuckGoProvider;
 use echomind_infra::hyde_rewriter::HydeRewriter;
 use echomind_infra::openai_provider::OpenAIProvider;
 use echomind_infra::sqlite_storage::SqliteStorage;
 use echomind_models::{
-    AgentStepPayload, CacheSettingsPayload, CacheStats, ChatMessage, ChatPhasePayload,
+    AgentStepPayload, BatchResult, CacheSettingsPayload, CacheStats, ChatMessage, ChatPhasePayload,
     Conversation, ConversationCost, ConversationTree, ConversationTreeNode, DocStatus,
-    DocStatusPayload, Document, EmbeddingProgressPayload, EntityRelation, ExecutionResult,
-    GraphCommunity, GraphPath, GraphStats, GraphTriple, ImportProgressPayload, LlmConfig, LlmMode,
-    LlmSamplingParams, MemoryEntry, MemoryTier, MessageSearchResult, ModelInfo, PaginatedResult,
-    PendingInput, PromptTemplate, RetrievalResult, SearchResult, SessionTodo, SettingsPayload,
-    StripConfig, StripPreview, StripResult, TodoStatus, TokenUsage, TurnActiveVersion, Workflow,
-    WorkflowResult,
+    DocStatusPayload, Document, DocumentPreview, EmbeddingProgressPayload, EntityRelation,
+    ExecutionResult, GenerationParams, GlobalSearchResults, GraphCommunity, GraphPath, GraphStats,
+    GraphTriple, ImportProgressPayload, LlmConfig, LlmMode, LlmSamplingParams, MemoryEntry,
+    MemoryTier, MessageSearchResult, ModelInfo, PaginatedResult, PendingInput, PromptTemplate,
+    RagParams, RetrievalResult, SearchResult, SessionTodo, SettingsPayload, StripConfig,
+    StripPreview, StripResult, TodoStatus, TokenUsage, TurnActiveVersion, Workflow, WorkflowResult,
 };
 use futures::FutureExt;
 use futures::StreamExt;
@@ -87,12 +89,14 @@ mod graph;
 mod import;
 mod license;
 mod local_llm;
+mod mcp;
 mod performance;
 mod rag_eval;
 mod security;
 mod settings;
 mod sync;
 mod trace;
+mod workspace;
 
 // ============================================================================
 // pub use 重导出（保持 lib.rs generate_handler! 不变）
@@ -107,12 +111,16 @@ pub use graph::*;
 pub use import::*;
 pub use license::*;
 pub use local_llm::*;
+pub use mcp::*;
 pub use performance::*;
 pub use rag_eval::*;
 pub use security::*;
 pub use settings::*;
 pub use sync::*;
+// trace 模块在 Release 构建中无导出项（S10 开发者工具门控），仅 Debug 注册
+#[cfg(debug_assertions)]
 pub use trace::*;
+pub use workspace::*;
 
 // ============================================================================
 // 共享类型 / 常量 / 辅助函数（各子模块通过 super::* 访问）

@@ -1,6 +1,6 @@
 # 代码契约 — Traits 与数据模型
 
-> **状态**：活跃 | **最后审阅**：2026-08-10（v8.0 全量同步 QM/OpenCode 借鉴：LLMProvider 4 个辅助方法 + SecurityPosture/SecurityScreener/LlmRouter/KeyedQueue/SessionCoordinator/Skill/Permission/LlmProtocol 新模块 + AppState 新字段）
+> **状态**：活跃 | **最后审阅**：2026-08-17（v12.7 REQ-SEC-022 PII 脱敏集成 RAG 管线 + P1-1 过检索倍数调优：sanitize.rs 新增 redact_pii()/detect_pii() + 7 类 PII 检测脱敏，HybridRetriever OVER_RETRIEVE_FACTOR 3→5；v12.4 REQ-SEC-021 Prompt 注入防护：crates/prompt/src/sanitize.rs 新增 sanitize_chunk_content() / sanitize_dynamic_context() + 三层防护常量；v9.0 v2.0 S17 文档同步：Document 新增 tags/workspace_id 字段，Conversation 新增 sort_order 字段，Storage trait 新增 workspace 方法，新增 ConversationBookmark 模型；v8.0 全量同步 QM/OpenCode 借鉴：LLMProvider 4 个辅助方法 + SecurityPosture/SecurityScreener/LlmRouter/KeyedQueue/SessionCoordinator/Skill/Permission/LlmProtocol 新模块 + AppState 新字段）
 >
 > 本文档是 AI Agent 开发的**第一技术参考**（铁律七文档优先级 #2）。
 > 所有签名必须与源码逐字一致。
@@ -17,7 +17,7 @@ crates/models  →  crates/prompt  →  crates/core  →  crates/infra  →  cra
                               (compaction)
 ```
 
-- `crates/prompt`：从 `crates/core` 提取的提示词构建逻辑（SegmentedPrompt / build_rag_prompt / build_agent_prompt），仅依赖 `echomind-models`。
+- `crates/prompt`：从 `crates/core` 提取的提示词构建逻辑（SegmentedPrompt / build_rag_prompt / build_agent_prompt），仅依赖 `echomind-models` + `regex`。REQ-SEC-021: `sanitize` 模块提供 Prompt 注入防护（内容边界隔离 + 防御性声明 + 注入模式标记）。REQ-SEC-022: `sanitize` 模块新增 PII 脱敏（7 类 PII 检测 + 脱敏，在注入标记之前执行，`redact_pii()` / `detect_pii()`）。
 - `crates/compact`：从 `crates/core` 提取的上下文压缩引擎（CompactionEngine），依赖 `echomind-models` + `echomind-core`（LLMProvider trait + bpe() tokenizer）。
 - `crates/core` 不依赖 `crates/compact`（无循环依赖）；`chat_with_compaction` 编排逻辑移至命令层。
 
@@ -234,6 +234,8 @@ pub struct Document {
     pub original_path: Option<String>, // 源文件路径（REQ-SYNC-002）
     pub domain: Option<String>,        // 领域分类标签（REQ-VEC-013）
     pub summary: Option<String>,       // 文档摘要（REQ-ING-019）
+    pub tags: Vec<String>,             // 用户自定义标签（REQ-ING-022）
+    pub workspace_id: String,          // 工作空间 ID（REQ-WS-001，默认 "default"）
 }
 ```
 
@@ -278,9 +280,10 @@ pub struct ChatMessage {
 ```rust
 pub struct Conversation {
     pub id: String,           // UUID v4
-    pub workspace_id: String, // v1.0 单工作区 "default"
+    pub workspace_id: String, // 工作区标识（v1.0 单工作区 "default"）
     pub title: String,
     pub created_at: i64,
+    pub sort_order: i64,      // 用户自定义排序序号（REQ-IX-002 拖拽排序）
 }
 ```
 
@@ -307,6 +310,9 @@ pub struct SettingsPayload {
     pub rerank_enabled: bool,    // Cross-Encoder 重排序开关（REQ-RAG-020；默认 false）
     pub hyde_enabled: bool,      // HyDE 查询改写开关（REQ-RAG-021；默认 false）
     pub embedding_model: String, // 嵌入模型标识（REQ-VEC-012；默认 "all-MiniLM-L6-v2"）
+    pub llm_mode: String,        // 推理模式 (remote/local)
+    pub local_model: String,     // 选中的模型文件名
+    pub smart_mode: bool,        // 智能模式开关（S5 审计 P0-1；默认 false）
 }
 ```
 
@@ -362,7 +368,55 @@ pub struct ConversationTree {
 }
 ```
 
-### 2.9 事件负载
+### 2.9 GlobalSearchResults / DocumentSearchResult / EntitySearchResult（REQ-IX-008 S90 全局搜索增强）
+
+```rust
+pub struct GlobalSearchResults {
+    pub messages: Vec<MessageSearchResult>,
+    pub documents: Vec<DocumentSearchResult>,
+    pub entities: Vec<EntitySearchResult>,
+}
+
+pub struct DocumentSearchResult {
+    pub doc_id: String,
+    pub file_path: String,
+    pub summary: Option<String>,
+    pub match_type: String, // "title" | "summary"
+}
+
+pub struct EntitySearchResult {
+    pub entity_text: String,
+    pub entity_type: String,
+    pub chunk_id: String,
+    pub doc_id: String,
+}
+```
+
+- **Storage trait 方法**：`async fn global_search(&self, query: &str, limit: usize) -> Result<GlobalSearchResults>`
+- **实现**：`SqliteStorage::global_search()` 并行搜索 messages_fts (FTS5) + documents (LIKE) + entities (LIKE)
+- **IPC 命令**：`global_search(query: String, limit: Option<usize>) -> GlobalSearchResults`
+
+### 2.10 BatchResult（REQ-ING-024 S91 批量操作增强）
+
+```rust
+pub struct BatchResult {
+    pub success_count: usize,
+    pub failed_count: usize,
+    pub failed_ids: Vec<String>,
+}
+```
+
+- **Storage trait 方法**：
+  - `async fn batch_delete_documents(&self, doc_ids: &[String]) -> Result<()>`
+  - `async fn batch_move_documents(&self, doc_ids: &[String], target_workspace_id: &str) -> Result<()>`
+  - `async fn batch_add_tags(&self, doc_ids: &[String], tags: &[String]) -> Result<()>`
+- **实现**：`SqliteStorage` 单事务批量 DELETE/UPDATE/标签（unchecked_transaction → prepare → execute 循环 → commit）
+- **IPC 命令**：
+  - `batch_delete_documents(ids: Vec<String>) -> BatchResult`
+  - `batch_move_documents(ids: Vec<String>, target_workspace_id: String) -> BatchResult`
+  - `batch_add_tags(ids: Vec<String>, tags: Vec<String>) -> BatchResult`
+
+### 2.10 事件负载
 
 ```rust
 pub struct DocStatusPayload {
@@ -439,7 +493,7 @@ pub struct AppState {
     audit_cancels: tokio::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,  // REQ-AUDIT-005
     file_watchers: tokio::sync::Mutex<HashMap<String, FileWatcherHandle>>,  // REQ-SYNC-003
     // ── QM/OpenCode 借鉴新增字段 ──
-    llm_router: LlmRouter,  // Q11 LLM 路由器（模式路由 + fallback + available_modes）
+    llm_router: LlmRouter,  // Q11 LLM 路由器 + P2-2 远程 LLM 连续失败自动降级（模式路由 + fallback + available_modes + remote_failure_count）
     persist_queue: KeyedQueue<String>,  // Q03 持久化队列（同 conversation_id 串行化写入）
     security_posture: Arc<AtomicU8>,  // Q05 安全态势（0=Dangerous, 1=Auto, 2=Strict）
     shadow_screen_collector: Arc<ShadowScreenCollector>,  // Q06 Shadow 安全筛查统计收集器
@@ -497,10 +551,26 @@ pub struct AppState {
 - 余弦相似度全量加载后 Rust 计算
 - 崩溃恢复：`cleanup_zombies()` 将 Processing → Failed
 
+#### 4.1.1 `storage/` 子模块（v2.0 S01/S02 拆分）
+
+| 子模块 | 文件 | 职责 | 行数 |
+|---|---|---|---|
+| `schema` | `crates/infra/src/storage/schema.rs` | SQL DDL 常量（表/索引/FTS/审计）+ 表名白名单 | ~433 |
+| `migration` | `crates/infra/src/storage/migration.rs` | `init_schema` / `migrate_schema` / `safe_migrate_schema`（REQ-DB-008 安全迁移）/ FTS 回填 / 表名校验 / `backup_database_file` / `run_integrity_check` / `restore_from_backup` / `cleanup_backup` | ~560 |
+| `crypto` | `crates/infra/src/storage/crypto.rs` | AES-256-GCM 加密/解密 + Unix 文件权限辅助 | ~103 |
+| `documents` | `crates/infra/src/storage/documents.rs` | 文档表 CRUD：写入/状态/查重/统计/列表/标签/导入日志/工作空间 | ~534（S02 新增） |
+| `conversations` | `crates/infra/src/storage/conversations.rs` | 会话表 CRUD：创建/列表/分页/删除/标题/排序/工作空间/书签 | ~427（S02 新增） |
+| `messages` | `crates/infra/src/storage/messages.rs` | 消息表 CRUD：写入/列表/分页/批量删除/编辑分页/安全标记/FTS5 | ~437（S02 新增） |
+| `mod` | `crates/infra/src/storage/mod.rs` | 重导出（`pub(crate) use`） | ~33 |
+
+> **可见性策略**：所有常量和函数使用 `pub(crate)` 可见性。`IntegrityCheckResult` 枚举保留在 `sqlite_storage.rs` 中定义（`pub`），因为外部 crate（`tauri-app`）直接引用。
+>
+> **S02 拆分**：文档/会话/消息表 CRUD 操作从 `SqliteStorage` 的 `impl Storage` 方法体中拆出为自由函数（接收 `&Pool` 参数），`SqliteStorage` 方法签名不变，内部委托调用。`sqlite_storage.rs` 从 4,805 行降至 3,883 行。
+
 ### 4.2 LocalEmbedder
 
 - `fastembed` + ONNX Runtime
-- 模型：all-MiniLM-L6-v2（384 维，~30MB）
+- 模型：5 种 EmbeddingModel 可选 — AllMiniLML6V2（384 维，默认）/ BgeSmallEnV1_5（384 维，推荐）/ BgeSmallZhV1_5（512 维，中文）/ E5SmallV2（384 维）/ BgeM3（1024 维，多语言，REQ-VEC-015），运行时切换
 - 懒加载（`OnceCell`）
 - 批量嵌入支持
 - **并行推理会话池（GB 级文档加速）**：内部维护 N 个独立 ONNX 会话（`Vec<Arc<Mutex<TextEmbedding>>>`），
@@ -886,6 +956,18 @@ pub struct VectorRetriever<E: Embedder, S: Storage> {
 - 不改变 `chunk.content`（存储仍为原始内容），仅嵌入文本拼接前缀
 - 检索时 `build_rag_prompt` 仍用原始 `chunk.content`（不含前缀），保持引用块可读
 
+**Late Chunking 上下文感知嵌入**（`build_late_chunking_text` / `extract_doc_prefix` 函数，REQ-RAG-049）：
+
+借鉴 Jina AI 2024 Late Chunking 技术，嵌入时为 chunk 内容拼接文档前 500 字符摘要作为上下文前缀，
+使 chunk 向量包含全文语义上下文。与 Contextual Retrieval 可组合使用：
+`{doc_prefix}\n\n---\n\n文档《{doc_name}》：\n{chunk_content}`
+
+- `extract_doc_prefix(text, max_chars=500)`：从文档全文提取前 N 字符，在段落/句子边界截取
+- `build_late_chunking_text(doc_prefix, chunk_content)`：拼接文档前缀 + 分隔符 + chunk 内容
+- `LateChunkingConfig`：配置结构体（max_prefix_chars=500, separator="\n\n---\n\n"）
+- 调用点：`commands/import.rs::embed_document_chunks`（`late_chunking_enabled` 开启时）
+- 零 LLM 依赖，纯规则方案
+
 ### 5.7 HybridRetriever（`crates/core/src/hybrid_retriever.rs`）
 
 实现 `Retriever` 端口，向量检索 + 关键词检索 → RRF 融合 → Chunk Expansion（REQ-RAG-010）。
@@ -895,18 +977,32 @@ pub struct VectorRetriever<E: Embedder, S: Storage> {
 pub struct HybridRetriever<E: Embedder, S: Storage> {
     embedder: E,
     storage: S,
-    score_threshold: f32,      // DEFAULT_SCORE_THRESHOLD = 0.35
-    hybrid_enabled: bool,      // 运行时开关（false 时等价于 VectorRetriever）
+    score_threshold: f32,          // DEFAULT_SCORE_THRESHOLD = 0.35
+    hybrid_enabled: bool,          // 运行时开关（false 时等价于 VectorRetriever）
+    reranker: Option<Arc<dyn Reranker>>,       // 可选 Cross-Encoder 重排序（REQ-RAG-020）
+    rewriter: Option<Arc<dyn QueryRewriter>>, // 可选 HyDE 查询改写（REQ-RAG-021）
+    mmr_config: Option<MmrConfig>,           // MMR 多样性重排配置
+    quality_gate_config: QualityGateConfig,   // 检索质量门控配置
+active_gate_config: Option<ActiveGateConfig>, // 主动门控配置（REQ-PERF-014）
 }
 
 impl<E: Embedder, S: Storage> HybridRetriever<E, S> {
     pub fn new(embedder: E, storage: S) -> Self;
     pub fn with_threshold(embedder: E, storage: S, score_threshold: f32) -> Self;
     pub fn set_hybrid_enabled(&mut self, enabled: bool);
+    pub fn set_reranker(&mut self, reranker: Option<Arc<dyn Reranker>>);
+    pub fn set_rewriter(&mut self, rewriter: Option<Arc<dyn QueryRewriter>>);
+    pub fn set_mmr(&mut self, config: Option<MmrConfig>);
+    pub fn with_mmr(self, config: MmrConfig) -> Self;
+pub fn set_quality_gate_config(&mut self, config: QualityGateConfig);
+pub fn with_quality_gate(self, config: QualityGateConfig) -> Self;
+pub fn set_active_gate(&mut self, config: Option<ActiveGateConfig>);  // REQ-PERF-014
+pub fn with_active_gate(self, config: ActiveGateConfig) -> Self;     // REQ-PERF-014
 }
 
 impl<E: Embedder, S: Storage> Retriever for HybridRetriever<E, S> {
     async fn retrieve(&self, query: &str, top_k: usize) -> anyhow::Result<Vec<RetrievalResult>>;
+    async fn retrieve_with_embedding(&self, query: &str, query_embedding: &[f32], top_k: usize) -> anyhow::Result<Vec<RetrievalResult>>;
 }
 ```
 
@@ -931,7 +1027,24 @@ pub fn rrf_fuse(
 - **公式**：`score = Σ weight_i / (rrf_k + rank_i + 1)`，其中 `rrf_k = 60`（Cormack et al. 2009 标准参数）
 - **权重**：向量通道 1.0，关键词通道 0.8（向量检索通常更准确）
 - **去重**：按 `chunk.id` 去重，重叠 chunk 累积两通道分数获得更高排名
-- **过度检索**：`retrieval_k = top_k * 3`，给 RRF 融合更大的候选池
+- **过度检索**：`retrieval_k = top_k * OVER_RETRIEVE_FACTOR`（`OVER_RETRIEVE_FACTOR = 5`，P1-1 调优从 3 提升到 5，给 RRF 融合更大的候选池）
+
+**三路 RRF 融合**（`rrf_fuse_three_way` 函数）：向量 + 关键词 + 实体匹配，实体通道权重 0.6（REQ-PERF-006）。
+
+**Prompt 安全防护**（`crates/prompt/src/sanitize.rs`，REQ-SEC-021 + REQ-SEC-022）：
+
+```rust
+/// 四层防护处理单个 chunk 内容
+pub fn sanitize_chunk_content(content: &str) -> String;
+/// 批量处理检索结果，构建带防护的动态上下文段
+pub fn sanitize_dynamic_context(sources: &[RetrievalResult]) -> String;
+/// PII 脱敏（7 类：邮箱/手机号/身份证/IP/国际手机号/SSN/护照）
+pub fn redact_pii(text: &str) -> String;
+/// PII 检测
+pub fn detect_pii(text: &str) -> Vec<PiiRedaction>;
+```
+
+四层防御：①PII 脱敏（REQ-SEC-022）→ ②内容边界隔离（`<retrieved_content>` 标签）→ ③防御性声明 → ④注入模式标记。
 
 **设计原因**：纯向量检索在精确匹配场景召回不足。LangChain `EnsembleRetriever` 验证了向量+BM25 RRF 融合的有效性。FTS5 `trigram` 分词器支持中英文子串匹配。
 
@@ -1083,7 +1196,9 @@ pub fn load_privkey(path: &Path) -> Result<Vec<u8>>;
 pub fn load_pubkey_from_b64(b64: &str) -> Result<VerifyingKey>;
 ```
 
-### 6.2 HNSW 向量索引（`crates/infra/src/hnsw_index.rs`，REQ-NFR-005）
+### 6.2 HNSW 向量索引（`crates/infra/src/hnsw_index.rs`，REQ-NFR-005 + REQ-PERF-013）
+
+> **已从 Pro 下沉到 Free**（REQ-PERF-013，2026-08-17）：`hnsw_rs` 依赖从 optional 变为非可选，`hnsw_index` 模块移出 `#[cfg(feature = "pro")]` 门控。Free 模式大知识库（>500 chunks）自动使用 HNSW O(log n) 检索。
 
 ```rust
 pub struct HnswIndex { /* Hnsw<'static, f32, DistCosine> + id_map + vectors */ }
@@ -1092,13 +1207,20 @@ impl HnswIndex {
     pub fn build(vectors: &[(String, Vec<f32>)]) -> Result<Self>;  // 批量构建
     pub fn search(&self, query: &[f32], top_k: usize) -> Vec<(String, f32)>;  // 查询 top-k
     pub fn save(&self, path: &Path) -> Result<()>;  // JSON 持久化
-    pub fn load(path: &Path) -> Result<Self>;  // 重建索引
+    pub fn load(path: &Path) -> Result<Self>;  // 重建索引（JSON）
     pub fn len(&self) -> usize;
     pub fn is_empty(&self) -> bool;
+    // REQ-PERF-015（v2.2）：二进制持久化（魔数+版本+维度校验）
+    pub fn save_binary(&self, path: &Path) -> Result<()>;  // 明文二进制落盘（测试/非敏感）
+    pub fn load_binary(path: &Path, expected_dim: usize) -> Result<Self>;
+    pub fn serialize_binary(&self) -> Result<Vec<u8>>;  // 序列化（供加密落盘）
+    pub fn deserialize_binary(bytes: &[u8], expected_dim: usize) -> Result<Self>;
 }
 ```
 
 参数：`max_nb_connection=32` / `max_layer=16` / `ef_construction=400` / `ef_search=64`（Malkov & Yashunin 论文推荐值）
+
+> **REQ-PERF-015（v2.2）**：`SqliteStorage` 将索引以 AES-256-GCM（`storage::crypto::encrypt_bytes/decrypt_bytes`）加密后落盘到数据目录 `hnsw_index.bin`，启动懒加载、写入后删除陈旧文件（`mark_hnsw_dirty`）、损坏/维度不匹配回退全量构建。
 
 ### 6.3 SqliteStorage HNSW 支持方法（F1-2）
 
@@ -1106,18 +1228,27 @@ impl HnswIndex {
 impl SqliteStorage {
     pub async fn load_all_embeddings(&self) -> Result<Vec<(String, Vec<f32>)>>;
     pub async fn get_chunks_by_ids(&self, ids: &[String]) -> Result<Vec<RetrievalResult>>;
+    // REQ-PERF-016（v2.2）：向量缓存内存预算守卫（0 = 自动缓存全部，正数 = 超出预算跳过缓存）
+    pub fn set_max_vectors(&mut self, max: usize);
+    pub fn max_vectors(&self) -> usize;
+    // REQ-PERF-017（v2.2）：归一化 + 点积（内部使用）
+    pub(crate) fn normalize_in_place(v: &mut [f32]);
+    pub(crate) fn dot_product(a: &[f32], b: &[f32]) -> f32;
 }
 ```
 
-### 6.4 EmbeddingModel 多模型预设 + 自定义模型（E3-1 + REQ-VEC-014）
+### 6.4 EmbeddingModel 多模型预设 + 自定义模型（E3-1 + REQ-VEC-014 + REQ-VEC-015）
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmbeddingModel {
-    AllMiniLML6V2,   // 384 维（默认）
-    BgeSmallZhV1_5,  // 512 维（中文优化）
-    E5SmallV2,       // 384 维（多语言）
-    Custom(String),   // 自定义 ONNX 模型（REQ-VEC-014，Pro 门控；dim 动态检测）
+AllMiniLML6V2,     // 384 维（英文通用）
+BgeSmallEnV1_5,    // 384 维（英文优化，默认）
+BgeSmallZhV1_5,    // 512 维（中文优化）
+E5SmallV2,         // 384 维（多语言）
+BgeBaseEnV1_5,     // 768 维（英文强检索）
+BgeM3,             // 1024 维（多语言，REQ-VEC-015）
+Custom(String),     // 自定义 ONNX 模型（REQ-VEC-014，Pro 门控；dim 动态检测）
 }
 
 impl LocalEmbedder {
@@ -1327,6 +1458,15 @@ pub trait ResponseCache: Send + Sync {
 
 - **实现**：`SqliteCache`（`crates/infra/src/sqlite_cache.rs`，3 张表：exact_cache / semantic_cache / retrieval_cache）
 - **辅助函数**：`normalize_query()` / `query_hash()` / `cosine_similarity()` / `is_expired()` / `estimate_rag_token_cost()`
+- **REQ-PERF-020（v2.2）语义缓存阈值动态校准**：
+
+```rust
+impl SqliteCache {
+    pub fn current_semantic_threshold(&self) -> f32;       // 默认 0.92，反馈校准后动态
+    pub fn adjust_semantic_threshold(&self, delta: f32) -> f32;  // 钳位 [0.85, 0.97]
+    pub fn feedback_adjust(&self, feedback: FeedbackType) -> f32; // 负反馈 +0.01 / 正反馈 -0.005
+}
+```
 
 ### 8.2 PromptCompressor trait（REQ-PERF-002）
 
@@ -1676,6 +1816,52 @@ pub const GATE_PASS_THRESHOLD: f32 = 0.6;
 /// 评估检索结果质量。
 pub fn evaluate(results: &[RetrievalResult], config: &GateConfig) -> GateScore;
 ```
+
+**主动干预（REQ-PERF-014）**：
+
+```rust
+/// 主动门控配置。
+pub struct ActiveGateConfig {
+    pub retry_threshold: f32,                // 触发重试的阈值（默认 0.6）
+    pub enhanced_top_k_multiplier: f32,      // top_k 扩大倍数（默认 3.0）
+    pub enable_hyde: bool,                   // 重试时启用 HyDE（默认 true）
+    pub enable_rerank: bool,                 // 重试时启用 Rerank（默认 true）
+    pub max_retries: usize,                  // 最大重试次数（默认 1）
+}
+
+/// 重试决策。
+pub struct RetryDecision {
+    pub should_retry: bool,
+    pub reason: String,
+}
+
+/// 增强检索配置。
+pub struct EnhancedRetrievalConfig {
+    pub enhanced_top_k: usize,
+    pub enable_hyde: bool,
+    pub enable_rerank: bool,
+}
+
+/// 重试结果（serde 序列化）。
+pub struct RetryOutcome {
+    pub original_score: f32,
+    pub retry_score: f32,
+    pub improvement: f32,
+    pub retried: bool,
+}
+
+pub fn should_retry(score: &GateScore, config: &ActiveGateConfig) -> RetryDecision;
+pub fn should_retry_with_count(score: &GateScore, config: &ActiveGateConfig, current_retry: usize) -> RetryDecision;
+pub fn build_enhanced_config(config: &ActiveGateConfig, original_top_k: usize) -> EnhancedRetrievalConfig;
+pub fn build_retry_outcome(original_score: f32, retry_score: f32, retried: bool) -> RetryOutcome;
+```
+
+**HybridRetriever 集成**：
+- `HybridRetriever.active_gate_config: Option<ActiveGateConfig>` — 字段
+- `HybridRetriever::set_active_gate(&mut self, config: Option<ActiveGateConfig>)` — 运行时开关
+- `HybridRetriever::with_active_gate(self, config: ActiveGateConfig) -> Self` — builder 方法
+- `HybridRetriever::try_active_retry(&self, query: &str, original_results: Vec<RetrievalResult>, top_k: usize) -> Vec<RetrievalResult>` — 主动重试核心方法
+- 集成点：6 个检索路径（retrieve × 3 + retrieve_with_embedding × 3）在 `log_quality()` 之后、`expand_neighbors()` 之前调用
 
 **ChatEngine 集成**：
 - `ChatEngine::with_quality_gate(config: GateConfig) -> Self` — builder 方法启用质量门控
@@ -2295,3 +2481,198 @@ pub fn align_to_user_boundary(messages: Vec<ChatMessage>) -> Vec<ChatMessage>;
 
 - LLM 压缩失败时降级为截断提示（不返回 Err）
 - 截断提示保留关键信息："[历史记录已压缩，省略了 X 条消息]"
+
+---
+
+## 14. 嵌入模型对比评估（REQ-VEC-018, S96）
+
+### 14.1 数据模型（`crates/models/src/lib.rs`）
+
+```rust
+/// 嵌入对比评估请求。
+pub struct EmbedComparisonRequest {
+    pub model_names: Vec<String>,       // 参与对比的模型名称列表
+    pub top_k: usize,                   // 每个查询检索的 top-k 结果数
+    pub dataset_json: Option<String>,    // 自定义数据集 JSON（None 用内置示例）
+}
+
+/// 嵌入对比评估指标分数。
+pub struct EmbedMetricScores {
+    pub hit_rate: f32,
+    pub mrr: f32,
+    pub ndcg: f32,
+}
+
+impl EmbedMetricScores {
+    /// 从多个样本的指标列表计算平均值。
+    pub fn from_metrics_avg(per_sample: &[Vec<RagEvalMetric>]) -> Self;
+}
+
+/// 嵌入对比评估结果（每个模型一个）。
+pub struct EmbedComparisonResult {
+    pub model_name: String,
+    pub dim: usize,                     // 向量维度
+    pub metrics: EmbedMetricScores,
+    pub sample_count: usize,             // 评估样本数
+}
+```
+
+### 14.2 核心引擎（`crates/core/src/embed_comparison.rs`）
+
+```rust
+/// 进度回调函数类型。
+pub type ProgressFn = Arc<dyn Fn(ProgressEvent) + Send + Sync>;
+
+/// 评估进度事件。
+pub enum ProgressEvent {
+    ModelStarted { model_name: String, index: usize, total: usize },
+    EmbeddingDone { model_name: String, chunk_count: usize },
+    ModelCompleted { model_name: String, result: EmbedComparisonResult },
+    AllCompleted { results: Vec<EmbedComparisonResult> },
+}
+
+/// 运行嵌入模型对比评估。
+///
+/// 对每个模型执行：创建 embedder → 嵌入全部 chunks → 嵌入 query → 检索 → 计算指标。
+pub async fn run_embed_comparison<E, F>(
+    chunks: &[(String, String)],         // (chunk_id, chunk_text) 列表
+    dataset: &RagEvalDataset,            // 评估数据集
+    model_names: &[String],              // 参与对比的模型名称
+    embedder_factory: F,                 // 按模型名称创建 Embedder 的工厂闭包
+    top_k: usize,                        // top-k 检索结果数
+    progress: Option<ProgressFn>,        // 进度回调
+) -> Result<Vec<EmbedComparisonResult>>
+where
+    E: Embedder,
+    F: Fn(&str) -> Pin<Box<dyn Future<Output = Result<E>> + Send>>;
+```
+
+### 14.3 IPC 命令（`crates/tauri-app/src/commands/performance.rs`）
+
+```rust
+/// 运行嵌入模型对比评估（开发者工具，#[cfg(debug_assertions)] 门控）。
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub async fn run_embed_comparison(
+    request: EmbedComparisonRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<EmbedComparisonResult>, String>;
+```
+
+- 评估过程中通过 `embed_eval_progress` Tauri 事件推送进度
+- Release 构建中此命令不注册（开发者工具隔离）
+
+---
+
+## 15. MCP 协议适配器（REQ-ARCH-016）
+
+### 15.1 数据模型（`crates/models/src/lib.rs`）
+
+```rust
+/// MCP 传输类型
+pub enum McpTransportType { Stdio, Sse }
+
+/// MCP 服务器配置
+pub struct McpServerConfig {
+    pub id: String,
+    pub name: String,
+    pub transport: McpTransportType,
+    pub command: Option<String>,      // stdio: 可执行文件路径
+    pub args: Vec<String>,            // stdio: 命令行参数
+    pub env: Vec<(String, String)>,   // stdio: 环境变量
+    pub url: Option<String>,          // SSE: 服务器 URL
+    pub headers: Vec<(String, String)>, // SSE: 认证头
+    pub enabled: bool,
+}
+
+/// MCP 工具定义
+pub struct McpTool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: String,  // JSON Schema 字符串
+    pub server_id: String,
+    pub server_name: String,
+}
+
+/// MCP 工具调用结果
+pub struct McpToolCallResult {
+    pub tool_name: String,
+    pub server_id: String,
+    pub success: bool,
+    pub content: String,
+    pub is_error: bool,
+}
+
+/// MCP 服务器连接状态
+pub enum McpConnectionStatus { Connected, Disconnected, Error }
+
+/// MCP 服务器状态信息
+pub struct McpServerStatus {
+    pub config: McpServerConfig,
+    pub status: McpConnectionStatus,
+    pub error_message: Option<String>,
+    pub tool_count: usize,
+}
+```
+
+### 15.2 Core 层 MCP 模块（`crates/core/src/mcp/`）
+
+#### 15.2.1 Transport trait（`transport.rs`）
+
+```rust
+/// MCP 传输层接口（对象安全）
+pub trait McpTransport: Send + Sync {
+    fn send_request<'a>(&'a self, request: &'a JsonRpcRequest)
+        -> Pin<Box<dyn Future<Output = Result<JsonRpcResponse>> + Send + 'a>>;
+    fn is_connected(&self) -> bool;
+    fn disconnect(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+    fn transport_name(&self) -> &'static str;
+}
+```
+
+#### 15.2.2 Client（`client.rs`）
+
+```rust
+pub struct McpClient {
+    pub fn new(config: McpServerConfig, transport: Arc<dyn McpTransport>) -> Self;
+    pub async fn initialize(&self) -> Result<()>;
+    pub async fn list_tools(&self) -> Result<Vec<McpTool>>;
+    pub async fn call_tool(&self, tool_name: &str, arguments: &serde_json::Value) -> Result<McpToolCallResult>;
+    pub async fn disconnect(&self);
+    pub fn connection_status(&self) -> McpConnectionStatus;
+}
+```
+
+#### 15.2.3 Registry（`registry.rs`）
+
+```rust
+pub struct McpRegistry {
+    pub fn new() -> Self;
+    pub async fn connect(&self, config: McpServerConfig, transport: Arc<dyn McpTransport>) -> Result<()>;
+    pub async fn disconnect(&self, server_id: &str);
+    pub async fn get_all_tools(&self) -> Vec<McpTool>;
+    pub async fn call_tool(&self, server_id: &str, tool_name: &str, args: &serde_json::Value) -> Result<McpToolCallResult>;
+    pub async fn get_server_statuses(&self, configs: &[McpServerConfig]) -> Vec<McpServerStatus>;
+}
+```
+
+### 15.3 Infra 层传输实现（`crates/infra/src/mcp_transport.rs`）
+
+```rust
+/// stdio 传输：子进程 stdin/stdout JSON-RPC 通信
+pub struct StdioTransport {
+    pub async fn new(command: &str, args: &[String], env: &[(String, String)]) -> Result<Self>;
+}
+impl McpTransport for StdioTransport { ... }
+
+/// SSE 传输：HTTP POST + SSE 响应
+pub struct SseTransport {
+    pub fn new(url: &str, headers: &[(String, String)]) -> Result<Self>;
+}
+impl McpTransport for SseTransport { ... }
+```
+
+### 15.4 IPC 命令（`crates/tauri-app/src/commands/mcp.rs`）
+
+6 个 IPC 命令：`add_mcp_server` / `remove_mcp_server` / `list_mcp_servers` / `toggle_mcp_server` / `get_mcp_tools` / `call_mcp_tool`。详见 `docs/api/ipc-commands.md` §2.57。

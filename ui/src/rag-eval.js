@@ -15,7 +15,7 @@
  */
 
 import { $ } from './utils.js';
-import { invoke } from './ipc.js';
+import { ragEvalApi } from './ipc.js';
 import { t } from './i18n.js';
 import { toast, toastError, toastSuccess } from './toast.js';
 
@@ -81,7 +81,7 @@ export async function showRagEvalModal(query, answer, contexts, sources, groundT
   document.body.appendChild(modal);
 
   try {
-    const metrics = await invoke('evaluate_rag_response', { sample });
+    const metrics = await ragEvalApi.evaluate(sample);
     renderEvalResults(modal, metrics);
   } catch (err) {
     modal.querySelector('#ragEvalContent').innerHTML =
@@ -104,7 +104,7 @@ export async function evaluateBatch(samples) {
   document.body.appendChild(modal);
 
   try {
-    const report = await invoke('evaluate_rag_batch', { samples });
+    const report = await ragEvalApi.evaluateBatch(samples);
     renderBatchReport(modal, report);
   } catch (err) {
     modal.querySelector('#ragEvalContent').innerHTML =
@@ -121,7 +121,7 @@ export async function renderRagEvalSettings(container) {
 
   let settings = null;
   try {
-    settings = await invoke('get_rag_eval_settings');
+    settings = await ragEvalApi.getSettings();
   } catch {
     // 静默失败
   }
@@ -169,7 +169,7 @@ function createEvalModal(loadingText) {
     <div class="bg-surface-1 border border-border-default rounded-2xl w-[520px] max-h-[80vh] overflow-y-auto shadow-2xl">
       <div class="flex items-center justify-between px-5 py-3 border-b border-border-default">
         <h3 class="text-base font-medium text-text-primary">RAG 评估指标</h3>
-        <button id="ragEvalClose" class="text-text-tertiary hover:text-text-primary transition-colors text-xl leading-none">×</button>
+        <button id="ragEvalClose" class="text-text-tertiary hover:text-text-primary transition-colors leading-none" aria-label="close"><svg class="icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
       <div id="ragEvalContent" class="px-5 py-4">
         <div class="flex items-center justify-center py-8">
@@ -287,7 +287,7 @@ function initEvalSettingsHandlers(settings) {
         updateToggleVisual(toggle, newEnabled);
         settings[key] = newEnabled;
         try {
-          await invoke('set_rag_eval_settings', { settings });
+          await ragEvalApi.setSettings(settings);
           toastSuccess(newEnabled ? '已启用' : '已禁用');
         } catch (err) {
           updateToggleVisual(toggle, !newEnabled);

@@ -113,6 +113,8 @@ impl SessionStripper {
             summary_inserted,
             stripped_message_ids,
             estimated_tokens_saved,
+            summary: config.summary_text.clone().unwrap_or_default(),
+            kept_count: total.saturating_sub(stripped_count),
         })
     }
 

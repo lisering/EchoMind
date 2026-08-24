@@ -20,8 +20,8 @@
 | B09 | Skill 系统发现 | 🟡 中 | S9 | ✅ Done |
 | B10 | 多协议 LLM 适配 | 🟢 低 | S10 | ✅ Done |
 | B11 | Permission 细粒度控制 | 🟢 低 | S11 | ✅ Done |
-| B12 | Snapshot/Revert | 🟢 低 | S12 | ⏸ 暂不实施 |
-| B13 | Plugin 系统 V2 | 🟢 低 | S13 | ⏸ 暂不实施 |
+| B12 | Snapshot/Revert | 🟢 低 | S12 | ⛔ Deprecated |
+| B13 | Plugin 系统 V2 | 🟢 低 | S13 | ⛔ Deprecated |
 | B14 | Effect 服务分层思路 | 🟢 低 | S14 | ✅ 仅参考 |
 
 ---
@@ -1450,7 +1450,11 @@ match effect {
 
 ---
 
-### S12: Snapshot/Revert（文件快照回滚）
+### S12: Snapshot/Revert（文件快照回滚）— ⛔ Deprecated
+
+#### 废弃理由
+
+EchoMind 是 Tauri 桌面应用，无 OpenCode 的 Web IDE 热重载场景。Tauri 窗口状态已由 `window.{x,y,width,height,maximized}` settings 键持久化，无需快照/回滚机制。文档版本管理可通过导入时 MD5 去重 + 历史记录实现，不需要内容寻址快照系统。
 
 #### 借鉴来源
 
@@ -1470,7 +1474,11 @@ OpenCode `packages/core/src/snapshot.ts` + `session/revert.ts`
 
 ---
 
-### S13: Plugin 系统 V2
+### S13: Plugin 系统 V2 — ⛔ Deprecated
+
+#### 废弃理由
+
+EchoMind 当前架构为单体桌面应用，六边形架构的 ports & adapters 已提供足够的扩展性。插件系统会增加安全攻击面（铁律安全要求），且无用户需求驱动。如需扩展功能，直接在 workspace 内新增 crate 即可，无需运行时插件加载。
 
 #### 借鉴来源
 

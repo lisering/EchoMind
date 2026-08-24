@@ -58,6 +58,12 @@ pub enum ImportOutcome {
     Imported(Document),
     /// 内容指纹重复，跳过（REQ-ING-004）
     SkippedDuplicate(String),
+    /// 同名不同内容，需用户确认是否替换（REQ-ING-012）
+    /// 携带旧文档 ID 和文件名，前端弹出替换确认对话框
+    NameConflict {
+        old_doc_id: String,
+        file_name: String,
+    },
 }
 
 /// 文件导入服务。
@@ -67,6 +73,8 @@ pub struct ImportService<S: Storage> {
     max_free_files: usize,
     /// 分块 token 窗口（GB 级文档加速：大文件用 1024，小文件用 256）
     chunk_tokens: usize,
+    /// 当前工作空间 ID（REQ-WS-002 配额独立计算）
+    pub workspace_id: String,
 }
 
 impl<S: Storage> ImportService<S> {
@@ -77,6 +85,7 @@ impl<S: Storage> ImportService<S> {
             data_dir,
             max_free_files: FREE_TIER_MAX_FILES,
             chunk_tokens: DEFAULT_CHUNK_TOKENS,
+            workspace_id: "default".to_string(),
         }
     }
 
@@ -90,6 +99,20 @@ impl<S: Storage> ImportService<S> {
             data_dir,
             max_free_files: FREE_TIER_MAX_FILES,
             chunk_tokens,
+            workspace_id: "default".to_string(),
+        }
+    }
+
+    /// 以指定工作空间构造（REQ-WS-002 配额独立计算）。
+    ///
+    /// 导入的文档归属此工作空间，配额按此工作空间独立计数。
+    pub fn with_workspace(storage: S, data_dir: PathBuf, workspace_id: String) -> Self {
+        Self {
+            storage,
+            data_dir,
+            max_free_files: FREE_TIER_MAX_FILES,
+            chunk_tokens: DEFAULT_CHUNK_TOKENS,
+            workspace_id,
         }
     }
 
@@ -182,17 +205,24 @@ impl<S: Storage> ImportService<S> {
         if PRO_GATED_EXTENSIONS.contains(&ext) {
             bail!("{ERR_PRO_REQUIRED}: .{ext} 导入为 Pro 版功能，请升级后重试");
         }
-        let count = self.storage.count_documents().await?;
+        // REQ-WS-002：配额按工作空间独立计算（非全局）
+        let count = self
+            .storage
+            .count_documents_in_workspace(&self.workspace_id)
+            .await?;
         if count >= self.max_free_files {
             bail!(
-                "{ERR_LIMIT_REACHED}: 免费版最多导入 {} 个文件（当前已达上限）",
+                "{ERR_LIMIT_REACHED}: 免费版每个知识库最多导入 {} 个文件（当前已达上限）",
                 self.max_free_files
             );
         }
         Ok(())
     }
 
-    /// 导入单个文件：校验 → 去重 → 配额 → 复制入库 → 状态 Pending。
+    /// 导入单个文件：校验 → 去重 → 同名检测 → 配额 → 复制入库 → 状态 Pending。
+    ///
+    /// REQ-ING-012：同名不同内容检测。导入同名但内容不同的文件时返回 `NameConflict`，
+    /// 由调用方（前端/IPC 层）决定是否替换。确认替换后调用 `replace_and_import`。
     pub async fn import_one(&self, raw_path: &str, is_pro: bool) -> anyhow::Result<ImportOutcome> {
         let canonical = Self::sanitize_path(raw_path)?;
         let ext = Self::validate_extension(&canonical)?;
@@ -200,8 +230,24 @@ impl<S: Storage> ImportService<S> {
         // GB 级文件优化：流式 MD5（64KB 块），不整读文件
         let hash = Self::content_hash_stream(&canonical).await?;
 
+        // 内容指纹去重（REQ-ING-004）
         if self.storage.find_document_by_hash(&hash).await?.is_some() {
-            return Ok(ImportOutcome::SkippedDuplicate(Self::file_name(&canonical)));
+            // REQ-ING-011：记录跳过的导入
+            let file_name = Self::file_name(&canonical);
+            let _ = self
+                .storage
+                .add_import_log(&file_name, &ext, "skipped", Some("duplicate content"), None)
+                .await;
+            return Ok(ImportOutcome::SkippedDuplicate(file_name));
+        }
+
+        // 同名不同内容检测（REQ-ING-012）
+        let file_name = Self::file_name(&canonical);
+        if let Some(existing) = self.storage.find_document_by_name(&file_name).await? {
+            return Ok(ImportOutcome::NameConflict {
+                old_doc_id: existing.id,
+                file_name,
+            });
         }
 
         self.check_free_tier_limits(is_pro, &ext).await?;
@@ -209,20 +255,49 @@ impl<S: Storage> ImportService<S> {
         let dest = self
             .data_dir
             .join("documents")
-            .join(format!("{hash}-{}", Self::file_name(&canonical)));
+            .join(format!("{hash}-{}", file_name));
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .with_context(|| format!("创建数据目录失败: {}", parent.display()))?;
         }
         // GB 级文件优化：内核级拷贝副本（零用户态内存），替代 read+write
-        tokio::fs::copy(&canonical, &dest)
+        let file_size = tokio::fs::copy(&canonical, &dest)
             .await
             .with_context(|| format!("写入数据目录失败: {}", dest.display()))?;
 
-        let doc = Document::new(dest.to_string_lossy().into_owned(), hash);
+        let mut doc = Document::new(dest.to_string_lossy().into_owned(), hash);
+        // REQ-WS-002：设置文档归属的工作空间
+        doc.workspace_id = self.workspace_id.clone();
         self.storage.add_document(&doc).await?;
+        // REQ-ING-011：记录成功的导入
+        let _ = self
+            .storage
+            .add_import_log(&file_name, &ext, "success", None, Some(file_size as i64))
+            .await;
         Ok(ImportOutcome::Imported(doc))
+    }
+
+    /// 替换文档并重新导入（REQ-ING-012）。
+    ///
+    /// 删除旧文档（级联清理 chunks/向量/propositions/entities/relations/wiki_links），
+    /// 然后执行完整导入管线。用于用户确认替换同名不同内容文件后调用。
+    ///
+    /// # 参数
+    /// - `raw_path`: 新文件路径
+    /// - `old_doc_id`: 旧文档 ID（将被删除）
+    /// - `is_pro`: 是否 Pro 用户
+    pub async fn replace_and_import(
+        &self,
+        raw_path: &str,
+        old_doc_id: &str,
+        is_pro: bool,
+    ) -> anyhow::Result<ImportOutcome> {
+        // 先删除旧文档（级联清理）
+        self.storage.delete_document(old_doc_id).await?;
+
+        // 重新导入（旧文档已删除，同名检测不会触发）
+        self.import_one(raw_path, is_pro).await
     }
 
     /// 导入单个文件（监听文件夹增量同步用，REQ-SYNC-002）。
@@ -272,11 +347,13 @@ impl<S: Storage> ImportService<S> {
             .await
             .with_context(|| format!("写入数据目录失败: {}", dest.display()))?;
 
-        let doc = Document::new_with_original_path(
+        let mut doc = Document::new_with_original_path(
             dest.to_string_lossy().into_owned(),
             hash,
             original_path.to_string(),
         );
+        // REQ-WS-002：设置文档归属的工作空间
+        doc.workspace_id = self.workspace_id.clone();
         self.storage.add_document(&doc).await?;
         Ok(ImportOutcome::Imported(doc))
     }

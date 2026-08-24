@@ -4,7 +4,9 @@
     clippy::panic,
     clippy::unreachable,
     clippy::todo,
-    clippy::unimplemented
+    clippy::unimplemented,
+    unused_imports,
+    dead_code
 )]
 //! QA 红灯集成测试（L2：Tauri Mock + 真实 SQLite，体系二阶段 2 先于实现编写）。
 //! 覆盖：TC-UI-001 配置持久化（REQ-UI-008）/ TC-UI-002 空知识库拦截（REQ-RAG-003-AC-2）。
@@ -20,17 +22,18 @@ use echomind_models::{ChatMessage, Chunk, DocStatus, Document, LlmConfig, LlmMod
 use echomind_tauri_app::commands::{
     activate_pro_inner, chat_inner, create_conversation_inner, deactivate_pro_inner,
     delete_conversation_inner, delete_document_inner, delete_model_inner, edit_user_message_inner,
-    edit_user_message_inner_full, export_conversation_markdown_inner, forward_stream,
-    get_conversation_cost_inner, get_conversations_inner, get_conversations_paginated_inner,
-    get_llm_mode_inner, get_locale_inner, get_messages_inner, get_pro_status_inner,
-    get_settings_inner, get_sidebar_collapsed_inner, get_watched_folders_inner, import_files_inner,
-    list_local_models_inner, open_data_dir_inner, persist_exchange, record_token_usage_inner,
-    remove_watched_folder_inner, retry_index_inner, save_text_file_inner, search_symbols_inner,
-    set_agent_enabled_inner, set_compression_ratio_inner, set_context_token_limit_inner,
-    set_coordinator_mode_inner, set_embedding_model_inner, set_hybrid_search_inner,
-    set_hyde_enabled_inner, set_llm_mode_inner, set_local_model_inner, set_locale_inner,
-    set_memory_enabled_inner, set_rerank_enabled_inner, set_sidebar_collapsed_inner,
-    set_token_budget_inner, update_llm_config_inner,
+    edit_user_message_inner_full, export_conversation_markdown_inner,
+    export_document_original_inner, forward_stream, get_conversation_cost_inner,
+    get_conversations_inner, get_conversations_paginated_inner, get_llm_mode_inner,
+    get_locale_inner, get_messages_inner, get_pro_status_inner, get_settings_inner,
+    get_sidebar_collapsed_inner, get_watched_folders_inner, import_files_inner,
+    list_local_models_inner, open_data_dir_inner, persist_exchange, rebuild_index_inner,
+    record_token_usage_inner, remove_watched_folder_inner, retry_index_inner, save_text_file_inner,
+    search_symbols_inner, set_agent_enabled_inner, set_compression_ratio_inner,
+    set_context_token_limit_inner, set_coordinator_mode_inner, set_embedding_model_inner,
+    set_hybrid_search_inner, set_hyde_enabled_inner, set_llm_mode_inner, set_local_model_inner,
+    set_locale_inner, set_memory_enabled_inner, set_rerank_enabled_inner,
+    set_sidebar_collapsed_inner, set_token_budget_inner, update_llm_config_inner,
 };
 #[cfg(feature = "pro")]
 use echomind_tauri_app::commands::{
@@ -44,20 +47,32 @@ use echomind_tauri_app::commands::{
     delete_custom_model_inner, list_custom_models_inner, upload_custom_embedding_model_inner,
 };
 use echomind_tauri_app::state::AppState;
-use echomind_tauri_app::stores::config_store::ALPHA_ALL_FEATURES_FREE;
 use ed25519_dalek::Signer;
 use futures::StreamExt;
 use std::sync::Arc;
 use tauri::Listener;
 use tempfile::TempDir;
 
-fn test_config() -> LlmConfig {
-    LlmConfig {
-        api_key: "sk-test-1234567890abcdef".to_string(),
-        base_url: "https://api.deepseek.com".to_string(),
-        model: "deepseek-chat".to_string(),
-    }
-}
+#[path = "integration/chat_tests.rs"]
+mod chat_tests;
+#[path = "integration/common.rs"]
+mod common;
+#[path = "integration/conversation_tests.rs"]
+mod conversation_tests;
+#[path = "integration/full_pipeline.rs"]
+mod full_pipeline;
+#[path = "integration/import_tests.rs"]
+mod import_tests;
+#[path = "integration/local_llm_chain.rs"]
+mod local_llm_chain;
+#[path = "integration/security_chain.rs"]
+mod security_chain;
+#[path = "integration/security_tests.rs"]
+mod security_tests;
+#[path = "integration/smart_mode_tests.rs"]
+mod smart_mode_tests;
+
+pub use common::{make_valid_license, test_config};
 
 /// TC-UI-001 配置持久化：update_llm_config → 重建 AppState（模拟重启）→ get_settings 数据仍在（REQ-UI-008-AC-1/AC-3）。
 #[tokio::test]
@@ -118,235 +133,16 @@ async fn tc_ui_002_empty_knowledge_base_chat_blocked() {
     );
 }
 
-// ================== Phase 6：会话生命周期（REQ-RAG-005/006） ==================
-
-/// TC-RAG-003 会话 CRUD：新建 → 列表 → 删除级联清理（REQ-RAG-006-AC-1）。
-#[tokio::test]
-async fn tc_rag_003_conversation_crud() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-    assert!(!id.is_empty(), "新建会话必须返回唯一 ID");
-
-    let list = get_conversations_inner("default", &state).await.unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].id, id);
-    assert_eq!(list[0].title, "新会话", "初始标题应为占位文案");
-
-    // 写入一轮问答后删除，验证级联清理
-    persist_exchange(
-        &state,
-        &id,
-        "级联删除验证问题",
-        "级联删除验证回答",
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    delete_conversation_inner(&id, &state).await.unwrap();
-
-    assert!(
-        get_conversations_inner("default", &state)
-            .await
-            .unwrap()
-            .is_empty(),
-        "删除后列表必须为空"
-    );
-    assert!(
-        get_messages_inner(&id, &state).await.unwrap().is_empty(),
-        "删除会话必须级联清理其消息"
-    );
-}
-
-/// TC-NAV-007 会话列表分页：新建多个会话 → 分页拉取验证 limit/offset/total（REQ-NAV-007）。
-#[tokio::test]
-async fn tc_nav_007_conversations_pagination() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 创建 5 个会话
-    let mut ids = Vec::new();
-    for i in 0..5 {
-        let id = create_conversation_inner("default".to_string(), &state)
-            .await
-            .unwrap();
-        persist_exchange(
-            &state,
-            &id,
-            &format!("问题{i}"),
-            "回答",
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        ids.push(id);
-    }
-
-    // 第一页：limit=2, offset=0 → 返回最近 2 条，total=5
-    let page1 = get_conversations_paginated_inner("default", 2, 0, &state)
-        .await
-        .unwrap();
-    assert_eq!(page1.items.len(), 2, "第一页应返回 2 条");
-    assert_eq!(page1.total, 5, "总数应为 5");
-
-    // 第二页：limit=2, offset=2 → 返回 2 条
-    let page2 = get_conversations_paginated_inner("default", 2, 2, &state)
-        .await
-        .unwrap();
-    assert_eq!(page2.items.len(), 2, "第二页应返回 2 条");
-    assert_eq!(page2.total, 5);
-
-    // 第三页：limit=2, offset=4 → 返回 1 条（不足一页）
-    let page3 = get_conversations_paginated_inner("default", 2, 4, &state)
-        .await
-        .unwrap();
-    assert_eq!(page3.items.len(), 1, "第三页应返回 1 条");
-    assert_eq!(page3.total, 5);
-
-    // 验证分页不重叠：第一页和第二页的 ID 不重复
-    let page1_ids: std::collections::HashSet<_> =
-        page1.items.iter().map(|c| c.id.clone()).collect();
-    let page2_ids: std::collections::HashSet<_> =
-        page2.items.iter().map(|c| c.id.clone()).collect();
-    assert!(
-        page1_ids.is_disjoint(&page2_ids),
-        "不同页的会话 ID 不应重复"
-    );
-
-    // 验证空工作区
-    let empty = get_conversations_paginated_inner("empty_ws", 10, 0, &state)
-        .await
-        .unwrap();
-    assert_eq!(empty.items.len(), 0);
-    assert_eq!(empty.total, 0);
-}
-
-/// TC-NAV-007b 会话列表分页边界：offset 超出总数 → 返回空列表但 total 正确。
-#[tokio::test]
-async fn tc_nav_007b_pagination_offset_beyond_total() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let _id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-
-    // offset=100 远超总数 1
-    let result = get_conversations_paginated_inner("default", 10, 100, &state)
-        .await
-        .unwrap();
-    assert_eq!(result.items.len(), 0, "offset 超出总数应返回空列表");
-    assert_eq!(result.total, 1, "total 仍应正确反映总数");
-}
-
-/// TC-RAG-004 消息持久化：完成一次对话 → messages 新增 user + assistant 两条，标题自动提取（REQ-RAG-006-AC-2）。
-#[tokio::test]
-async fn tc_rag_004_message_persistence_and_title() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-
-    persist_exchange(
-        &state,
-        &id,
-        "什么是本地知识库？",
-        "本地知识库是将文档索引后…",
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-
-    let messages = get_messages_inner(&id, &state).await.unwrap();
-    assert_eq!(messages.len(), 2, "一次完整对话必须落库两条消息");
-    assert_eq!(messages[0].role, "user");
-    assert_eq!(messages[0].content, "什么是本地知识库？");
-    assert_eq!(messages[1].role, "assistant");
-    assert!(messages[1].content.contains("本地知识库"));
-
-    let convs = get_conversations_inner("default", &state).await.unwrap();
-    assert_eq!(
-        convs[0].title, "什么是本地知识库？",
-        "首轮问答后标题必须自动提取"
-    );
-}
-
-/// TC-RAG-005 流控制：abort_chat 触发取消令牌，慢速流被中断且无 Panic（REQ-RAG-005-AC-1）。
-#[tokio::test]
-async fn tc_rag_005_abort_interrupts_stream() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-
-    // 子验证 1：命令级 abort_chat 必须触发已注册令牌
-    let token = state.abort_token_for("conv-x").await;
-    state.abort_chat("conv-x").await;
-    assert!(token.is_cancelled(), "abort_chat 必须触发取消令牌");
-
-    // 子验证 2：慢速无限流在 abort 后中断，部分内容保留，无 Panic
-    let token = state.abort_token_for("conv-y").await;
-    let cancel = token.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-        cancel.cancel();
-    });
-
-    let slow_stream = futures::stream::unfold(0u32, |i| async move {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        Some((Ok::<String, anyhow::Error>(format!("tok{i}")), i + 1))
-    })
-    .boxed();
-
-    let result = forward_stream(&handle, slow_stream, token, None)
-        .await
-        .unwrap();
-
-    assert!(!result.completed, "流必须被标记为中断（未完成）");
-    assert!(!result.content.is_empty(), "中断前已生成的部分内容必须保留");
-}
-
-// ================== Phase 8：License 校验与配额门控（REQ-LIC-001/002） ==================
-
-/// 开发测试种子（与 BUILTIN_PUBKEY 对应；仅存在于测试代码）。
-const DEV_SEED: [u8; 32] = [
-    0xF1, 0xF7, 0x2D, 0x13, 0x51, 0xE4, 0x8F, 0x18, 0xB7, 0xE1, 0xAA, 0x07, 0x95, 0x27, 0x12, 0x12,
-    0x04, 0x72, 0xCF, 0xC5, 0xC3, 0x65, 0xAB, 0x70, 0xED, 0xA3, 0xC6, 0x5A, 0xC3, 0x29, 0xBC, 0x5C,
-];
-
-/// 生成合法 License Key（使用开发种子签名）。
-fn make_valid_license() -> String {
-    let signing_key = ed25519_dalek::SigningKey::from_bytes(&DEV_SEED);
-    let payload = b"EchoMind-Pro-v1";
-    let signature = signing_key.sign(payload);
-    format!(
-        "{}-{}",
-        B64.encode(payload),
-        B64.encode(signature.to_bytes())
-    )
-}
-
 /// TC-LIC-003 免费版配额拦截：已有 50 个文件，导入第 51 个返回 LIMIT_REACHED（REQ-LIC-002-AC-1）。
 ///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：全功能免费，配额不限制，导入应成功。
-/// 后期稳定后（ALPHA_ALL_FEATURES_FREE = false）：恢复配额限制。
+/// v1.20.0 起：Alpha 阶段结束，配额限制正式生效。
 #[tokio::test]
 async fn tc_lic_003_free_tier_quota_blocked() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    // 确认为免费版
+    assert!(!get_pro_status_inner(&state).await, "测试前提：免费版");
 
     // 预填充 50 个文档（直接写入 storage，跳过导入管线）
     for i in 0..50 {
@@ -363,38 +159,25 @@ async fn tc_lic_003_free_tier_quota_blocked() {
 
     let result = import_files_inner(&handle, &[extra.to_string_lossy().into_owned()], &state).await;
 
-    if ALPHA_ALL_FEATURES_FREE {
-        // Alpha 阶段：全功能免费，配额不限制
-        assert!(
-            result.is_ok(),
-            "Alpha 阶段配额不限制，导入应成功，实际: {:?}",
-            result.err()
-        );
-    } else {
-        let err = result.err().unwrap_or_default();
-        assert!(
-            err.contains("LIMIT_REACHED"),
-            "配额触顶应返回 LIMIT_REACHED 错误，实际: {err}"
-        );
-    }
+    let err = result.err().unwrap_or_default();
+    assert!(
+        err.contains("LIMIT_REACHED"),
+        "配额触顶应返回 LIMIT_REACHED 错误，实际: {err}"
+    );
 }
 
 /// TC-LIC-004 Pro 门控格式付费门（REQ-LIC-002-AC-2）。
 ///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：所有格式均可导入，无 PRO_REQUIRED 错误。
-/// 后期稳定后（ALPHA_ALL_FEATURES_FREE = false）：恢复专业格式付费门。
+/// v1.20.0 起：Alpha 阶段结束，Free 用户导入 Pro 门控格式应返回 PRO_REQUIRED。
 #[tokio::test]
-async fn tc_lic_004_pro_gated_formats_alpha_all_free() {
+async fn tc_lic_004_pro_gated_formats_blocked() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
     let app = tauri::test::mock_app();
     let handle = app.handle().clone();
 
-    // Alpha 阶段：is_pro 自动激活，所有格式均可导入
-    assert!(
-        *state.is_pro().read().await,
-        "Alpha 阶段 is_pro 应自动激活为 true"
-    );
+    // 确认为免费版
+    assert!(!*state.is_pro().read().await, "测试前提：免费版");
 
     for ext in ["pdf", "docx", "pptx", "epub", "xlsx", "csv"] {
         let fname = format!("test.{ext}");
@@ -403,19 +186,17 @@ async fn tc_lic_004_pro_gated_formats_alpha_all_free() {
 
         let result =
             import_files_inner(&handle, &[file.to_string_lossy().into_owned()], &state).await;
+        let err = result.err().unwrap_or_default();
         assert!(
-            result.is_ok(),
-            "Alpha 阶段 .{ext} 导入应成功，实际: {:?}",
-            result.err()
+            err.contains("PRO_REQUIRED"),
+            "Free 用户 .{ext} 导入应返回 PRO_REQUIRED，实际: {err}"
         );
     }
 }
 
 /// TC-LIC-005 激活 Pro 并跨重启持久化（REQ-LIC-001-AC-3）。
 ///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：is_pro 初始即为 true（自动激活），
-/// activate_pro 仍应成功，重启后仍为 true。
-/// 后期稳定后：初始为 false，激活后变 true，重启后恢复 true。
+/// v1.20.0 起：初始为 false，激活后变 true，重启后恢复 true。
 #[tokio::test]
 async fn tc_lic_005_activate_pro_persists_across_restart() {
     let dir = TempDir::new().unwrap();
@@ -424,15 +205,7 @@ async fn tc_lic_005_activate_pro_persists_across_restart() {
     // 第一次会话：激活 Pro
     {
         let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        if ALPHA_ALL_FEATURES_FREE {
-            // Alpha 阶段：初始即为 Pro
-            assert!(
-                get_pro_status_inner(&state).await,
-                "Alpha 阶段初始状态应为 Pro"
-            );
-        } else {
-            assert!(!get_pro_status_inner(&state).await, "初始状态应为免费版");
-        }
+        assert!(!get_pro_status_inner(&state).await, "初始状态应为免费版");
 
         let result = activate_pro_inner(&license, &state).await;
         assert!(
@@ -453,8 +226,7 @@ async fn tc_lic_005_activate_pro_persists_across_restart() {
 
 /// TC-LIC-005b 无效 License 被拒绝（REQ-LIC-001-AC-2/AC-4）。
 ///
-/// Alpha 阶段：is_pro 初始即为 true，无效 License 被拒绝后仍保持 true。
-/// 后期稳定后：初始为 false，拒绝后仍为 false。
+/// v1.20.0 起：初始为 false，拒绝后仍为 false。
 #[tokio::test]
 async fn tc_lic_005b_invalid_license_rejected() {
     let dir = TempDir::new().unwrap();
@@ -463,18 +235,10 @@ async fn tc_lic_005b_invalid_license_rejected() {
     let result = activate_pro_inner("invalid-license-string", &state).await;
     assert!(result.is_err(), "无效 License 必须被拒绝");
 
-    if ALPHA_ALL_FEATURES_FREE {
-        // Alpha 阶段：is_pro 始终为 true
-        assert!(
-            get_pro_status_inner(&state).await,
-            "Alpha 阶段 is_pro 始终为 true"
-        );
-    } else {
-        assert!(
-            !get_pro_status_inner(&state).await,
-            "拒绝后状态不得变为 Pro"
-        );
-    }
+    assert!(
+        !get_pro_status_inner(&state).await,
+        "拒绝后状态不得变为 Pro"
+    );
 }
 
 // ================== Phase 8.5：混沌测试（REQ-CHAOS-001~007） ==================
@@ -549,6 +313,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
         service.index_document(&doc).await.unwrap();
         let elapsed = start.elapsed();
@@ -582,6 +347,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // index_document 失败时返回 Err（PdfLoader 可能无法提取某些 PDF 的文本）
@@ -613,6 +379,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // TextLoader 使用 from_utf8_lossy，混合编码文件不应导致崩溃
@@ -648,6 +415,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
         service.index_document(&doc).await.unwrap();
 
@@ -692,6 +460,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // 空文件索引不应 Panic（splitter 对空文本返回空 Vec）
@@ -719,6 +488,7 @@ mod chaos_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // index_document 应返回 Err（PdfLoader 无法解析非 PDF 内容）
@@ -1052,6 +822,7 @@ mod embed_search_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // 步骤 2：索引（load → split → chunks 入库）
@@ -1103,7 +874,7 @@ mod embed_search_tests {
 
         // 多文档导入 + 索引 + 向量化 + 检索
         for i in 0..3 {
-            let path = dir.path().join("doc{i}.md");
+            let path = dir.path().join(format!("doc{i}.md"));
             std::fs::write(&path, format!("文档 {i} 的内容，关于主题 {i}。")).unwrap();
             let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
             let outcome = service.import_one(&canon, true).await.unwrap();
@@ -1134,108 +905,6 @@ mod embed_search_tests {
     }
 }
 
-// ================== REQ-RAG-020 Cross-Encoder 重排序开关持久化测试 ==================
-
-/// TC-RAG-020 重排序开关持久化与重启恢复（REQ-RAG-020 前端接线）。
-///
-/// AC-1：默认 rerank_enabled 为 false
-/// AC-2：set_rerank_enabled(true) 后 get_settings 返回 rerank_enabled = true
-/// AC-3：set_rerank_enabled(false) 后 get_settings 返回 rerank_enabled = false
-/// AC-4：重启（重建 AppState）后设置仍在
-#[tokio::test]
-async fn tc_rag_020_rerank_toggle_persists() {
-    let dir = TempDir::new().unwrap();
-    {
-        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        update_llm_config_inner(test_config(), &state)
-            .await
-            .unwrap();
-
-        // AC-1: 默认开启（层次化重排为精度默认项）
-        let settings = get_settings_inner(&state).await.unwrap();
-        assert!(settings.rerank_enabled, "AC-1: 重排序默认应开启");
-
-        // AC-2: 开启
-        set_rerank_enabled_inner(true, &state).await.unwrap();
-        let settings = get_settings_inner(&state).await.unwrap();
-        assert!(settings.rerank_enabled, "AC-2: 开启后重排序应为 true");
-
-        // AC-3: 关闭
-        set_rerank_enabled_inner(false, &state).await.unwrap();
-        let settings = get_settings_inner(&state).await.unwrap();
-        assert!(!settings.rerank_enabled, "AC-3: 关闭后重排序应为 false");
-    }
-
-    // AC-4: 重启后设置仍在（关闭状态）
-    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let settings = get_settings_inner(&restarted).await.unwrap();
-    assert!(!settings.rerank_enabled, "AC-4: 重启后重排序应保持关闭");
-
-    // 再测开启后重启
-    set_rerank_enabled_inner(true, &restarted).await.unwrap();
-    drop(restarted);
-    let restarted2 = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let settings2 = get_settings_inner(&restarted2).await.unwrap();
-    assert!(
-        settings2.rerank_enabled,
-        "AC-4: 重启后重排序开启状态应持久化"
-    );
-}
-
-// ================== REQ-RAG-021 HyDE 查询改写开关持久化测试 ==================
-
-/// TC-RAG-021 HyDE 查询改写开关持久化与重启恢复（REQ-RAG-021 前端接线）。
-///
-/// AC-1：默认 hyde_enabled 为 false
-/// AC-2：set_hyde_enabled(true) 后 get_settings 返回 hyde_enabled = true
-/// AC-3：set_hyde_enabled(false) 后 get_settings 返回 hyde_enabled = false
-/// AC-4：重启（重建 AppState）后设置仍在
-#[tokio::test]
-async fn tc_rag_021_hyde_toggle_persists() {
-    let dir = TempDir::new().unwrap();
-    {
-        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        update_llm_config_inner(test_config(), &state)
-            .await
-            .unwrap();
-
-        // AC-1: 默认关闭
-        let settings = get_settings_inner(&state).await.unwrap();
-        assert!(!settings.hyde_enabled, "AC-1: HyDE 默认应关闭");
-
-        // AC-2: 开启
-        set_hyde_enabled_inner(true, &state).await.unwrap();
-        let settings = get_settings_inner(&state).await.unwrap();
-        assert!(settings.hyde_enabled, "AC-2: 开启后 HyDE 应为 true");
-
-        // AC-3: 关闭
-        set_hyde_enabled_inner(false, &state).await.unwrap();
-        let settings = get_settings_inner(&state).await.unwrap();
-        assert!(!settings.hyde_enabled, "AC-3: 关闭后 HyDE 应为 false");
-    }
-
-    // AC-4: 重启后设置仍在（关闭状态）
-    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let settings = get_settings_inner(&restarted).await.unwrap();
-    assert!(!settings.hyde_enabled, "AC-4: 重启后 HyDE 应保持关闭");
-
-    // 再测开启后重启
-    set_hyde_enabled_inner(true, &restarted).await.unwrap();
-    drop(restarted);
-    let restarted2 = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let settings2 = get_settings_inner(&restarted2).await.unwrap();
-    assert!(settings2.hyde_enabled, "AC-4: 重启后 HyDE 开启状态应持久化");
-}
-
-// ================== VEC-012 嵌入模型运行时切换 L2 契约测试 ==================
-
-/// TC-VEC-012 嵌入模型持久化与重启恢复（REQ-VEC-012）。
-///
-/// AC-1：默认 embedding_model 为 "all-MiniLM-L6-v2"
-/// AC-2：set_embedding_model("bge-small-zh-v1.5") 后 get_settings 返回对应模型
-/// AC-3：set_embedding_model("e5-small-v2") 后 get_settings 返回对应模型
-/// AC-4：重启（重建 AppState）后设置仍在
-/// AC-5：非法模型标识被拒绝
 #[tokio::test]
 async fn tc_vec_012_embedding_model_persists() {
     let dir = TempDir::new().unwrap();
@@ -1715,6 +1384,7 @@ mod mm_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // 使用多模态索引（注入 Mock PageRenderer + MockOcrEngine）
@@ -1811,6 +1481,7 @@ mod mm_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // VLM 模拟返回 Markdown 表格
@@ -1880,6 +1551,7 @@ mod mm_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // VLM 模拟返回 Mermaid gantt 语法
@@ -1947,6 +1619,7 @@ mod mm_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         let ocr_calls = Arc::new(AtomicUsize::new(0));
@@ -2127,6 +1800,7 @@ mod mm_tests {
         let doc = match outcome {
             ImportOutcome::Imported(d) => d,
             ImportOutcome::SkippedDuplicate(_) => panic!("首次导入不应跳过"),
+            ImportOutcome::NameConflict { .. } => panic!("首次导入不应同名冲突"),
         };
 
         // 模拟 VLM 按 Level 3 策略提取的 CSV 数据
@@ -2231,210 +1905,13 @@ mod mm_tests {
     }
 }
 
-// ================== AUDIT 域集成测试（REQ-AUDIT-001~005） ==================
-// L2 契约测试：真实 SQLite + Tauri Mock，验证 IPC 层门控与取消机制。
-// AuditEngine 核心逻辑（Decompose/Verify/Report）由 audit_tests.rs 单元测试覆盖（Mock LLM/Embedder/Storage）。
-// 此处不发起真实 LLM/Embedder 调用，仅验证 Pro 门控、配置检查、空文档处理与取消信号。
-
-/// TC-AUDIT-006 免费版审计门控：is_pro=false 时调用 audit_document 返回 Pro 版功能错误（REQ-AUDIT-001）。
-#[cfg(feature = "pro")]
-#[tokio::test]
-async fn tc_audit_006_free_tier_audit_blocked() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    // 配置 LLM（排除「未配置」干扰项，单独验证 Pro 门控）
-    update_llm_config_inner(test_config(), &state)
-        .await
-        .unwrap();
-    // 确认为免费版
-    assert!(!get_pro_status_inner(&state).await, "初始状态应为免费版");
-
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-
-    let result = audit_document_inner(&handle, "any-doc", "test.md", &state).await;
-
-    let err = result.err().unwrap_or_default();
-    assert!(
-        err.contains("Pro 版功能"),
-        "免费版审计应返回 Pro 版功能错误，实际: {err}"
-    );
-}
-
-/// TC-AUDIT-007 Pro 版未配置 LLM：is_pro=true 但无 LLM 配置时返回配置错误（REQ-AUDIT-001）。
-#[cfg(feature = "pro")]
-#[tokio::test]
-async fn tc_audit_007_pro_without_llm_config_blocked() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let license = make_valid_license();
-    activate_pro_inner(&license, &state).await.unwrap();
-    assert!(get_pro_status_inner(&state).await, "激活后应为 Pro");
-    // 不配置 LLM，验证 Pro 门控通过但 LLM 配置检查拦截
-
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-
-    let result = audit_document_inner(&handle, "any-doc", "test.md", &state).await;
-
-    let err = result.err().unwrap_or_default();
-    assert!(
-        err.contains("未配置 LLM"),
-        "Pro 版未配置 LLM 应返回配置错误，实际: {err}"
-    );
-}
-
-/// TC-AUDIT-008 审计取消机制：abort_audit 设置 AtomicBool 标志，audit_cancel_for 返回的标志可被检测（REQ-AUDIT-005）。
-#[tokio::test]
-async fn tc_audit_008_abort_sets_cancel_flag() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 获取取消标志（初始为 false）
-    let flag = state.audit_cancel_for("doc-cancel-test").await;
-    assert!(
-        !flag.load(std::sync::atomic::Ordering::SeqCst),
-        "初始状态不应取消"
-    );
-
-    // 触发取消
-    state.abort_audit("doc-cancel-test").await;
-    assert!(
-        flag.load(std::sync::atomic::Ordering::SeqCst),
-        "abort_audit 后标志必须为 true"
-    );
-
-    // 清理后标志仍保持 true（已传播给持有者），但 HashMap 条目已移除
-    state.clear_audit_cancel("doc-cancel-test").await;
-    assert!(
-        flag.load(std::sync::atomic::Ordering::SeqCst),
-        "清理后已传播的标志仍为 true（语义不变）"
-    );
-
-    // 再次获取应为新标志（false）
-    let new_flag = state.audit_cancel_for("doc-cancel-test").await;
-    assert!(
-        !new_flag.load(std::sync::atomic::Ordering::SeqCst),
-        "清理后重新获取应为新标志（false）"
-    );
-}
-
-/// TC-AUDIT-009 审计按钮可见性条件：仅 Pro 版 + 已索引文档显示审计按钮（REQ-AUDIT-001 前端旁证）。
-/// 此测试验证后端数据前提：Pro 激活后导入文档，文档状态为 Indexed 且可通过 list_documents 获取。
-#[cfg(feature = "pro")]
-#[tokio::test]
-async fn tc_audit_009_pro_indexed_doc_ready_for_audit() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 激活 Pro
-    let license = make_valid_license();
-    activate_pro_inner(&license, &state).await.unwrap();
-    assert!(get_pro_status_inner(&state).await, "应为 Pro");
-
-    // 配置 LLM
-    update_llm_config_inner(test_config(), &state)
-        .await
-        .unwrap();
-
-    // 导入测试文档
-    let md = dir.path().join("audit-test.md");
-    std::fs::write(
-        &md,
-        "# 测试文档\n\n实验温度为 25°C，误差小于 5%。\n\n实验温度为 20°C。\n",
-    )
-    .unwrap();
-
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-    let imported = import_files_inner(&handle, &[md.to_string_lossy().into_owned()], &state)
-        .await
-        .unwrap();
-    assert_eq!(imported.len(), 1, "应导入 1 个文档");
-
-    // 验证文档已索引
-    let docs = state.storage.list_documents().await.unwrap();
-    assert_eq!(docs.len(), 1, "应有 1 个文档");
-
-    let doc = &docs[0];
-    let status = format!("{:?}", doc.status);
-    assert!(
-        status.contains("Indexed"),
-        "文档应已索引，实际状态: {status}"
-    );
-
-    // 验证 chunks 已写入（审计的前置条件）
-    let chunks = state.storage.list_chunks(&doc.id).await.unwrap();
-    assert!(!chunks.is_empty(), "已索引文档应有 chunks");
-
-    // 验证 chunks 中包含矛盾内容（审计的目标数据）
-    let all_text: String = chunks.iter().map(|c| c.content.as_str()).collect();
-    assert!(
-        all_text.contains("25°C") || all_text.contains("25"),
-        "chunks 应包含温度参数 25°C"
-    );
-    assert!(
-        all_text.contains("20°C") || all_text.contains("20"),
-        "chunks 应包含温度参数 20°C"
-    );
-}
-
-/// TC-AUDIT-010 空文档审计：Pro + LLM 配置但文档无 chunks 时返回 NoChunks 提示（REQ-AUDIT-001-AC-4）。
-/// 此测试验证文档存在但无 chunks 的边界情况。
-#[cfg(feature = "pro")]
-#[tokio::test]
-async fn tc_audit_010_empty_doc_no_chunks_handling() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 激活 Pro + 配置 LLM
-    let license = make_valid_license();
-    activate_pro_inner(&license, &state).await.unwrap();
-    update_llm_config_inner(test_config(), &state)
-        .await
-        .unwrap();
-
-    // 直接写入文档记录（无 chunks）
-    let doc = Document::new("empty-audit.md".to_string(), "empty-hash".to_string());
-    state.storage.add_document(&doc).await.unwrap();
-
-    // 验证文档存在但无 chunks
-    let chunks = state.storage.list_chunks(&doc.id).await.unwrap();
-    assert!(chunks.is_empty(), "文档不应有 chunks");
-
-    // 调用审计——会在 embedder 初始化阶段失败（无 ONNX 模型），
-    // 但此测试验证的是 list_chunks 返回空时的边界处理。
-    // 由于 embedder 初始化在 list_chunks 之前，此测试主要验证 Pro 门控通过。
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-    let result = audit_document_inner(&handle, &doc.id, "empty.md", &state).await;
-
-    // 审计会因 embedder 不可用而返回错误（测试环境无 ONNX 模型），
-    // 但不应是 Pro 门控或 LLM 配置错误——证明门控已通过。
-    if let Err(ref err) = result {
-        assert!(
-            !err.contains("Pro 版功能"),
-            "Pro 已激活，不应返回 Pro 门控错误: {err}"
-        );
-        assert!(
-            !err.contains("未配置 LLM"),
-            "LLM 已配置，不应返回配置错误: {err}"
-        );
-    }
-    // embedder 不可用是预期的（测试环境无 ONNX 模型下载）
-}
-
-// ==================================================================
+// AUDIT 域集成测试已迁移至 integration/security_tests.rs
 // REQ-LIC-004 License 停用与状态展示
 // ==================================================================
 
 /// TC-LIC-006 License 停用（REQ-LIC-004-AC-1）：
 /// 停用后 is_pro 回落为 false，settings 表 license.is_pro 变为 "false"；
 /// 重建 AppState（模拟重启）后仍为 false（持久化验证）。
-///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：deactivate_pro 设置运行态为 false，
-/// 但重建 AppState 后 load_is_pro 会重新自动激活为 true。
-/// 后期稳定后：停用后运行态和持久化均为 false，重启后仍为 false。
 #[tokio::test]
 async fn tc_lic_006_deactivate_pro() {
     let dir = TempDir::new().unwrap();
@@ -2461,198 +1938,10 @@ async fn tc_lic_006_deactivate_pro() {
 
     // 重建 AppState（模拟重启），验证 is_pro 状态
     let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    if ALPHA_ALL_FEATURES_FREE {
-        // Alpha 阶段：load_is_pro 自动激活，重启后仍为 true
-        assert!(
-            get_pro_status_inner(&restarted).await,
-            "Alpha 阶段重启后自动激活 Pro"
-        );
-    } else {
-        assert!(
-            !get_pro_status_inner(&restarted).await,
-            "重启后应为免费版（持久化生效）"
-        );
-    }
-}
-
-// ==================================================================
-// REQ-VEC-005 索引失败重试
-// ==================================================================
-
-/// TC-VEC-005 索引失败重试（REQ-VEC-005-AC-1）：
-/// 调用 retry_index 后文档状态重置为 Pending，旧 chunks 被清理。
-/// 重试最终因 embedder 不可用而失败（测试环境无 ONNX 模型），
-/// 但状态重置与 chunks 清理逻辑得到验证。
-#[tokio::test]
-async fn tc_vec_005_retry_resets_and_clears() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 创建测试文件
-    let md = dir.path().join("test.md");
-    std::fs::write(&md, "# Test\n\nContent here.").unwrap();
-
-    // 直接创建文档记录（跳过导入管线，避免 embedder 依赖）
-    let doc = Document::new(
-        md.to_string_lossy().into_owned(),
-        "fake-hash-001".to_string(),
-    );
-    state.storage.add_document(&doc).await.unwrap();
-
-    // 添加旧 chunks（模拟之前失败的索引结果）
-    let chunk = Chunk::new(doc.id.clone(), "old content".to_string(), 10, 0);
-    state.storage.add_chunk(&chunk).await.unwrap();
-
-    // 设置为 Failed 状态
-    state
-        .storage
-        .update_doc_status(&doc.id, DocStatus::Failed("test error".to_string()))
-        .await
-        .unwrap();
-
-    // 验证前置条件
-    let chunks_before = state.storage.list_chunks(&doc.id).await.unwrap();
-    assert_eq!(chunks_before.len(), 1, "重试前应有 1 个旧 chunk");
-
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-
-    // 调用 retry_index_inner（会因 embedder 不可用而失败，但状态重置和清理已执行）
-    let _ = retry_index_inner(&handle, &doc.id, &state).await;
-
-    // 验证旧 chunks 被清理（delete_chunks_by_doc 被调用）
-    // 索引会成功产生新 chunks，但嵌入失败（embedder 不可用）。
-    // 旧 chunk（内容为 "old content"）应已被清理，不应出现在新 chunks 中。
-    let chunks_after = state.storage.list_chunks(&doc.id).await.unwrap();
     assert!(
-        chunks_after.iter().all(|c| c.content != "old content"),
-        "旧 chunk 内容应被清理，不应出现在新 chunks 中"
+        !get_pro_status_inner(&restarted).await,
+        "重启后应为免费版（持久化生效）"
     );
-
-    // 文档记录应保留（delete_chunks_by_doc 只清理 chunks，不删文档）
-    let docs = state.storage.list_documents().await.unwrap();
-    assert!(docs.iter().any(|d| d.id == doc.id), "文档记录应保留");
-}
-
-// ==================================================================
-// REQ-ING-005 删除文档与会话隔离
-// ==================================================================
-
-/// TC-ING-DEL-001 删除文档不影响会话与消息（REQ-ING-005-AC-3/AC-4/AC-5）：
-/// 导入文档 → 创建会话 → 写入消息 → 删除文档 → 验证会话和消息仍然存在。
-#[tokio::test]
-async fn tc_ing_del_001_delete_document_preserves_conversations() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 1. 导入测试文档
-    let md = dir.path().join("test-doc.md");
-    std::fs::write(&md, "# 测试文档\n\n这是一段测试内容。").unwrap();
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-    let imported = import_files_inner(&handle, &[md.to_string_lossy().into_owned()], &state)
-        .await
-        .unwrap();
-    assert_eq!(imported.len(), 1, "应导入 1 个文档");
-
-    let docs = state.storage.list_documents().await.unwrap();
-    assert_eq!(docs.len(), 1, "导入后应有 1 个文档");
-    let doc_id = docs[0].id.clone();
-
-    // 2. 创建会话并写入消息
-    let conv_id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-    persist_exchange(
-        &state,
-        &conv_id,
-        "测试问题",
-        "测试回答",
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-
-    let messages_before = get_messages_inner(&conv_id, &state).await.unwrap();
-    assert_eq!(messages_before.len(), 2, "删除前应有 2 条消息");
-
-    // 3. 删除文档
-    delete_document_inner(&doc_id, &state).await.unwrap();
-
-    // 4. 验证文档已被删除
-    let docs_after = state.storage.list_documents().await.unwrap();
-    assert!(docs_after.is_empty(), "删除后文档列表应为空");
-
-    // 5. 验证 chunks 已级联删除
-    let chunks = state.storage.list_chunks(&doc_id).await.unwrap();
-    assert!(chunks.is_empty(), "删除后 chunks 应为空");
-
-    // 6. 核心断言：会话仍然存在
-    let convs = get_conversations_inner("default", &state).await.unwrap();
-    assert_eq!(
-        convs.len(),
-        1,
-        "删除文档后会话数量不应变化（REQ-ING-005-AC-3）"
-    );
-    assert_eq!(convs[0].id, conv_id, "会话 ID 应保持不变");
-
-    // 7. 核心断言：消息仍然存在且内容不变
-    let messages_after = get_messages_inner(&conv_id, &state).await.unwrap();
-    assert_eq!(
-        messages_after.len(),
-        2,
-        "删除文档后消息数量不应变化（REQ-ING-005-AC-3）"
-    );
-    assert_eq!(messages_after[0].content, "测试问题", "消息内容应保持不变");
-    assert_eq!(messages_after[1].content, "测试回答", "消息内容应保持不变");
-}
-
-// ==================================================================
-// REQ-ING-006 导入进度与取消
-// ==================================================================
-
-/// TC-ING-006 导入取消标志机制（REQ-ING-006-AC-1/AC-2）：
-/// abort_import 设置取消标志，reset_import_cancel 重置标志，
-/// import_cancel_flag 返回共享的 Arc<AtomicBool>。
-/// import_files_inner 循环在文件边界检查标志并退出，已完成部分保留。
-#[tokio::test]
-async fn tc_ing_006_import_cancel_mechanism() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 初始状态：未取消
-    let flag = state.import_cancel_flag();
-    assert!(
-        !flag.load(std::sync::atomic::Ordering::SeqCst),
-        "初始状态不应取消"
-    );
-
-    // 设置取消
-    state.abort_import();
-    assert!(
-        flag.load(std::sync::atomic::Ordering::SeqCst),
-        "abort_import 后应取消"
-    );
-
-    // 重置取消
-    state.reset_import_cancel();
-    assert!(
-        !flag.load(std::sync::atomic::Ordering::SeqCst),
-        "reset 后不应取消"
-    );
-
-    // 验证 flag 与 state 共享同一 AtomicBool（修改 flag 不影响 state）
-    flag.store(true, std::sync::atomic::Ordering::SeqCst);
-    assert!(
-        state
-            .import_cancel_flag()
-            .load(std::sync::atomic::Ordering::SeqCst),
-        "flag 应与 state 共享同一 AtomicBool"
-    );
-    state.reset_import_cancel();
 }
 
 // ==================================================================
@@ -3020,13 +2309,15 @@ async fn tc_ipc_llm_005_set_remote() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
-    // 先设为 Local
-    set_llm_mode_inner("local".to_string(), &state)
-        .await
-        .unwrap();
-    assert_eq!(state.get_llm_mode().await, LlmMode::Local);
+    // Free 模式下 set_llm_mode("local") 应被 Pro 门控拦截
+    let result = set_llm_mode_inner("local".to_string(), &state).await;
+    assert!(result.is_err(), "Free 模式下 local 模式应被 Pro 门控拦截");
+    assert!(result.unwrap_err().contains("PRO_REQUIRED"));
 
-    // 切回 Remote
+    // 默认应为 Remote
+    assert_eq!(state.get_llm_mode().await, LlmMode::Remote);
+
+    // 设置为 Remote（应成功）
     set_llm_mode_inner("remote".to_string(), &state)
         .await
         .unwrap();
@@ -3038,18 +2329,27 @@ async fn tc_ipc_llm_005_set_remote() {
 }
 
 /// TC-IPC-LLM-006：设置 Local 模式（REQ-LLM-003 AC-4）。
+/// Free 模式下 local 模式被 Pro 门控拦截。
 #[tokio::test]
 async fn tc_ipc_llm_006_set_local() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
-    set_llm_mode_inner("local".to_string(), &state)
-        .await
-        .unwrap();
-    assert_eq!(state.get_llm_mode().await, LlmMode::Local);
+    // Free 模式下 set_llm_mode("local") 应被 Pro 门控拦截
+    let result = set_llm_mode_inner("local".to_string(), &state).await;
+    assert!(result.is_err(), "Free 模式下 local 模式应被 Pro 门控拦截");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("PRO_REQUIRED"),
+        "错误应包含 PRO_REQUIRED: {err}"
+    );
 
+    // 模式不应被修改（仍为 Remote）
+    assert_eq!(state.get_llm_mode().await, LlmMode::Remote);
+
+    // settings 表不应持久化 local
     let persisted = state.storage.get_setting("llm.mode").await.unwrap();
-    assert_eq!(persisted.as_deref(), Some("local"));
+    assert_ne!(persisted.as_deref(), Some("local"));
 }
 
 /// TC-IPC-LLM-007：无效模式返回错误（REQ-LLM-003 AC-4）。
@@ -3103,22 +2403,32 @@ async fn tc_ipc_llm_009_recommended_models() {
 }
 
 /// TC-IPC-LLM-010：set_local_model 持久化到 settings 表（REQ-LLM-003）。
+/// Free 模式下 set_local_model 被 Pro 门控拦截。
 #[tokio::test]
 async fn tc_ipc_llm_010_set_local_model_persists() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
     let filename = "qwen2.5-7b-instruct-q4_k_m.gguf";
-    set_local_model_inner(filename.to_string(), &state)
-        .await
-        .unwrap();
+    // Free 模式下 set_local_model 应被 Pro 门控拦截
+    let result = set_local_model_inner(filename.to_string(), &state).await;
+    assert!(
+        result.is_err(),
+        "Free 模式下 set_local_model 应被 Pro 门控拦截"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("PRO_REQUIRED"),
+        "错误应包含 PRO_REQUIRED: {err}"
+    );
 
-    // 持久化到 settings 表
+    // 不应持久化到 settings 表
     let persisted = state.storage.get_setting("llm.local_model").await.unwrap();
-    assert_eq!(persisted.as_deref(), Some(filename));
+    assert_ne!(persisted.as_deref(), Some(filename));
 }
 
 /// TC-IPC-LLM-011：get_settings 返回 llm_mode 和 local_model 字段（REQ-LLM-003）。
+/// Free 模式下 local 设置被 Pro 门控拦截，但 get_settings 正常返回。
 #[tokio::test]
 async fn tc_ipc_llm_011_get_settings_returns_llm_fields() {
     let dir = TempDir::new().unwrap();
@@ -3132,53 +2442,50 @@ async fn tc_ipc_llm_011_get_settings_returns_llm_fields() {
     );
     assert_eq!(settings.local_model, "", "初始 local_model 应为空串");
 
-    // 设置模式和模型
-    set_llm_mode_inner("local".to_string(), &state)
-        .await
-        .unwrap();
-    set_local_model_inner("test-model.gguf".to_string(), &state)
-        .await
-        .unwrap();
+    // Free 模式下 set_llm_mode("local") 和 set_local_model 应被 Pro 门控拦截
+    let result1 = set_llm_mode_inner("local".to_string(), &state).await;
+    assert!(result1.is_err(), "Free 模式下 local 模式应被 Pro 门控拦截");
+    let result2 = set_local_model_inner("test-model.gguf".to_string(), &state).await;
+    assert!(
+        result2.is_err(),
+        "Free 模式下 set_local_model 应被 Pro 门控拦截"
+    );
 
-    // 验证 get_settings 反映最新值
+    // 模式不应被修改（仍为 Remote 等价空串）
     let settings = get_settings_inner(&state).await.unwrap();
-    assert_eq!(settings.llm_mode, "local", "设置后 llm_mode 应为 local");
+    assert_eq!(settings.llm_mode, "", "Free 模式下 llm_mode 应不被修改");
     assert_eq!(
-        settings.local_model, "test-model.gguf",
-        "设置后 local_model 应反映选中模型"
+        settings.local_model, "",
+        "Free 模式下 local_model 应不被修改"
     );
 }
 
 /// TC-IPC-LLM-012：get_settings 重启后恢复 llm_mode 和 local_model（REQ-LLM-003）。
+/// Free 模式下 local 设置被 Pro 门控拦截，重启后仍为 remote。
 #[tokio::test]
 async fn tc_ipc_llm_012_get_settings_restore_after_restart() {
     let dir = TempDir::new().unwrap();
 
-    // 写入阶段
+    // 写入阶段：Free 模式下 set_llm_mode/set_local_model 被 Pro 门控拦截
     {
         let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        set_llm_mode_inner("local".to_string(), &state)
-            .await
-            .unwrap();
-        set_local_model_inner("persisted-model.gguf".to_string(), &state)
-            .await
-            .unwrap();
+        let r1 = set_llm_mode_inner("local".to_string(), &state).await;
+        assert!(r1.is_err(), "Free 模式下 local 模式应被 Pro 门控拦截");
+        let r2 = set_local_model_inner("persisted-model.gguf".to_string(), &state).await;
+        assert!(r2.is_err(), "Free 模式下 set_local_model 应被 Pro 门控拦截");
     }
 
-    // 重启阶段
+    // 重启阶段：仍为 Remote（未被修改）
     let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
     let settings = get_settings_inner(&restarted).await.unwrap();
-    assert_eq!(settings.llm_mode, "local", "重启后 llm_mode 应恢复为 local");
-    assert_eq!(
-        settings.local_model, "persisted-model.gguf",
-        "重启后 local_model 应恢复"
-    );
+    assert_eq!(settings.llm_mode, "", "重启后 llm_mode 应为空串（remote）");
+    assert_eq!(settings.local_model, "", "重启后 local_model 应为空串");
 
-    // 运行态也应恢复
+    // 运行态也应恢复为 Remote
     assert_eq!(
         restarted.get_llm_mode().await,
-        LlmMode::Local,
-        "重启后运行态模式应恢复为 Local"
+        LlmMode::Remote,
+        "重启后运行态模式应恢复为 Remote"
     );
 }
 
@@ -3426,329 +2733,9 @@ async fn tc_ipc_sample_007_invalid_frequency_penalty() {
     );
 }
 
-// ============================================================================
-// 安全防御 IPC 集成测试（REQ-SEC-013~020）
-// ============================================================================
+// 安全防御 IPC 集成测试已迁移至 integration/security_tests.rs
 
-/// TC-IPC-SEC-001：安全状态查询——初始状态为 Unencrypted（REQ-SEC-013）。
-#[tokio::test]
-async fn tc_ipc_sec_001_initial_security_state_is_unencrypted() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let security_state = state.security().state().await;
-    assert_eq!(
-        security_state,
-        echomind_core::security::SecurityState::Unencrypted,
-        "初始状态应为 Unencrypted"
-    );
-    assert!(!state.security().is_locked().await, "初始不应被锁定");
-    assert_eq!(
-        state.security().remaining_attempts().await,
-        5,
-        "初始剩余尝试次数应为 5"
-    );
-}
-
-/// TC-IPC-SEC-002：应用锁定与解锁循环（REQ-SEC-014）。
-#[tokio::test]
-async fn tc_ipc_sec_002_lock_unlock_cycle() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 设置加密状态
-    state.security().set_encrypted().await;
-    assert_eq!(
-        state.security().state().await,
-        echomind_core::security::SecurityState::EncryptedUnlocked
-    );
-
-    // 锁定
-    state
-        .security()
-        .lock(echomind_core::security::LockReason::Manual)
-        .await;
-    assert!(state.security().is_locked().await);
-    assert!(state.security().locked_at().await.is_some());
-
-    // 解锁
-    state.security().unlock().await;
-    assert!(!state.security().is_locked().await);
-    assert_eq!(
-        state.security().state().await,
-        echomind_core::security::SecurityState::EncryptedUnlocked
-    );
-    assert!(state.security().locked_at().await.is_none());
-}
-
-/// TC-IPC-SEC-003：自动锁屏配置设置与查询（REQ-SEC-015）。
-#[tokio::test]
-async fn tc_ipc_sec_003_auto_lock_config_set_and_get() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let config = echomind_core::security::AutoLockConfig {
-        enabled: true,
-        timeout_secs: 60,
-        lock_on_sleep: false,
-    };
-    state.security().set_auto_lock_config(config).await;
-
-    let retrieved = state.security().get_auto_lock_config().await;
-    assert!(retrieved.enabled);
-    assert_eq!(retrieved.timeout_secs, 60);
-    assert!(!retrieved.lock_on_sleep);
-}
-
-/// TC-IPC-SEC-004：暴力破解防护——5次失败后锁定（REQ-SEC-016）。
-#[tokio::test]
-async fn tc_ipc_sec_004_brute_force_protection_5_failures() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 前4次不应锁定
-    for i in 0..4 {
-        let locked = state.security().record_auth_failure().await;
-        assert!(!locked, "第 {} 次失败不应触发锁定", i + 1);
-    }
-    assert_eq!(state.security().remaining_attempts().await, 1);
-
-    // 第5次应触发锁定
-    let locked = state.security().record_auth_failure().await;
-    assert!(locked, "第 5 次失败应触发锁定");
-
-    let bf = state.security().brute_force().await;
-    assert!(bf.is_locked());
-}
-
-/// TC-IPC-SEC-005：解锁后暴力破解计数器重置（REQ-SEC-016）。
-#[tokio::test]
-async fn tc_ipc_sec_005_unlock_resets_brute_force() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    state.security().set_encrypted().await;
-
-    // 3次失败
-    state.security().record_auth_failure().await;
-    state.security().record_auth_failure().await;
-    state.security().record_auth_failure().await;
-    assert_eq!(state.security().remaining_attempts().await, 2);
-
-    // 锁定后解锁
-    state
-        .security()
-        .lock(echomind_core::security::LockReason::Manual)
-        .await;
-    state.security().unlock().await;
-
-    // 计数器应重置
-    assert_eq!(state.security().remaining_attempts().await, 5);
-}
-
-/// TC-IPC-SEC-006：紧急销毁密码设置与清除（REQ-SEC-017）。
-#[tokio::test]
-async fn tc_ipc_sec_006_panic_wipe_password_set_and_clear() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    assert!(!state.security().is_panic_wipe_enabled().await);
-
-    state.security().set_panic_wipe_password("panic123").await;
-    assert!(state.security().is_panic_wipe_enabled().await);
-    assert!(
-        state.security().check_panic_wipe_password("panic123").await,
-        "正确密码应验证通过"
-    );
-    assert!(
-        !state.security().check_panic_wipe_password("wrong").await,
-        "错误密码应验证失败"
-    );
-
-    state.security().clear_panic_wipe_password().await;
-    assert!(!state.security().is_panic_wipe_enabled().await);
-}
-
-/// TC-IPC-SEC-007：剪贴板清除配置（REQ-SEC-018）。
-#[tokio::test]
-async fn tc_ipc_sec_007_clipboard_config() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let config = echomind_core::security::ClipboardConfig {
-        enabled: true,
-        clear_after_secs: 15,
-    };
-    state.clipboard_guard().set_config(config).await;
-
-    let retrieved = state.clipboard_guard().get_config().await;
-    assert!(retrieved.enabled);
-    assert_eq!(retrieved.clear_after_secs, 15);
-}
-
-/// TC-IPC-SEC-008：密码强度检测——弱密码（REQ-SEC-019）。
-#[tokio::test]
-async fn tc_ipc_sec_008_password_strength_weak() {
-    let strength = echomind_core::encryption::PasswordStrengthChecker::check("123456");
-    assert_eq!(
-        strength,
-        echomind_core::encryption::PasswordStrength::VeryWeak
-    );
-}
-
-/// TC-IPC-SEC-009：密码强度检测——强密码（REQ-SEC-019）。
-#[tokio::test]
-async fn tc_ipc_sec_009_password_strength_strong() {
-    let strength = echomind_core::encryption::PasswordStrengthChecker::check("Str0ng@Pass!2024");
-    assert_eq!(
-        strength,
-        echomind_core::encryption::PasswordStrength::VeryStrong
-    );
-}
-
-/// TC-IPC-SEC-010：PII 检测——邮箱+手机号（REQ-SEC-020）。
-#[tokio::test]
-async fn tc_ipc_sec_010_pii_detection_email_and_phone() {
-    let redactor = echomind_core::privacy::PiiRedactor::new();
-    let text = "联系 john@example.com 或 13812345678";
-    let detections = redactor.detect(text);
-
-    assert!(
-        detections
-            .iter()
-            .any(|d| d.pii_type == echomind_core::privacy::PiiType::Email)
-    );
-    assert!(
-        detections
-            .iter()
-            .any(|d| d.pii_type == echomind_core::privacy::PiiType::Phone)
-    );
-
-    let redacted = redactor.redact_text(text);
-    assert!(redacted.contains("j***@example.com"));
-    assert!(redacted.contains("138****5678"));
-    assert!(!redacted.contains("john@example.com"));
-}
-
-/// TC-IPC-SEC-011：系统睡眠唤醒后自动锁定（REQ-SEC-015）。
-#[tokio::test]
-async fn tc_ipc_sec_011_system_wake_triggers_lock() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    state.security().set_encrypted().await;
-
-    state.security().on_system_wake().await;
-    assert!(state.security().is_locked().await);
-    assert!(matches!(
-        state.security().state().await,
-        echomind_core::security::SecurityState::Locked(
-            echomind_core::security::LockReason::SystemSleep
-        )
-    ));
-}
-
-/// TC-IPC-SEC-012：record_activity 更新活动时间（REQ-SEC-015）。
-#[tokio::test]
-async fn tc_ipc_sec_012_record_activity_resets_timer() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    state.security().set_encrypted().await;
-    state
-        .security()
-        .set_auto_lock_config(echomind_core::security::AutoLockConfig {
-            enabled: true,
-            timeout_secs: 2,
-            lock_on_sleep: true,
-        })
-        .await;
-
-    // 活动后1秒不应锁定
-    state.security().record_activity().await;
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-    assert!(!state.security().check_auto_lock().await);
-
-    // 再次活动后1秒仍不应锁定
-    state.security().record_activity().await;
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-    assert!(!state.security().check_auto_lock().await);
-}
-
-// ============================================================================
-// 导出功能集成测试（REQ-EXP-001）
-// ============================================================================
-
-/// TC-IPC-EXP-001：导出对话为 Markdown——基本格式（REQ-EXP-001）。
-#[tokio::test]
-async fn tc_ipc_exp_001_export_conversation_markdown() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let conv_id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-
-    // 添加消息
-    let user_msg = ChatMessage {
-        id: None,
-        role: "user".to_string(),
-        content: "什么是 Rust？".to_string(),
-        sources: None,
-        reasoning: None,
-        ..Default::default()
-    };
-    state
-        .storage
-        .add_message(&conv_id, &user_msg)
-        .await
-        .unwrap();
-
-    let assistant_msg = ChatMessage {
-        id: None,
-        role: "assistant".to_string(),
-        content: "Rust 是一门系统编程语言。".to_string(),
-        sources: None,
-        reasoning: Some("先分析 Rust 的核心特性，再组织答案。".to_string()),
-        ..Default::default()
-    };
-    state
-        .storage
-        .add_message(&conv_id, &assistant_msg)
-        .await
-        .unwrap();
-
-    // 推理思考过程（reasoning）落库往返验证：历史消息加载可重现思考过程
-    let loaded = state.storage.list_messages(&conv_id).await.unwrap();
-    let loaded_assistant = loaded
-        .iter()
-        .find(|m| m.role == "assistant")
-        .expect("应加载到助手消息");
-    assert_eq!(
-        loaded_assistant.reasoning.as_deref(),
-        Some("先分析 Rust 的核心特性，再组织答案。"),
-        "reasoning 应持久化并可读回（历史消息重现思考过程）"
-    );
-
-    let (md, _filename) = export_conversation_markdown_inner(&conv_id, &state)
-        .await
-        .unwrap();
-
-    assert!(md.contains("什么是 Rust"), "导出应包含用户消息");
-    assert!(md.contains("Rust 是一门系统编程语言"), "导出应包含助手消息");
-}
-
-/// TC-IPC-EXP-002：save_text_file 保存文件（REQ-EXP-001）。
-#[tokio::test]
-async fn tc_ipc_exp_002_save_text_file() {
-    let dir = TempDir::new().unwrap();
-    let test_file = dir.path().join("test-export.md");
-    let test_content = "# Test Export\n\nThis is test content.";
-
-    save_text_file_inner(test_file.to_str().unwrap(), test_content)
-        .await
-        .unwrap();
-
-    let read = std::fs::read_to_string(&test_file).unwrap();
-    assert_eq!(read, test_content, "保存的文件内容应匹配");
-}
+// 导出功能集成测试（tc_ipc_exp_001/002）已迁移至 integration/conversation_tests.rs
 
 // ============================================================================
 // 文件监听集成测试（REQ-SYNC-001~003）
@@ -3776,47 +2763,6 @@ async fn tc_ipc_sync_002_remove_nonexistent_folder_no_error() {
 
 // ============================================================================
 // 高级 RAG 功能集成测试（REQ-RAG-020~022, REQ-VEC-012）
-// ============================================================================
-
-/// TC-IPC-RAG-020：重排序开关持久化（REQ-RAG-020）。
-#[tokio::test]
-async fn tc_ipc_rag_020_rerank_toggle_persists() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    set_rerank_enabled_inner(true, &state).await.unwrap();
-    let settings = get_settings_inner(&state).await.unwrap();
-    assert!(settings.rerank_enabled, "重排序应已启用");
-
-    set_rerank_enabled_inner(false, &state).await.unwrap();
-    let settings = get_settings_inner(&state).await.unwrap();
-    assert!(!settings.rerank_enabled, "重排序应已禁用");
-}
-
-/// TC-IPC-RAG-021：HyDE 开关持久化（REQ-RAG-021）。
-#[tokio::test]
-async fn tc_ipc_rag_021_hyde_toggle_persists() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    set_hyde_enabled_inner(true, &state).await.unwrap();
-    let settings = get_settings_inner(&state).await.unwrap();
-    assert!(settings.hyde_enabled, "HyDE 应已启用");
-}
-
-/// TC-IPC-RAG-022：Agent 模式开关持久化（REQ-RAG-022）。
-#[tokio::test]
-async fn tc_ipc_rag_022_agent_toggle_persists() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    set_agent_enabled_inner(true, &state).await.unwrap();
-    let settings = get_settings_inner(&state).await.unwrap();
-    assert!(settings.agent_enabled, "Agent 模式应已启用");
-}
-
-/// TC-IPC-VEC-012：嵌入模型切换持久化（REQ-VEC-012）。
-#[tokio::test]
 async fn tc_ipc_vec_012_embedding_model_switch_persists() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
@@ -4596,1525 +3542,8 @@ async fn tc_win_002_window_state_default() {
     );
 }
 
-// ============================================================================
-// REQ-RAG-017 对话上下文长度管理 集成测试
-// ============================================================================
+// Token/Cost/Coordinator/EditDB 测试已迁移至 integration/conversation_tests.rs
 
-/// TC-RAG-017-001：get_settings 默认返回 context_token_limit = 4096。
-#[tokio::test]
-async fn tc_rag_017_001_default_context_token_limit() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let settings = get_settings_inner(&state).await.unwrap();
-    assert_eq!(
-        settings.context_token_limit, 4096,
-        "默认上下文 token 限制应为 4096"
-    );
-}
-
-/// TC-RAG-017-002：set_context_token_limit 写入合法值后 get_settings 反映最新值。
-#[tokio::test]
-async fn tc_rag_017_002_set_valid_limit() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 设置为 8192
-    set_context_token_limit_inner(8192, &state).await.unwrap();
-
-    let settings = get_settings_inner(&state).await.unwrap();
-    assert_eq!(
-        settings.context_token_limit, 8192,
-        "应反映已设置的上下文 token 限制"
-    );
-}
-
-/// TC-RAG-017-003：set_context_token_limit 拒绝超出范围的值（< 2048）。
-#[tokio::test]
-async fn tc_rag_017_003_reject_below_range() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let result = set_context_token_limit_inner(1024, &state).await;
-    assert!(result.is_err(), "低于 2048 的值应被拒绝");
-    assert!(
-        result.unwrap_err().contains("2048"),
-        "错误消息应包含合法范围提示"
-    );
-}
-
-/// TC-RAG-017-004：set_context_token_limit 拒绝超出范围的值（> 32768）。
-#[tokio::test]
-async fn tc_rag_017_004_reject_above_range() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let result = set_context_token_limit_inner(65536, &state).await;
-    assert!(result.is_err(), "超过 32768 的值应被拒绝");
-    assert!(
-        result.unwrap_err().contains("32768"),
-        "错误消息应包含合法范围提示"
-    );
-}
-
-/// TC-RAG-017-005：set_context_token_limit 重启后恢复配置。
-#[tokio::test]
-async fn tc_rag_017_005_restore_after_restart() {
-    let dir = TempDir::new().unwrap();
-
-    // 写入阶段
-    {
-        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        set_context_token_limit_inner(16384, &state).await.unwrap();
-    }
-
-    // 重启阶段
-    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let settings = get_settings_inner(&restarted).await.unwrap();
-    assert_eq!(
-        settings.context_token_limit, 16384,
-        "重启后上下文 token 限制应恢复为 16384"
-    );
-}
-
-/// TC-RAG-017-006：set_context_token_limit 边界值测试（2048 和 32768 均合法）。
-#[tokio::test]
-async fn tc_rag_017_006_boundary_values() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 下边界 2048
-    set_context_token_limit_inner(2048, &state).await.unwrap();
-    let settings = get_settings_inner(&state).await.unwrap();
-    assert_eq!(settings.context_token_limit, 2048, "下边界 2048 应合法");
-
-    // 上边界 32768
-    set_context_token_limit_inner(32768, &state).await.unwrap();
-    let settings = get_settings_inner(&state).await.unwrap();
-    assert_eq!(settings.context_token_limit, 32768, "上边界 32768 应合法");
-}
-
-// =============================================================
-// Token 用量追踪集成测试（Session 27）
-// =============================================================
-
-/// TC-TOKEN-001：record_token_usage 正确累加 token 用量。
-#[tokio::test]
-async fn tc_token_001_record_usage_accumulates() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 初始状态：无用量记录
-    let cost = get_conversation_cost_inner(&state).await.unwrap();
-    assert_eq!(cost.total_prompt_tokens, 0);
-    assert_eq!(cost.total_completion_tokens, 0);
-    assert_eq!(cost.exchange_count, 0);
-
-    // 记录第一次用量
-    let usage1 = TokenUsage {
-        prompt_tokens: 100,
-        completion_tokens: 50,
-        total_tokens: 150,
-    };
-    record_token_usage_inner(&state, &Some(usage1)).await;
-
-    // 验证累加
-    let cost = get_conversation_cost_inner(&state).await.unwrap();
-    assert_eq!(cost.total_prompt_tokens, 100, "第一次 prompt 累加");
-    assert_eq!(cost.total_completion_tokens, 50, "第一次 completion 累加");
-    assert_eq!(cost.total_tokens, 150, "第一次 total 累加");
-    assert_eq!(cost.exchange_count, 1, "exchange_count 应为 1");
-
-    // 记录第二次用量
-    let usage2 = TokenUsage {
-        prompt_tokens: 200,
-        completion_tokens: 100,
-        total_tokens: 300,
-    };
-    record_token_usage_inner(&state, &Some(usage2)).await;
-
-    // 验证再次累加
-    let cost = get_conversation_cost_inner(&state).await.unwrap();
-    assert_eq!(cost.total_prompt_tokens, 300, "第二次 prompt 累加 100+200");
-    assert_eq!(
-        cost.total_completion_tokens, 150,
-        "第二次 completion 累加 50+100"
-    );
-    assert_eq!(cost.total_tokens, 450, "第二次 total 累加 150+300");
-    assert_eq!(cost.exchange_count, 2, "exchange_count 应为 2");
-}
-
-/// TC-TOKEN-002：None 用量不增加计数器（本地推理模式）。
-#[tokio::test]
-async fn tc_token_002_none_usage_no_change() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 记录一次 None（本地推理模式无 usage 数据）
-    record_token_usage_inner(&state, &None).await;
-
-    let cost = get_conversation_cost_inner(&state).await.unwrap();
-    assert_eq!(cost.total_prompt_tokens, 0, "None 不应累加");
-    assert_eq!(cost.exchange_count, 0, "None 不应增加 exchange_count");
-}
-
-// =============================================================
-// 成本追踪 UI 集成测试（Session 30）
-// =============================================================
-
-/// TC-COST-001：set_token_budget 持久化到 settings 表。
-#[tokio::test]
-async fn tc_cost_001_token_budget_persists() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 设置预算
-    set_token_budget_inner(100000, &state).await.unwrap();
-
-    // 验证持久化
-    let cost = get_conversation_cost_inner(&state).await.unwrap();
-    assert_eq!(cost.token_budget, 100000, "预算应持久化");
-
-    // 验证通过 get_settings 也能读到
-    let settings = get_settings_inner(&state).await.unwrap();
-    assert_eq!(settings.token_budget, 100000, "get_settings 应返回预算");
-
-    // 设置为 0（不限制）
-    set_token_budget_inner(0, &state).await.unwrap();
-    let cost = get_conversation_cost_inner(&state).await.unwrap();
-    assert_eq!(cost.token_budget, 0, "预算 0 = 不限制");
-}
-
-/// TC-COST-002：get_conversation_cost 返回正确累计。
-#[tokio::test]
-async fn tc_cost_002_cost_reflects_usage() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 设置预算
-    set_token_budget_inner(50000, &state).await.unwrap();
-
-    // 记录多次用量
-    for _ in 0..3 {
-        record_token_usage_inner(
-            &state,
-            &Some(TokenUsage {
-                prompt_tokens: 1000,
-                completion_tokens: 500,
-                total_tokens: 1500,
-            }),
-        )
-        .await;
-    }
-
-    let cost = get_conversation_cost_inner(&state).await.unwrap();
-    assert_eq!(cost.total_prompt_tokens, 3000, "3次 × 1000");
-    assert_eq!(cost.total_completion_tokens, 1500, "3次 × 500");
-    assert_eq!(cost.total_tokens, 4500, "3次 × 1500");
-    assert_eq!(cost.exchange_count, 3, "3次对话");
-    assert_eq!(cost.token_budget, 50000, "预算不变");
-}
-
-// =============================================================
-// 多代理协调模式集成测试（Session 33）
-// =============================================================
-
-/// TC-COORD-001：set_coordinator_mode 持久化到 settings 表。
-#[tokio::test]
-async fn tc_coord_001_coordinator_mode_persists() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 启用协调模式
-    set_coordinator_mode_inner(true, &state).await.unwrap();
-
-    // 验证持久化
-    let value = state
-        .storage
-        .get_setting("rag.coordinator_enabled")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(value, "true", "启用后应为 true");
-
-    // 关闭协调模式
-    set_coordinator_mode_inner(false, &state).await.unwrap();
-
-    let value = state
-        .storage
-        .get_setting("rag.coordinator_enabled")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(value, "false", "关闭后应为 false");
-}
-
-/// TC-COORD-002：协调模式默认关闭（未设置时为 false）。
-#[tokio::test]
-async fn tc_coord_002_coordinator_mode_default_off() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 未设置时应默认为 false
-    let value = state
-        .storage
-        .get_setting("rag.coordinator_enabled")
-        .await
-        .unwrap();
-    assert!(value.is_none(), "未设置时应为 None（视为 false）");
-}
-
-// =============================================================
-// 多文档交叉检索集成测试（REQ-RAG-001~008）
-// =============================================================
-//
-// 验证多文档知识库场景下的检索正确性：
-// - 不同查询检索到不同文档
-// - 删除文档后搜索不再返回该文档的 chunk
-// - 重复内容导入去重
-// - 跨文档检索结果正确标注来源
-// - 大量 chunk 检索性能
-
-use echomind_core::import::{ImportOutcome, ImportService};
-
-/// TC-CROSS-001：多文档导入后——vector_search 返回不同文档的 chunk。
-///
-/// 导入 3 个不同主题的文档（Rust / Python / 烹饪），
-/// 为每个 chunk 写入不同的向量，验证 vector_search 能根据向量相似度
-/// 返回正确文档的 chunk，而非混合返回。
-#[tokio::test]
-async fn tc_cross_001_multi_doc_search_returns_correct_doc() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-
-    // 导入 3 个文档
-    let docs_info = [
-        (
-            "rust-guide.md",
-            "Rust 是一门系统级编程语言，注重安全与性能。",
-            [1.0, 0.0, 0.0, 0.0],
-        ),
-        (
-            "python-tutorial.md",
-            "Python 是一种高级解释型语言，适合快速开发。",
-            [0.0, 1.0, 0.0, 0.0],
-        ),
-        (
-            "cooking-recipes.md",
-            "番茄炒蛋是一道简单的家常菜，需要鸡蛋和番茄。",
-            [0.0, 0.0, 1.0, 0.0],
-        ),
-    ];
-
-    let mut doc_ids = Vec::new();
-    for (name, content, embedding) in &docs_info {
-        let path = dir.path().join(name);
-        std::fs::write(&path, content).unwrap();
-        let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
-        let outcome = service.import_one(&canon, true).await.unwrap();
-        if let ImportOutcome::Imported(doc) = outcome {
-            service.index_document(&doc).await.unwrap();
-            let chunks = state.storage.list_chunks(&doc.id).await.unwrap();
-            // 为每个 chunk 写入对应的向量
-            for chunk in &chunks {
-                state
-                    .storage
-                    .add_embedding(&chunk.id, embedding)
-                    .await
-                    .unwrap();
-            }
-            doc_ids.push(doc.id);
-        }
-    }
-
-    // 验证文档数
-    let doc_count = state.storage.count_documents().await.unwrap();
-    assert_eq!(doc_count, 3, "应导入 3 个文档");
-
-    // 搜索 Rust 相关内容（向量 [1,0,0,0]）
-    // 注：vector_search 返回全量结果按余弦相似度排序，阈值过滤在 Retriever 层
-    let rust_hits = state
-        .storage
-        .vector_search(&[1.0, 0.0, 0.0, 0.0], 5)
-        .await
-        .unwrap();
-    assert!(!rust_hits.is_empty(), "Rust 搜索应返回结果");
-    // 最高分（第一个）应来自 rust-guide.md（余弦相似度 1.0）
-    assert!(
-        rust_hits[0].doc_name.contains("rust-guide"),
-        "最高分命中应来自 rust-guide.md，实际: {} (score={})",
-        rust_hits[0].doc_name,
-        rust_hits[0].score
-    );
-    assert!(
-        rust_hits[0].score > 0.99,
-        "Rust 向量自身余弦相似度应接近 1.0，实际: {}",
-        rust_hits[0].score
-    );
-
-    // 搜索 Python 相关内容（向量 [0,1,0,0]）
-    let python_hits = state
-        .storage
-        .vector_search(&[0.0, 1.0, 0.0, 0.0], 5)
-        .await
-        .unwrap();
-    assert!(!python_hits.is_empty(), "Python 搜索应返回结果");
-    assert!(
-        python_hits[0].doc_name.contains("python-tutorial"),
-        "最高分命中应来自 python-tutorial.md，实际: {} (score={})",
-        python_hits[0].doc_name,
-        python_hits[0].score
-    );
-    assert!(
-        python_hits[0].score > 0.99,
-        "Python 向量自身余弦相似度应接近 1.0，实际: {}",
-        python_hits[0].score
-    );
-
-    // 搜索烹饪相关内容（向量 [0,0,1,0]）
-    let cooking_hits = state
-        .storage
-        .vector_search(&[0.0, 0.0, 1.0, 0.0], 5)
-        .await
-        .unwrap();
-    assert!(!cooking_hits.is_empty(), "烹饪搜索应返回结果");
-    assert!(
-        cooking_hits[0].doc_name.contains("cooking-recipes"),
-        "最高分命中应来自 cooking-recipes.md，实际: {} (score={})",
-        cooking_hits[0].doc_name,
-        cooking_hits[0].score
-    );
-    assert!(
-        cooking_hits[0].score > 0.99,
-        "烹饪向量自身余弦相似度应接近 1.0，实际: {}",
-        cooking_hits[0].score
-    );
-}
-
-/// TC-CROSS-002：删除文档后——vector_search 不再返回该文档的 chunk。
-///
-/// 导入 2 个文档，删除其中一个，验证后续搜索只返回剩余文档的 chunk。
-#[tokio::test]
-async fn tc_cross_002_delete_doc_then_search_excludes_it() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-
-    // 导入 2 个文档，使用相同向量以便搜索都能命中
-    let docs = [("doc-a.md", "文档 A 内容"), ("doc-b.md", "文档 B 内容")];
-    let mut doc_ids = Vec::new();
-    for (name, content) in &docs {
-        let path = dir.path().join(name);
-        std::fs::write(&path, content).unwrap();
-        let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
-        let outcome = service.import_one(&canon, true).await.unwrap();
-        if let ImportOutcome::Imported(doc) = outcome {
-            service.index_document(&doc).await.unwrap();
-            let chunks = state.storage.list_chunks(&doc.id).await.unwrap();
-            for chunk in &chunks {
-                state
-                    .storage
-                    .add_embedding(&chunk.id, &[1.0, 0.0])
-                    .await
-                    .unwrap();
-            }
-            doc_ids.push(doc.id);
-        }
-    }
-
-    // 搜索前：两个文档都有命中
-    let hits_before = state.storage.vector_search(&[1.0, 0.0], 10).await.unwrap();
-    let doc_names_before: std::collections::HashSet<_> =
-        hits_before.iter().map(|h| h.doc_name.clone()).collect();
-    assert!(
-        doc_names_before.iter().any(|n| n.contains("doc-a")),
-        "删除前应包含 doc-a"
-    );
-    assert!(
-        doc_names_before.iter().any(|n| n.contains("doc-b")),
-        "删除前应包含 doc-b"
-    );
-
-    // 删除 doc-b
-    delete_document_inner(&doc_ids[1], &state).await.unwrap();
-
-    // 搜索后：只有 doc-a 的命中
-    let hits_after = state.storage.vector_search(&[1.0, 0.0], 10).await.unwrap();
-    let doc_names_after: std::collections::HashSet<_> =
-        hits_after.iter().map(|h| h.doc_name.clone()).collect();
-    assert!(
-        doc_names_after.iter().any(|n| n.contains("doc-a")),
-        "删除后仍应包含 doc-a"
-    );
-    assert!(
-        !doc_names_after.iter().any(|n| n.contains("doc-b")),
-        "删除后不应再包含 doc-b"
-    );
-}
-
-/// TC-CROSS-003：重复导入相同内容——去重不增加文档数和 chunk 数。
-#[tokio::test]
-async fn tc_cross_003_duplicate_import_dedup() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-
-    let path = dir.path().join("dedup.md");
-    std::fs::write(&path, "# 去重测试\n\n这段内容用于测试文件去重功能。").unwrap();
-    let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
-
-    // 第一次导入
-    let outcome1 = service.import_one(&canon, true).await.unwrap();
-    assert!(
-        matches!(outcome1, ImportOutcome::Imported(_)),
-        "首次导入应成功"
-    );
-
-    // 第二次导入相同文件
-    let outcome2 = service.import_one(&canon, true).await.unwrap();
-    assert!(
-        matches!(outcome2, ImportOutcome::SkippedDuplicate(_)),
-        "重复导入应跳过"
-    );
-
-    // 文档数仍为 1
-    let count = state.storage.count_documents().await.unwrap();
-    assert_eq!(count, 1, "重复导入后文档数应仍为 1");
-}
-
-/// TC-CROSS-004：多文档多 chunk——检索 top_k 正确截断。
-///
-/// 导入 3 个文档，每个文档产生多个 chunk，
-/// 验证 vector_search 的 top_k 参数正确截断结果数量。
-#[tokio::test]
-async fn tc_cross_004_multi_doc_top_k_truncation() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-
-    // 导入 3 个文档，每个有多段内容（产生多个 chunk）
-    for i in 0..3 {
-        let path = dir.path().join(format!("multi-chunk-{i}.md"));
-        let content = format!(
-            "# 文档{i}\n\n段落一：主题{i}的介绍。\n\n段落二：主题{i}的详细说明。\n\n段落三：主题{i}的总结。"
-        );
-        std::fs::write(&path, content).unwrap();
-        let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
-        let outcome = service.import_one(&canon, true).await.unwrap();
-        if let ImportOutcome::Imported(doc) = outcome {
-            service.index_document(&doc).await.unwrap();
-            let chunks = state.storage.list_chunks(&doc.id).await.unwrap();
-            for chunk in &chunks {
-                state
-                    .storage
-                    .add_embedding(&chunk.id, &[1.0, 0.0])
-                    .await
-                    .unwrap();
-            }
-        }
-    }
-
-    // 验证总 chunk 数 > 3
-    let total_chunks = state.storage.count_chunks().await.unwrap();
-    assert!(total_chunks >= 3, "总 chunk 数应 ≥ 3，实际: {total_chunks}");
-
-    // top_k=1 应只返回 1 个结果
-    let hits_1 = state.storage.vector_search(&[1.0, 0.0], 1).await.unwrap();
-    assert_eq!(hits_1.len(), 1, "top_k=1 应返回 1 个结果");
-
-    // top_k=2 应返回 2 个结果
-    let hits_2 = state.storage.vector_search(&[1.0, 0.0], 2).await.unwrap();
-    assert_eq!(hits_2.len(), 2, "top_k=2 应返回 2 个结果");
-}
-
-/// TC-CROSS-005：同名不同内容文件——各自独立入库不冲突。
-#[tokio::test]
-async fn tc_cross_005_same_name_diff_content_independent() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-
-    // 创建两个同名文件（不同目录、不同内容）
-    let dir_a = dir.path().join("a");
-    let dir_b = dir.path().join("b");
-    std::fs::create_dir_all(&dir_a).unwrap();
-    std::fs::create_dir_all(&dir_b).unwrap();
-
-    let path_a = dir_a.join("readme.md");
-    let path_b = dir_b.join("readme.md");
-    std::fs::write(&path_a, "内容 A：关于 Rust 编程。").unwrap();
-    std::fs::write(&path_b, "内容 B：关于 Python 数据分析。").unwrap();
-
-    let canon_a = path_a
-        .canonicalize()
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
-    let canon_b = path_b
-        .canonicalize()
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
-
-    // 两个同名文件都应成功导入
-    let outcome_a = service.import_one(&canon_a, true).await.unwrap();
-    let outcome_b = service.import_one(&canon_b, true).await.unwrap();
-    assert!(
-        matches!(outcome_a, ImportOutcome::Imported(_)),
-        "文件 A 应导入成功"
-    );
-    assert!(
-        matches!(outcome_b, ImportOutcome::Imported(_)),
-        "文件 B 应导入成功"
-    );
-
-    // 文档数应为 2
-    let count = state.storage.count_documents().await.unwrap();
-    assert_eq!(count, 2, "两个同名不同内容文件应各自入库，文档数应为 2");
-}
-
-/// TC-CROSS-006：文档全部删除后——count_documents 返回 0，chat 被拦截。
-#[tokio::test]
-async fn tc_cross_006_all_deleted_chat_blocked() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-
-    // 导入一个文档
-    let path = dir.path().join("temp.md");
-    std::fs::write(&path, "临时内容").unwrap();
-    let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
-    let outcome = service.import_one(&canon, true).await.unwrap();
-    let doc = match outcome {
-        ImportOutcome::Imported(d) => d,
-        _ => panic!("导入应成功"),
-    };
-
-    // 删除文档
-    delete_document_inner(&doc.id, &state).await.unwrap();
-
-    // 文档数为 0
-    let count = state.storage.count_documents().await.unwrap();
-    assert_eq!(count, 0, "删除后文档数应为 0");
-
-    // chat 应被空知识库拦截
-    update_llm_config_inner(test_config(), &state)
-        .await
-        .unwrap();
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-    let result = chat_inner(&handle, "任意问题", &[], "conv-x", None, None, &state).await;
-    let err = result.err().unwrap_or_default();
-    assert!(
-        err.contains("知识库为空"),
-        "全部删除后 chat 应被空知识库拦截，实际: {err}"
-    );
-}
-
-/// TC-CROSS-007：多文档导入——文档列表正确返回所有文档。
-#[tokio::test]
-async fn tc_cross_007_multi_doc_list_all_returned() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-
-    // 导入 5 个文档
-    for i in 0..5 {
-        let path = dir.path().join(format!("list-doc-{i}.md"));
-        std::fs::write(&path, format!("文档 {i} 的内容")).unwrap();
-        let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
-        let outcome = service.import_one(&canon, true).await.unwrap();
-        if let ImportOutcome::Imported(doc) = outcome {
-            service.index_document(&doc).await.unwrap();
-        }
-    }
-
-    // list_documents 应返回 5 个文档
-    let docs = state.storage.list_documents().await.unwrap();
-    assert_eq!(docs.len(), 5, "应返回 5 个文档，实际: {}", docs.len());
-
-    // 每个文档的 status 应为 Indexed
-    for doc in &docs {
-        assert_eq!(
-            doc.status,
-            DocStatus::Indexed,
-            "文档 {} 的状态应为 Indexed",
-            doc.file_path
-        );
-    }
-}
-
-/// TC-CROSS-008：文档分块后——chunk sequence 连续无间隙。
-///
-/// 验证多文档导入后，每个文档的 chunk sequence 是从 0 开始的连续序列，
-/// 没有 gap 或重复（影响 Chunk Expansion 的相邻 chunk 查找）。
-#[tokio::test]
-async fn tc_cross_008_chunk_sequence_continuous() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-
-    // 导入一个长文档（产生多个 chunk）
-    let path = dir.path().join("long-doc.md");
-    let mut content = String::from("# 长文档\n\n");
-    for i in 0..20 {
-        content.push_str(&format!("段落 {i}：这是一段较长的文本内容，用于测试分块器的连续性。需要足够的文本量来触发多个 chunk 的生成。"));
-    }
-    std::fs::write(&path, &content).unwrap();
-    let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
-    let outcome = service.import_one(&canon, true).await.unwrap();
-    if let ImportOutcome::Imported(doc) = outcome {
-        service.index_document(&doc).await.unwrap();
-
-        let chunks = state.storage.list_chunks(&doc.id).await.unwrap();
-        assert!(
-            chunks.len() > 1,
-            "长文档应产生多个 chunk，实际: {}",
-            chunks.len()
-        );
-
-        // 验证 sequence 从 0 开始连续
-        for (idx, chunk) in chunks.iter().enumerate() {
-            assert_eq!(
-                chunk.sequence, idx,
-                "chunk sequence 应从 0 连续递增，位置 {idx} 的 sequence 实际为 {}",
-                chunk.sequence
-            );
-        }
-    }
-}
-
-// ============================================================================
-// TC-RES：对话韧性 — embedder 初始化超时/失败恢复
-// ============================================================================
-//
-// 根因：chat_inner 中 init_embedder_with_progress 无超时保护。当 ONNX 模型下载
-// 因网络问题挂起时（如 HuggingFace 在境内不可达），chat 命令永久阻塞，
-// 前端卡死在「初始化向量化引擎」。
-//
-// 修复：chat_inner 使用 tokio::time::timeout 包装 init_embedder_with_progress，
-// 超时后返回 EMBED: 前缀错误。超时阈值可通过 ECHOMIND_EMBEDDER_TIMEOUT 环境变量覆盖。
-
-/// TC-RES-001：embedder 初始化超时/失败时 chat_inner 返回 EMBED: 错误而非永久阻塞。
-///
-/// 验证：设置 1 秒超时 → 导入文档使 KB 非空 → chat_inner 在合理时间内返回 EMBED: 错误。
-/// 此前无超时保护时，chat_inner 会永久阻塞。
-#[tokio::test]
-async fn tc_res_001_embedder_init_timeout_returns_embed_error() {
-    // 设置 1 秒超时（测试环境无法在 1 秒内下载 30MB ONNX 模型）
-    // 注意：仅此测试调用 chat_inner 且 KB 非空，不影响其他并行测试
-    // SAFETY: 测试进程中设置环境变量，仅此测试调用 chat_inner 且 KB 非空
-    unsafe {
-        std::env::set_var("ECHOMIND_EMBEDDER_TIMEOUT", "1");
-    }
-
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 配置 LLM（排除「未配置」干扰）
-    update_llm_config_inner(test_config(), &state)
-        .await
-        .unwrap();
-
-    // 导入文档使知识库非空（排除「空库」干扰）
-    // import_one 只创建 document + chunks，不需要 embedder
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-    let path = dir.path().join("res-test.md");
-    std::fs::write(&path, "递归是一种编程技巧").unwrap();
-    let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
-    let _ = service.import_one(&canon, true).await.unwrap();
-
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-
-    // chat_inner 应在超时后返回 EMBED: 错误，而非永久阻塞
-    // 使用 30 秒测试级超时保护（防止测试本身挂起）
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        chat_inner(&handle, "测试问题", &[], "conv-res-001", None, None, &state),
-    )
-    .await;
-
-    // 清理 env var
-    // SAFETY: 清理测试中设置的环境变量
-    unsafe {
-        std::env::remove_var("ECHOMIND_EMBEDDER_TIMEOUT");
-    }
-
-    // 验证 chat_inner 在 30 秒内返回（未永久阻塞）
-    let inner_result = match result {
-        Ok(r) => r,
-        Err(_) => panic!("chat_inner 在 30 秒内未返回（可能永久阻塞）"),
-    };
-
-    let err = inner_result.err().unwrap_or_default();
-    assert!(
-        err.starts_with("EMBED:"),
-        "embedder 初始化失败/超时应返回 EMBED: 前缀错误，实际: {err}"
-    );
-    assert!(
-        err.contains("超时") || err.contains("不可用"),
-        "错误消息应包含「超时」或「不可用」，实际: {err}"
-    );
-}
-
-/// TC-RES-002：embedder 初始化超时后错误消息包含用户引导。
-///
-/// 验证超时错误消息包含可操作的引导文案（检查网络 + 设置中手动初始化）。
-#[tokio::test]
-async fn tc_res_002_embedder_timeout_message_has_guidance() {
-    // SAFETY: 测试进程中设置环境变量
-    unsafe {
-        std::env::set_var("ECHOMIND_EMBEDDER_TIMEOUT", "1");
-    }
-
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    update_llm_config_inner(test_config(), &state)
-        .await
-        .unwrap();
-
-    let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-    let path = dir.path().join("res-guide.md");
-    std::fs::write(&path, "内容").unwrap();
-    let canon = path.canonicalize().unwrap().to_string_lossy().into_owned();
-    let _ = service.import_one(&canon, true).await.unwrap();
-
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        chat_inner(&handle, "测试", &[], "conv-res-002", None, None, &state),
-    )
-    .await;
-
-    // SAFETY: 清理测试中设置的环境变量
-    unsafe {
-        std::env::remove_var("ECHOMIND_EMBEDDER_TIMEOUT");
-    }
-
-    let inner_result = result.expect("chat_inner 应在 30 秒内返回");
-    let err = inner_result.err().unwrap_or_default();
-
-    // 超时路径：错误消息应包含网络引导和手动初始化引导
-    if err.contains("超时") {
-        assert!(
-            err.contains("网络") || err.contains("network"),
-            "超时错误应包含网络检查引导，实际: {err}"
-        );
-        assert!(
-            err.contains("设置") || err.contains("Settings"),
-            "超时错误应包含手动初始化引导，实际: {err}"
-        );
-    }
-    // 如果是「不可用」路径（网络立即失败），不需要检查引导文案
-}
-
-// ================== 编辑版本持久化测试（AC-QA-006 DB 持久化） ==================
-
-/// TC-EDIT-DB-001: edit_user_message 创建新版本并持久化到 DB。
-///
-/// 验证：
-/// 1. 首次编辑创建 version=2
-/// 2. 二次编辑创建 version=3
-/// 3. list_messages 返回所有版本的消息
-/// 4. 旧版本消息保留在 DB 中
-#[tokio::test]
-async fn tc_edit_db_001_edit_creates_new_version() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let conv_id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-
-    // 初始问答（无 turn_group，视为无版本管理）
-    persist_exchange(
-        &state,
-        &conv_id,
-        "原始问题",
-        "原始回答",
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-
-    // 编辑：创建 turn_group + version=1（首次编辑该 turn_group）
-    let turn_group = "turn-test-001";
-    let v1 = edit_user_message_inner(&conv_id, turn_group, "编辑后的问题v1", &state)
-        .await
-        .unwrap();
-    assert_eq!(v1, 1, "首次编辑应返回 version=1");
-
-    // 再次编辑：version=2
-    let v2 = edit_user_message_inner(&conv_id, turn_group, "编辑后的问题v2", &state)
-        .await
-        .unwrap();
-    assert_eq!(v2, 2, "二次编辑应返回 version=2");
-
-    // 验证 DB 中有所有版本的消息
-    let messages = get_messages_inner(&conv_id, &state).await.unwrap();
-    // 初始 2 条 + v1 user + v2 user = 4 条
-    assert_eq!(messages.len(), 4, "应有 4 条消息（初始2 + 编辑2）");
-
-    // 验证编辑版本有正确的 turn_group 和 version
-    let edited_msgs: Vec<_> = messages
-        .iter()
-        .filter(|m| m.turn_group.as_deref() == Some(turn_group))
-        .collect();
-    assert_eq!(edited_msgs.len(), 2, "应有 2 条带 turn_group 的消息");
-    assert_eq!(edited_msgs[0].version, Some(1));
-    assert_eq!(edited_msgs[0].content, "编辑后的问题v1");
-    assert_eq!(edited_msgs[1].version, Some(2));
-    assert_eq!(edited_msgs[1].content, "编辑后的问题v2");
-}
-
-/// TC-EDIT-DB-002: 无 turn_group 的旧消息保持兼容性。
-///
-/// 验证旧消息（无 turn_group）的 turn_group 和 version 字段为 None。
-#[tokio::test]
-async fn tc_edit_db_002_legacy_messages_have_no_turn_group() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let conv_id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-
-    persist_exchange(
-        &state,
-        &conv_id,
-        "普通问题",
-        "普通回答",
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-
-    let messages = get_messages_inner(&conv_id, &state).await.unwrap();
-    assert_eq!(messages.len(), 2);
-    // 旧消息不应有 turn_group / version
-    for msg in &messages {
-        assert!(msg.turn_group.is_none(), "旧消息不应有 turn_group");
-        assert!(msg.version.is_none(), "旧消息不应有 version");
-    }
-}
-
-/// TC-EDIT-DB-004: 首次编辑（无 turn_group 的原始问答）产生 v1+v2 版本组。
-///
-/// 验证（REQ-QA 首次编辑分页）：
-/// 1. 原始 user/assistant 行原地升级为 turn_group + version=1
-/// 2. 新内容作为 version=2 追加
-/// 3. active_version 持久化为 2（重启后保持编辑后的查看状态）
-/// 4. 从 get_messages 可拿到消息行 id（供前端定位原始行）
-#[tokio::test]
-async fn tc_edit_db_004_first_edit_promotes_original_to_v1() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let conv_id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-
-    // 原始问答（无 turn_group）
-    persist_exchange(
-        &state,
-        &conv_id,
-        "原始问题",
-        "原始回答",
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-
-    // 找到原始 user 消息行 id
-    let before = get_messages_inner(&conv_id, &state).await.unwrap();
-    assert_eq!(before.len(), 2);
-    let original_user_id = before
-        .iter()
-        .find(|m| m.role == "user")
-        .and_then(|m| m.id.clone())
-        .expect("get_messages 应返回消息行 id");
-
-    // 首次编辑：传 original_message_id → 原始行升级 v1，新内容 v2
-    let turn_group = "turn-first-edit";
-    let v = edit_user_message_inner_full(
-        &conv_id,
-        turn_group,
-        "编辑后的问题",
-        Some(&original_user_id),
-        &state,
-    )
-    .await
-    .unwrap();
-    assert_eq!(v, 2, "首次编辑应返回 version=2");
-
-    // 验证 DB 状态：原始行升级为 v1，新内容为 v2
-    let messages = get_messages_inner(&conv_id, &state).await.unwrap();
-    let turn_msgs: Vec<_> = messages
-        .iter()
-        .filter(|m| m.turn_group.as_deref() == Some(turn_group))
-        .collect();
-    assert_eq!(
-        turn_msgs.len(),
-        3,
-        "应有 3 条 turn_group 消息（user v1 + assistant v1 + user v2）"
-    );
-
-    let user_v1 = turn_msgs
-        .iter()
-        .find(|m| m.role == "user" && m.version == Some(1))
-        .expect("应存在 user v1");
-    assert_eq!(user_v1.content, "原始问题", "user v1 应为原始问题");
-    let assistant_v1 = turn_msgs
-        .iter()
-        .find(|m| m.role == "assistant" && m.version == Some(1))
-        .expect("应存在 assistant v1");
-    assert_eq!(
-        assistant_v1.content, "原始回答",
-        "assistant v1 应为原始回答"
-    );
-    let user_v2 = turn_msgs
-        .iter()
-        .find(|m| m.role == "user" && m.version == Some(2))
-        .expect("应存在 user v2");
-    assert_eq!(user_v2.content, "编辑后的问题", "user v2 应为编辑后问题");
-
-    // 原始行 id 已被升级（同一行），不再是无 turn_group 的消息
-    assert_eq!(
-        messages.iter().filter(|m| m.turn_group.is_none()).count(),
-        0,
-        "原始行升级后不应再有未分组消息"
-    );
-
-    // 验证 active_version 持久化为 2
-    let active = state
-        .storage
-        .get_turn_active_versions(&conv_id)
-        .await
-        .unwrap();
-    let entry = active
-        .iter()
-        .find(|a| a.turn_group == turn_group)
-        .expect("应存在 active 记录");
-    assert_eq!(entry.active_version, 2, "编辑后 active 应为 2");
-}
-
-/// TC-EDIT-DB-005: 首次编辑时原始消息 id 无效 → 返回错误且不产生部分数据。
-#[tokio::test]
-async fn tc_edit_db_005_first_edit_invalid_original_id_errors() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let conv_id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-
-    persist_exchange(
-        &state,
-        &conv_id,
-        "原始问题",
-        "原始回答",
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-
-    let result = edit_user_message_inner_full(
-        &conv_id,
-        "turn-bad-id",
-        "编辑后的问题",
-        Some("不存在的消息id"),
-        &state,
-    )
-    .await;
-    assert!(result.is_err(), "无效原始 id 应返回错误");
-
-    // 不产生任何 turn_group 数据（事务回滚）
-    let messages = get_messages_inner(&conv_id, &state).await.unwrap();
-    assert_eq!(
-        messages.iter().filter(|m| m.turn_group.is_some()).count(),
-        0,
-        "失败后不应产生 turn_group 消息"
-    );
-}
-
-/// TC-EDIT-DB-006: 多问答对场景下首次编辑的边界。
-///
-/// 验证（REQ-RAG-026 边界）：
-/// 1. 被编辑 user 行无回答（后一问已有回答）时，不误升级下一问答对的 assistant
-/// 2. promote_original_turn 幂等：重复调用同一 turn_group 不报错（重试自愈）
-#[tokio::test]
-async fn tc_edit_db_006_first_edit_boundaries() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let conv_id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-
-    // 两个问答对（均无 turn_group）：Q1/A1, Q2/A2
-    persist_exchange(&state, &conv_id, "问题一", "回答一", None, None, None, None)
-        .await
-        .unwrap();
-    persist_exchange(&state, &conv_id, "问题二", "回答二", None, None, None, None)
-        .await
-        .unwrap();
-
-    let before = get_messages_inner(&conv_id, &state).await.unwrap();
-    let q2_id = before
-        .iter()
-        .find(|m| m.role == "user" && m.content == "问题二")
-        .and_then(|m| m.id.clone())
-        .expect("应找到问题二行 id");
-
-    // 编辑问题二：只应升级 Q2+A2，不应触碰 Q1/A1
-    let turn_group = "turn-boundary";
-    let v =
-        edit_user_message_inner_full(&conv_id, turn_group, "编辑后的问题二", Some(&q2_id), &state)
-            .await
-            .unwrap();
-    assert_eq!(v, 2);
-
-    let messages = get_messages_inner(&conv_id, &state).await.unwrap();
-    // turn_group 应恰好 3 条：Q2(v1) + A2(v1) + 新问题(v2)
-    let turn_msgs: Vec<_> = messages
-        .iter()
-        .filter(|m| m.turn_group.as_deref() == Some(turn_group))
-        .collect();
-    assert_eq!(turn_msgs.len(), 3, "turn_group 应有 3 条消息");
-    // Q1/A1 保持无 turn_group
-    let q1 = messages.iter().find(|m| m.content == "问题一").unwrap();
-    let a1 = messages.iter().find(|m| m.content == "回答一").unwrap();
-    assert!(q1.turn_group.is_none(), "Q1 不应被升级");
-    assert!(a1.turn_group.is_none(), "A1 不应被升级");
-
-    // 幂等：同一 turn_group 重复 promote 不报错（模拟 add_message 半失败后的重试）
-    state
-        .storage
-        .promote_original_turn(&conv_id, &q2_id, turn_group)
-        .await
-        .expect("重复 promote 应幂等成功");
-}
-
-/// TC-EDIT-DB-003: DB 迁移后旧数据库的消息保持可用。
-///
-/// 验证迁移后旧消息可正常读取（turn_group 默认 ''，version 默认 1）。
-#[tokio::test]
-async fn tc_edit_db_003_migration_preserves_old_messages() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let conv_id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-
-    // 写入消息（无 turn_group）
-    persist_exchange(
-        &state,
-        &conv_id,
-        "迁移前的问题",
-        "迁移前的回答",
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-
-    // 重新初始化（模拟重启，触发迁移）
-    let state2 = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 验证消息仍然可读
-    let messages = get_messages_inner(&conv_id, &state2).await.unwrap();
-    assert_eq!(messages.len(), 2, "迁移后消息数量应不变");
-    assert_eq!(messages[0].content, "迁移前的问题");
-    assert_eq!(messages[1].content, "迁移前的回答");
-}
-
-// ================== v1.0 发布准备：设置持久化测试 ==================
-
-/// TC-PERSIST-001: hybrid_search 设置持久化（重启后仍保持开启）。
-#[tokio::test]
-async fn tc_persist_001_hybrid_search_persists() {
-    let dir = TempDir::new().unwrap();
-    {
-        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        set_hybrid_search_inner(true, &state).await.unwrap();
-        let settings = get_settings_inner(&state).await.unwrap();
-        assert!(settings.hybrid_search, "设置后 hybrid_search 应为 true");
-    }
-    // 模拟重启
-    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let settings = get_settings_inner(&restarted).await.unwrap();
-    assert!(settings.hybrid_search, "重启后 hybrid_search 应保持为 true");
-}
-
-/// TC-PERSIST-002: compression_ratio 设置持久化（重启后仍保持 3.0）。
-#[tokio::test]
-async fn tc_persist_002_compression_ratio_persists() {
-    let dir = TempDir::new().unwrap();
-    {
-        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        set_compression_ratio_inner(3.0, &state).await.unwrap();
-    }
-    // 模拟重启
-    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let ratio = restarted.compression_ratio;
-    assert!(
-        (ratio - 3.0).abs() < 0.01,
-        "compression_ratio 必须在重启后保持 3.0，实际: {ratio}"
-    );
-}
-
-/// TC-PERSIST-003: memory_enabled 设置持久化（重启后仍保持开启）。
-#[tokio::test]
-async fn tc_persist_003_memory_enabled_persists() {
-    let dir = TempDir::new().unwrap();
-    {
-        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        set_memory_enabled_inner(true, &state).await.unwrap();
-    }
-    // 模拟重启
-    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    assert!(
-        restarted.memory_enabled,
-        "memory_enabled 必须在重启后保持 true"
-    );
-}
-
-// ================== v1.0 发布准备：边界值测试 ==================
-
-/// TC-EDGE-001: 空字符串 query chat 应返回错误（不应崩溃）。
-#[tokio::test]
-async fn tc_edge_001_empty_query_chat() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    update_llm_config_inner(test_config(), &state)
-        .await
-        .unwrap();
-
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-
-    let result = chat_inner(&handle, "", &[], "conv-edge-1", None, None, &state).await;
-    let err = result.err().unwrap_or_default();
-    assert!(
-        err.contains("知识库为空") || err.contains("空") || err.contains("empty"),
-        "空知识库 + 空 query 应返回知识库为空错误，实际: {err}"
-    );
-}
-
-/// TC-EDGE-002: 超长 query（>10KB）chat 不应崩溃或 panic。
-#[tokio::test]
-async fn tc_edge_002_super_long_query_chat() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    update_llm_config_inner(test_config(), &state)
-        .await
-        .unwrap();
-
-    // 生成 10KB+ 的超长 query
-    let long_query = "测试".repeat(6000); // ~12KB
-
-    let app = tauri::test::mock_app();
-    let handle = app.handle().clone();
-
-    let result = chat_inner(&handle, &long_query, &[], "conv-edge-2", None, None, &state).await;
-    // 不应 panic，应返回正常错误（知识库为空）
-    let err = result.err().unwrap_or_default();
-    assert!(
-        err.contains("知识库为空")
-            || err.contains("空")
-            || err.contains("empty")
-            || err.contains("VALIDATION")
-            || err.contains("过长"),
-        "超长 query + 空知识库应返回知识库为空或验证错误，实际: {err}"
-    );
-}
-
-/// TC-EDGE-003: Free 版本文档数达到 50 上限时拒绝导入。
-///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：全功能免费，无配额限制。
-/// 后期稳定后：Free 版 50 文档上限。
-#[tokio::test]
-async fn tc_edge_003_free_tier_50_doc_limit() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    if ALPHA_ALL_FEATURES_FREE {
-        // Alpha 阶段：全功能免费，无配额限制
-        // 确认是 Pro 状态
-        assert!(*state.is_pro().read().await, "Alpha 阶段 is_pro 应为 true");
-
-        // 直接写入 50 个文档到数据库
-        for i in 0..50 {
-            let doc = Document::new(format!("/tmp/test-{i}.md"), format!("hash-{i}"));
-            state.storage.add_document(&doc).await.unwrap();
-        }
-
-        // 尝试导入第 51 个文档 → 应成功（Alpha 阶段无限制）
-        let test_file = dir.path().join("doc-51.md");
-        std::fs::write(&test_file, "第 51 个文档内容").unwrap();
-
-        let app = tauri::test::mock_app();
-        let handle = app.handle().clone();
-        let result =
-            import_files_inner(&handle, &[test_file.to_string_lossy().to_string()], &state).await;
-
-        assert!(
-            result.is_ok(),
-            "Alpha 阶段 50 文档上限不限制，导入应成功，实际: {:?}",
-            result.err()
-        );
-    } else {
-        // 确保是 Free 版本
-        assert!(!*state.is_pro().read().await, "测试前提：Free 版本");
-
-        // 直接写入 50 个文档到数据库（绕过 import_files 的限制检查）
-        for i in 0..50 {
-            let doc = Document::new(format!("/tmp/test-{i}.md"), format!("hash-{i}"));
-            state.storage.add_document(&doc).await.unwrap();
-        }
-
-        // 验证已有 50 个文档
-        let docs = state.storage.list_documents().await.unwrap();
-        assert_eq!(docs.len(), 50, "应已有 50 个文档");
-
-        // 尝试导入第 51 个文档 → 应被拒绝
-        let test_file = dir.path().join("doc-51.md");
-        std::fs::write(&test_file, "第 51 个文档内容").unwrap();
-
-        let app = tauri::test::mock_app();
-        let handle = app.handle().clone();
-        let result =
-            import_files_inner(&handle, &[test_file.to_string_lossy().to_string()], &state).await;
-
-        let err = result.err().unwrap_or_default();
-        assert!(
-            err.contains("50") || err.contains("配额") || err.contains("quota"),
-            "Free 版本 50 文档上限应拒绝导入第 51 个，实际: {err}"
-        );
-    }
-}
-
-// ================== v1.0 发布准备：并发安全测试 ==================
-
-/// TC-CONC-001: 多个 chat 命令并发执行（不同 conversation_id）不应互相干扰。
-#[tokio::test]
-async fn tc_conc_001_concurrent_chat_different_conversations() {
-    let dir = TempDir::new().unwrap();
-    let state = Arc::new(AppState::new(dir.path().to_path_buf()).await.unwrap());
-    update_llm_config_inner(test_config(), &state)
-        .await
-        .unwrap();
-
-    let app = tauri::test::mock_app();
-    let handle = Arc::new(app.handle().clone());
-
-    // 并发发起 3 个 chat（不同会话），都应返回「知识库为空」错误
-    let mut handles = Vec::new();
-    for i in 0..3 {
-        let state_clone = state.clone();
-        let handle_clone = handle.clone();
-        handles.push(tokio::spawn(async move {
-            chat_inner(
-                &handle_clone,
-                &format!("并发问题{i}"),
-                &[],
-                &format!("conv-conc-{i}"),
-                None,
-                None,
-                &state_clone,
-            )
-            .await
-        }));
-    }
-
-    for (i, h) in handles.into_iter().enumerate() {
-        let result = h.await.unwrap();
-        let err = result.err().unwrap_or_default();
-        assert!(
-            err.contains("知识库为空") || err.contains("空") || err.contains("empty"),
-            "并发 chat #{i} 应返回知识库为空错误，实际: {err}"
-        );
-    }
-}
-
-/// TC-CONC-002: import_files 并发 + chat 并发（读写竞争不应 panic）。
-#[tokio::test]
-async fn tc_conc_002_concurrent_import_and_chat() {
-    let dir = TempDir::new().unwrap();
-    let state = Arc::new(AppState::new(dir.path().to_path_buf()).await.unwrap());
-    update_llm_config_inner(test_config(), &state)
-        .await
-        .unwrap();
-
-    // 创建测试文件
-    let test_file = dir.path().join("concurrent_test.md");
-    std::fs::write(&test_file, "# 并发测试\n\n这是一个并发导入测试文档。").unwrap();
-
-    let app = tauri::test::mock_app();
-    let handle = Arc::new(app.handle().clone());
-
-    // 并发：导入 + chat
-    let state_import = state.clone();
-    let handle_import = handle.clone();
-    let file_path = test_file.to_string_lossy().to_string();
-    let import_handle = tokio::spawn(async move {
-        import_files_inner(&handle_import, &[file_path], &state_import).await
-    });
-
-    let state_chat = state.clone();
-    let handle_chat = handle.clone();
-    let chat_handle = tokio::spawn(async move {
-        chat_inner(
-            &handle_chat,
-            "并发查询",
-            &[],
-            "conv-conc-mix",
-            None,
-            None,
-            &state_chat,
-        )
-        .await
-    });
-
-    // 两者都不应 panic
-    let import_result = import_handle.await.unwrap();
-    let chat_result = chat_handle.await.unwrap();
-
-    // 导入应成功或返回合理错误
-    assert!(
-        import_result.is_ok() || import_result.err().is_some(),
-        "导入操作应完成（成功或错误），不应 panic"
-    );
-
-    // chat 可能返回知识库为空（如果导入还没完成）或其他错误
-    if let Err(e) = chat_result {
-        assert!(!e.is_empty(), "chat 错误信息不应为空");
-    }
-}
-
-// ================== v1.0 发布准备：Pro 门控测试 ==================
-
-/// TC-PRO-GATE-001: Free 版本 is_pro = false，Pro 功能不可用。
-///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：is_pro 自动激活为 true。
-/// 后期稳定后：is_pro = false。
-#[tokio::test]
-async fn tc_pro_gate_001_free_tier_pro_disabled() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let pro_status = get_pro_status_inner(&state).await;
-    if ALPHA_ALL_FEATURES_FREE {
-        assert!(pro_status, "Alpha 阶段 is_pro 应自动激活为 true");
-    } else {
-        assert!(!pro_status, "Free 版本 is_pro 必须为 false");
-    }
-}
-
-/// TC-PRO-GATE-002: activate_pro + deactivate_pro 生命周期。
-#[tokio::test]
-async fn tc_pro_gate_002_pro_activation_lifecycle() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 使用开发种子签发合法 License
-    let license_key = make_valid_license();
-
-    // 激活 Pro
-    activate_pro_inner(&license_key, &state).await.unwrap();
-    assert!(*state.is_pro().read().await, "激活后 is_pro 必须为 true");
-
-    // 验证 get_pro_status 返回 true
-    let pro_status = get_pro_status_inner(&state).await;
-    assert!(pro_status, "激活后 get_pro_status 必须返回 true");
-
-    // 停用 Pro
-    deactivate_pro_inner(&state).await.unwrap();
-    assert!(!*state.is_pro().read().await, "停用后 is_pro 必须为 false");
-
-    let pro_status = get_pro_status_inner(&state).await;
-    assert!(!pro_status, "停用后 get_pro_status 必须返回 false");
-}
-
-// ================== v1.0 发布准备：补充集成测试 ==================
-
-/// TC-CONC-003: abort_chat + clear_abort 生命周期（中断令牌创建/取消/清理）。
-#[tokio::test]
-async fn tc_conc_003_abort_lifecycle() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    let conv_id = create_conversation_inner("default".to_string(), &state)
-        .await
-        .unwrap();
-
-    // 获取 abort token（应自动创建）
-    let token = state.abort_token_for(&conv_id).await;
-    assert!(!token.is_cancelled(), "新建令牌不应已取消");
-
-    // 触发中断
-    state.abort_chat(&conv_id).await;
-    assert!(token.is_cancelled(), "中断后令牌应已取消");
-
-    // 清理后再次获取应是全新的
-    state.clear_abort(&conv_id).await;
-    let token2 = state.abort_token_for(&conv_id).await;
-    assert!(!token2.is_cancelled(), "清理后新令牌不应已取消");
-}
-
-/// TC-CONC-004: 多个会话并发创建不冲突（不同 conversation_id 唯一）。
-#[tokio::test]
-async fn tc_conc_004_multiple_conversation_create() {
-    let dir = TempDir::new().unwrap();
-    let state = Arc::new(AppState::new(dir.path().to_path_buf()).await.unwrap());
-
-    let s1 = state.clone();
-    let s2 = state.clone();
-    let s3 = state.clone();
-    let s4 = state.clone();
-    let s5 = state.clone();
-
-    let (r1, r2, r3, r4, r5) = tokio::join!(
-        create_conversation_inner("default".to_string(), &s1),
-        create_conversation_inner("default".to_string(), &s2),
-        create_conversation_inner("default".to_string(), &s3),
-        create_conversation_inner("default".to_string(), &s4),
-        create_conversation_inner("default".to_string(), &s5),
-    );
-
-    let mut ids = vec![
-        r1.unwrap(),
-        r2.unwrap(),
-        r3.unwrap(),
-        r4.unwrap(),
-        r5.unwrap(),
-    ];
-    ids.sort();
-    ids.dedup();
-    assert_eq!(ids.len(), 5, "并发创建的 5 个会话 ID 必须全部唯一");
-
-    let list = get_conversations_inner("default", &state).await.unwrap();
-    assert_eq!(list.len(), 5, "会话列表应有 5 个会话");
-}
-
-/// TC-PRO-GATE-003: Free 模式 search_symbols 正常工作（非 Pro 门控，返回空列表）。
-///
-/// Alpha 阶段：is_pro 自动激活，search_symbols 仍应正常工作。
-/// 后期稳定后：Free 模式 search_symbols 正常工作。
 #[tokio::test]
 async fn tc_pro_gate_003_search_symbols_free_works() {
     let dir = TempDir::new().unwrap();
@@ -6130,426 +3559,29 @@ async fn tc_pro_gate_003_search_symbols_free_works() {
     );
 }
 
-/// TC-PRO-GATE-004: Free 模式 set_llm_mode("local") 设置成功但 is_pro 仍为 false。
-///
-/// Alpha 阶段：is_pro 自动激活为 true，set_llm_mode("local") 设置成功。
-/// 后期稳定后：set_llm_mode 设置成功，is_pro 仍为 false。
+/// TC-PRO-GATE-004: Free 模式 set_llm_mode("local") 被 Pro 门控拦截，is_pro 仍为 false。
 #[tokio::test]
 async fn tc_pro_gate_004_local_mode_free_still_not_pro() {
     let dir = TempDir::new().unwrap();
     let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
 
-    // Free 模式设置 local 模式（设置本身不应失败）
-    set_llm_mode_inner("local".to_string(), &state)
-        .await
-        .unwrap();
+    // Free 模式设置 local 模式应被 Pro 门控拦截
+    let result = set_llm_mode_inner("local".to_string(), &state).await;
+    assert!(result.is_err(), "Free 模式下 local 模式应被 Pro 门控拦截");
+    assert!(
+        result.unwrap_err().contains("PRO_REQUIRED"),
+        "错误应包含 PRO_REQUIRED"
+    );
 
-    // 验证模式已设置
+    // 验证模式未被修改（仍为 remote）
     let mode = get_llm_mode_inner(&state).await.unwrap();
-    assert_eq!(mode, "local", "llm_mode 应已设置为 local");
+    assert_eq!(mode, "remote", "llm_mode 应仍为 remote");
 
     // 验证 Pro 状态
     let pro_status = get_pro_status_inner(&state).await;
-    if ALPHA_ALL_FEATURES_FREE {
-        assert!(pro_status, "Alpha 阶段 is_pro 始终为 true");
-    } else {
-        assert!(!pro_status, "设置 local 模式后仍应为 Free 模式");
-    }
+    assert!(!pro_status, "应仍为 Free 模式");
 }
 
-// ============================================================
-// 自定义 ONNX 嵌入模型上传（REQ-VEC-014，Pro 门控）
-// TC-VEC-CUSTOM-001~005
-// ============================================================
-
-/// 创建测试用的假 ONNX 文件（非空、非 HTML 的二进制数据）。
-#[cfg(feature = "pro")]
-fn create_fake_onnx_file(dir: &tempfile::TempDir, name: &str) -> std::path::PathBuf {
-    let path = dir.path().join(name);
-    // ONNX protobuf 文件不需要特定 magic bytes，只需要非空且非 HTML
-    std::fs::write(&path, b"\x08\x01\x12\x04test\x1a\x03for").unwrap();
-    path
-}
-
-/// 创建测试用的假 tokenizer 文件（有效 JSON）。
-#[cfg(feature = "pro")]
-fn create_fake_tokenizer_files(dir: &tempfile::TempDir) -> Vec<std::path::PathBuf> {
-    let files = [
-        "tokenizer.json",
-        "config.json",
-        "special_tokens_map.json",
-        "tokenizer_config.json",
-    ];
-    files
-        .iter()
-        .map(|name| {
-            let path = dir.path().join(name);
-            std::fs::write(&path, r#"{"test": true}"#).unwrap();
-            path
-        })
-        .collect()
-}
-
-/// TC-VEC-CUSTOM-001: 上传有效 ONNX 模型文件后，文件成功复制到 custom_models 目录。
-///
-/// 验证：AC-1 — 上传有效 ONNX 模型后文件复制成功，返回 CustomModelInfo。
-/// 注：此测试验证文件管理逻辑，不验证实际 ONNX 模型加载（需要真实模型）。
-#[cfg(feature = "pro")]
-#[tokio::test]
-async fn tc_vec_custom_001_upload_valid_model() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 激活 Pro（测试需要 Pro 权限）
-    let license_key = make_valid_license();
-    activate_pro_inner(&license_key, &state).await.unwrap();
-
-    // 创建测试文件
-    let onnx_path = create_fake_onnx_file(&dir, "model.onnx");
-    let tokenizer_paths = create_fake_tokenizer_files(&dir);
-    let tokenizer_str: Vec<String> = tokenizer_paths
-        .iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .collect();
-
-    // 上传模型
-    let result = upload_custom_embedding_model_inner(
-        "test-bge-model".to_string(),
-        onnx_path.to_string_lossy().to_string(),
-        tokenizer_str,
-        &state,
-    )
-    .await;
-
-    assert!(result.is_ok(), "上传有效模型应成功: {:?}", result.err());
-    let info = result.unwrap();
-    assert_eq!(info.name, "test-bge-model", "模型名称应匹配");
-    assert!(info.is_valid, "模型应标记为有效");
-    assert!(info.size_bytes > 0, "模型大小应大于 0");
-
-    // 验证文件已复制到 custom_models 目录
-    let model_dir = state.custom_model_dir().join("test-bge-model");
-    assert!(model_dir.join("model.onnx").exists(), "ONNX 文件应已复制");
-    assert!(
-        model_dir.join("tokenizer.json").exists(),
-        "tokenizer.json 应已复制"
-    );
-    assert!(
-        model_dir.join("config.json").exists(),
-        "config.json 应已复制"
-    );
-}
-
-/// TC-VEC-CUSTOM-002: 切换到自定义模型后，设置持久化且 embedder 缓存清除。
-///
-/// 验证：AC-2 — 切换到自定义模型后 vec.embedding_model 设置为 "custom:{name}"。
-#[cfg(feature = "pro")]
-#[tokio::test]
-async fn tc_vec_custom_002_switch_to_custom_model() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 切换到自定义模型
-    set_embedding_model_inner("custom:my-custom-model", &state)
-        .await
-        .unwrap();
-
-    // 验证设置已持久化
-    let setting = state
-        .storage
-        .get_setting("vec.embedding_model")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        setting, "custom:my-custom-model",
-        "vec.embedding_model 应为 custom:my-custom-model"
-    );
-
-    // 验证 embedder 缓存已清除（embedder_initialized 返回 false）
-    let initialized = state.embedder_initialized().await;
-    assert!(!initialized, "切换模型后 embedder 缓存应已清除");
-}
-
-/// TC-VEC-CUSTOM-003: 上传无效文件（HTML 错误页内容）返回 Err。
-///
-/// 验证：AC-3 — 上传无效文件返回 Err，不崩溃。
-#[cfg(feature = "pro")]
-#[tokio::test]
-async fn tc_vec_custom_003_upload_invalid_file() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 激活 Pro
-    let license_key = make_valid_license();
-    activate_pro_inner(&license_key, &state).await.unwrap();
-
-    // 创建无效 ONNX 文件（HTML 错误页内容）
-    let invalid_path = dir.path().join("invalid.onnx");
-    std::fs::write(
-        &invalid_path,
-        b"<!DOCTYPE html><html><body>404</body></html>",
-    )
-    .unwrap();
-
-    let tokenizer_paths = create_fake_tokenizer_files(&dir);
-    let tokenizer_str: Vec<String> = tokenizer_paths
-        .iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .collect();
-
-    let result = upload_custom_embedding_model_inner(
-        "invalid-model".to_string(),
-        invalid_path.to_string_lossy().to_string(),
-        tokenizer_str,
-        &state,
-    )
-    .await;
-
-    assert!(result.is_err(), "上传无效 ONNX 文件应返回错误");
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("VALIDATION") || err.contains("STORAGE"),
-        "错误应包含 VALIDATION 或 STORAGE 前缀: {err}"
-    );
-}
-
-/// TC-VEC-CUSTOM-004: 删除自定义模型后文件目录被移除。
-///
-/// 验证：AC-4 — 删除自定义模型后文件删除，无法再切换。
-#[cfg(feature = "pro")]
-#[tokio::test]
-async fn tc_vec_custom_004_delete_custom_model() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 激活 Pro
-    let license_key = make_valid_license();
-    activate_pro_inner(&license_key, &state).await.unwrap();
-
-    // 先上传模型
-    let onnx_path = create_fake_onnx_file(&dir, "model.onnx");
-    let tokenizer_paths = create_fake_tokenizer_files(&dir);
-    let tokenizer_str: Vec<String> = tokenizer_paths
-        .iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .collect();
-    upload_custom_embedding_model_inner(
-        "delete-test-model".to_string(),
-        onnx_path.to_string_lossy().to_string(),
-        tokenizer_str,
-        &state,
-    )
-    .await
-    .unwrap();
-
-    // 验证目录存在
-    let model_dir = state.custom_model_dir().join("delete-test-model");
-    assert!(model_dir.exists(), "上传后目录应存在");
-
-    // 删除模型
-    let result = delete_custom_model_inner("delete-test-model".to_string(), &state).await;
-    assert!(result.is_ok(), "删除模型应成功: {:?}", result.err());
-
-    // 验证目录已删除
-    assert!(!model_dir.exists(), "删除后目录不应存在");
-
-    // 验证再次删除返回错误
-    let result2 = delete_custom_model_inner("delete-test-model".to_string(), &state).await;
-    assert!(result2.is_err(), "删除不存在的模型应返回错误");
-}
-
-/// TC-VEC-CUSTOM-005: Free 用户上传被拒绝，返回 PRO_REQUIRED 错误。
-///
-/// 验证：AC-5 — Free 用户无法使用自定义模型上传功能。
-///
-/// Alpha 阶段（ALPHA_ALL_FEATURES_FREE = true）：全功能免费，上传应成功（或文件格式验证失败）。
-/// 后期稳定后：Free 用户上传/列出/删除均返回 PRO_REQUIRED 错误。
-#[tokio::test]
-async fn tc_vec_custom_005_free_user_rejected() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    if ALPHA_ALL_FEATURES_FREE {
-        // Alpha 阶段：全功能免费，is_pro 始终为 true
-        assert!(*state.is_pro().read().await, "Alpha 阶段 is_pro 应为 true");
-
-        // Alpha 阶段上传不会被 PRO_REQUIRED 拦截
-        // （具体上传行为取决于文件验证，此处仅验证不返回 PRO_REQUIRED）
-        #[cfg(feature = "pro")]
-        {
-            let onnx_path = create_fake_onnx_file(&dir, "model.onnx");
-            let tokenizer_paths = create_fake_tokenizer_files(&dir);
-            let tokenizer_str: Vec<String> = tokenizer_paths
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
-
-            let result = upload_custom_embedding_model_inner(
-                "test-model".to_string(),
-                onnx_path.to_string_lossy().to_string(),
-                tokenizer_str,
-                &state,
-            )
-            .await;
-
-            // 不应返回 PRO_REQUIRED 错误（可能因文件验证失败，但不是 Pro 门控）
-            if let Err(ref e) = result {
-                assert!(
-                    !e.contains("PRO_REQUIRED"),
-                    "Alpha 阶段不应返回 PRO_REQUIRED 错误，实际: {e}"
-                );
-            }
-        }
-    } else {
-        // 确保是 Free 模式（不激活 Pro）
-        let is_pro = *state.is_pro().read().await;
-        assert!(!is_pro, "测试初始状态应为 Free 模式");
-
-        // Free 用户上传应被拒绝
-        #[cfg(feature = "pro")]
-        {
-            // 创建测试文件（仅在 Pro 编译时需要）
-            let onnx_path = create_fake_onnx_file(&dir, "model.onnx");
-            let tokenizer_paths = create_fake_tokenizer_files(&dir);
-            let tokenizer_str: Vec<String> = tokenizer_paths
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
-
-            let result = upload_custom_embedding_model_inner(
-                "test-model".to_string(),
-                onnx_path.to_string_lossy().to_string(),
-                tokenizer_str.clone(),
-                &state,
-            )
-            .await;
-            assert!(result.is_err(), "Free 用户上传应被拒绝");
-            let err = result.unwrap_err();
-            assert!(
-                err.contains("PRO_REQUIRED"),
-                "错误应包含 PRO_REQUIRED 前缀: {err}"
-            );
-        }
-
-        // Free 用户列出模型应被拒绝
-        #[cfg(feature = "pro")]
-        {
-            let result = list_custom_models_inner(&state).await;
-            assert!(result.is_err(), "Free 用户列出自定义模型应被拒绝");
-            let err = result.unwrap_err();
-            assert!(
-                err.contains("PRO_REQUIRED"),
-                "错误应包含 PRO_REQUIRED 前缀: {err}"
-            );
-        }
-
-        // Free 用户删除模型应被拒绝
-        #[cfg(feature = "pro")]
-        {
-            let result = delete_custom_model_inner("test-model".to_string(), &state).await;
-            assert!(result.is_err(), "Free 用户删除自定义模型应被拒绝");
-            let err = result.unwrap_err();
-            assert!(
-                err.contains("PRO_REQUIRED"),
-                "错误应包含 PRO_REQUIRED 前缀: {err}"
-            );
-        }
-    }
-}
-
-/// TC-VEC-CUSTOM-006: list_custom_models 返回已上传的模型列表。
-///
-/// 验证：上传多个模型后，list_custom_models 返回完整列表。
-#[cfg(feature = "pro")]
-#[tokio::test]
-async fn tc_vec_custom_006_list_custom_models() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 激活 Pro
-    let license_key = make_valid_license();
-    activate_pro_inner(&license_key, &state).await.unwrap();
-
-    // 上传两个模型
-    for model_name in &["model-a", "model-b"] {
-        let onnx_path = create_fake_onnx_file(&dir, "model.onnx");
-        let tokenizer_paths = create_fake_tokenizer_files(&dir);
-        let tokenizer_str: Vec<String> = tokenizer_paths
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        upload_custom_embedding_model_inner(
-            model_name.to_string(),
-            onnx_path.to_string_lossy().to_string(),
-            tokenizer_str,
-            &state,
-        )
-        .await
-        .unwrap();
-    }
-
-    // 列出模型
-    let result = list_custom_models_inner(&state).await;
-    assert!(result.is_ok(), "列出自定义模型应成功");
-    let models = result.unwrap();
-    assert_eq!(models.len(), 2, "应有 2 个自定义模型");
-    let names: Vec<&str> = models.iter().map(|m| m.name.as_str()).collect();
-    assert!(names.contains(&"model-a"), "列表应包含 model-a");
-    assert!(names.contains(&"model-b"), "列表应包含 model-b");
-}
-
-/// TC-VEC-CUSTOM-007: 路径遍历防护 — 模型名称中的危险字符被替换。
-///
-/// 验证：模型名称 `../../etc/passwd` 被清理为安全目录名。
-#[cfg(feature = "pro")]
-#[tokio::test]
-async fn tc_vec_custom_007_path_traversal_protection() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 激活 Pro
-    let license_key = make_valid_license();
-    activate_pro_inner(&license_key, &state).await.unwrap();
-
-    let onnx_path = create_fake_onnx_file(&dir, "model.onnx");
-    let tokenizer_paths = create_fake_tokenizer_files(&dir);
-    let tokenizer_str: Vec<String> = tokenizer_paths
-        .iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .collect();
-
-    // 使用危险路径作为模型名称
-    let result = upload_custom_embedding_model_inner(
-        "../../etc/passwd".to_string(),
-        onnx_path.to_string_lossy().to_string(),
-        tokenizer_str,
-        &state,
-    )
-    .await;
-
-    assert!(
-        result.is_ok(),
-        "上传应成功（名称被清理）: {:?}",
-        result.err()
-    );
-    let info = result.unwrap();
-    // 危险字符应被替换
-    assert!(
-        !info.name.contains('/') && !info.name.contains('\\') && !info.name.contains(".."),
-        "模型名称不应包含路径分隔符或 ..: {}",
-        info.name
-    );
-
-    // 验证文件存储在 custom_models 目录下（非系统目录）
-    let model_dir = state.custom_model_dir().join(&info.name);
-    assert!(model_dir.exists(), "模型应存储在 custom_models 目录下");
-}
-
-/// TC-PERF-BATCH-001：批量 embedding 写入性能对比（单事务 vs 逐条写入）。
-///
-/// 验证 `add_embeddings_batch` 在单事务中写入全部 embeddings，
-/// 且仅触发一次 `invalidate_vector_cache`，而非逐条写入的 N 次。
 #[tokio::test]
 async fn tc_perf_batch_001_add_embeddings_batch() {
     let dir = tempfile::tempdir().unwrap();
@@ -6720,5 +3752,83 @@ async fn tc_perf_batch_004_idempotent_cache_write() {
     assert!(
         (cached_c.as_ref().unwrap()[0] - 3.0).abs() < 0.001,
         "hash_c 应为 3.0"
+    );
+}
+
+// ==================================================================
+// REQ-EXP-004 文档原文导出
+// ==================================================================
+
+/// TC-EXP-ORIG-001 export_document_original 成功复制文件到目标路径（REQ-EXP-004-AC-1/AC-3）。
+#[tokio::test]
+async fn tc_exp_orig_001_export_document_original_success() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    // 创建测试文件并导入
+    let src_file = dir.path().join("source").join("test_export.md");
+    std::fs::create_dir_all(src_file.parent().unwrap()).unwrap();
+    std::fs::write(&src_file, b"export test content").unwrap();
+
+    let app = tauri::test::mock_app();
+    let handle = app.handle().clone();
+    let imported = import_files_inner(&handle, &[src_file.to_string_lossy().to_string()], &state)
+        .await
+        .unwrap();
+    assert_eq!(imported.len(), 1, "应导入 1 个文件");
+
+    // 获取文档 ID
+    let docs = state.storage.list_documents().await.unwrap();
+    assert_eq!(docs.len(), 1);
+    let doc_id = &docs[0].id;
+
+    // 导出到一个新路径
+    let dest = dir.path().join("exported.md");
+    export_document_original_inner(doc_id, dest.to_str().unwrap(), &state)
+        .await
+        .unwrap();
+
+    // 验证导出文件内容一致（AC-3：字节级一致）
+    let exported_content = std::fs::read_to_string(&dest).unwrap();
+    assert_eq!(exported_content, "export test content");
+}
+
+/// TC-EXP-ORIG-002 不存在的文档 ID 返回 Err（REQ-EXP-004-AC-1）。
+#[tokio::test]
+async fn tc_exp_orig_002_export_nonexistent_doc_returns_error() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    let dest = dir.path().join("exported.md");
+    let result =
+        export_document_original_inner("nonexistent-id", dest.to_str().unwrap(), &state).await;
+
+    assert!(result.is_err(), "不存在的文档 ID 必须返回 Err");
+    assert!(
+        result.unwrap_err().contains("文档不存在"),
+        "错误消息应包含「文档不存在」"
+    );
+}
+
+/// TC-EXP-ORIG-003 文件副本不存在时返回 Err（REQ-EXP-004 异常场景）。
+#[tokio::test]
+async fn tc_exp_orig_003_export_missing_file_returns_error() {
+    let dir = TempDir::new().unwrap();
+    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
+
+    // 直接插入文档记录（file_path 指向不存在的文件）
+    let doc = Document::new(
+        "/nonexistent/path/to/file.md".to_string(),
+        "fake_hash_001".to_string(),
+    );
+    state.storage.add_document(&doc).await.unwrap();
+
+    let dest = dir.path().join("exported.md");
+    let result = export_document_original_inner(&doc.id, dest.to_str().unwrap(), &state).await;
+
+    assert!(result.is_err(), "文件副本不存在时必须返回 Err");
+    assert!(
+        result.unwrap_err().contains("文档副本文件不存在"),
+        "错误消息应包含「文档副本文件不存在」"
     );
 }

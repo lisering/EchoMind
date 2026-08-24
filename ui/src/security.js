@@ -17,8 +17,11 @@ import { securityApi } from './ipc.js';
 import { t } from './i18n.js';
 import { toast as showToast } from './toast.js';
 import { createFocusTrap } from './focus-trap.js';
-import { Z_INDEX, zClass } from './zindex.js';
+import { Z_INDEX, zClass } from './panel-stack.js';
 import { pushPanel, removePanel } from './panel-stack.js';
+import { showConfirmDialog } from './confirm-dialog.js';
+import { icon } from './utils.js';
+import { isComposingEvent } from './input-utils.js';
 
 // ============================================================
 // 锁屏遮罩
@@ -50,7 +53,7 @@ function ensureLockOverlay() {
           <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
         </svg>
       </div>
-      <h2 class="text-xl font-semibold m-0 mb-2 text-text-primary" data-i18n="security.lock_title">🔒 EchoMind 已锁定</h2>
+      <h2 class="text-xl font-semibold m-0 mb-2 text-text-primary" data-i18n="security.lock_title">EchoMind 已锁定</h2>
       <p class="text-sm text-text-tertiary m-0 mb-8 leading-normal" data-i18n="security.lock_subtitle">输入密码以解锁并访问你的知识库</p>
       <div class="w-full mb-3">
         <input type="password" id="lockPasswordInput" class="w-full px-4 py-3 text-[15px] border border-border-strong rounded-[10px] bg-bg-input text-text-primary outline-none transition-colors box-border focus:border-info focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]"
@@ -74,7 +77,7 @@ function ensureLockOverlay() {
 
   // Enter 键提交
   _lockPasswordInputEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !isComposingEvent(e)) {
       handleUnlock();
     }
   });
@@ -221,8 +224,10 @@ export function recordActivity() {
   const now = Date.now();
   if (now - _activityThrottle < 5000) return; // 5 秒内不重复上报
   _activityThrottle = now;
-  // 异步通知后端，不等待结果
-  securityApi.checkStatus().catch(() => {});
+  // 异步通知后端 record_activity 命令（S2 复盘接线），降级 checkStatus
+  securityApi.recordActivity().catch(() => {
+    securityApi.checkStatus().catch(() => {});
+  });
 }
 
 // ============================================================
@@ -255,7 +260,7 @@ export function renderSecuritySettings(container) {
         </div>
         <div class="shrink-0 ml-4">
           ${isEnc
-            ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-[rgba(var(--success-rgb),0.12)] text-success">🔒 ${t('security.encrypted', '已加密')}</span>`
+            ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-[rgba(var(--success-rgb),0.12)] text-success">${icon('lock', 'sm')} ${t('security.encrypted', '已加密')}</span>`
             : `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-[rgba(100,116,139,0.12)] text-text-quaternary">${t('security.not_encrypted', '未加密')}</span>`
           }
         </div>
@@ -324,6 +329,70 @@ export function renderSecuritySettings(container) {
         <div class="shrink-0 ml-4 flex gap-2">
           <button id="btnViewAuditLog" class="px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" data-i18n="security.view_log">查看日志</button>
           <button id="btnVerifyAudit" class="px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" data-i18n="security.verify_integrity">验证完整性</button>
+          <button id="btnClearAuditLogs" class="px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:text-red-400 hover:border-red-400/40 transition-colors" data-i18n="security.clear_logs">清空日志</button>
+        </div>
+      </div>
+
+      <!-- 剪贴板自动清除配置（S2 复盘接线） -->
+      <div class="flex items-center justify-between py-3 border-t border-border-default">
+        <div class="flex flex-col gap-0.5 flex-1">
+          <span data-i18n="security.clipboard_clear">剪贴板自动清除</span>
+          <span class="text-xs text-text-tertiary leading-tight" data-i18n="security.clipboard_clear_desc">复制敏感数据后自动清除剪贴板（秒，0=禁用）</span>
+        </div>
+        <div class="shrink-0 ml-4 flex items-center gap-2">
+          <input type="number" id="clipboardClearTimeoutInput" class="px-2.5 py-1 text-[13px] border border-border-default rounded-md bg-bg-input text-text-primary outline-none transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]"
+                 min="0" max="300" step="5"
+                 value="${state.clipboardClearTimeout || 30}"
+                 style="width: 70px;"/>
+          <label class="relative inline-block w-10 h-[22px]">
+            <input type="checkbox" id="clipboardClearToggle" class="peer opacity-0 w-0 h-0" ${state.clipboardClearEnabled ? 'checked' : ''}/>
+            <span class="absolute cursor-pointer inset-0 bg-border-default rounded-[11px] transition-[background] duration-300 before:content-[''] before:absolute before:h-4 before:w-4 before:left-[3px] before:bottom-[3px] before:bg-white before:rounded-full before:transition-transform before:duration-300 peer-checked:bg-primary peer-checked:before:translate-x-[18px]"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 安全态势选择器（S2 复盘接线） -->
+      <div class="flex items-center justify-between py-3 border-t border-border-default">
+        <div class="flex flex-col gap-0.5 flex-1">
+          <span data-i18n="security.posture">安全态势</span>
+          <span class="text-xs text-text-tertiary leading-tight" data-i18n="security.posture_desc">控制安全筛查严格程度</span>
+        </div>
+        <div class="shrink-0 ml-4 flex gap-1" id="postureSelector">
+          <button class="posture-btn px-2.5 py-1 text-xs font-medium rounded-md border border-border-default text-text-tertiary hover:bg-surface-3 transition-colors" data-posture="dangerous" data-i18n="security.posture_dangerous">宽松</button>
+          <button class="posture-btn px-2.5 py-1 text-xs font-medium rounded-md border border-border-default text-text-tertiary hover:bg-surface-3 transition-colors" data-posture="auto" data-i18n="security.posture_auto">自动</button>
+          <button class="posture-btn px-2.5 py-1 text-xs font-medium rounded-md border border-border-default text-text-tertiary hover:bg-surface-3 transition-colors" data-posture="strict" data-i18n="security.posture_strict">严格</button>
+        </div>
+      </div>
+
+      <!-- Shadow 筛查统计（S2 复盘接线） -->
+      <div class="py-3 border-t border-border-default" id="shadowScreenSection">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span data-i18n="security.shadow_screen">Shadow 筛查统计</span>
+            <span class="text-xs text-text-tertiary leading-tight" data-i18n="security.shadow_screen_desc">并行安全筛查对比统计</span>
+          </div>
+          <button id="btnResetShadowStats" class="shrink-0 ml-4 px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" data-i18n="security.reset_stats">重置</button>
+        </div>
+        <div class="flex gap-3 text-sm" id="shadowScreenStats">
+          <span class="text-text-tertiary"><span data-i18n="security.shadow_total">总计</span>: <span class="font-semibold text-text-primary" id="shadowTotal">-</span></span>
+          <span class="text-success"><span data-i18n="security.shadow_agree">一致</span>: <span class="font-semibold" id="shadowAgree">-</span></span>
+          <span class="text-danger"><span data-i18n="security.shadow_disagree">分歧</span>: <span class="font-semibold" id="shadowDisagree">-</span></span>
+          <span class="text-text-quaternary"><span data-i18n="security.shadow_unavailable">不可用</span>: <span class="font-semibold" id="shadowUnavailable">-</span></span>
+        </div>
+      </div>
+
+      <!-- 紧急销毁（S2 复盘接线） -->
+      <div class="py-3 border-t border-border-default" id="panicWipeSection">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex flex-col gap-0.5 flex-1">
+            <span data-i18n="security.panic_wipe">紧急销毁</span>
+            <span class="text-xs text-text-tertiary leading-tight" data-i18n="security.panic_wipe_desc">设置紧急密码，输入后立即销毁所有数据</span>
+          </div>
+          <button id="btnSetPanicWipe" class="shrink-0 ml-4 px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" data-i18n="security.set_panic_password">设置密码</button>
+        </div>
+        <div class="flex items-center gap-2" id="panicWipeStatus" style="display:none">
+          <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-[rgba(var(--success-rgb),0.12)] text-success" data-i18n="security.panic_enabled">已启用</span>
+          <button id="btnClearPanicWipe" class="px-3 py-1 text-xs font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:text-red-400 hover:border-red-400/40 transition-colors" data-i18n="security.clear_panic">清除</button>
         </div>
       </div>
     </div>
@@ -403,6 +472,140 @@ function bindSecuritySettingsEvents(container) {
   if (btnVerify) {
     btnVerify.addEventListener('click', verifyAuditChain);
   }
+
+  // 清空审计日志（S2 复盘接线）
+  const btnClearLogs = container.querySelector('#btnClearAuditLogs');
+  if (btnClearLogs) {
+    btnClearLogs.addEventListener('click', async () => {
+      const confirmed = await showConfirmDialog({
+        title: t('security.clear_logs_confirm', '确认清空所有审计日志？此操作不可撤销。'),
+      });
+      if (!confirmed) return;
+      try {
+        await securityApi.clearAuditLogs();
+        showToast(t('security.logs_cleared', '审计日志已清空'), 'success');
+      } catch (err) {
+        showToast(t('security.clear_failed', '清空失败') + ': ' + String(err), 'error');
+      }
+    });
+  }
+
+  // 剪贴板自动清除配置（S2 复盘接线）
+  const clipboardToggle = container.querySelector('#clipboardClearToggle');
+  const clipboardInput = container.querySelector('#clipboardClearTimeoutInput');
+  if (clipboardToggle && clipboardInput) {
+    const updateClipboard = async () => {
+      const enabled = clipboardToggle.checked;
+      const secs = parseInt(clipboardInput.value, 10) || 0;
+      try {
+        await securityApi.setClipboardConfig(enabled, secs);
+        setState({ clipboardClearEnabled: enabled, clipboardClearTimeout: secs });
+      } catch (err) {
+        showToast(t('security.update_failed', '更新失败') + ': ' + String(err), 'error');
+      }
+    };
+    clipboardToggle.addEventListener('change', updateClipboard);
+    clipboardInput.addEventListener('change', updateClipboard);
+  }
+
+  // 安全态势选择器（S2 复盘接线）
+  const postureButtons = container.querySelectorAll('.posture-btn');
+  if (postureButtons.length > 0) {
+    // 异步加载当前态势
+    securityApi.getSecurityPosture().then((posture) => {
+      postureButtons.forEach((btn) => {
+        const isActive = btn.dataset.posture === posture;
+        btn.classList.toggle('bg-accent', isActive);
+        btn.classList.toggle('text-surface-0', isActive);
+        btn.classList.toggle('border-accent', isActive);
+        btn.classList.toggle('text-text-tertiary', !isActive);
+        btn.classList.toggle('border-border-default', !isActive);
+      });
+    }).catch(() => {});
+    // 绑定点击
+    postureButtons.forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const posture = btn.dataset.posture;
+        try {
+          await securityApi.setSecurityPosture(posture);
+          postureButtons.forEach((b) => {
+            const active = b.dataset.posture === posture;
+            b.classList.toggle('bg-accent', active);
+            b.classList.toggle('text-surface-0', active);
+            b.classList.toggle('border-accent', active);
+            b.classList.toggle('text-text-tertiary', !active);
+            b.classList.toggle('border-border-default', !active);
+          });
+          showToast(t('security.posture_updated', '安全态势已更新'), 'success');
+        } catch (err) {
+          showToast(t('security.update_failed', '更新失败') + ': ' + String(err), 'error');
+        }
+      });
+    });
+  }
+
+  // Shadow 筛查统计（S2 复盘接线）
+  const shadowSection = container.querySelector('#shadowScreenSection');
+  if (shadowSection) {
+    const loadShadowStats = async () => {
+      try {
+        const stats = await securityApi.getSecurityScreenStats();
+        const el = (id) => shadowSection.querySelector(id);
+        if (el('#shadowTotal')) el('#shadowTotal').textContent = String(stats.total || 0);
+        if (el('#shadowAgree')) el('#shadowAgree').textContent = String(stats.agree || 0);
+        if (el('#shadowDisagree')) el('#shadowDisagree').textContent = String(stats.disagree || 0);
+        if (el('#shadowUnavailable')) el('#shadowUnavailable').textContent = String(stats.unavailable || 0);
+      } catch (_) {
+        // 静默降级
+      }
+    };
+    loadShadowStats();
+    const resetBtn = container.querySelector('#btnResetShadowStats');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', async () => {
+        try {
+          await securityApi.resetSecurityScreenStats();
+          await loadShadowStats();
+          showToast(t('security.stats_reset', '统计已重置'), 'success');
+        } catch (err) {
+          showToast(String(err), 'error');
+        }
+      });
+    }
+  }
+
+  // 紧急销毁（S2 复盘接线）
+  const btnSetPanic = container.querySelector('#btnSetPanicWipe');
+  const panicStatus = container.querySelector('#panicWipeStatus');
+  const btnClearPanic = container.querySelector('#btnClearPanicWipe');
+  if (btnSetPanic) {
+    // 异步检查是否已启用
+    securityApi.isPanicWipeEnabled().then((enabled) => {
+      if (enabled && panicStatus) {
+        panicStatus.style.display = 'flex';
+        btnSetPanic.textContent = t('security.update_panic_password', '更新密码');
+      }
+    }).catch(() => {});
+    btnSetPanic.addEventListener('click', () => {
+      showPanicWipeDialog(btnSetPanic, panicStatus);
+    });
+  }
+  if (btnClearPanic) {
+    btnClearPanic.addEventListener('click', async () => {
+      const confirmed = await showConfirmDialog({
+        title: t('security.clear_panic_confirm', '确认清除紧急销毁密码？'),
+      });
+      if (!confirmed) return;
+      try {
+        await securityApi.clearPanicWipePassword();
+        if (panicStatus) panicStatus.style.display = 'none';
+        if (btnSetPanic) btnSetPanic.textContent = t('security.set_panic_password', '设置密码');
+        showToast(t('security.panic_cleared', '紧急销毁已清除'), 'success');
+      } catch (err) {
+        showToast(String(err), 'error');
+      }
+    });
+  }
 }
 
 // ============================================================
@@ -417,7 +620,7 @@ function showEncryptDialog() {
   dialog.className = `fixed inset-0 ${zClass(Z_INDEX.AUDIT_LOG)} flex items-center justify-center bg-black/50 backdrop-blur-[4px]`;
   dialog.innerHTML = `
     <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[480px] w-[90%] max-h-[85vh] overflow-y-auto">
-      <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="security.encrypt_title">🔒 启用数据库加密</h3>
+      <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="security.encrypt_title">启用数据库加密</h3>
       <div class="px-7 py-5">
         <p class="text-sm text-text-secondary leading-normal m-0 mb-5" data-i18n="security.encrypt_desc">
           设置一个强密码，用于加密你的数据库。所有文档、向量、对话记录将使用 AES-256 加密。
@@ -436,7 +639,7 @@ function showEncryptDialog() {
         </div>
         <div id="encPwdStrength" class="text-xs font-medium mt-1.5 min-h-[18px]"></div>
         <p class="text-[13px] text-warning bg-[rgba(var(--warning-rgb),0.08)] px-3.5 py-2.5 rounded-lg mt-3 leading-normal" data-i18n="security.encrypt_warning">
-          ⚠️ 密码丢失将无法恢复数据。请妥善保管密码。
+          密码丢失将无法恢复数据。请妥善保管密码。
         </p>
         <p id="encError" class="text-[13px] text-danger min-h-[18px] mt-2"></p>
       </div>
@@ -455,16 +658,34 @@ function showEncryptDialog() {
   const cancelBtn = dialog.querySelector('#encCancelBtn');
   const confirmBtn = dialog.querySelector('#encConfirmBtn');
 
-  // 密码强度实时检测
-  pwdInput.addEventListener('input', () => {
+  // 密码强度实时检测（S2 复盘：调用后端 check_password_strength）
+  pwdInput.addEventListener('input', async () => {
     const pwd = pwdInput.value;
     if (!pwd) {
       strengthEl.textContent = '';
       return;
     }
-    const strength = assessPasswordStrength(pwd);
-    strengthEl.textContent = strength.label;
-    strengthEl.className = `text-xs font-medium mt-1.5 min-h-[18px] ${strength.level === 'weak' ? 'text-danger' : strength.level === 'medium' ? 'text-warning' : 'text-success'}`;
+    // 先用前端即时评估快速响应
+    const localStrength = assessPasswordStrength(pwd);
+    strengthEl.textContent = localStrength.label;
+    strengthEl.className = `text-xs font-medium mt-1.5 min-h-[18px] ${localStrength.level === 'weak' ? 'text-danger' : localStrength.level === 'medium' ? 'text-warning' : 'text-success'}`;
+    // 再异步调用后端精确评估（含 Argon2id 建议）
+    try {
+      const result = await securityApi.checkPasswordStrength(pwd);
+      if (result && result.level) {
+        const pct = result.percentage || 0;
+        const color = result.color || '';
+        const suggestions = result.suggestions || [];
+        const levelText = t('security.pwd_' + result.level, result.level);
+        strengthEl.textContent = `${levelText} (${pct}%)`;
+        strengthEl.className = `text-xs font-medium mt-1.5 min-h-[18px] ${color || (result.level === 'weak' ? 'text-danger' : result.level === 'medium' ? 'text-warning' : 'text-success')}`;
+        if (suggestions.length > 0 && pwd.length < 12) {
+          strengthEl.textContent += ' — ' + suggestions[0];
+        }
+      }
+    } catch (_) {
+      // 后端不可用时保留前端评估结果
+    }
   });
 
   // 取消
@@ -556,7 +777,7 @@ async function showAuditLogPanel() {
   panel.className = 'modal-overlay';
   panel.innerHTML = `
     <div class="modal-card modal-card--wide">
-      <h3 class="modal-title" data-i18n="security.audit_log_title">📋 安全审计日志</h3>
+      <h3 class="modal-title" data-i18n="security.audit_log_title">安全审计日志</h3>
       <div class="modal-body">
         <div id="auditLogContent" class="audit-log-container">
           <p class="loading-text" data-i18n="security.loading">加载中…</p>
@@ -564,6 +785,7 @@ async function showAuditLogPanel() {
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="auditCloseBtn" data-i18n="common.close">关闭</button>
+        <button class="btn btn-secondary" id="auditClearBtn" data-i18n="security.clear_logs">清空日志</button>
         <button class="btn btn-secondary" id="auditVerifyBtn" data-i18n="security.verify_integrity">验证完整性</button>
       </div>
     </div>
@@ -579,6 +801,24 @@ async function showAuditLogPanel() {
     panel.remove();
   });
   verifyBtn.addEventListener('click', verifyAuditChain);
+
+  // 清空审计日志（S2 复盘接线）
+  const clearBtn = panel.querySelector('#auditClearBtn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', async () => {
+      const confirmed = await showConfirmDialog({
+        title: t('security.clear_logs_confirm', '确认清空所有审计日志？此操作不可撤销。'),
+      });
+      if (!confirmed) return;
+      try {
+        await securityApi.clearAuditLogs();
+        showToast(t('security.logs_cleared', '审计日志已清空'), 'success');
+        contentEl.innerHTML = `<p class="empty-text" data-i18n="security.no_audit_logs">暂无审计日志记录</p>`;
+      } catch (err) {
+        showToast(t('security.clear_failed', '清空失败') + ': ' + String(err), 'error');
+      }
+    });
+  }
 
   // 激活 Focus Trap（REQ-A11Y-002）：Tab 键锁定在审计日志面板内
   const auditTrap = createFocusTrap(panel);
@@ -628,13 +868,13 @@ async function verifyAuditChain() {
     const result = await securityApi.verifyAuditChain();
     if (result.valid) {
       showToast(
-        t('security.audit_valid', '✅ 审计日志完整，未检测到篡改') +
+        t('security.audit_valid', '审计日志完整，未检测到篡改') +
         ` (${result.count} ${t('security.audit_entries', '条记录')})`,
         'success'
       );
     } else {
       showToast(
-        t('security.audit_invalid', '⚠️ 审计日志可能已被篡改') +
+        t('security.audit_invalid', '审计日志可能已被篡改') +
         ` (${t('security.audit_broken_at', '第')} ${result.broken_at} ${t('security.audit_entry', '条')})`,
         'error'
       );
@@ -717,7 +957,7 @@ export function getSecurityCommands() {
   if (isEncrypted() && !isLocked()) {
     commands.push({
       id: 'lock-app',
-      label: t('security.cmd_lock', '🔒 锁定应用'),
+      label: t('security.cmd_lock', '锁定应用'),
       group: 'security',
       action: lockApp,
     });
@@ -725,17 +965,97 @@ export function getSecurityCommands() {
 
   commands.push({
     id: 'view-audit-log',
-    label: t('security.cmd_audit_log', '📋 查看审计日志'),
+    label: t('security.cmd_audit_log', '查看审计日志'),
     group: 'security',
     action: showAuditLogPanel,
   });
 
   commands.push({
     id: 'verify-audit',
-    label: t('security.cmd_verify_audit', '✅ 验证审计完整性'),
+    label: t('security.cmd_verify_audit', '验证审计完整性'),
     group: 'security',
     action: verifyAuditChain,
   });
 
   return commands;
+}
+
+// ============================================================
+// 紧急销毁对话框（S2 复盘接线）
+// ============================================================
+
+/**
+ * 显示紧急销毁密码设置对话框。
+ * @param {HTMLElement} btnSetPanic - 设置按钮
+ * @param {HTMLElement} panicStatus - 状态显示区域
+ */
+function showPanicWipeDialog(btnSetPanic, panicStatus) {
+  const dialog = document.createElement('div');
+  dialog.className = `fixed inset-0 ${zClass(Z_INDEX.AUDIT_LOG)} flex items-center justify-center bg-black/50 backdrop-blur-[4px]`;
+  dialog.innerHTML = `
+    <div class="bg-bg-primary rounded-2xl shadow-modal max-w-[420px] w-[90%]">
+      <h3 class="text-lg font-semibold px-6 pt-6 m-0" data-i18n="security.panic_wipe_title">🚨 紧急销毁密码</h3>
+      <div class="px-7 py-5">
+        <p class="text-sm text-text-secondary leading-normal m-0 mb-5" data-i18n="security.panic_wipe_warning">
+          设置紧急销毁密码后，在锁屏界面输入此密码将立即永久删除所有数据库内容。此操作不可撤销。
+        </p>
+        <div class="mb-4">
+          <label class="block text-[13px] font-medium mb-1.5" data-i18n="security.password">密码</label>
+          <input type="password" id="panicPwdInput" class="w-full px-3.5 py-2.5 text-sm border border-border-default rounded-md bg-bg-input text-text-primary outline-none box-border transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]" autocomplete="new-password" placeholder="至少 8 个字符…"/>
+        </div>
+        <div class="mb-4">
+          <label class="block text-[13px] font-medium mb-1.5" data-i18n="security.confirm_password">确认密码</label>
+          <input type="password" id="panicPwdConfirm" class="w-full px-3.5 py-2.5 text-sm border border-border-default rounded-md bg-bg-input text-text-primary outline-none box-border transition-colors focus:border-primary focus:shadow-[0_0_0_3px_rgba(var(--info-rgb),0.15)]" autocomplete="new-password" placeholder="再次输入密码…"/>
+        </div>
+        <p id="panicError" class="text-[13px] text-danger min-h-[18px] mt-2"></p>
+      </div>
+      <div class="flex justify-end gap-3 px-7 pb-6">
+        <button class="px-3.5 py-2.5 text-sm font-medium rounded-md bg-bg-secondary text-text-primary border border-border-default cursor-pointer hover:bg-bg-hover transition-colors" id="panicCancelBtn" data-i18n="common.cancel">取消</button>
+        <button class="px-3.5 py-2.5 text-sm font-medium border-none rounded-md bg-danger text-surface-0 cursor-pointer hover:opacity-90 transition-opacity" id="panicConfirmBtn" data-i18n="security.set_panic_confirm">确认设置</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+
+  const pwdInput = dialog.querySelector('#panicPwdInput');
+  const pwdConfirm = dialog.querySelector('#panicPwdConfirm');
+  const errorEl = dialog.querySelector('#panicError');
+  const cancelBtn = dialog.querySelector('#panicCancelBtn');
+  const confirmBtn = dialog.querySelector('#panicConfirmBtn');
+  const trap = createFocusTrap(dialog);
+  trap.activate();
+
+  const closeDialog = () => {
+    trap.deactivate();
+    dialog.remove();
+  };
+
+  cancelBtn.addEventListener('click', closeDialog);
+  dialog.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDialog();
+  });
+
+  confirmBtn.addEventListener('click', async () => {
+    const pwd = pwdInput.value;
+    const confirm = pwdConfirm.value;
+    if (!pwd || pwd.length < 8) {
+      errorEl.textContent = t('security.error_pwd_too_short', '密码至少 8 个字符');
+      return;
+    }
+    if (pwd !== confirm) {
+      errorEl.textContent = t('security.error_pwd_mismatch', '两次输入的密码不一致');
+      return;
+    }
+    try {
+      await securityApi.setPanicWipePassword(pwd);
+      if (panicStatus) panicStatus.style.display = 'flex';
+      if (btnSetPanic) btnSetPanic.textContent = t('security.update_panic_password', '更新密码');
+      showToast(t('security.panic_set', '紧急销毁密码已设置'), 'success');
+      closeDialog();
+    } catch (err) {
+      errorEl.textContent = String(err);
+    }
+  });
+
+  pwdInput.focus();
 }

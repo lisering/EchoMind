@@ -92,6 +92,7 @@ fn tc_vec_008_download_event_serde() {
         total: 30000000,
         file_index: 0,
         total_files: 3,
+        source: "https://huggingface.co".to_string(),
     };
     let json = serde_json::to_string(&event).expect("序列化失败");
     let de: DownloadEvent = serde_json::from_str(&json).expect("反序列化失败");
@@ -102,6 +103,7 @@ fn tc_vec_008_download_event_serde() {
             total,
             file_index: _,
             total_files: _,
+            source: _,
         } => {
             assert_eq!(file_name, "model.onnx");
             assert_eq!(current, 1024);

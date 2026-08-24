@@ -51,7 +51,11 @@ test.describe('E2E-UX 交互体验原子级', () => {
   });
 
   test('E2E-UX-003 输入框焦点态有边框变化', async ({ page }) => {
+    // 先导入文档使输入框启用（空知识库时输入框 disabled）
+    await importDocs(page, ['/mock/ux-test.md']);
+
     const input = page.locator('#queryInput');
+    await expect(input).not.toBeDisabled({ timeout: 5000 });
     const beforeBorder = await input.evaluate((el) => window.getComputedStyle(el).borderColor);
 
     await input.focus();
@@ -158,8 +162,8 @@ test.describe('E2E-UX 交互体验原子级', () => {
 
     const collapsedBox = await sidebar.boundingBox();
     expect(collapsedBox, '折叠后 sidebar 应有 boundingBox').not.toBeNull();
-    // 折叠后宽度应减小（强制断言）
-    expect(collapsedBox!.width, '折叠后宽度应 < 展开宽度').toBeLessThan(beforeBox!.width);
+    // 折叠后侧栏移出视口（transform: translateX(-100%)），位置变化而非宽度
+    expect(collapsedBox!.x, '折叠后 x 应 < 展开时 x').toBeLessThan(beforeBox!.x);
 
     // 展开
     const expandBtn = page.locator('#expandBtn');
@@ -230,6 +234,9 @@ test.describe('E2E-UX 交互体验原子级', () => {
   // ─── 付费墙动画 ───
 
   test('E2E-UX-014 付费墙出现动画', async ({ page }) => {
+    // 设置 Free 模式以触发付费墙
+    await page.evaluate(() => { window.__state.isPro = false; });
+
     // 触发付费墙
     await page.evaluate(() => window.__mock.simulateDragDrop(['/mock/paper.pdf']));
     await page.waitForTimeout(300);

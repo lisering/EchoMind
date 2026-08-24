@@ -11,7 +11,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { setupPage } from './helpers.mjs';
+import { setupPage, openToolsDropdown } from './helpers.mjs';
 
 // 辅助：通过 evaluate 点击按钮（避免 Playwright 点击 SVG 子元素时的定位问题）
 async function clickById(page, id) {
@@ -25,7 +25,8 @@ async function clickById(page, id) {
 test.describe('AutoDream 知识库整理面板 (TC-DREAM-UI)', () => {
   test.beforeEach(async ({ page }) => {
     await setupPage(page);
-    await page.waitForSelector('#dreamBtn', { timeout: 5000 });
+    // S5 P1-1: dreamBtn 收纳到工具下拉菜单，等待 #toolsBtn 可见
+    await page.waitForSelector('#toolsBtn', { timeout: 5000 });
   });
 
   test('TC-DREAM-UI-001: Dream 面板打开', async ({ page }) => {

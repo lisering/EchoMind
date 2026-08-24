@@ -1,14 +1,18 @@
-//! Trace 系统 IPC 命令子模块（S70：Cherry Studio 借鉴）。
+//! Trace 系统 IPC 命令子模块（S70：Cherry Studio 借鉴）— S10: 开发者工具门控
 //!
 //! 前端通过这些命令获取 RAG 链路追踪数据，在设置面板可视化展示。
+//! Release 构建中不注册，仅 Debug 构建可用。
 
+#[cfg(debug_assertions)]
 use super::*;
+#[cfg(debug_assertions)]
 use echomind_core::trace::TraceRecord;
 
 /// 获取最近的 trace 记录列表。
 ///
 /// # 参数
 /// - `limit` — 返回最近 N 条记录（默认 20，最大 50）
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_recent_traces(
     limit: Option<usize>,
@@ -20,6 +24,7 @@ pub async fn get_recent_traces(
 }
 
 /// 获取指定 ID 的 trace 记录详情。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_trace_detail(
     id: String,
@@ -30,6 +35,7 @@ pub async fn get_trace_detail(
 }
 
 /// 清空所有 trace 记录。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn clear_traces(state: State<'_, AppState>) -> Result<(), String> {
     let store = state.trace_store.read().await;
@@ -38,6 +44,7 @@ pub async fn clear_traces(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 /// 获取 trace 记录数量。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_trace_count(state: State<'_, AppState>) -> Result<usize, String> {
     let store = state.trace_store.read().await;

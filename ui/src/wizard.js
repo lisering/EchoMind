@@ -13,7 +13,7 @@
 import { setState, get } from './state.js';
 import { showApp, updateModelPill } from './chat-render.js';
 import { $, PRESETS, WORKSPACE } from './utils.js';
-import { invoke, openUrl, listen, openDialog } from './ipc.js';
+import { invoke, openUrl, listen, openDialog, demoModeApi } from './ipc.js';
 import { toast, toastError } from './toast.js';
 import { t } from './i18n.js';
 import { createFocusTrap } from './focus-trap.js';
@@ -435,9 +435,13 @@ async function validateAndContinue() {
     return;
   }
   if (btn) { btn.disabled = false; btn.textContent = t('wizard.validate_and_continue'); }
-  setState({ currentModel: model, currentLlmMode: 'remote', llmConfigured: true });
+  setState({ currentModel: model, currentLlmMode: 'remote', llmConfigured: true, demoMode: false });
   updateModelPill();
   toast(t('wizard.llm_configured'), 'success');
+  // REQ-RAG-051 AC-5: 配置 API Key 后自动退出演示模式
+  if (window.exitDemoModeIfActive) {
+    await window.exitDemoModeIfActive();
+  }
   // 进入 Step 3
   showWizardStep(3);
 }
@@ -542,6 +546,23 @@ export function initWizard(onComplete) {
   const skipBtn = $('wizSkipStep2');
   if (skipBtn) skipBtn.onclick = () => showWizardStep(3);
 
+  // REQ-RAG-051 AC-1: 跳过配置，使用演示模式
+  const demoBtn = $('wizDemoMode');
+  if (demoBtn) demoBtn.onclick = async () => {
+    try {
+      // 加载示例文档 + 设置演示模式标志
+      await demoModeApi.loadDemoDocuments();
+      toast(t('wizard.demo_mode_activated'), 'success');
+      // 演示模式无需 LLM 配置，直接进入主界面
+      setState({ demoMode: true, llmConfigured: true });
+      if (_onComplete) await _onComplete();
+      showApp();
+      updateModelPill();
+    } catch (err) {
+      toastError(String(err));
+    }
+  };
+
   // Step 2: 获取 API Key 链接
   const keyLink = $('wizKeyLink');
   if (keyLink) keyLink.onclick = async () => {
@@ -627,4 +648,135 @@ export async function startWizard(onComplete) {
   // 旧接口：直接验证并继续
   _onComplete = onComplete;
   await validateAndContinue();
+}
+
+// ============================================================
+// 付费墙（paywall.js 已合并到此）
+// ============================================================
+
+/**
+ * EchoMind 付费墙模块 — 配额触顶 / PDF 付费门 / License 激活 / 停用。
+ *
+ * 职责：
+ * 1. 显示付费墙 Modal（设置升级原因文案）
+ * 2. 激活 Pro License（验证签名 → 刷新 UI）
+ * 3. 停用 Pro 授权
+ * 4. 更新侧栏授权状态文案
+ */
+
+import { setState as _setState, get as _get } from './state.js';
+import { invoke as _invoke } from './ipc.js';
+import { toast as _toast, toastError as _toastError, toastSuccess as _toastSuccess } from './toast.js';
+import { t as _t2 } from './i18n.js';
+import { createFocusTrap as _createFocusTrap } from './focus-trap.js';
+import { pushPanel as _pushPanel, removePanel as _removePanel } from './panel-stack.js';
+import { isComposingEvent as _isComposingEvent } from './input-utils.js';
+
+/** 付费墙的 Focus Trap 实例（REQ-A11Y-002） */
+let _paywallTrap = null;
+
+/**
+ * 显示付费墙 Modal，设置升级原因文案。
+ * @param {string} reason - 触发付费墙的原因
+ */
+export function showPaywall(reason) {
+  $('paywallReason').textContent = reason || _t2('paywall.reason_default');
+  $('paywallError').classList.add('hidden');
+  $('licenseInput').value = '';
+  $('paywall').classList.remove('hidden');
+
+  if (_paywallTrap) {
+    _paywallTrap.deactivate();
+  }
+  _paywallTrap = _createFocusTrap($('paywall'));
+  _paywallTrap.activate();
+
+  _pushPanel({ id: 'paywall', close: hidePaywall, element: $('paywall'), label: 'Paywall' });
+}
+
+/** 隐藏付费墙 Modal。 */
+export function hidePaywall() {
+  _removePanel('paywall');
+  if (_paywallTrap) {
+    _paywallTrap.deactivate();
+    _paywallTrap = null;
+  }
+  $('paywall').classList.add('hidden');
+}
+
+/**
+ * 根据 isPro 全局状态刷新侧栏授权状态文案与颜色。
+ */
+export function updateProStatus() {
+  const el = $('proStatus');
+  const badge = $('proStatusBadge');
+  if (!el || !badge) return;
+  if (_get('isPro')) {
+    el.textContent = _t2('sidebar.pro_badge_pro');
+    badge.className = 'inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium bg-accent/15 text-accent border border-accent/20';
+    badge.querySelector('.badge-icon').textContent = '⭐';
+  } else {
+    el.textContent = _t2('sidebar.pro_badge_free');
+    badge.className = 'inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium bg-surface-3 text-text-tertiary border border-border-default';
+    badge.querySelector('.badge-icon').innerHTML = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+  }
+}
+
+/**
+ * 激活 Pro License。
+ */
+export async function activatePro() {
+  const key = $('licenseInput').value.trim();
+  if (!key) {
+    $('paywallError').textContent = _t2('paywall.error_no_key');
+    $('paywallError').classList.remove('hidden');
+    return;
+  }
+  $('paywallActivate').disabled = true;
+  $('paywallActivate').textContent = _t2('paywall.activating');
+  try {
+    const result = await _invoke('activate_pro', { licenseKey: key });
+    if (result) {
+      _setState({ isPro: true });
+      updateProStatus();
+      hidePaywall();
+      _toastSuccess(_t2('paywall.activated'));
+    }
+  } catch (err) {
+    $('paywallError').textContent = String(err);
+    $('paywallError').classList.remove('hidden');
+  }
+  $('paywallActivate').disabled = false;
+  $('paywallActivate').textContent = _t2('paywall.activate');
+}
+
+/**
+ * 停用 Pro 授权（REQ-LIC-004）。
+ */
+export async function deactivatePro() {
+  try {
+    await _invoke('deactivate_pro');
+    _setState({ isPro: false });
+    updateProStatus();
+    const settingsModal = $('settingsModal');
+    if (settingsModal && !settingsModal.classList.contains('hidden')) {
+      $('settingsLicenseInfo').innerHTML =
+        '<span class="text-slate-400">' + _t2('settings.license_free') + '</span>';
+    }
+    _toast(_t2('paywall.deactivated'), 'info');
+  } catch (err) {
+    _toastError(err);
+  }
+}
+
+/**
+ * 初始化付费墙事件绑定。
+ */
+export function initPaywall() {
+  $('paywallClose').onclick = hidePaywall;
+  if ($('paywallCloseBtn')) $('paywallCloseBtn').onclick = hidePaywall;
+  $('paywallActivate').onclick = activatePro;
+  $('licenseInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !_isComposingEvent(e)) activatePro();
+  });
 }

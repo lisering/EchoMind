@@ -34,6 +34,7 @@
  * @property {number} docCount             - 知识库文档总数
  * @property {number} chunkCount           - 知识库分块总数
  * @property {Array} documents             - 当前文档列表快照
+ * @property {Array} kbAllDocs             - 全部文档缓存（用于建议生成）
  * @property {string} activeSidebarTab     - 当前侧栏 Tab（conversations/documents）
  * @property {number} cmdSelectedIndex    - 命令面板选中索引
  * @property {Array} cmdFiltered          - 当前过滤后的命令列表
@@ -45,8 +46,11 @@
  * @property {string} securityState        - 安全状态（unencrypted/encrypted_unlocked/locked）
  * @property {boolean} piiDetectionEnabled - PII 检测开关
  * @property {number} autoLockTimeout      - 自动锁屏超时（0=disabled）
+ * @property {boolean} clipboardClearEnabled - 剪贴板自动清除开关
+ * @property {number} clipboardClearTimeout  - 剪贴板清除超时（秒）
  * @property {string} theme                - 当前主题模式（dark/light/system，REQ-UI-011）
  * @property {boolean} llmConfigured       - LLM 是否已配置（API Key + Base URL + Model）
+ * @property {boolean} demoMode            - REQ-RAG-051: 演示模式（无 Key 体验）
  * @property {Object<string, string>} drafts - 会话级草稿（conversationId → 未发送文本）
  * @property {boolean} hybridEnabled       - 混合搜索开关
  * @property {boolean} agentEnabled        - Agent 模式开关
@@ -77,9 +81,10 @@ const initialState = {
 hydeEnabled: false,
   auditingDocId: null,
   importing: false,
-  docCount: 0,
-  chunkCount: 0,
-  documents: [],
+docCount: 0,
+chunkCount: 0,
+documents: [],
+kbAllDocs: [],
   activeSidebarTab: 'conversations',
   cmdSelectedIndex: 0,
   cmdFiltered: [],
@@ -94,8 +99,11 @@ hydeEnabled: false,
   securityState: 'unencrypted',   // 'unencrypted' | 'encrypted_unlocked' | 'locked'
   piiDetectionEnabled: false,
   autoLockTimeout: 0,             // 0 = disabled
+  clipboardClearEnabled: true,   // S2 复盘：剪贴板自动清除开关
+  clipboardClearTimeout: 30,     // S2 复盘：剪贴板清除超时（秒）
   theme: 'dark',                  // REQ-UI-011：主题模式 dark/light/system
   llmConfigured: false,            // LLM 是否已配置
+demoMode: false,                  // REQ-RAG-051: 演示模式（无 Key 体验）
   drafts: {},                      // 会话级草稿（conversationId → 未发送文本）
   
   // 功能开关状态（方案4：input-toggles.js 状态补全）

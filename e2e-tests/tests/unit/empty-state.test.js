@@ -28,7 +28,8 @@ describe('Empty State — empty-state.js', () => {
       renderEmptyState(container, { docCount: 10, chunkCount: 500 });
       const logo = container.querySelector('.empty-state-logo');
       expect(logo).not.toBeNull();
-      expect(logo.textContent).toContain('◈');
+      // v1.21: logo 从 Unicode ◈ 改为 SVG inline 图标
+      expect(logo.querySelector('svg')).not.toBeNull();
       const tagline = container.querySelector('.empty-state-tagline');
       expect(tagline).not.toBeNull();
     });
@@ -47,14 +48,18 @@ describe('Empty State — empty-state.js', () => {
       renderEmptyState(container, { docCount: 5, chunkCount: 100, encrypted: true });
       const privacyCard = container.querySelector('.empty-state-privacy-card');
       expect(privacyCard).not.toBeNull();
-      expect(privacyCard.textContent).toContain('🔒');
+      // v1.21: 从 emoji 🔒 改为 SVG inline lock 图标
+      const iconSvg = privacyCard.querySelector('.empty-state-card-icon svg');
+      expect(iconSvg).not.toBeNull();
     });
 
     it('TC-QA-007b: 未加密时隐私卡片显示未加密状态', () => {
       renderEmptyState(container, { docCount: 5, chunkCount: 100, encrypted: false });
       const privacyCard = container.querySelector('.empty-state-privacy-card');
       expect(privacyCard).not.toBeNull();
-      expect(privacyCard.textContent).toContain('🔓');
+      // v1.21: 从 emoji 🔓 改为 SVG inline unlock 图标
+      const iconSvg = privacyCard.querySelector('.empty-state-card-icon svg');
+      expect(iconSvg).not.toBeNull();
     });
 
     it('TC-QA-008: 渲染 3 个推荐问题卡片', () => {

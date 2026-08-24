@@ -11,6 +11,7 @@ use echomind_models::{RagEvalReport, RagEvalSample, RagEvalSettings};
 ///
 /// 输入一个 RAG 评估样本（query + answer + contexts + 可选 ground truth），
 /// 返回各指标分数。LLM 指标使用已配置的 LLM Provider。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn evaluate_rag_response(
     sample: RagEvalSample,
@@ -36,6 +37,7 @@ pub async fn evaluate_rag_response_inner(
 /// 批量评估多个 RAG 响应（REQ-RAG-045）。
 ///
 /// 输入多个评估样本，返回聚合报告（各指标平均值 + 每样本明细）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn evaluate_rag_batch(
     samples: Vec<RagEvalSample>,
@@ -59,6 +61,7 @@ pub async fn evaluate_rag_batch_inner(
 }
 
 /// 获取 RAG 评估设置（REQ-RAG-045）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn get_rag_eval_settings(state: State<'_, AppState>) -> Result<RagEvalSettings, String> {
     let settings = load_eval_settings(state.inner()).await;
@@ -66,6 +69,7 @@ pub async fn get_rag_eval_settings(state: State<'_, AppState>) -> Result<RagEval
 }
 
 /// 设置 RAG 评估设置（REQ-RAG-045）。
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn set_rag_eval_settings(
     settings: RagEvalSettings,

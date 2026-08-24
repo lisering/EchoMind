@@ -15,12 +15,29 @@ import { setupPage } from './helpers.mjs';
 test.describe('性能优化设置 (TC-PERF-UI)', () => {
   test.beforeEach(async ({ page }) => {
     await setupPage(page);
-    // 打开设置面板
+    // S5 P0-1: 智能模式默认隐藏所有性能设置，需先关闭智能模式
     await page.waitForSelector('#settingsBtn', { timeout: 5000 });
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
     // 等待性能设置容器渲染
     await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
+    // 关闭智能模式以显示所有性能设置 toggle
+    // 直接通过 evaluate 调用 smartModeApi.set(false) 并重新打开设置面板触发重新渲染
+    await page.evaluate(async () => {
+      try {
+        await window.__TAURI__.core.invoke('set_smart_mode', { enabled: false });
+      } catch (e) { /* ignore */ }
+    });
+    // 关闭并重新打开设置面板以触发 perf-settings 重新渲染
+    await page.evaluate(() => {
+      const modal = document.querySelector('#settingsModal');
+      if (modal) modal.classList.add('hidden');
+    });
+    await page.waitForTimeout(300);
+    await page.locator('#settingsBtn').click();
+    await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
+    await page.waitForTimeout(500);
   });
 
   test('TC-PERF-UI-001: 性能优化 section 显示', async ({ page }) => {

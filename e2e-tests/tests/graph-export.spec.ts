@@ -7,15 +7,15 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { setupPage } from './helpers.mjs';
+import { setupPage, clickToolButton } from './helpers.mjs';
 
 test.describe('知识图谱导出 (TC-EXP-GRAPH)', () => {
   test.beforeEach(async ({ page }) => {
     await setupPage(page);
-    // 等待侧栏按钮渲染
-    await page.waitForSelector('#graphBtn', { timeout: 5000 });
+    // 等待工具按钮渲染（S5 P1-1：graphBtn 收纳到工具下拉菜单）
+    await page.waitForSelector('#toolsBtn', { timeout: 5000 });
     // 打开图谱面板
-    await page.locator('#graphBtn').click();
+    await clickToolButton(page, 'graphBtn');
     await expect(page.locator('#graphOverlay')).toBeVisible({ timeout: 5000 });
   });
 

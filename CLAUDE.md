@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 >
 > **📚 软件资产**：`docs/SOFTWARE_ASSET.md` 是项目完整软件资产清单（架构、代码、数据流、依赖、测试、数据库、IPC），后续迭代必须同步更新。
 >
-> **🔄 Session 管理（全自动）**：`docs/sessions/` 是跨会话上下文管理中心。**Agent 自动行为**：会话开始时自动读 `docs/sessions/CURRENT_STATE.md` 获取快照；会话结束时自动更新 `CURRENT_STATE.md` + 追加 `LOG.md` + 按 `HANDOFF_TEMPLATE.md` 生成衔接提示词。无需人工介入（铁律十二）。
+> **🔄 Session 管理（全自动）**：`docs/sessions/` 是跨会话上下文管理中心。**Agent 自动行为**：会话开始时自动读 `docs/sessions/CURRENT_STATE.md` 获取快照；会话结束时自动更新 `CURRENT_STATE.md` + 追加 `LOG.md` + **无条件生成下个 Session 提示词**（`NEXT_SESSION_*.md`）。无需人工介入（铁律十二）。
 >
 > **🗺 版本路线图**：v1.1.0 已发布（✅ 5 功能 S44-S48）。v1.2 规划中（📋 4 功能 S49-S53：PDF 导出 / .pptx 导入 / .epub 导入 / 自定义嵌入模型上传 Pro），详见 `docs/architecture/V1.2_ATOMIC_PLAN.md`。
 >
@@ -62,9 +62,11 @@ Traits in `crates/core/src/lib.rs` use native `async fn` in trait (Edition 2024)
 
 Both `echomind-core` and `echomind-infra` have a `pro` Cargo feature that gates optional functionality behind a compile-time flag:
 - **Core (pro)**: `audit` (document consistency audit engine), `vlm_prompt` (VLM tiered chart understanding prompts)
-- **Infra (pro)**: `hnsw_index` (approximate nearest neighbor), `ocrs_engine` (local OCR), `openai_vision` (VLM API adapter), `pdfium_renderer` (PDF page rendering), `local_llm` (mistral.rs v0.9.0 local LLM inference, REQ-LLM-003; Phase 2: GPU/Metal/CUDA + PagedAttention + 采样参数 + 模型卸载 + 流取消 + 预热; Phase 3: 自研 GEMV 内核 + 权重重排 + 流式预取 + RAM 预算 + KernelMode), `colbert_embedder` (multi-vector embedding), `onnx_compressor`, `symbol_engine` (tree-sitter AST 代码符号抽取, REQ-RAG-031), `wasm_executor` (代码执行沙箱, REQ-RAG-032)
+- **Infra (pro)**: `ocrs_engine` (local OCR), `openai_vision` (VLM API adapter), `pdfium_renderer` (PDF page rendering), `local_llm` (mistral.rs v0.9.0 local LLM inference, REQ-LLM-003; Phase 2: GPU/Metal/CUDA + PagedAttention + 采样参数 + 模型卸载 + 流取消 + 预热; Phase 3: 自研 GEMV 内核 + 权重重排 + 流式预取 + RAM 预算 + KernelMode), `colbert_embedder` (multi-vector embedding), `onnx_compressor`, `symbol_engine` (tree-sitter AST 代码符号抽取, REQ-RAG-031), `wasm_executor` (代码执行沙箱, REQ-RAG-032)
+- **Infra (Free, v2.2 下沉)**: `hnsw_index` (HNSW 近似最近邻索引, REQ-NFR-005 + REQ-PERF-013, 原 Pro 已下沉 Free; 二进制加密持久化 + 懒加载 + 归一化点积, REQ-PERF-015)
 - **GPU feature flags**: `metal` (Apple Metal), `cuda` (NVIDIA CUDA), `accelerate` (Apple BLAS), `flash-attn` (Flash Attention 2, needs cuda), `cudnn` (cuDNN, needs cuda). These are Cargo features on `echomind-infra` and forwarded by `echomind-tauri-app`.
-- Pro deps include: `pdfium-render`, `ocrs` + `rten`, `image`, `hnsw_rs`, `mistral.rs` v0.9.0 (local LLM, with optional `metal`/`cuda`/`accelerate` GPU features), `memmap2` (mmap GGUF), `half` (f16), `libc` (sysconf/madvise)
+- Pro deps include: `pdfium-render`, `ocrs` + `rten`, `image`, `mistral.rs` v0.9.0 (local LLM, with optional `metal`/`cuda`/`accelerate` GPU features), `memmap2` (mmap GGUF), `half` (f16), `libc` (sysconf/madvise)
+- Free deps (non-optional): `hnsw_rs` (HNSW, v2.2 从 Pro 下沉 Free), `rusqlite`, `r2d2`, `fastembed`, `tokio`, `rayon`, etc.
 
 Tests in pro-gated modules use `#[cfg(all(test, feature = "pro"))]` and require `cargo test --features pro` to run.
 
@@ -99,7 +101,9 @@ Sixteen port traits define the entire system contract:
 - `rusqlite` with WAL mode + busy_timeout, r2d2 connection pool
 - All DB operations via `tokio::task::spawn_blocking`
 - Vectors stored as BLOB (raw f32 bytes)
-- Cosine similarity computed in Rust after full-scan load
+- Vector search: HNSW index (auto-enabled > 500 vectors, O(log n)) or full-scan with Arc snapshot cache (zero-copy, REQ-PERF-016)
+- Normalized dot product (REQ-PERF-017): vectors pre-normalized on load, 3× FLOP reduction vs cosine_similarity
+- Vector snapshot cache: `Arc<Vec<(chunk_id, Vec<f32>)>>` shared clone, invalidated on write (REQ-PERF-016, replaced LruVectorCache 5000 truncation bug)
 - FTS5 full-text index for `keyword_search()` (BM25 ranking)
 - Tables: documents, chunks, embeddings, conversations, messages, settings
 - Cascading deletes (ON DELETE CASCADE)
@@ -110,19 +114,21 @@ Sixteen port traits define the entire system contract:
 ### Embedder: LocalEmbedder
 
 `crates/infra/src/local_embedder.rs` — fastembed/ONNX Runtime:
-- Model: all-MiniLM-L6-v2 (384-dim, ~30MB)
+- Models: 5 EmbeddingModel variants — `AllMiniLML6V2` (384-dim, default), `BgeSmallEnV1_5` (384-dim, recommended), `BgeSmallZhV1_5` (512-dim, Chinese), `E5SmallV2` (384-dim), `BgeM3` (1024-dim, multilingual, REQ-VEC-015)
+- Runtime model switching via `EmbeddingModel` enum + `ModelManager` store
 - Lazy init via `tokio::sync::OnceCell` in AppState
 - Model download from HuggingFace on first use
 - Batch embedding support (`embed_batch`)
 - Parallel inference pool (`rayon` thread pool) for large batch throughput
 
-### HNSW Index (pro feature)
+### HNSW Index (Free, v2.2 下沉)
 
-`crates/infra/src/hnsw_index.rs` — approximate nearest neighbor search:
-- Pure Rust `hnsw_rs` crate (Malkov & Yashunin 2016 algorithm)
-- Reduces vector search from O(n) brute-force to O(log n)
+`crates/infra/src/hnsw_index.rs` — approximate nearest neighbor search (Free, 原 Pro 已下沉):
+- Pure Rust `hnsw_rs` crate (Malkov & Yashunin 2016/2018 algorithm)
+- Reduces vector search from O(n) brute-force to O(log n), auto-enabled > 500 vectors (`HNSW_AUTO_THRESHOLD`)
 - Cosine distance metric, 32 max connections, 16 max layers
-- JSON persistence (saves raw vectors + ID map; rebuilds graph on load)
+- Binary encrypted persistence (REQ-PERF-015): AES-256-GCM encrypted binary format + lazy load from disk + crash consistency
+- `storage::crypto` module for encrypt/decrypt HNSW index files
 
 ### LLM: OpenAIProvider / LocalLlmEngine
 
@@ -415,7 +421,7 @@ openGraphViewer → get_graph_data() → D3 forceSimulation
 - `crates/core/src/vlm_prompt.rs` — VLM tiered prompt (4-level chart understanding, pro feature)
 - `crates/core/src/errors.rs` — 统一错误类型
 - `crates/infra/src/sqlite_storage.rs` — SQLite with WAL mode, r2d2 pool, FTS5, vector BLOB storage, AuditLogger impl (hash-chain), SQLCipher encrypted mode (`new_encrypted`)
-- `crates/infra/src/local_embedder.rs` — fastembed/ONNX embedding (all-MiniLM-L6-v2, 384-dim, parallel inference)
+- `crates/infra/src/local_embedder.rs` — fastembed/ONNX embedding (5 models: AllMiniLML6V2/BgeSmallEnV1_5/BgeSmallZhV1_5/E5SmallV2/BgeM3, 384~1024-dim, parallel inference, runtime switchable)
 - `crates/infra/src/local_reranker.rs` — fastembed/ONNX Cross-Encoder reranking (bge-reranker-base, REQ-RAG-020)
 - `crates/infra/src/hyde_rewriter.rs` — HyDE query rewriting adapter (REQ-RAG-021)
 - `crates/infra/src/openai_provider.rs` — OpenAI-compatible SSE streaming
@@ -430,7 +436,7 @@ openGraphViewer → get_graph_data() → D3 forceSimulation
 - `crates/infra/src/model_manager.rs` — Local GGUF model file management (download/list/delete, REQ-LLM-004)
 - `crates/infra/src/file_watcher.rs` — 文件监听器（notify + debouncer，REQ-SYNC-003）
 - `crates/infra/src/local_logger.rs` — 本地日志系统（REQ-OBS-001）：tracing 集成 + JSON Lines + 日期轮转 + 运行时级别控制 + 诊断信息导出（REQ-OBS-003）
-- `crates/infra/src/hnsw_index.rs` — HNSW approximate nearest neighbor index (pro feature)
+- `crates/infra/src/hnsw_index.rs` — HNSW approximate nearest neighbor index (Free, v2.2 下沉, 二进制加密持久化 + 懒加载, REQ-PERF-015)
 - `crates/infra/src/ocrs_engine.rs` — Local OCR engine (ocrs + rten, PaddleOCR PP-OCRv4, pro feature)
 - `crates/infra/src/pdfium_renderer.rs` — PDF page renderer (pdfium, pro feature)
 - `crates/infra/src/openai_vision.rs` — VLM API adapter (OpenAI-compatible Vision, pro feature)
@@ -538,5 +544,5 @@ AI Agent 开发前必读文档优先级：`PROJECT_RULES.md` → `.catpaw/rules/
 - **最新版本依赖（铁律六）**：开发前 `cargo update --dry-run` 与 `npm outdated`；新增依赖必须确认最新版本；API 变化查官方迁移指南。
 - **开发决策互联网搜索（铁律八）**：技术选型、架构设计前先搜索最新资料并引用来源。
 - **Rust 生态优先（铁律九）**：功能实现优先纯 Rust crate；参考 `/Users/john/rs-pro`（成熟 Rust 实现移植首选）。
-- **跨 Session 衔接（铁律十二）**：Session 上下文管理是 AI Agent 的**全自动行为**。会话开始时自动读 `docs/sessions/CURRENT_STATE.md`，会话结束时自动更新 `CURRENT_STATE.md` + 追加 `LOG.md` + 按 `docs/sessions/HANDOFF_TEMPLATE.md` 生成衔接提示词。无需人工介入。
+- **跨 Session 衔接（铁律十二）**：Session 上下文管理是 AI Agent 的**全自动行为**。会话开始时自动读 `docs/sessions/CURRENT_STATE.md`，会话结束时自动更新 `CURRENT_STATE.md` + 追加 `LOG.md` + **无条件生成下个 Session 提示词**（`NEXT_SESSION_*.md`，含项目概要/上 Session 摘要/测试基线/下 Session 任务/约束/后续路径/关键文件索引）。无需人工介入。
 - **Spec-driven Development（铁律十五）**：先写规格再写代码。任何功能实现前，必须先在 `docs/SRS_v1.0.md` 或原子规划文档中定义 REQ + AC + TC，测试从 AC 派生。实现偏离规格时必须先回写规格。规格是开发的唯一依据。

@@ -197,7 +197,9 @@ describe('ConfirmDialog — confirm-dialog.js（REQ-IX-005）', () => {
       showConfirmDialog({ title: '测试', danger: true });
       const icon = document.querySelector('#confirmDialog .text-amber-400');
       expect(icon).toBeTruthy();
-      expect(icon.textContent).toContain('⚠️');
+      // v1.21: 从 emoji ⚠️ 改为 SVG inline 警告图标
+      const svg = icon.querySelector('svg');
+      expect(svg).not.toBeNull();
     });
 
     it('danger=false 时不显示警告图标', () => {

@@ -194,6 +194,9 @@ export class ActionRegistry {
  * @param {() => void} [handlers.onToggleSidebar] - 折叠/展开侧栏（⌘B）
  * @param {() => void} [handlers.onAbort]
  * @param {() => void} [handlers.onCommandPalette]
+ * @param {() => void} [handlers.onKeyboardHelp] - 显示快捷键帮助（⌘/）
+ * @param {() => void} [handlers.onGlobalSearch] - 全局搜索（⌘⇧F）
+ * @param {() => void} [handlers.onExport] - 导出当前对话（⌘E）
  * @param {() => boolean} [handlers.isInputFocused] - 判断是否有输入框聚焦
  * @param {() => boolean} [handlers.isAppVisible] - 判断应用是否可见
  * @returns {ActionRegistry}
@@ -249,6 +252,33 @@ export function createDefaultRegistry(handlers) {
     condition: () => isAppVisible(),
   });
 
+  // ⌘/ 打开快捷键帮助面板（REQ-KB-005）
+  registry.register({
+    id: 'keyboard-help',
+    keybinding: { mod: true, key: '/' },
+    description: '显示快捷键帮助',
+    handler: handlers.onKeyboardHelp || (() => {}),
+    condition: () => isAppVisible(),
+  });
+
+  // ⌘⇧F 全局搜索（REQ-NAV-002）
+  registry.register({
+    id: 'global-search',
+    keybinding: { mod: true, shift: true, key: 'f' },
+    description: '全局搜索',
+    handler: handlers.onGlobalSearch || (() => {}),
+    condition: () => isAppVisible(),
+  });
+
+  // ⌘E 导出当前对话（P1-6: N1 导出发现性）
+  registry.register({
+    id: 'export-conversation',
+    keybinding: { mod: true, key: 'e' },
+    description: '导出当前对话',
+    handler: handlers.onExport || (() => {}),
+    condition: () => isAppVisible() && !isInputFocused(),
+  });
+
   return registry;
 }
 
@@ -276,4 +306,191 @@ export function getGlobalRegistry() {
  */
 export function setGlobalRegistry(registry) {
   _globalRegistry = registry;
+}
+
+// ============================================================
+// 防御性守卫（guards.js 已合并到此）
+// ============================================================
+
+/**
+ * 前端防御性编程守卫（Defensive Guards）+ 统一 UI 状态管理。
+ *
+ * 设计原则：
+ * 1. 每个依赖后端前置条件的用户操作都应有前端层 UX 防御
+ * 2. 防御分两层：UI 禁用（prevent input）+ 函数拦截（early return）
+ * 3. 防御守卫集中管理，避免散落在各模块中
+ * 4. updateInputUI() 是唯一的输入区 UI 状态更新入口
+ */
+
+import { get as _getState, isLocked } from './state.js';
+import { $ } from './utils.js';
+import { t as _t } from './i18n.js';
+import { toastError as _toastError } from './toast.js';
+import { getQueueSize } from './chat-utils.js';
+
+/**
+ * @typedef {Object} GuardResult
+ * @property {boolean} passed - 是否通过守卫检查
+ * @property {string} [reason] - 未通过时的原因（i18n key）
+ */
+
+/**
+ * 检查知识库是否有文档。
+ * @returns {GuardResult}
+ */
+export function requireDocuments() {
+  if (_getState('docCount') === 0) {
+    return { passed: false, reason: 'chat.empty_kb_error' };
+  }
+  return { passed: true };
+}
+
+/**
+ * 检查 LLM 是否已配置。
+ * @returns {GuardResult}
+ */
+export function requireLlmConfig() {
+  if (!_getState('llmConfigured')) {
+    return { passed: false, reason: 'chat.llm_not_configured' };
+  }
+  return { passed: true };
+}
+
+/**
+ * 检查数据库是否已解锁。
+ * @returns {GuardResult}
+ */
+export function requireUnlocked() {
+  if (isLocked()) {
+    return { passed: false, reason: 'chat.security_locked' };
+  }
+  return { passed: true };
+}
+
+/**
+ * 检查当前是否可以发送消息（非流式 + 有文档 + LLM 已配置 + 未锁定）。
+ * @returns {GuardResult}
+ */
+export function canSend() {
+  const idle = requireIdle();
+  if (!idle.passed) return idle;
+  const docs = requireDocuments();
+  if (!docs.passed) return docs;
+  const llm = requireLlmConfig();
+  if (!llm.passed) return llm;
+  const unlocked = requireUnlocked();
+  if (!unlocked.passed) return unlocked;
+  return { passed: true };
+}
+
+/**
+ * 检查是否为 Pro 用户。
+ * @returns {GuardResult}
+ */
+export function requirePro() {
+  if (!_getState('isPro')) {
+    return { passed: false, reason: 'paywall.reason_default' };
+  }
+  return { passed: true };
+}
+
+/**
+ * 检查当前是否可以进行新操作（非流式、非审计中、未锁定）。
+ * @returns {GuardResult}
+ */
+export function requireIdle() {
+  if (isLocked()) {
+    return { passed: false, reason: 'chat.security_locked' };
+  }
+  if (_getState('streaming')) {
+    return { passed: false, reason: 'chat.streaming_hint' };
+  }
+  if (_getState('auditingDocId')) {
+    return { passed: false, reason: 'chat.thinking_auditing' };
+  }
+  return { passed: true };
+}
+
+/**
+ * 执行守卫检查：通过返回 true，未通过显示 toast 并返回 false。
+ * @param {GuardResult} result - 守卫检查结果
+ * @returns {boolean} 是否通过
+ */
+export function runGuard(result) {
+  if (!result.passed) {
+    if (result.reason) {
+      _toastError(_t(result.reason));
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 根据全局 state 计算并更新聊天输入框和发送按钮的 UI 状态。
+ *
+ * 状态矩阵（7 种）：
+ * | 状态 | 触发条件 | queryInput | sendBtn | placeholder |
+ * |---|---|---|---|---|
+ * | locked       | 数据库锁定 | disabled | disabled | "数据库已锁定" |
+ * | empty-kb     | docCount===0 && !streaming | disabled | disabled | "请先导入文档" |
+ * | streaming    | streaming && queue 空 | enabled | stop-mode | "输入下一条问题排队发送…" |
+ * | queued       | streaming && queue 非空 | enabled | stop-mode+badge | 同上 |
+ * | ready-empty  | !streaming && input 空 | enabled | enabled+视觉降级 | 正常 placeholder |
+ * | ready-active | !streaming && input 非空 | enabled | enabled+accent | 正常 placeholder |
+ */
+export function updateInputUI() {
+  const docCount = _getState('docCount');
+  const streaming = _getState('streaming');
+  const queueSize = getQueueSize();
+  const locked = isLocked();
+  const input = $('queryInput');
+  const sendBtn = $('sendBtn');
+  if (!input || !sendBtn) return;
+
+  if (locked) {
+    input.disabled = true;
+    sendBtn.disabled = true;
+    input.setAttribute('placeholder', _t('chat.locked_placeholder') || '数据库已锁定，请先解锁');
+    sendBtn.classList.add('opacity-30', 'cursor-not-allowed');
+    return;
+  }
+
+  if (docCount === 0 && !streaming) {
+    input.disabled = true;
+    sendBtn.disabled = true;
+    input.setAttribute('placeholder', _t('chat.empty_kb_placeholder'));
+    sendBtn.classList.add('opacity-30', 'cursor-not-allowed');
+    return;
+  }
+
+  if (streaming) {
+    input.disabled = false;
+    sendBtn.disabled = false;
+    sendBtn.classList.remove('opacity-30', 'cursor-not-allowed');
+    input.setAttribute('placeholder', _t('chat.queue_placeholder') || '输入下一条问题排队发送…');
+    return;
+  }
+
+  input.disabled = false;
+  sendBtn.disabled = false;
+  input.setAttribute('placeholder', _t('chat.input_placeholder'));
+  sendBtn.classList.remove('opacity-30', 'cursor-not-allowed');
+
+  const inputEmpty = !input.value.trim();
+  if (inputEmpty) {
+    sendBtn.classList.add('opacity-40', 'cursor-default');
+    sendBtn.classList.remove('hover:opacity-90');
+  } else {
+    sendBtn.classList.remove('opacity-40', 'cursor-default');
+    sendBtn.classList.add('hover:opacity-90');
+  }
+}
+
+/**
+ * 向后兼容：syncChatInputState 委托给 updateInputUI。
+ * @deprecated 使用 updateInputUI() 替代。
+ */
+export function syncChatInputState() {
+  updateInputUI();
 }
