@@ -81,6 +81,9 @@ jobs:
           cache: npm
           cache-dependency-path: e2e-tests/package-lock.json
 
+      - name: Install root dependencies (esbuild/typescript)
+        run: npm ci
+
       - name: Build UI (esbuild IIFE bundle)
         run: node scripts/build-ui.mjs
 
