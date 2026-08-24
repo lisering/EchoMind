@@ -1,0 +1,22 @@
+{
+  "name": "echomind-e2e",
+  "private": true,
+  "version": "0.1.0",
+  "description": "EchoMind L3 E2E：WebdriverIO+tauri-driver 真实 GUI（CI / Linux / Windows）；Playwright 桥接层（全平台本机）",
+  "type": "module",
+  "scripts": {
+    "test:unit": "vitest run",
+    "test:bridge": "playwright test",
+    "test:e2e": "node scripts/run-e2e.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.50.0",
+    "@wdio/cli": "^9.4.0",
+    "@wdio/local-runner": "^9.4.0",
+    "@wdio/mocha-framework": "^9.4.0",
+    "@wdio/spec-reporter": "^9.4.0",
+    "jsdom": "^25.0.1",
+    "vitest": "^3.2.7"
+  }
+}

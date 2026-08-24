@@ -133,7 +133,11 @@ async fn real_data_001_full_pipeline_with_real_embeddings_and_llm() {
     let handle = app.handle().clone();
 
     // ── 2. 真实导入（解析 + 分块 + 实体抽取，嵌入在索引阶段异步完成）──
-    let canon = doc_path.canonicalize().unwrap().to_string_lossy().into_owned();
+    let canon = doc_path
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let imported = import_files_inner(&handle, &[canon], &state).await.unwrap();
     assert!(!imported.is_empty(), "真实文档导入应成功入库");
     let doc_name = imported[0].clone();
@@ -167,7 +171,9 @@ async fn real_data_001_full_pipeline_with_real_embeddings_and_llm() {
     }
 
     // ── 4. 真实 RAG 对话 ──
-    let conv_id = create_conversation_inner("default".to_string(), &state).await.unwrap();
+    let conv_id = create_conversation_inner("default".to_string(), &state)
+        .await
+        .unwrap();
     let question = "这个项目是做什么的？请简要概括它的核心特性。";
     chat_inner(&handle, question, &[], &conv_id, None, None, &state)
         .await
@@ -198,7 +204,9 @@ async fn real_data_001_full_pipeline_with_real_embeddings_and_llm() {
     // 相关性：README_zh 的核心词（lisp/解释器/Rust 等至少命中一个，宽松匹配）
     let lower = assistant.content.to_lowercase();
     assert!(
-        ["lisp", "解释", "rust", "语言", "知识"].iter().any(|k| lower.contains(k)),
+        ["lisp", "解释", "rust", "语言", "知识"]
+            .iter()
+            .any(|k| lower.contains(k)),
         "回答应与文档主题相关，实际: {}",
         assistant.content
     );
