@@ -1,22 +1,19 @@
-# EchoMind — 真实数据 RAG 集成测试（V3.1 R2 关闭项）
+# EchoMind — 真实数据 RAG 集成测试（V3.1 阶段二：V5 漏洞关闭）
 #
-# 目的：关闭「核心 RAG 链路从未被真实端到端验证」的体系性漏洞
-# （QA ROOT_CAUSE_ANALYSIS V5 / COMPREHENSIVE_RETROSPECTIVE TD-7）。
-# 全部桥接 E2E 走 tauri-stub mock；本 job 用真实 Tauri dev 进程 +
-# 真实 ONNX 嵌入 + 真实 LLM API 验证 导入→分块→嵌入→检索→生成 全链路。
+# 验证「导入 → 分块 → 真实 ONNX 嵌入 → 检索 → 真实 LLM 回答」核心链路。
+#
+# 实现说明（2026-08-24）：
+# - 权威路径为 Rust 集成测试 real_data_001（crates/tauri-app/tests/integration/
+#   real_data_tests.rs）——直接驱动 chat_inner/import_files_inner，无需浏览器。
+# - 浏览器版 real-data.spec.ts 因 Tauri v2 不向 remote URL（devUrl HTTP 页面）
+#   注入 __TAURI__ 而暂不可用（存量断裂，见 LOG 2026-08-24）。
 #
 # 触发：仅手动（workflow_dispatch）。需要仓库 secrets：
 #   ECHOMIND_LLM_API_KEY / ECHOMIND_LLM_BASE_URL / ECHOMIND_LLM_MODEL
-# 不阻塞 PR 与主干流水线；失败在 Actions 页面单独归因。
 name: Real Data E2E
 
 on:
   workflow_dispatch:
-    inputs:
-      test_doc:
-        description: '测试文档路径（runner 上的绝对路径或 GitHub raw URL）'
-        required: false
-        default: ''
 
 concurrency:
   group: real-data-e2e-${{ github.ref }}
@@ -24,7 +21,7 @@ concurrency:
 
 jobs:
   real-data:
-    name: Real data RAG integration (ubuntu)
+    name: Real RAG pipeline (ubuntu, real ONNX + real LLM)
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -37,10 +34,10 @@ jobs:
           workspaces: '.'
           key: real-data-e2e
 
-      - name: Install system dependencies (Tauri Linux)
+      - name: Install system dependencies (ONNX runtime deps)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libssl-dev
 
       - name: Fail fast when LLM secrets are absent
         env:
@@ -51,62 +48,38 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: e2e-tests/package-lock.json
-
-      - name: Build UI bundle
-        run: node scripts/build-ui.mjs
-
-      - name: Cache embedding model (all-MiniLM-L6-v2)
+      - name: Cache embedding model (bge-small-en-v1.5)
         uses: actions/cache@v4
         with:
-          path: target/fastembed-cache
-          key: fastembed-model-v1-realdata
+          path: target/realdata-models
+          key: bge-small-en-v1.5-v1
 
-      - name: Start Tauri dev server
-        env:
-          ECHOMIND_LLM_API_KEY: ${{ secrets.ECHOMIND_LLM_API_KEY }}
-          ECHOMIND_LLM_BASE_URL: ${{ secrets.ECHOMIND_LLM_BASE_URL }}
-          ECHOMIND_LLM_MODEL: ${{ secrets.ECHOMIND_LLM_MODEL }}
+      - name: Prepare test doc and model dir
         run: |
-          cargo tauri dev > /tmp/tauri-dev.log 2>&1 &
-          echo $! > /tmp/tauri-dev.pid
-          # 轮询等待 dev server 就绪（最长 10 分钟：首次编译较慢）
-          for i in $(seq 1 120); do
-            if curl -sf http://localhost:1420 > /dev/null 2>&1; then
-              echo "dev server ready after ${i}x5s"
-              break
-            fi
-            sleep 5
-            if [ "$i" = "120" ]; then
-              echo "::error::Tauri dev server 未能在 10 分钟内就绪"
-              tail -100 /tmp/tauri-dev.log
-              exit 1
-            fi
-          done
+          mkdir -p target/realdata-models target/realdata-docs
+          # 测试文档：用仓库自身的 README（真实语料，随 checkout 可得）
+          cp README.md target/realdata-docs/README_test.md
+          # 嵌入模型：缓存缺失时由 fastembed 从 HuggingFace 下载（直连，铁律一）
+          ls target/realdata-models/bge-small-en-v1.5/model.onnx 2>/dev/null \
+            || echo "模型将由 fastembed 首次下载"
 
-      - name: Run real-data integration tests
-        working-directory: e2e-tests
+      - name: Run real RAG pipeline integration test
         env:
           ECHOMIND_E2E_REAL_DATA: '1'
-          ECHOMIND_E2E_URL: http://localhost:1420
-          ECHOMIND_TEST_DOC: ${{ inputs.test_doc }}
           ECHOMIND_LLM_API_KEY: ${{ secrets.ECHOMIND_LLM_API_KEY }}
           ECHOMIND_LLM_BASE_URL: ${{ secrets.ECHOMIND_LLM_BASE_URL }}
           ECHOMIND_LLM_MODEL: ${{ secrets.ECHOMIND_LLM_MODEL }}
-        run: npx playwright test tests/real-data.spec.ts --retries=1
+          ECHOMIND_REAL_MODEL_DIR: ${{ github.workspace }}/target/realdata-models
+          ECHOMIND_TEST_DOC: ${{ github.workspace }}/target/realdata-docs/README_test.md
+        run: |
+          cargo test -p echomind-tauri-app --test integration real_data_001 \
+            -- --nocapture --include-ignored
 
-      - name: Upload artifacts on failure
+      - name: Upload failure logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: real-data-failure-logs
           path: |
-            /tmp/tauri-dev.log
-            e2e-tests/test-results/
-            e2e-tests/playwright-report/
-          include-hidden-files: true
+            target/realdata-docs/
           retention-days: 7

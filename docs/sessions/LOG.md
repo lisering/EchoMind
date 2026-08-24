@@ -408,3 +408,27 @@
 - **发现 2 项新摩擦**：F1 发版未 bump 版本号（流程债）；F2 无单实例锁（双实例可同时指向同一数据目录）
 
 **用户已在实际使用**（/Applications 常驻旧版本）——dogfooding 事实上已开始，friction log 交由用户日常填写。
+
+
+## 2026-08-24（深夜续）— V5 漏洞正式关闭：真实 RAG 链路首次端到端贯通
+
+**DeepSeek 接入**：用户环境 ANTHROPIC_AUTH_TOKEN 实为 DeepSeek 官方 Anthropic 兼容端点
+的 key；验证 OpenAI 端点（https://api.deepseek.com）同 token 可用，模型 deepseek-v4-pro
+（文档核验：api-docs.deepseek.com，base_url 无 /v1，Bearer 认证）。GitHub secrets 三件套
+已配置。附带发现 deepseek-v4-flash-vision-exp 支持图片输入，可作 BYOK VLM 后端（记录备用）。
+
+**浏览器路径的存量断裂确认**：real-data.spec.ts 依赖 devUrl HTTP 页面注入 __TAURI__，
+但 Tauri v2 不向 remote URL 注入 IPC（capabilities remote 授权仅解决 ACL；devUrl 配置 +
+强制重编译均无效——注入被核心屏蔽）。4 轮攻坚后按时间盒切换方案。spec 头注释已记录断裂
+现状，保留为历史参考。
+
+**权威路径落地：Rust 集成测试 real_data_001**（tests/integration/real_data_tests.rs）：
+- env 门控（ECHOMIND_E2E_REAL_DATA=1 + LLM 三件套 + 模型目录）
+- 真实导入 README_zh.md → **510 chunks 真实 ONNX 嵌入** → 真实检索 → **DeepSeek v4-pro
+  生成 1176 字符高质量回答**（含来源引用 [1][3]）→ persist_exchange 持久化断言
+- 本地两次复跑通过（~61s）；模型目录 symlink 复用用户已有模型，零下载
+- guard 设计：显式 env 模型目录缺失时由 fastembed 自动下载（CI 缓存持久化），杜绝假绿
+
+**CI 更新**：real-data-e2e.yml 改跑 Rust 集成测试（无需 dev server/浏览器，ubuntu 直跑）。
+
+**验证**: real_data_001 两次通过 ✅ | cargo build tests 0 error ✅

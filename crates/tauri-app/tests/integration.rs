@@ -65,6 +65,8 @@ mod full_pipeline;
 mod import_tests;
 #[path = "integration/local_llm_chain.rs"]
 mod local_llm_chain;
+#[path = "integration/real_data_tests.rs"]
+mod real_data_tests;
 #[path = "integration/security_chain.rs"]
 mod security_chain;
 #[path = "integration/security_tests.rs"]

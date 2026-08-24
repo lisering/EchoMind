@@ -18,6 +18,13 @@
 //
 // ```bash
 // # 1. 启动 EchoMind dev 服务器
+// ⚠️ 现状（V3.1 阶段二）：本 spec 暂不可用——Tauri v2 不向 remote URL
+// （devUrl HTTP 页面）注入 window.__TAURI__（安全设计，capabilities remote
+// 授权仅解决 ACL 不解决注入）。权威验证路径已迁移至 Rust 集成测试：
+//   crates/tauri-app/tests/integration/real_data_tests.rs（real_data_001）
+//   CI: .github/workflows/real-data-e2e.yml
+// 本文件保留为 UI 层验证的历史参考，待 Tauri 上游支持 remote 注入后恢复。
+//
 // cargo tauri dev &
 //
 // # 2. 运行真实数据集成测试
