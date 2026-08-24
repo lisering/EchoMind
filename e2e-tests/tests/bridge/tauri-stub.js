@@ -256,7 +256,7 @@
 
 const state = {
 configured: window.__TEST_OPTS?.configured || false,
-isPro: true, // Alpha 阶段：全功能免费开放
+isPro: true, // 测试便利：默认 Pro 开启（v1.20.0 Alpha 结束，实际后端默认 false）
 docs: [],
 /** 文件路径 → 内容哈希（去重用） */
 hashIndex: {},
@@ -264,6 +264,14 @@ conversations: [],
 messages: {},
 listeners: {},
 aborted: false,
+/** 工作空间列表（REQ-WS-001 多知识库 mock） */
+workspaces: [
+  { id: 'default', name: 'Default', created_at: Date.now() },
+],
+/** 当前工作空间 ID */
+currentWorkspaceId: 'default',
+/** 工作空间设置（持久化 mock） */
+workspaceSettings: {},
 /** 测试控制开关：下次 chat 是否返回空上下文 */
 nextChatEmpty: false,
 /** 测试控制开关：下次 chat 的自定义 token 序列 */
@@ -307,8 +315,12 @@ graphRelations: [
 ],
     /** 模型缓存信息（REQ-VEC-008） */
     modelCacheInfo: { models: [{ name: 'all-MiniLM-L6-v2', size_bytes: 31457280 }], total_size_bytes: 31457280 },
-    /** 混合检索开关（REQ-RAG-010） */
-    hybridSearch: false,
+/** 混合检索开关（REQ-RAG-010） */
+hybridSearch: false,
+/** 智能模式开关（S5 审计 P0-1） */
+smartModeEnabled: true,
+/** REQ-RAG-051: 演示模式 */
+demoMode: false,
     /** 上下文 token 限制（REQ-RAG-017） */
     contextTokenLimit: 4096,
     /** LLM 推理模式（REQ-LLM-003）：'remote' / 'local' */
@@ -386,13 +398,25 @@ graphRelations: [
     // ============================================================
     /** 已保存的工作流模板 */
 workflowTemplates: [],
-// S56：自定义快捷指令模板
-promptTemplates: [],
+// S56：自定义快捷指令模板（S88：预填测试模板）
+promptTemplates: [
+  { id: 'pt-test-summary', name: 'test_summary', label: 'Test Summary', description: 'Test summary template', icon: '📋', prompt_template: 'Please summarize: {query}', created_at: 1700000000, updated_at: 1700000000 },
+  { id: 'pt-test-translate', name: 'test_translate', label: 'Test Translate', description: 'Test translate template', icon: '🌐', prompt_template: 'Please translate: {query}', created_at: 1700000001, updated_at: 1700000001 },
+],
+// B09 v1.8：Skill 文件（slash: true 的技能）
+skills: [],
 /** Wiki 双向链接数据（REQ-ING-020） */
 wikiLinks: [],
 /** Durable Prompt Admission 待处理输入（B05） */
 pendingInputs: [],
-      sessionTodos: [],
+sessionTodos: [],
+/** Trace 记录（S2 复盘接线） */
+traces: [],
+/** Token 预算配置（S2 复盘接线） */
+tokenBudgetMaxTokens: 32768,
+tokenBudgetThreshold: 0.8,
+tokenBudgetKeepRatio: 0.67,
+tokenBudgetMinMsgs: 3,
 /** 对话分支树数据（REQ-RAG-039） */
 conversationTree: null,
 // ============================================================
@@ -435,11 +459,19 @@ burstBuffer: [],
     subAgentEnabled: false,
     /** 网页搜索开关（REQ-RAG-036） */
     webSearchEnabled: false,
+    /** RAG 检索参数（REQ-RAG-014 v1.10） */
+    ragParams: { top_k: 8, score_threshold: 0.0, chunk_expansion_enabled: true, chunk_expansion_window: 1 },
+    /** LLM 生成参数（REQ-RAG-015 v1.10） */
+    generationParams: { temperature: 0.7, max_tokens: 4096, top_p: 1.0 },
+    /** 文档排序状态（REQ-ING-008 v1.10） */
+    docSortBy: null,
+    docSortOrder: null,
     /** 协调模式开关 */
     coordinatorEnabled: false,
     /** 渐进式注入开关 */
     progressiveInjection: false,
 contextualRetrieval: true,
+lateChunking: false,
     /** Speculative RAG 开关 */
     speculativeEnabled: false,
     // ============================================================
@@ -468,6 +500,17 @@ contextualRetrieval: true,
     // ============================================================
     /** Token 预算 */
     tokenBudget: 0,
+    // ============================================================
+    // v1.13 功能状态
+    // ============================================================
+    /** 开机自启开关（REQ-WIN-004） */
+    autostart: false,
+    /** 应用更新检查信息（REQ-HELP-004） */
+    updateInfo: null,
+    /** 自动检查更新开关 */
+    updateAutoCheck: true,
+    /** 上次检查时间戳 */
+    updateLastCheck: 0,
   };
 
   const emit = (name, payload) => {
@@ -704,9 +747,10 @@ if (!state.isPro && PRO_GATED.includes(ext)) {
 throw `PRO_REQUIRED: .${ext} 导入为 Pro 版功能，请升级后重试`;
 }
 
-          // 配额检查
-          if (!state.isPro && state.docs.length >= FREE_LIMIT) {
-            throw 'LIMIT_REACHED: 免费版上限 50 个文件，请升级 Pro 版';
+          // 配额检查（REQ-WS-002：按工作空间独立计数）
+          const wsDocs = state.docs.filter((d) => (d.workspace_id || 'default') === state.currentWorkspaceId);
+          if (!state.isPro && wsDocs.length >= FREE_LIMIT) {
+            throw 'LIMIT_REACHED: 免费版每个知识库上限 50 个文件，请升级 Pro 版';
           }
 
           // 内容去重（基于路径确定性哈希模拟）
@@ -727,6 +771,7 @@ throw `PRO_REQUIRED: .${ext} 导入为 Pro 版功能，请升级后重试`;
             file_hash: hash,
             status: 'Pending',
             created_at: Math.floor(Date.now() / 1000),
+            workspace_id: state.currentWorkspaceId,
           };
           state.docs.push(doc);
           emit('doc-status-changed', { status: 'indexing', message: `正在索引：${name}` });
@@ -758,8 +803,50 @@ return args.paths.map((p) => {
 case 'get_file_size_limits':
 return [100 * 1024 * 1024, 500 * 1024 * 1024];
 
-case 'get_documents':
-        return state.docs;
+case 'get_documents': {
+// REQ-ING-008 文档排序支持（v1.10）
+let docs = [...state.docs];
+const sortBy = args.sortBy || null;
+const sortOrder = args.sortOrder || null;
+if (sortBy === 'file_name') {
+docs.sort((a, b) => {
+const na = (a.file_path || '').split('/').pop() || '';
+const nb = (b.file_path || '').split('/').pop() || '';
+return sortOrder === 'asc' ? na.localeCompare(nb) : nb.localeCompare(na);
+});
+} else if (sortBy === 'file_size') {
+docs.sort((a, b) => sortOrder === 'asc' ? (a.file_size || 0) - (b.file_size || 0) : (b.file_size || 0) - (a.file_size || 0));
+} else {
+// imported_at (default)
+docs.sort((a, b) => sortOrder === 'asc' ? (a.created_at || 0) - (b.created_at || 0) : (b.created_at || 0) - (a.created_at || 0));
+}
+ return docs;
+      }
+
+      // 磁盘空间管理（P1-1 三件套：有后端注册，此前无前端/mock）
+      case 'get_disk_space_info': {
+        const total = 500 * 1024 * 1024 * 1024; // 500GB
+        const free = 100 * 1024 * 1024 * 1024; // 100GB
+        return JSON.stringify({
+          free_bytes: free,
+          total_bytes: total,
+          used_bytes: total - free,
+          free_percent: (free / total) * 100,
+          is_low: false,
+          threshold_bytes: 1024 * 1024 * 1024,
+        });
+      }
+
+      case 'cleanup_disk_space':
+        return 0;
+
+      case 'check_disk_space': {
+        const required = args.requiredBytes ?? args.required_bytes ?? 0;
+        if (required > 50 * 1024 * 1024 * 1024) {
+          throw '磁盘空间不足：可用 100GB，需要 ' + Math.round(required / 1024 / 1024 / 1024) + 'GB';
+        }
+        return null;
+      }
 
       case 'get_document_chunks': {
         // REQ-EXP-005: 返回文档分块（用于 PDF 导出）
@@ -772,13 +859,34 @@ case 'get_documents':
         ];
       }
 
-      case 'delete_document':
-        state.docs = state.docs.filter((d) => d.id !== args.id);
-        return null;
+case 'delete_document':
+state.docs = state.docs.filter((d) => d.id !== args.id);
+return null;
 
-      case 'set_vlm_enabled':
-        state.vlmEnabled = args.enabled;
-        return null;
+case 'batch_delete_documents':
+state.docs = state.docs.filter((d) => !args.ids.includes(d.id));
+return { success_count: args.ids.length, failed_count: 0, failed_ids: [] };
+
+case 'batch_move_documents':
+state.docs = state.docs.map((d) =>
+  args.ids.includes(d.id) ? { ...d, workspace_id: args.targetWorkspaceId } : d
+);
+return { success_count: args.ids.length, failed_count: 0, failed_ids: [] };
+
+case 'batch_add_tags':
+state.docs = state.docs.map((d) => {
+  if (args.ids.includes(d.id)) {
+    const existing = d.tags || [];
+    const newTags = [...existing];
+    for (const tag of args.tags) {
+      if (!newTags.includes(tag)) newTags.push(tag);
+    }
+    return { ...d, tags: newTags };
+  }
+  return d;
+});
+return { success_count: args.ids.length, failed_count: 0, failed_ids: [] };
+
 
       case 'get_pro_status':
         return state.isPro;
@@ -797,13 +905,16 @@ case 'get_documents':
           workspace_id: args.workspaceId || 'default',
           title: '新会话',
           created_at: Math.floor(Date.now() / 1000),
+          sort_order: 0,
         });
         state.messages[id] = [];
         return id;
       }
 
       case 'get_conversations':
-        return state.conversations;
+        return state.conversations.filter(
+          (c) => (c.workspace_id || 'default') === state.currentWorkspaceId
+        );
 
       case 'get_messages':
         return state.messages[args.conversationId] || [];
@@ -823,7 +934,71 @@ case 'get_documents':
         delete state.messages[args.id];
         return null;
 
-      case 'edit_user_message': {
+      case 'rename_conversation': {
+        const conv = state.conversations.find((c) => c.id === args.id);
+        if (conv) conv.title = args.title;
+        return null;
+      }
+
+      case 'reorder_conversations': {
+        // REQ-IX-002: 按传入的有序 ID 列表更新 sort_order
+        const ids = args.orderedIds || [];
+        for (let i = 0; i < ids.length; i++) {
+          const conv = state.conversations.find((c) => c.id === ids[i]);
+          if (conv) conv.sort_order = i + 1;
+        }
+        // 重新按 sort_order ASC, created_at DESC 排序
+        state.conversations.sort((a, b) => {
+          const sa = a.sort_order || 0;
+          const sb = b.sort_order || 0;
+          if (sa !== sb) return sa - sb;
+          return (b.created_at || 0) - (a.created_at || 0);
+        });
+        return null;
+      }
+
+case 'add_bookmark': {
+// REQ-RAG-047 + REQ-RAG-053: 添加对话书签（支持消息级）
+if (!state._bookmarks) state._bookmarks = [];
+const existing = state._bookmarks.findIndex((b) => b.conversation_id === args.conversationId);
+const bm = {
+conversation_id: args.conversationId,
+note: args.note || null,
+created_at: Date.now(),
+message_id: args.messageId || null,
+summary: args.summary || null,
+};
+        if (existing >= 0) {
+          state._bookmarks[existing] = bm;
+        } else {
+          state._bookmarks.push(bm);
+        }
+        return null;
+      }
+
+      case 'remove_bookmark': {
+        if (!state._bookmarks) state._bookmarks = [];
+        state._bookmarks = state._bookmarks.filter((b) => b.conversation_id !== args.conversationId);
+        return null;
+      }
+
+      case 'list_bookmarks': {
+        if (!state._bookmarks) state._bookmarks = [];
+        return state._bookmarks.slice().sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+      }
+
+case 'is_bookmarked': {
+if (!state._bookmarks) state._bookmarks = [];
+return state._bookmarks.some((b) => b.conversation_id === args.conversationId);
+}
+
+case 'get_message_bookmark': {
+// REQ-RAG-053: 按消息 ID 查询书签
+if (!state._bookmarks) state._bookmarks = [];
+return state._bookmarks.find((b) => b.message_id === args.messageId) || null;
+}
+
+case 'edit_user_message': {
         // Mock: 返回顺序递增的版本号（v1=原始, v2=首次编辑, v3=第二次编辑, ...）
         const tg = args.turn_group || 'default';
         if (!state._editVersionCounter) state._editVersionCounter = {};
@@ -847,6 +1022,23 @@ case 'get_documents':
         state.importCancelled = true;
         return null;
 
+      case 'replace_document': {
+        // REQ-ING-012：替换文档 mock
+        const oldDocIdx = state.docs.findIndex((d) => d.id === args.oldDocId);
+        if (oldDocIdx >= 0) state.docs.splice(oldDocIdx, 1);
+        const newId = 'replaced-' + Date.now();
+        state.docs.push({
+          id: newId,
+          file_path: args.filePath,
+          file_hash: 'replaced-hash-' + Date.now(),
+          status: 'Indexed',
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [],
+        });
+        emit('doc-status-changed', { status: 'done', message: `替换完成：${basename(args.filePath)}` });
+        return newId;
+      }
+
       case 'retry_index': {
         const doc = state.docs.find((d) => d.id === args.id);
         if (!doc) throw '文档不存在';
@@ -860,13 +1052,32 @@ case 'get_documents':
         return null;
       }
 
+      // 索引重建（REQ-VEC-009）
+      case 'rebuild_index': {
+        const doc = state.docs.find((d) => d.id === args.id);
+        if (!doc) throw '文档不存在';
+        doc.status = 'Processing';
+        emit('doc-status-changed', { status: 'indexing', message: `正在重建索引：${basename(doc.file_path)}` });
+        (async () => {
+          await delay(400);
+          doc.status = 'Indexed';
+          emit('doc-status-changed', { status: 'done', message: `重建完成：${basename(doc.file_path)}` });
+        })();
+        return null;
+      }
+
+      // 文档原文导出（REQ-EXP-004）
+      case 'export_document_original': {
+        const doc = state.docs.find((d) => d.id === args.docId);
+        if (!doc) throw '文档不存在';
+        // mock：模拟成功导出
+        return null;
+      }
+
       case 'deactivate_pro':
         state.isPro = false;
         return null;
 
-      case 'set_hybrid_search':
-        state.hybridSearch = args.enabled;
-        return null;
 
       // ============================================================
       // 本地 LLM 推理（REQ-LLM-003/004）
@@ -1225,31 +1436,20 @@ conv.title = userQuery.slice(0, 24);
         return null;
       }
 
-      case 'set_context_token_limit':
-        const limit = args.limit;
-        if (limit >= 2048 && limit <= 32768) {
-          state.contextTokenLimit = limit;
-          return null;
-        }
-        throw new Error('上下文 token 限制范围为 2048-32768');
 
       // ============================================================
       // 高级 RAG 功能（REQ-RAG-020~022, REQ-VEC-012~013）
       // ============================================================
-      case 'set_rerank_enabled':
-        state.rerankEnabled = args.enabled;
-        return null;
 
-      case 'set_hyde_enabled':
-        state.hydeEnabled = args.enabled;
-        return null;
 
-      case 'set_agent_enabled':
-        state.agentEnabled = args.enabled;
-        return null;
 
-      case 'set_embedding_model':
-        state.embeddingModel = args.model;
+
+      case 'get_chunk_params':
+        return { chunk_size: state.chunkSize || 256, overlap: state.chunkOverlap || 32 };
+
+      case 'set_chunk_params':
+        state.chunkSize = args.params.chunk_size;
+        state.chunkOverlap = args.params.overlap;
         return null;
 
       case 'reclassify_document': {
@@ -1282,16 +1482,42 @@ conv.title = userQuery.slice(0, 24);
         return md;
       }
 
-      case 'save_text_file':
-        state.lastExportPath = args.path;
-        state.lastExportContent = args.content;
-        return null;
+case 'save_text_file':
+state.lastExportPath = args.path;
+state.lastExportContent = args.content;
+return null;
+
+case 'read_text_file':
+// REQ-EXP-003: 返回模拟的备份文件内容
+if (state.mockBackupContent) return state.mockBackupContent;
+// S88: 返回模拟的模板导出 JSON（路径含 template 关键字时）
+if (args.path && String(args.path).includes('template')) {
+  return JSON.stringify({
+    version: '1.0',
+    exported_at: '2026-08-22T12:00:00.000Z',
+    templates: [
+      { name: 'imported_summary', label: 'Imported Summary', description: 'Imported template', icon: '📋', prompt_template: 'Summarize: {query}' },
+      { name: 'test_summary', label: 'Conflict Test', description: 'Name conflict test', icon: '⚡', prompt_template: 'Test: {query}' },
+    ],
+  });
+}
+return JSON.stringify({
+version: 1,
+exported_at: '0',
+conversations: [],
+messages: {},
+documents: [],
+settings: {},
+});
 
       // ============================================================
       // 文件监听 + 增量同步（REQ-SYNC-001~003）
       // ============================================================
-      case 'add_watched_folder': {
-        if (!state.watchedFolders.includes(args.path)) {
+case 'add_watched_folder': {
+if (!args.path || args.path.trim() === '') {
+  throw 'VALIDATION: 路径不能为空';
+}
+if (!state.watchedFolders.includes(args.path)) {
           state.watchedFolders.push(args.path);
         }
         // 模拟同步进度事件（REQ-SYNC-002 AC-7）
@@ -1546,32 +1772,6 @@ return null;
         return { success: true };
       }
 
-      case 'set_auto_lock_timeout':
-        state.autoLockConfig = {
-          ...state.autoLockConfig,
-          timeout_secs: args.seconds ?? args.timeoutSecs ?? 180,
-        };
-        return null;
-
-      case 'redact_pii': {
-        const text = args.text || '';
-        let redactedText = text;
-        const patterns = [
-          { re: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, tag: '[REDACTED-EMAIL]' },
-          { re: /1[3-9]\d{9}/g, tag: '[REDACTED-PHONE]' },
-          { re: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g, tag: '[REDACTED-IP]' },
-          { re: /\d{17}[\dXx]/g, tag: '[REDACTED-IDCARD]' },
-          { re: /6\d{15,18}/g, tag: '[REDACTED-BANKCARD]' },
-          { re: /\b\d{3}-\d{2}-\d{4}\b/g, tag: '[REDACTED-SSN]' },
-          { re: /\b[Gg]\d{8}\b/g, tag: '[REDACTED-PASSPORT]' },
-          { re: /\+\d{1,3}-\d{6,14}/g, tag: '[REDACTED-INTL_PHONE]' },
-        ];
-        for (const { re, tag } of patterns) {
-          redactedText = redactedText.replace(re, tag);
-        }
-        return redactedText;
-      }
-
       case 'verify_audit_chain':
         return { valid: true, count: state.auditLogs.length, broken_at: null };
 
@@ -1579,24 +1779,8 @@ return null;
         state.piiDetectionEnabled = args.enabled;
         return null;
 
-      case 'clear_clipboard':
-        return null;
 
-      case 'set_clipboard_clear_timeout':
-        state.clipboardConfig = {
-          ...state.clipboardConfig,
-          clear_after_secs: args.seconds ?? args.clearAfterSecs ?? 30,
-        };
-        return null;
 
-      case 'check_security_status':
-        return {
-          state: state.securityState,
-          color: state.securityState === 'Locked' ? '#ef4444' : state.securityState === 'EncryptedUnlocked' ? '#22c55e' : '#f59e0b',
-          is_locked: state.isLocked,
-          remaining_attempts: state.remainingAttempts,
-          remaining_lock_seconds: state.remainingLockSeconds,
-        };
 
       // ============================================================
       // 国际化（REQ-I18N-001）
@@ -1619,11 +1803,6 @@ return null;
       case 'get_sidebar_collapsed':
         return state.sidebarCollapsed || false;
 
-      case 'set_sidebar_collapsed':
-        state.sidebarCollapsed = args.collapsed;
-        return null;
-
-      // 知识图谱可视化（REQ-RAG-027）
       case 'get_graph_data': {
         const limit = args.limit || 200;
         const relations = state.graphRelations || [];
@@ -1680,11 +1859,6 @@ return null;
         return result;
       }
 
-      case 'set_graph_retriever_enabled':
-        state.graphRetrieverEnabled = args.enabled;
-        return null;
-
-      // 知识图谱高级分析（Session 5）
       case 'get_shortest_path': {
         // 构建邻接表并使用 BFS 查找最短路径
         const relations = state.graphRelations || [];
@@ -1834,6 +2008,50 @@ return null;
         return mockSummary;
       }
 
+      // 文档内容预览（REQ-ING-010）
+      case 'get_document_preview': {
+        const doc = state.docs.find((d) => d.id === args.docId);
+        if (!doc) return null;
+        const chunks = (state.chunks || {})[args.docId] || [];
+        const contentPreview = chunks.map((c) => c.content).join(' ').substring(0, 500);
+        return {
+          id: doc.id,
+          file_path: doc.file_path,
+          status: doc.status || 'Indexed',
+          created_at: doc.created_at || Math.floor(Date.now() / 1000),
+          domain: doc.domain || null,
+          summary: doc.summary || null,
+          tags: doc.tags || [],
+          file_hash: doc.file_hash || 'abc123',
+          content_preview: contentPreview || '(empty)',
+          chunks: chunks.map((c) => ({
+            id: c.id || 'chunk-1',
+            sequence: c.sequence || 0,
+            content_preview: (c.content || '').substring(0, 200),
+            token_count: c.token_count || 100,
+          })),
+          chunk_count: chunks.length,
+        };
+      }
+
+      // 单条消息删除（REQ-RAG-013）
+      case 'delete_message': {
+        const msgs = state.messages[args.conversationId] || [];
+        const idx = msgs.findIndex((m) => m.id === args.messageId);
+        if (idx < 0) throw '消息不存在';
+        const target = msgs[idx];
+        let count = 1;
+        // user 消息连带删除下一条 assistant
+        if (target.role === 'user' && idx + 1 < msgs.length && msgs[idx + 1].role === 'assistant') {
+          msgs.splice(idx, 2);
+          count = 2;
+        } else {
+          msgs.splice(idx, 1);
+        }
+        state.messages[args.conversationId] = msgs;
+        return count;
+      }
+
       // ============================================================
       // DAG 工作流引擎（REQ-RAG-030）
       // ============================================================
@@ -1918,6 +2136,12 @@ state.promptTemplates = state.promptTemplates.filter((t) => t.id !== (args.templ
 return null;
 
 // ============================================================
+// B09 Skill 系统集成（v1.8：斜杠命令面板 Skill 发现）
+// ============================================================
+case 'discover_skills':
+return state.skills || [];
+
+// ============================================================
 // Wiki 双向链接（REQ-ING-020 Markdown 笔记双向链接）
 // ============================================================
 case 'get_forward_links': {
@@ -1981,6 +2205,56 @@ content: m.content || '',
 score: 1.0,
 created_at: m.created_at || 0,
 }));
+}
+
+// ============================================================
+// 全局搜索增强（REQ-IX-008, S90）
+// ============================================================
+
+case 'global_search': {
+const query = (args.query || '').toLowerCase();
+const limit = args.limit || 5;
+if (!query) return { messages: [], documents: [], entities: [] };
+
+// 搜索消息
+const allMessages = Array.isArray(state.messages) ? state.messages : Object.values(state.messages || {}).flat();
+const messages = allMessages
+  .filter(m => (m.content || '').toLowerCase().includes(query))
+  .slice(0, limit)
+  .map(m => ({
+    message_id: m.id || 'msg-1',
+    conversation_id: m.conversation_id || 'conv-1',
+    conversation_title: (state.conversations || []).find(c => c.id === (m.conversation_id || 'conv-1'))?.title || 'Mock Conversation',
+    role: m.role || 'user',
+    content: m.content || '',
+    score: 1.0,
+    created_at: m.created_at || 0,
+  }));
+
+// 搜索文档
+const docs = (state.documents || []).filter(d => {
+  const name = (d.file_path || '').toLowerCase();
+  const summary = (d.summary || '').toLowerCase();
+  return name.includes(query) || summary.includes(query);
+}).slice(0, limit).map(d => ({
+  doc_id: d.id || 'doc-1',
+  file_path: d.file_path || '',
+  summary: d.summary || null,
+  match_type: (d.file_path || '').toLowerCase().includes(query) ? 'title' : 'summary',
+}));
+
+// 搜索实体
+const entities = (state.graphRelations || [])
+  .filter(r => (r.subject || '').toLowerCase().includes(query) || (r.object || '').toLowerCase().includes(query))
+  .slice(0, limit)
+  .map(r => ({
+    entity_text: r.subject || '',
+    entity_type: r.entity_type || 'PERSON',
+    chunk_id: r.chunk_id || 'chunk-1',
+    doc_id: r.doc_id || 'doc-1',
+  }));
+
+return { messages, documents, entities };
 }
 
 // ============================================================
@@ -2056,9 +2330,6 @@ estimated_tokens_saved: previewMessages.reduce((sum, m) => sum + Math.floor((m.c
 // ============================================================
 // 持久化记忆系统（REQ-RAG-033）
 // ============================================================
-      case 'set_memory_enabled':
-        state.memoryEnabled = args.enabled;
-        return null;
 
       case 'get_memories': {
         let memories = state.memories;
@@ -2324,12 +2595,7 @@ return null;
       // ============================================================
       // 性能优化：Prompt 压缩（REQ-PERF-002）
       // ============================================================
-      case 'set_compression_ratio':
-        state.compressionRatio = args.ratio;
-        return null;
 
-      case 'get_compression_ratio':
-        return state.compressionRatio;
 
       // ============================================================
       // 性能优化：索引重建
@@ -2346,12 +2612,19 @@ return null;
       // ============================================================
       // Contextual Retrieval（REQ-RAG-041：上下文增强嵌入）
       // ============================================================
-      case 'set_contextual_retrieval':
-        state.contextualRetrieval = args.enabled;
-        return null;
 
       case 'rebuild_contextual_embeddings':
         return null;
+
+      case 'rebuild_all_embeddings':
+        return null;
+
+      // Late Chunking 上下文感知嵌入（REQ-RAG-049）
+      case 'set_late_chunking':
+        state.lateChunking = args.enabled;
+        return null;
+      case 'get_late_chunking':
+        return state.lateChunking === true;
 
       // ============================================================
       // 文档标签系统（REQ-ING-022：用户自定义标签管理）
@@ -2387,9 +2660,54 @@ return null;
         return Object.entries(tagCounts).sort((a, b) => b[1] - a[1]);
       }
 
-      case 'filter_documents_by_tag': {
-        return state.docs.filter(d => d.tags && d.tags.includes(args.tag));
-      }
+case 'filter_documents_by_tag': {
+return state.docs.filter(d => d.tags && d.tags.includes(args.tag));
+}
+
+case 'get_kb_stats': {
+// REQ-KB-003 v1.5 + REQ-VEC-010 v1.16 KB statistics dashboard mock
+const docs = state.docs || [];
+const docCount = docs.length;
+const chunkCount = docs.reduce((sum, d) => sum + (d.chunk_count || 3), 0);
+const vectorCount = chunkCount; // mock: 每个chunk一个向量
+const domainMap = {};
+const formatMap = {};
+const statusMap = { pending: 0, processing: 0, indexed: 0, failed: 0 };
+for (const doc of docs) {
+  const domain = doc.domain || 'general';
+  domainMap[domain] = (domainMap[domain] || 0) + 1;
+  const ext = (doc.file_path || '').split('.').pop() || 'unknown';
+  formatMap[ext] = (formatMap[ext] || 0) + 1;
+  const status = doc.status || 'Indexed';
+  if (status === 'Pending' || status === 'pending') statusMap.pending++;
+  else if (status === 'Processing' || status === 'processing') statusMap.processing++;
+  else if (status === 'Failed' || status === 'failed') statusMap.failed++;
+  else statusMap.indexed++;
+}
+const tagCounts = {};
+for (const doc of docs) {
+  if (doc.tags) {
+    for (const tag of doc.tags) {
+      tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+    }
+  }
+}
+return {
+  doc_count: docCount,
+  chunk_count: chunkCount,
+  vector_count: vectorCount,
+  db_size_bytes: docCount * 10240,
+  domain_distribution: Object.entries(domainMap).sort((a, b) => b[1] - a[1]),
+  format_distribution: Object.entries(formatMap).sort((a, b) => b[1] - a[1]),
+  tags: Object.entries(tagCounts).sort((a, b) => b[1] - a[1]),
+  status_distribution: [
+    ['pending', statusMap.pending],
+    ['processing', statusMap.processing],
+    ['indexed', statusMap.indexed],
+    ['failed', statusMap.failed],
+  ],
+};
+}
 
       // ============================================================
       // Durable Prompt Admission（B05 持久化提示接纳）
@@ -2474,9 +2792,6 @@ return null;
       // ============================================================
       // 性能优化：检索记忆（REQ-PERF-012）
       // ============================================================
-      case 'set_retrieval_memory_enabled':
-        state.retrievalMemoryEnabled = args.enabled;
-        return null;
 
       case 'get_retrieval_memory_stats':
         return state.retrievalMemoryStats;
@@ -2499,32 +2814,14 @@ return null;
       // ============================================================
       // 子代理 + 协调模式
       // ============================================================
-      case 'set_sub_agent_enabled':
-        state.subAgentEnabled = args.enabled;
-        return null;
 
-      case 'set_coordinator_mode':
-        state.coordinatorEnabled = args.enabled;
-        return null;
 
-      case 'set_progressive_injection':
-        state.progressiveInjection = args.enabled;
-        return null;
 
-      case 'set_speculative_enabled':
-        state.speculativeEnabled = args.enabled;
-        return null;
 
-      case 'set_quality_gate_enabled':
-        state.qualityGateEnabled = args.enabled;
-        return null;
 
       // ============================================================
       // 网页搜索集成（REQ-RAG-036）
       // ============================================================
-      case 'set_web_search_enabled':
-        state.webSearchEnabled = args.enabled;
-        return null;
 
       case 'web_search': {
         // 模拟 DuckDuckGo Instant Answer API 返回
@@ -2532,11 +2829,38 @@ return null;
           { title: 'Mock Web Result 1', url: 'https://example.com/1', snippet: 'This is a mock web search result for testing.', source: 'duckduckgo' },
           { title: 'Mock Web Result 2', url: 'https://example.com/2', snippet: 'Another mock search result snippet.', source: 'duckduckgo' },
         ];
-        return mockResults;
-      }
+return mockResults;
+}
 
-      // ============================================================
-      // 可观测性（REQ-OBS-001/002）
+// ============================================================
+// RAG/LLM 参数可配置（REQ-RAG-014/015 v1.10）
+// ============================================================
+case 'get_rag_params':
+return state.ragParams || { top_k: 8, score_threshold: 0.0, chunk_expansion_enabled: true, chunk_expansion_window: 1 };
+
+case 'set_rag_params':
+state.ragParams = args.params;
+return null;
+
+case 'get_generation_params':
+return state.generationParams || { temperature: 0.7, max_tokens: 4096, top_p: 1.0 };
+
+case 'set_generation_params':
+state.generationParams = args.params;
+return null;
+
+// ============================================================
+// 嵌入模型下载镜像源配置（REQ-VEC-017 v2.3）
+// ============================================================
+case 'set_mirror_source':
+state.mirrorSource = args.source;
+return null;
+
+case 'get_mirror_source':
+return state.mirrorSource || 'auto';
+
+// ============================================================
+// 可观测性（REQ-OBS-001/002）
       // ============================================================
       case 'get_log_level':
         return state.logLevel;
@@ -2548,8 +2872,28 @@ return null;
       case 'export_logs':
         return 'Mock log export\n2026-08-06T03:00:00Z INFO Application started\n2026-08-06T03:01:00Z INFO Document imported';
 
-      case 'export_diagnostics':
-        return { logs: 'Mock diagnostics', app_version: '1.0.0', os: 'mock', rust_version: '1.85.0' };
+case 'export_diagnostics':
+return { logs: 'Mock diagnostics', app_version: '1.0.0', os: 'mock', rust_version: '1.85.0' };
+
+// REQ-EXP-002/003: 全量数据备份与恢复
+case 'export_backup':
+return JSON.stringify({
+version: 1,
+exported_at: '0',
+conversations: state.conversations || [],
+messages: state.messages || {},
+documents: state.documents || [],
+settings: {},
+});
+
+case 'import_backup':
+state.mockBackupContent = args.content;
+return JSON.stringify({
+conversations: 0,
+messages: 0,
+documents: 0,
+settings: 0,
+});
 
       case 'open_data_dir':
         return null;
@@ -2579,14 +2923,58 @@ case 'set_token_budget':
 
 case 'get_budget_stats':
     return {
-        daily_limit: state.budgetDailyLimit || 0,
-        spent_today: state.budgetSpentToday || 0.0,
+        daily_limit_usd: state.budgetDailyLimit || 0,
+        daily_spent_usd: state.budgetSpentToday || 0.0,
+        monthly_spent_usd: state.budgetSpentMonthly || 0.0,
         remaining: state.budgetDailyLimit > 0 ? Math.max(0, state.budgetDailyLimit - (state.budgetSpentToday || 0)) : Infinity
     };
 
 case 'set_budget_limit':
     state.budgetDailyLimit = args.daily_limit_usd || 0;
     return null;
+
+// ============================================================
+// S69: Token 预算配置（S2 复盘接线）
+// ============================================================
+
+case 'get_token_budget_config':
+    return {
+        max_tokens: state.tokenBudgetMaxTokens || 32768,
+        compaction_threshold: state.tokenBudgetThreshold || 0.8,
+        recent_keep_ratio: state.tokenBudgetKeepRatio || 0.67,
+        min_messages_to_compact: state.tokenBudgetMinMsgs || 3
+    };
+
+case 'set_token_budget_config':
+    if (args.config) {
+        state.tokenBudgetMaxTokens = args.config.max_tokens;
+        state.tokenBudgetThreshold = args.config.compaction_threshold;
+        state.tokenBudgetKeepRatio = args.config.recent_keep_ratio;
+        state.tokenBudgetMinMsgs = args.config.min_messages_to_compact;
+    }
+    return null;
+
+// ============================================================
+// S70: Trace 系统命令（S2 复盘接线）
+// ============================================================
+
+case 'get_recent_traces': {
+    const limit = args.limit || 20;
+    const traces = state.traces || [];
+    return traces.slice(-limit).reverse();
+}
+
+case 'get_trace_detail': {
+    const traces = state.traces || [];
+    return traces.find(function(tr) { return tr.id === args.id; }) || null;
+}
+
+case 'clear_traces':
+    state.traces = [];
+    return null;
+
+case 'get_trace_count':
+    return (state.traces || []).length;
 
 // ============================================================
 // RAG 评估指标（REQ-RAG-045，RAGAS 风格）
@@ -2689,6 +3077,307 @@ case 'set_rag_eval_settings':
       case 'set_embedder_model':
         state.embeddingModel = args.model;
         return null;
+
+      // S4 v1.6: close-to-tray 设置（REQ-WIN-003）
+      case 'get_close_to_tray':
+        return state.closeToTray === true;
+
+      case 'export_error_logs':
+        return state.errorLogs || '';
+
+      // v1.13: 开机自启（REQ-WIN-004）
+      case 'get_autostart':
+        return state.autostart === true;
+
+      case 'check_for_updates':
+        return state.updateInfo || { has_update: false, current_version: '2.2.0', latest_version: '2.2.0', release_notes: null, download_url: null };
+
+      case 'get_update_check_config':
+        return { auto_check: state.updateAutoCheck !== false, last_check: state.updateLastCheck || 0 };
+
+      case 'get_import_history':
+        return (state.importLogs || []).filter(
+          (l) => !args.resultFilter || l.result === args.resultFilter
+        );
+
+      case 'clear_import_history':
+        state.importLogs = [];
+        return null;
+
+      // 智能模式（S5 审计 P0-1）
+      case 'set_smart_mode':
+        state.smartModeEnabled = args.enabled;
+        if (args.enabled) {
+          state.hybridSearch = true;
+          state.rerankEnabled = true;
+          state.hydeEnabled = true;
+        }
+        return null;
+      case 'get_smart_mode':
+        return state.smartModeEnabled !== false;
+
+      // REQ-RAG-051: 无 Key 演示模式
+      case 'is_demo_mode':
+        return state.demoMode === true;
+
+      case 'exit_demo_mode':
+        state.demoMode = false;
+        // 清除示例文档
+        state.documents = state.documents.filter((d) => !d.title.startsWith('[Demo] '));
+        return null;
+
+      case 'load_demo_documents': {
+        state.demoMode = true;
+        const demoDocs = [
+          { title: '[Demo] EchoMind 介绍', content: 'EchoMind 是一款本地优先的智能知识库助手。', file_path: 'demo://intro', file_type: 'txt' },
+          { title: '[Demo] RAG 技术概述', content: 'RAG 是检索增强生成技术。', file_path: 'demo://rag', file_type: 'txt' },
+          { title: '[Demo] 隐私安全说明', content: 'EchoMind 隐私安全设计。', file_path: 'demo://privacy', file_type: 'txt' },
+        ];
+        for (const d of demoDocs) {
+          state.documents.push({
+            id: 'doc-' + Math.random().toString(36).slice(2, 10),
+            title: d.title,
+            file_path: d.file_path,
+            file_type: d.file_type,
+            content: d.content,
+            created_at: Date.now(),
+            chunk_count: 1,
+            total_tokens: 10,
+            status: 'Indexed',
+          });
+        }
+        return null;
+      }
+
+      // 多知识库管理（REQ-WS-001/003）
+      case 'create_workspace': {
+        const id = 'ws-' + Math.random().toString(36).slice(2, 10);
+        const ws = { id, name: args.name, created_at: Date.now() };
+        state.workspaces.push(ws);
+        return id;
+      }
+
+      case 'list_workspaces':
+        return state.workspaces;
+
+      case 'switch_workspace':
+        state.currentWorkspaceId = args.workspaceId;
+        state.workspaceSettings['workspace.current'] = args.workspaceId;
+        return null;
+
+      case 'get_current_workspace':
+        return state.workspaceSettings['workspace.current'] || 'default';
+
+      case 'rename_workspace': {
+        const ws = state.workspaces.find((w) => w.id === args.id);
+        if (ws) ws.name = args.name;
+        return null;
+      }
+
+      case 'delete_workspace': {
+        if (state.workspaces.length <= 1) {
+          throw new Error('至少保留一个知识库');
+        }
+        const ws = state.workspaces.find((w) => w.id === args.id);
+        if (!ws) throw new Error('工作空间不存在: ' + args.id);
+        if (args.id === 'default') throw new Error('默认知识库不可删除');
+        // 级联清理 conversations
+        state.conversations = state.conversations.filter((c) => c.workspace_id !== args.id);
+        // 级联清理 docs（有 workspace_id 字段的文档）
+        state.docs = state.docs.filter((d) => (d.workspace_id || 'default') !== args.id);
+        // 删除工作空间
+        state.workspaces = state.workspaces.filter((w) => w.id !== args.id);
+        // 如果删除的是当前工作空间，回退到 default
+        if (state.currentWorkspaceId === args.id) {
+          state.currentWorkspaceId = 'default';
+          state.workspaceSettings['workspace.current'] = 'default';
+        }
+        return null;
+      }
+
+      case 'get_workspace_stats': {
+        const docs = state.docs.filter((d) => (d.workspace_id || 'default') === args.id);
+        const convs = state.conversations.filter((c) => c.workspace_id === args.id);
+        return { document_count: docs.length, conversation_count: convs.length };
+      }
+
+      case 'get_workspace_quota': {
+        // REQ-WS-002：配额按工作空间独立计算
+        const wsId = state.workspaceSettings['workspace.current'] || 'default';
+        const wsDocs = state.docs.filter((d) => (d.workspace_id || 'default') === wsId);
+        const limit = state.isPro ? 0 : 50;
+        return [wsDocs.length, limit];
+      }
+
+      case 'migrate_document': {
+        // REQ-WS-004：文档跨知识库迁移
+        const doc = state.docs.find((d) => d.id === args.docId);
+        if (!doc) throw new Error('文档不存在: ' + args.docId);
+        const targetWs = state.workspaces.find((w) => w.id === args.targetWorkspaceId);
+        if (!targetWs) throw new Error('目标知识库不存在: ' + args.targetWorkspaceId);
+        // 配额检查（免费版）
+        if (!state.isPro) {
+          const targetDocs = state.docs.filter((d) => (d.workspace_id || 'default') === args.targetWorkspaceId);
+          if (targetDocs.length >= 50) {
+            throw 'LIMIT_REACHED: 目标知识库已达免费版上限（50 个文件）';
+          }
+        }
+        // 执行迁移（仅更新 workspace_id，不重新嵌入）
+        doc.workspace_id = args.targetWorkspaceId;
+        return null;
+      }
+
+      case 'export_audit_report': {
+        const logs = state.auditLogs || [];
+        if (args.format === 'json') {
+          return JSON.stringify(logs, null, 2);
+        }
+        let md = '# EchoMind 安全审计报告\n\n';
+        md += `**总条目数**: ${logs.length}\n\n---\n\n`;
+        for (let i = 0; i < logs.length; i++) {
+          const e = logs[i];
+          md += `## ${i + 1}. ${e.action || 'unknown'}\n\n`;
+          md += `- **时间**: ${e.timestamp}\n- **PII 检测数**: ${e.pii_count || 0}\n`;
+          if (e.prev_hash) md += `- **前条哈希**: \`${e.prev_hash}\`\n`;
+          if (e.curr_hash) md += `- **当前哈希**: \`${e.curr_hash}\`\n`;
+          md += '\n';
+        }
+        return md;
+      }
+
+      // ============================================================
+      // S09: 统一设置命令 update_setting / get_setting
+      // ============================================================
+      case 'update_setting': {
+        const key = args.key;
+        const value = args.value;
+        const enabled = value === 'true';
+
+        // 映射设置键到 mock state（与旧 set_xxx 命令一致）
+        switch (key) {
+          case 'rag.hybrid_search': state.hybridSearch = enabled; break;
+          case 'rag.rerank_enabled': state.rerankEnabled = enabled; break;
+          case 'rag.hyde_enabled': state.hydeEnabled = enabled; break;
+          case 'rag.agent_enabled': state.agentEnabled = enabled; break;
+          case 'rag.coordinator_enabled': state.coordinatorEnabled = enabled; break;
+          case 'rag.sub_agent_enabled': state.subAgentEnabled = enabled; break;
+          case 'vec.embedding_model': state.embeddingModel = value; break;
+          case 'compression.ratio': state.compressionRatio = parseFloat(value); break;
+          case 'rag.context_token_limit': state.contextTokenLimit = parseInt(value); break;
+          case 'mm.vlm_enabled': state.vlmEnabled = enabled; break;
+          case 'rag.progressive_injection': state.progressiveInjection = enabled; break;
+          case 'rag.speculative_enabled': state.speculativeEnabled = enabled; break;
+          case 'rag.quality_gate_enabled': state.qualityGateEnabled = enabled; break;
+          case 'rag.graph_retriever_enabled': state.graphRetrieverEnabled = enabled; break;
+          case 'memory.enabled': state.memoryEnabled = enabled; break;
+          case 'rag.web_search_enabled': state.webSearchEnabled = enabled; break;
+          case 'rag.contextual_retrieval': state.contextualRetrieval = enabled; break;
+          case 'window.close_to_tray': state.closeToTray = enabled; break;
+          case 'ui.sidebar_collapsed': state.sidebarCollapsed = enabled; break;
+          case 'app.autostart': state.autostart = enabled; break;
+          case 'rag.retrieval_memory_enabled': state.retrievalMemoryEnabled = enabled; break;
+          case 'update.auto_check': state.updateAutoCheck = enabled; break;
+          case 'vec.mirror_source': state.embeddingMirrorSource = value; break;
+          default:
+            throw new Error('S09 mock: 不支持的设置键: ' + key);
+        }
+        return null;
+      }
+
+      case 'get_setting': {
+        const key = args.key;
+        // 返回 mock state 中的值（与旧 get_xxx 命令一致）
+        switch (key) {
+          case 'rag.hybrid_search': return String(state.hybridSearch);
+          case 'rag.rerank_enabled': return String(state.rerankEnabled);
+          case 'rag.hyde_enabled': return String(state.hydeEnabled);
+          case 'rag.agent_enabled': return String(state.agentEnabled);
+          case 'rag.coordinator_enabled': return String(state.coordinatorEnabled);
+          case 'rag.sub_agent_enabled': return String(state.subAgentEnabled);
+          case 'vec.embedding_model': return state.embeddingModel || 'all-MiniLM-L6-v2';
+          case 'compression.ratio': return String(state.compressionRatio || 1.0);
+          case 'rag.context_token_limit': return String(state.contextTokenLimit || 4096);
+          case 'mm.vlm_enabled': return String(state.vlmEnabled);
+          case 'rag.progressive_injection': return String(state.progressiveInjection);
+          case 'rag.speculative_enabled': return String(state.speculativeEnabled);
+          case 'rag.quality_gate_enabled': return String(state.qualityGateEnabled);
+          case 'rag.graph_retriever_enabled': return String(state.graphRetrieverEnabled);
+          case 'memory.enabled': return String(state.memoryEnabled);
+          case 'rag.web_search_enabled': return String(state.webSearchEnabled);
+          case 'rag.contextual_retrieval': return String(state.contextualRetrieval);
+          case 'window.close_to_tray': return String(state.closeToTray);
+          case 'ui.sidebar_collapsed': return String(state.sidebarCollapsed);
+          case 'app.autostart': return String(state.autostart);
+          case 'rag.retrieval_memory_enabled': return String(state.retrievalMemoryEnabled);
+          case 'update.auto_check': return String(state.updateAutoCheck !== false);
+          case 'vec.mirror_source': return state.embeddingMirrorSource || '';
+          default: return '';
+        }
+      }
+
+      // ============================================================
+      // S96: 嵌入模型对比评估（REQ-VEC-018，开发者工具门控）
+      // ============================================================
+      case 'run_embed_comparison': {
+        const req = args.request || {};
+        const modelNames = req.model_names || ['all-MiniLM-L6-v2'];
+        const topK = req.top_k || 5;
+
+        // mock：返回确定性评估结果（不同模型略有差异）
+        return modelNames.map((name, i) => {
+          // 不同模型返回不同分数（模拟检索质量差异）
+          const seed = (i + 1) * 0.15;
+          return {
+            model_name: name,
+            dim: name === 'bge-m3' ? 1024 : name === 'bge-base-en-v1.5' ? 768 : name === 'bge-small-zh-v1.5' ? 512 : 384,
+            metrics: {
+              hit_rate: Math.min(1.0, 0.6 + seed),
+              mrr: Math.min(1.0, 0.5 + seed * 0.8),
+              ndcg: Math.min(1.0, 0.55 + seed * 0.7),
+            },
+            sample_count: 6,
+          };
+        });
+      }
+
+      // ============================================================
+      // S97: MCP 协议适配器（REQ-ARCH-016）
+      // ============================================================
+      case 'add_mcp_server': {
+        state.mcpServers = state.mcpServers || [];
+        const config = args.config;
+        state.mcpServers.push({ ...config, _status: 'disconnected', _tools: [] });
+        return null;
+      }
+      case 'remove_mcp_server': {
+        state.mcpServers = (state.mcpServers || []).filter(s => s.id !== args.id);
+        return null;
+      }
+      case 'list_mcp_servers': {
+        return (state.mcpServers || []).map(s => ({
+          config: { id: s.id, name: s.name, transport: s.transport, enabled: s.enabled, command: s.command, args: s.args || [], env: [], url: s.url, headers: [] },
+          status: s._status || 'disconnected',
+          error_message: s._error || null,
+          tool_count: (s._tools || []).length,
+        }));
+      }
+      case 'toggle_mcp_server': {
+        state.mcpServers = (state.mcpServers || []).map(s => s.id === args.id ? { ...s, enabled: args.enabled } : s);
+        return null;
+      }
+      case 'get_mcp_tools': {
+        const all = (state.mcpServers || []).filter(s => s.enabled).flatMap(s => (s._tools || []).map(t => ({ ...t, server_id: s.id, server_name: s.name })));
+        return all;
+      }
+      case 'call_mcp_tool': {
+        return {
+          tool_name: args.toolName,
+          server_id: args.serverId,
+          success: true,
+          content: 'Mock tool result',
+          is_error: false,
+        };
+      }
 
       default:
         throw new Error('未实现的 mock 命令: ' + cmd);
@@ -2872,6 +3561,10 @@ case 'set_rag_eval_settings':
       state.retrievalMemoryStats = [];
 state.subAgentEnabled = false;
 state.webSearchEnabled = false;
+state.ragParams = { top_k: 8, score_threshold: 0.0, chunk_expansion_enabled: true, chunk_expansion_window: 1 };
+state.generationParams = { temperature: 0.7, max_tokens: 4096, top_p: 1.0 };
+state.docSortBy = null;
+state.docSortOrder = null;
 state.coordinatorEnabled = false;
       state.progressiveInjection = false;
       state.speculativeEnabled = false;
@@ -2884,6 +3577,8 @@ state.coordinatorEnabled = false;
       state.samplingParams = { temperature: null, top_p: null, top_k: null, max_tokens: null, frequency_penalty: null, presence_penalty: null };
       state.kernelMode = 'mistral_rs';
       state.kvCacheEnabled = false;
+      // 书签重置
+      state._bookmarks = [];
       // Token 用量重置
       state.tokenBudget = 0;
     },
@@ -2930,6 +3625,7 @@ state.coordinatorEnabled = false;
         content_hash: hash,
         chunk_count: 3,
         created_at: Date.now(),
+        workspace_id: state.currentWorkspaceId,
       });
     },
     /** 设置下次 chat 的错误消息 */
@@ -2989,6 +3685,10 @@ state.coordinatorEnabled = false;
       state.retrievalMemoryStats = [];
 state.subAgentEnabled = false;
 state.webSearchEnabled = false;
+state.ragParams = { top_k: 8, score_threshold: 0.0, chunk_expansion_enabled: true, chunk_expansion_window: 1 };
+state.generationParams = { temperature: 0.7, max_tokens: 4096, top_p: 1.0 };
+state.docSortBy = null;
+state.docSortOrder = null;
 state.coordinatorEnabled = false;
       state.progressiveInjection = false;
       state.speculativeEnabled = false;
@@ -2999,6 +3699,7 @@ state.coordinatorEnabled = false;
   state.sessionTodos = [];
   state.burstBuffer = [];
   state.shadowScreenStats = { total: 0, agree: 0, disagree: 0, unavailable: 0 };
+    state.mcpServers = [];
     },
   };
 })();

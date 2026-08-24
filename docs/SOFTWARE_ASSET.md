@@ -2,7 +2,7 @@
 
 > **本文档是 EchoMind 项目的权威软件资产清单，覆盖全部源代码、架构、数据流、依赖、测试、构建与部署细节。后续迭代开发必须同步更新此文档。**
 >
-> **版本**: v1.5.0 | **更新日期**: 2026-08-10 | **维护者**: EchoMind 团队
+> **版本**: v2.0.0（深耕阶段） | **更新日期**: 2026-08-16 | **维护者**: EchoMind 团队
 
 ---
 
@@ -44,8 +44,8 @@ EchoMind（灵犀）是一个 **本地 RAG 知识库桌面应用**，基于 Rust
 |---|---|
 | 文档导入 | Markdown / 纯文本 / PDF（含多模态 OCR + VLM） |
 | 文本分块 | Token 窗口 / 语义分块 / 章节感知分块 / Proposition 原子分割 |
-| 嵌入向量 | fastembed ONNX (all-MiniLM-L6-v2, 384-dim)，多模型运行时切换 |
-| 向量检索 | 余弦相似度全表扫描 / HNSW 近似最近邻（Pro） |
+| 嵌入向量 | fastembed ONNX (5 模型可选: AllMiniLML6V2/BgeSmallEnV1_5/BgeSmallZhV1_5/E5SmallV2/BgeM3, 384~1024-dim)，多模型运行时切换 |
+| 向量检索 | 归一化点积（内存快照）/ HNSW 近似最近邻（Free，磁盘加密持久化 + 懒加载） |
 | 混合检索 | 向量 + BM25 关键词 → RRF 融合 |
 | 重排序 | bge-reranker-base Cross-Encoder（Pro 可选） |
 | 查询改写 | HyDE 假设性文档嵌入（Pro） |
@@ -55,13 +55,15 @@ EchoMind（灵犀）是一个 **本地 RAG 知识库桌面应用**，基于 Rust
 | 安全状态机 | 自动锁屏 / 暴力破解防护 / 紧急销毁 / 剪贴板清除 |
 | 多代理 RAG | ReAct 循环 / Coordinator 多步协调 |
 | 性能优化 | 三级缓存 / Prompt 压缩 / 渐进注入 / Speculative RAG / 检索记忆 / Prompt Prefix 磁盘缓存 / 上下文压缩增强（原文尾部保留） |
+| 多知识库 | 工作空间创建/切换/重命名/删除（REQ-WS-001） |
+| 智能模式 | 一键开启最佳实践配置（混合搜索 + Rerank + HyDE + 知识图谱 + 质量门控 + 压缩） |
 
 ### 1.3 技术栈
 
 - **后端**: Rust Edition 2024 (≥1.85), Tauri v2
-- **前端**: Vanilla JS ES Modules (56 个模块), esbuild 打包 IIFE, TypeScript checkJs 类型检查 (tsconfig.json + types/*.d.ts), Tailwind CSS (本地 JIT), 无框架无 CDN
+- **前端**: Vanilla JS ES Modules (76 个模块), esbuild 打包 IIFE, TypeScript checkJs 类型检查 (tsconfig.json + types/*.d.ts), Tailwind CSS (预构建), 无框架无 CDN
 - **数据库**: SQLite (rusqlite + r2d2 连接池, WAL 模式, FTS5, SQLCipher)
-- **嵌入模型**: fastembed (ONNX Runtime, all-MiniLM-L6-v2 384-dim)
+- **嵌入模型**: fastembed (ONNX Runtime, 5 模型可选: AllMiniLML6V2 384-dim / BgeSmallEnV1_5 384-dim / BgeSmallZhV1_5 512-dim / E5SmallV2 384-dim / BgeM3 1024-dim)
 - **本地 LLM**: mistral.rs v0.9.0 (GGUF 格式, GPU Metal/CUDA 可选)
 - **许可证**: Ed25519 签名验证
 
@@ -77,6 +79,8 @@ crates/models  →  crates/prompt  →  crates/core  →  crates/infra  →  cra
                                      ↑
                               crates/compact
                               (compaction)
+                              crates/context
+                              (system context)
 ```
 
 **依赖方向铁律**: `tauri-app → core → models`，严禁反向依赖。`crates/infra` 实现 `crates/core` 定义的端口 Trait。
@@ -188,7 +192,7 @@ opt-level = 3  # ML 依赖在 dev 模式以 opt-level 3 编译，避免调试时
 
 ## 5. Prompt 构建层 (crates/prompt)
 
-**文件**: `crates/prompt/src/lib.rs`
+**文件**: `crates/prompt/src/lib.rs` + `crates/prompt/src/sanitize.rs`
 
 ### 5.1 核心功能
 
@@ -198,6 +202,10 @@ opt-level = 3  # ML 依赖在 dev 模式以 opt-level 3 编译，避免调试时
 | `build_agent_prompt()` | ReAct Agent prompt（Thought/Action/Observation 循环） |
 | `build_final_rag_prompt()` | Agent 最终答案 RAG prompt |
 | `truncate_text()` | 文本截断工具 |
+| `sanitize_chunk_content()` | 四层防护处理单个 chunk（PII 脱敏 + 边界隔离 + 注入标记）|
+| `sanitize_dynamic_context()` | 批量处理检索结果，构建带防护的动态上下文段 |
+| `redact_pii()` | PII 脱敏（7 类：邮箱/手机号/身份证/IP/国际手机号/SSN/护照）|
+| `detect_pii()` | PII 检测，返回 `Vec<PiiRedaction>` |
 
 ### 5.2 SegmentedPrompt
 
@@ -379,7 +387,7 @@ Unencrypted → EncryptedUnlocked →(超时/手动)→ Locked →(密码)→ En
 | `local_logger` | `local_logger.rs` | `LocalLogger` | tracing 结构化日志 + JSON Lines + 轮转 |
 | `perf` | `perf.rs` | `PerfReport`, `PerfRunner` | 性能基准框架 |
 | `local_llm` (Pro) | `local_llm.rs` | `LocalLlmEngine`, `Quantization`, `KernelMode` | mistral.rs 本地 LLM 推理 |
-| `hnsw_index` (Pro) | `hnsw_index.rs` | `HnswIndex` | HNSW 近似最近邻索引 |
+| `hnsw_index` | `hnsw_index.rs` | `HnswIndex` | HNSW 近似最近邻索引（Free，二进制加密持久化 REQ-PERF-015） |
 | `ocrs_engine` (Pro) | `ocrs_engine.rs` | `OcrsEngine` | ocrs + rten 本地 OCR |
 | `pdfium_renderer` (Pro) | `pdfium_renderer.rs` | `PdfiumRenderer` | pdfium PDF 页面渲染 |
 | `openai_vision` (Pro) | `openai_vision.rs` | `OpenAIVisionProvider` | OpenAI 兼容 VLM API |
@@ -421,7 +429,7 @@ Unencrypted → EncryptedUnlocked →(超时/手动)→ Locked →(密码)→ En
 
 ### 8.4 LocalEmbedder 关键设计
 
-- **模型**: all-MiniLM-L6-v2 (384-dim, ~30MB)
+- **模型**: 5 种 EmbeddingModel 可选 — AllMiniLML6V2（384-dim，默认）/ BgeSmallEnV1_5（384-dim，推荐）/ BgeSmallZhV1_5（512-dim，中文）/ E5SmallV2（384-dim）/ BgeM3（1024-dim，多语言）
 - **多源容错**: HF 官方 → hf-mirror.com 回退
 - **并行推理池**: N 个独立 ONNX 会话，`embed_batch` 分片并行
 - **池大小**: `available_parallelism().min(8)`
@@ -539,11 +547,11 @@ base64(payload)-base64(signature)
 
 ### 11.1 架构
 
-- **源码**: `ui/src/*.js` (54 个 ES Module，Session 1-2 新增 zindex/panel-stack/input-keymap/input-history + focus-trap 改造)
+- **源码**: `ui/src/*.js` (59 个 ES Module，V3.1 新增 disk-space.js；S95 精简后模块合并)
 - **构建产物**: `ui/index.html` (单文件内联，由 `scripts/build-ui.mjs` esbuild 打包生成)
 - **类型检查**: `tsconfig.json` (checkJs: true) + `types/*.d.ts` (dom-ext / tauri / vendor 全局声明)，`npx tsc --noEmit` 检查
 - **样式**: `ui/styles/*.css` (tokens.css + typography.css + components.css)
-- **i18n**: `ui/locales/{en,zh-CN}.json`
+- **i18n**: `ui/locales/{en,zh-CN,ja}.json`（V3.1 起三语言 100% key 对齐）
 - **无框架**: 原生 Vanilla JS，无 CDN 依赖
 - **第三方库**: Tailwind CSS (本地 JIT), marked.js, DOMPurify, highlight.js, KaTeX, Mermaid — 全部本地 vendored
 
@@ -914,7 +922,11 @@ Locked →(10 failed attempts + panic_wipe)→ 紧急销毁
 
 ### 17.3 PII 检测与脱敏
 
-8 类 PII：Email, Phone (CN), IdCard, BankCard (Luhn), IP, IntlPhone, SSN, Passport。正则匹配 + 脱敏替换 + 审计日志。
+**两层 PII 防护**：
+
+1. **CRUD 层 PII 检测**（`crates/core/src/privacy.rs`）：8 类 PII（Email, Phone (CN), IdCard, BankCard (Luhn), IP, IntlPhone, SSN, Passport）正则匹配 + 脱敏替换 + 审计日志。
+2. **RAG 管线 PII 脱敏**（`crates/prompt/src/sanitize.rs`，REQ-SEC-022）：7 类 PII（不含银行卡号，误报率高）在 chunk 注入 prompt 前执行脱敏。`redact_pii()` → `sanitize_chunk_content()` 在 PII 脱敏后再执行注入标记，确保敏感信息不进入 LLM 上下文。
+3. **macOS 代码签名与公证**（`crates/tauri-app/tauri.conf.json` + `scripts/sign-macos.sh`，REQ-SEC-023）：配置 `signingIdentity`（ad-hoc 默认 `-`，Developer ID 通过环境变量覆盖）+ `entitlements.plist`（网络/文件/JIT 权限声明）+ CI/CD 签名流程（P12 证书 base64 注入 + notarytool 公证 + stapler staple）。无证书环境自动跳过签名。
 
 ### 17.4 审计日志哈希链
 
@@ -960,7 +972,7 @@ entry_hash = SHA256(prev_hash || entry_data)
 | 文档数 | 50 个上限 | 无限制 |
 | PDF 导入 | 禁止 | 允许（含多模态 OCR + VLM） |
 | 本地 LLM | 禁止 | mistral.rs GGUF 推理 |
-| HNSW 索引 | 禁止 | 允许 |
+| HNSW 索引 | 允许（Free 默认，REQ-PERF-013） | 允许 |
 | ColBERT 多向量 | 禁止 | 允许 |
 | ONNX 压缩 | 禁止 | 允许 |
 | 文档审计 | 禁止 | 允许 |
@@ -1315,6 +1327,7 @@ v1.1（11 项）→ v1.2 S50（12 项）→ v1.2 S51（13 项）：新增 "pptx"
 |---|---|---|
 | `crates/models/src/lib.rs` | ~1095 | 数据模型定义 |
 | `crates/prompt/src/lib.rs` | - | Prompt 构建 |
+| `crates/prompt/src/sanitize.rs` | ~880 | Prompt 安全防护（REQ-SEC-021 + REQ-SEC-022）|
 | `crates/compact/src/lib.rs` | - | 上下文压缩 |
 | `crates/core/src/lib.rs` | - | 15 个端口 Trait 定义 |
 | `crates/core/src/chat.rs` | - | ChatEngine RAG 编排 |

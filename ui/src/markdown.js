@@ -17,23 +17,138 @@
 import { $, copyToClipboard } from './utils.js';
 import { t } from './i18n.js';
 import { enhanceWikiLinks } from './wiki-links.js';
+import { loadMermaid, loadKatex, loadChart, loadHighlight } from './lazy-loader.js';
+
+// ============================================================
+// Mermaid 图片查看器（P1-4：DeepSeek 风格 Fancy Box）
+// ============================================================
+
+/**
+ * 弹出全屏 Mermaid SVG 查看器。
+ * @param {string} svgHtml - SVG HTML 内容
+ */
+function _showMermaidLightbox(svgHtml) {
+  // 移除已有 lightbox
+  const existing = document.getElementById('mermaidLightbox');
+  if (existing) { existing.remove(); return; }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'mermaidLightbox';
+  overlay.className = 'fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center cursor-zoom-out';
+  overlay.style.animation = 'fadeInZoomExpand 0.2s ease-out';
+
+  const container = document.createElement('div');
+  container.className = 'max-w-[90vw] max-h-[90vh] overflow-auto p-4';
+  container.innerHTML = svgHtml;
+  // SVG 自适应缩放
+  const svg = container.querySelector('svg');
+  if (svg) {
+    svg.style.maxWidth = '90vw';
+    svg.style.maxHeight = '90vh';
+    svg.style.width = 'auto';
+    svg.style.height = 'auto';
+  }
+
+  overlay.appendChild(container);
+
+  // 点击空白处关闭
+  overlay.onclick = (e) => {
+    if (e.target === overlay) overlay.remove();
+  };
+
+  // ESC 关闭
+  const escHandler = (e) => {
+    if (e.key === 'Escape') {
+      overlay.remove();
+      document.removeEventListener('keydown', escHandler);
+    }
+  };
+  document.addEventListener('keydown', escHandler);
+
+  document.body.appendChild(overlay);
+}
 
 // ============================================================
 // 代码块增强
 // ============================================================
 
+/** 彩虹括号颜色列表（6 色循环） */
+const RAINBOW_BRACKET_COLORS = [
+  '#FFD700', // gold
+  '#FF6B6B', // coral
+  '#4ECDC4', // teal
+  '#95E1D3', // mint
+  '#C7B3F0', // lavender
+  '#FAB1A0', // peach
+];
+
+/**
+ * P1-5：为代码块中的括号字符添加彩虹颜色层级。
+ * 使用 TreeWalker 遍历文本节点，将 ()[]{} 替换为带颜色的 span。
+ * 已被 hljs 标记的 token 内的括号也会被着色。
+ * @param {HTMLElement} codeEl - <code> 元素
+ */
+function _applyRainbowBrackets(codeEl) {
+  if (codeEl.dataset.rainbowApplied) return;
+  codeEl.dataset.rainbowApplied = 'true';
+
+  const walker = document.createTreeWalker(codeEl, NodeFilter.SHOW_TEXT, null);
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    textNodes.push(node);
+  }
+
+  for (const textNode of textNodes) {
+    const text = textNode.textContent;
+    if (!text || !/[\(\)\[\]\{\}]/.test(text)) continue;
+
+    const fragment = document.createDocumentFragment();
+    let depth = 0;
+    for (const char of text) {
+      if (char === '(' || char === '[' || char === '{') {
+        const span = document.createElement('span');
+        span.style.color = RAINBOW_BRACKET_COLORS[depth % RAINBOW_BRACKET_COLORS.length];
+        span.textContent = char;
+        fragment.appendChild(span);
+        depth++;
+      } else if (char === ')' || char === ']' || char === '}') {
+        depth = Math.max(0, depth - 1);
+        const span = document.createElement('span');
+        span.style.color = RAINBOW_BRACKET_COLORS[depth % RAINBOW_BRACKET_COLORS.length];
+        span.textContent = char;
+        fragment.appendChild(span);
+      } else {
+        fragment.appendChild(document.createTextNode(char));
+      }
+    }
+    textNode.parentNode.replaceChild(fragment, textNode);
+  }
+}
+
 /**
  * 增强代码块：包裹 .code-block + 头部栏（语言标签 + 复制按钮）。
+ *
+ * # 性能（V3.1 P2-1）
+ * `skipHeavy=true`（流式期间）跳过 hljs 语法高亮与彩虹括号：innerHTML 每帧全量
+ * 重建使 dataset 标记失效，二者每帧重跑是 O(n²) 热点。chat_done 后由
+ * `renderRichContent → highlightPendingCode` 一次性补齐。
+ *
  * @param {HTMLElement} mdEl - Markdown 内容容器
+ * @param {boolean} [skipHeavy=false] - 流式期间跳过重活（hljs/彩虹括号）
  */
-export function enhanceCodeBlocks(mdEl) {
+export function enhanceCodeBlocks(mdEl, skipHeavy = false) {
   mdEl.querySelectorAll('pre').forEach((pre) => {
     if (pre.closest('.mermaid-source, .code-block')) return;
     const code = pre.querySelector('code');
     if (!code) return;
-    if (!code.dataset.highlighted) {
+    if (!skipHeavy && !code.dataset.highlighted && typeof hljs !== 'undefined') {
       // @ts-expect-error Element extended with HTMLElement properties via dom-ext.d.ts
       try { hljs.highlightElement(code); } catch (_) { /* 半截语法容错 */ }
+    }
+    // P1-5：彩虹括号 — 为括号字符添加颜色层级（流式期间跳过，同上）
+    if (!skipHeavy) {
+      _applyRainbowBrackets(/** @type {HTMLElement} */(code));
     }
     const langMatch = /language-(\w+)/.exec(code.className);
     const lang = langMatch ? langMatch[1] : 'code';
@@ -93,17 +208,27 @@ export function replaceMermaidBlocks(mdEl) {
 
 /**
  * 渲染 .mermaid-source 占位元素为 SVG（chat_done 后调用）。
+ * 延迟加载 mermaid.min.js（3.4MB）—— 仅在有 mermaid 代码块时才加载。
  * @param {HTMLElement} mdEl - Markdown 内容容器
  */
 export async function renderMermaid(mdEl) {
   const sources = mdEl.querySelectorAll('.mermaid-source:not(.mermaid-rendered):not(.mermaid-error)');
+  if (sources.length === 0) return;
+  const mmd = await loadMermaid();
+  if (!mmd) return;
   for (const el of sources) {
     const raw = el.getAttribute('data-raw') || '';
     try {
       const id = 'mmd-' + Math.random().toString(36).slice(2, 10);
-      const { svg } = await mermaid.render(id, raw);
+      const { svg } = await mmd.render(id, raw);
       el.innerHTML = svg;
       el.classList.add('mermaid-rendered');
+      // P1-4：Mermaid 图片查看器 — 点击 SVG 弹出全屏放大查看
+      el.style.cursor = 'zoom-in';
+      el.addEventListener('click', (ev) => {
+        if (ev.target.closest('a')) return; // 不拦截链接点击
+        _showMermaidLightbox(el.innerHTML);
+      });
     } catch (_) {
       el.classList.add('mermaid-error');
       el.innerHTML = '';
@@ -124,10 +249,10 @@ export async function renderMermaid(mdEl) {
 // ============================================================
 
 const ALERT_CONFIG = {
-  note: { icon: 'ℹ️', label: 'Note' },
+  note: { icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>', label: 'Note' },
   tip: { icon: '💡', label: 'Tip' },
   important: { icon: '❗', label: 'Important' },
-  warning: { icon: '⚠️', label: 'Warning' },
+  warning: { icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>', label: 'Warning' },
   caution: { icon: '🔴', label: 'Caution' },
 };
 
@@ -319,10 +444,14 @@ export function wrapTables(mdEl) {
 
 /**
  * 在 DOM 元素内渲染 KaTeX 数学公式（REQ-VIZ-002）。
+ * 延迟加载 katex.min.js + CSS + mhchem 插件（~280KB）—— 仅在有 $ 公式时才加载。
  * @param {HTMLElement} el - Markdown 内容容器元素
+ * @returns {Promise<void>}
  */
-export function renderKatexInElement(el) {
-  if (typeof katex === 'undefined') return;
+export async function renderKatexInElement(el) {
+  // 延迟加载 KaTeX（Promise 缓存，重复调用返回同一 Promise）
+  const katex = await loadKatex();
+  if (!katex) return;
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) => {
       const parent = node.parentElement;
@@ -378,9 +507,13 @@ export function renderKatexInElement(el) {
 /**
  * 重试渲染流式期间未能渲染的 KaTeX 公式（chat_done 后调用）。
  * @param {HTMLElement} mdEl - Markdown 内容容器
+ * @returns {Promise<void>}
  */
-export function retryPendingKatex(mdEl) {
+export async function retryPendingKatex(mdEl) {
   const pendingKatex = mdEl.querySelectorAll('.katex-pending');
+  if (pendingKatex.length === 0) return;
+  const katex = await loadKatex();
+  if (!katex) return;
   for (const kp of pendingKatex) {
     const latex = kp.getAttribute('data-latex') || '';
     const isBlock = kp.getAttribute('data-display') === 'true';
@@ -435,7 +568,7 @@ export function parseTableForChart(table) {
  * @param {{labels: string[], datasets: Array}} data
  * @returns {unknown}
  */
-export function renderChart(canvas, type, data) {
+function renderChart(canvas, type, data) {
   const config = {
     type,
     data: { labels: data.labels, datasets: data.datasets.map((ds) => ({ ...ds, borderWidth: 1 })) },
@@ -457,16 +590,33 @@ export function renderChart(canvas, type, data) {
 
 /**
  * 为 Markdown 表格注入「切换图表视图」按钮。
+ * 延迟加载 chart.umd.min.js（204KB）—— 仅在有数据表格时才加载。
  * @param {HTMLElement} mdEl
+ * @returns {Promise<void>}
  */
-export function enhanceTablesForChart(mdEl) {
-  if (typeof Chart === 'undefined') return;
+export async function enhanceTablesForChart(mdEl) {
+  // 检测是否有可图表化的表格（有数值数据的表格）
+  const tables = mdEl.querySelectorAll('table:not(.chart-enhanced)');
+  if (tables.length === 0) return;
+  // 预检：至少一个表格有数值数据才加载 Chart
+  let hasChartData = false;
+  for (const table of tables) {
+    if (parseTableForChart(/** @type {HTMLTableElement} */ (table))) {
+      hasChartData = true;
+      break;
+    }
+  }
+  if (!hasChartData) {
+    tables.forEach((tbl) => tbl.classList.add('chart-enhanced'));
+    return;
+  }
+  const Chart = await loadChart();
+  if (!Chart) return;
   if (!Chart._echomindDefaults) {
     Chart.defaults.color = '#94a3b8';
     Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
     Chart._echomindDefaults = true;
   }
-  const tables = mdEl.querySelectorAll('table:not(.chart-enhanced)');
   for (const table of tables) {
     table.classList.add('chart-enhanced');
     const data = parseTableForChart(/** @type {HTMLTableElement} */ (table));
@@ -567,8 +717,8 @@ export function renderMarkdown(mdEl, rawMarkdown, sources, skipHeavy = false) {
   // Mermaid 代码块 → 占位 div
   replaceMermaidBlocks(mdEl);
 
-  // 代码块增强
-  enhanceCodeBlocks(mdEl);
+  // 代码块增强（流式期间跳过 hljs 高亮/彩虹括号 — V3.1 P2-1）
+  enhanceCodeBlocks(mdEl, skipHeavy);
 
   // GitHub Alerts
   enhanceCallouts(mdEl);
@@ -587,8 +737,34 @@ export function renderMarkdown(mdEl, rawMarkdown, sources, skipHeavy = false) {
 
   // KaTeX 数学公式（流式期间跳过，chat_done 后由 retryPendingKatex 兜底）
   if (!skipHeavy) {
-    renderKatexInElement(mdEl);
+    // 延迟加载：KaTeX 异步加载后渲染（fire-and-forget）
+    renderKatexInElement(mdEl).catch(() => {});
+    // 延迟加载：highlight.js 异步加载后高亮代码块（fire-and-forget）
+    highlightPendingCode(mdEl).catch(() => {});
   }
+}
+
+/**
+ * 延迟加载 highlight.js 并高亮所有未高亮的代码块。
+ *
+ * 将 highlight.js（124KB）从 eager 加载改为按需加载：
+ * - 首次调用时加载 hljs 库
+ * - 后续调用从 Promise 缓存直接返回
+ * - 未加载前代码块仍正常显示（无语法着色），加载后自动高亮
+ *
+ * @param {HTMLElement} mdEl - Markdown 内容容器
+ */
+export async function highlightPendingCode(mdEl) {
+  const pending = mdEl.querySelectorAll('pre code:not([data-highlighted])');
+  if (pending.length === 0) return;
+  const hljs = await loadHighlight();
+  if (!hljs) return;
+  pending.forEach((code) => {
+    // @ts-expect-error Element extended with HTMLElement properties via dom-ext.d.ts
+    try { hljs.highlightElement(code); } catch (_) { /* 半截语法容错 */ }
+    // 流式期间彩虹括号被 skipHeavy 豁免（V3.1 P2-1）→ 此处一次性补齐
+    _applyRainbowBrackets(/** @type {HTMLElement} */(code));
+  });
 }
 
 /**
@@ -601,8 +777,9 @@ export function renderMarkdown(mdEl, rawMarkdown, sources, skipHeavy = false) {
 export async function renderRichContent(mdEl) {
   if (!mdEl) return;
   await renderMermaid(mdEl);
+  await highlightPendingCode(mdEl);
   // 流式期间跳过 KaTeX → 此处全量渲染一次完整公式
-  renderKatexInElement(mdEl);
-  retryPendingKatex(mdEl);
-  enhanceTablesForChart(mdEl);
+  await renderKatexInElement(mdEl);
+  await retryPendingKatex(mdEl);
+  await enhanceTablesForChart(mdEl);
 }

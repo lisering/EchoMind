@@ -154,15 +154,9 @@ test.describe('TC-DL-001~012 向导下载进度条全链路', () => {
   });
 
   // ============================================================
-  // TC-DL-006: 下载挂起 → 15s 看门狗提示
+  // TC-DL-006 已删除：15s 看门狗功能已移除（魔塔下载很快），
+  // indeterminate 持续显示由 TC-DL-005 覆盖。
   // ============================================================
-  test.skip('TC-DL-006 下载挂起时 indeterminate 动画持续', async ({ page }) => {
-    // 看门狗已移除（魔塔下载很快），此测试仅验证 indeterminate 持续
-    // init_embedder 已挂起（beforeEach 设置），无进度事件
-    await page.waitForTimeout(500);
-    const barClass = await page.locator('#wizDownloadBar').getAttribute('class');
-    expect(barClass, '挂起期间应持续显示 indeterminate 动画').toContain('progress-indeterminate');
-  });
 
   // ============================================================
   // TC-DL-007: 下载完成 → progress-complete + 自动进入 Step 2

@@ -84,7 +84,7 @@ test.describe('E2E-ADV 高级功能（REQ-VEC-013, REQ-VEC-012, REQ-RAG-019, REQ
 
   test('E2E-ADV-004 嵌入模型——切换为 bge-small-zh', async ({ page }) => {
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_embedding_model', { model: 'bge-small-zh-v1.5' })
+      window.__TAURI__.core.invoke('update_setting', { key: 'vec.embedding_model', value: 'bge-small-zh-v1.5' })
     );
     const model = await page.evaluate(() => window.__mock.state.embeddingModel);
     expect(model).toBe('bge-small-zh-v1.5');
@@ -92,10 +92,10 @@ test.describe('E2E-ADV 高级功能（REQ-VEC-013, REQ-VEC-012, REQ-RAG-019, REQ
 
   test('E2E-ADV-005 嵌入模型——切换回默认', async ({ page }) => {
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_embedding_model', { model: 'bge-small-zh-v1.5' })
+      window.__TAURI__.core.invoke('update_setting', { key: 'vec.embedding_model', value: 'bge-small-zh-v1.5' })
     );
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_embedding_model', { model: 'all-MiniLM-L6-v2' })
+      window.__TAURI__.core.invoke('update_setting', { key: 'vec.embedding_model', value: 'all-MiniLM-L6-v2' })
     );
     const model = await page.evaluate(() => window.__mock.state.embeddingModel);
     expect(model).toBe('all-MiniLM-L6-v2');
@@ -142,7 +142,7 @@ test.describe('E2E-ADV 高级功能（REQ-VEC-013, REQ-VEC-012, REQ-RAG-019, REQ
 
   test('E2E-ADV-008 上下文 token 限制——设置有效值', async ({ page }) => {
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_context_token_limit', { limit: 8192 })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.context_token_limit', value: String(8192) })
     );
     const limit = await page.evaluate(() => window.__mock.state.contextTokenLimit);
     expect(limit).toBe(8192);
@@ -151,20 +151,20 @@ test.describe('E2E-ADV 高级功能（REQ-VEC-013, REQ-VEC-012, REQ-RAG-019, REQ
   test('E2E-ADV-009 上下文 token 限制——无效值抛出错误', async ({ page }) => {
     await expect(
       page.evaluate(() =>
-        window.__TAURI__.core.invoke('set_context_token_limit', { limit: 100 })
+        window.__TAURI__.core.invoke('update_setting', { key: 'rag.context_token_limit', value: String(100) })
       )
     ).rejects.toThrow();
 
     await expect(
       page.evaluate(() =>
-        window.__TAURI__.core.invoke('set_context_token_limit', { limit: 999999 })
+        window.__TAURI__.core.invoke('update_setting', { key: 'rag.context_token_limit', value: String(999999) })
       )
     ).rejects.toThrow();
   });
 
   test('E2E-ADV-010 上下文 token 限制——边界值 2048', async ({ page }) => {
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_context_token_limit', { limit: 2048 })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.context_token_limit', value: String(2048) })
     );
     const limit = await page.evaluate(() => window.__mock.state.contextTokenLimit);
     expect(limit).toBe(2048);
@@ -172,7 +172,7 @@ test.describe('E2E-ADV 高级功能（REQ-VEC-013, REQ-VEC-012, REQ-RAG-019, REQ
 
   test('E2E-ADV-011 上下文 token 限制——边界值 32768', async ({ page }) => {
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_context_token_limit', { limit: 32768 })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.context_token_limit', value: String(32768) })
     );
     const limit = await page.evaluate(() => window.__mock.state.contextTokenLimit);
     expect(limit).toBe(32768);

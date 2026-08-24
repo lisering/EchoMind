@@ -21,9 +21,5 @@ r-free = "run"
 # ──────────────────────────────────────────────
 # [build] 编译优化
 # ──────────────────────────────────────────────
-[build]
-# 使用 split-debuginfo 减少 debug 产物体积（macOS）
-# split-debuginfo 将调试信息拆分为独立 .dwarf 文件，而非内嵌在 .rlib/.a 中
-# 可减少 ~30-40% 的 target 体积
-# 参考: https://blog.rust-lang.org/2021/05/11/edition-2021.html#split-debug-info
-split-debuginfo = "unpacked"
+# 注：split-debuginfo 已移除——cargo 1.9x 起该 key 在项目级 config 中
+# 报 "unused config key" warning（仅 [profile] 表支持），macOS 默认行为已足够。

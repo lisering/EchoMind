@@ -11,13 +11,21 @@
  * 7. 点击加密状态可跳转到安全设置
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+// V3.1 P3-3：formatPrivacyText 文案走 i18n —— mock t() 直接读真实 zh-CN 语言包
+vi.mock('../../../ui/src/i18n.js', async () => {
+  const zh = (await import('../../../ui/locales/zh-CN.json')).default;
+  const resolve = (path) => path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), zh);
+  return { t: vi.fn((key) => resolve(key) ?? key), getLocale: vi.fn(() => 'zh-CN'), setLocale: vi.fn(), SUPPORTED_LOCALES: ['en', 'zh-CN', 'ja'] };
+});
+
 import {
   getPrivacyStatus,
   formatPrivacyText,
   renderPrivacyIndicator,
   PRIVACY_STATUS_TEXT,
-} from '../../../ui/src/privacy-indicator.js';
+} from '../../../ui/src/chat-render.js';
 import { setState, resetState } from '../../../ui/src/state.js';
 
 describe('Privacy Indicator — privacy-indicator.js', () => {

@@ -21,19 +21,32 @@ import { importPaths } from './import.js';
 import { toast, toastError } from './toast.js';
 import { renderMarkdown, renderRichContent } from './markdown.js';
 import { t } from './i18n.js';
-import { showCaret, removeCaret } from './caret.js';
-import { shouldAutoScroll, resetScrollLock, createJumpToLatestButton, beginProgrammaticScroll } from './scroll-lock.js';
-import { send } from './chat.js';
+// caret.js 已合并到本模块末尾
+import { shouldAutoScroll, resetScrollLock, createJumpToLatestButton, beginProgrammaticScroll } from './chat-utils.js';
 import { renderEmptyState } from './empty-state.js';
-import { renderPrivacyIndicator } from './privacy-indicator.js';
 import { createThinkingPanel } from './thinking-panel.js';
+// privacy-indicator.js 已合并到本模块末尾
 import { createEditButton, enterEditMode, renderBranchPagination, findAssistantBlock } from './message-edit.js';
-import { removeFollowups } from './followup.js';
+import { icon } from './utils.js';
+import { showConfirmDialog } from './confirm-dialog.js';
 import { createTtsButton } from './voice-input.js';
-import { getExistingCarousel, createCarousel, addCarouselVersion } from './regen-carousel.js';
+// regen-carousel.js merged into this file (createCarousel, addCarouselVersion, etc.)
 import { generateTurnGroupId, getTurn, getActiveVersion, getVersionCount, setTurnTree, buildTurnTree, buildHistoryFromTurns, addVersion, updateVersionAssistant } from './turn-tree.js';
 import { convApi } from './ipc.js';
-import { sendFromEdit } from './chat.js';
+
+// ============================================================
+// chat 动作注册表（V3.1 P4-2：解除 chat-render ⇄ chat 循环依赖。
+// chat.js 在模块初始化时注入 send/sendFromEdit，本模块仅经此表调用。）
+// ============================================================
+const _chatActions = {};
+
+/**
+ * 由 chat.js 调用：注入本模块需要的发送动作（单向依赖）。
+ * @param {{send: Function, sendFromEdit: Function}} actions
+ */
+export function registerChatActions(actions) {
+  Object.assign(_chatActions, actions);
+}
 
 // ============================================================
 // 模块级状态
@@ -41,6 +54,66 @@ import { sendFromEdit } from './chat.js';
 
 /** 「回到底部」浮动按钮（null 表示未创建）。 */
 let _jumpToLatestBtn = null;
+
+// ============================================================
+// 重新生成变体菜单（P0-3：DeepSeek 风格重新生成变体）
+// ============================================================
+
+/**
+ * 显示重新生成变体菜单（右键 / 长按触发）。
+ * @param {number} x - 屏幕坐标 X
+ * @param {number} y - 屏幕坐标 Y
+ * @param {(variant: 'default'|'concise'|'detailed') => void} callback - 选择变体后的回调
+ */
+function _showRegenVariantMenu(x, y, callback) {
+  // 移除已有菜单
+  const existing = document.querySelector('.regen-variant-menu');
+  if (existing) existing.remove();
+
+  const menu = document.createElement('div');
+  menu.className = 'regen-variant-menu fixed z-50 bg-surface-2 border border-border rounded-lg shadow-lg py-1 min-w-[160px]';
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+
+  const variants = [
+    { id: 'default', label: t('chat.regen_default') || '重新生成' },
+    { id: 'concise', label: t('chat.regen_concise') || '简洁模式' },
+    { id: 'detailed', label: t('chat.regen_detailed') || '详细模式' },
+  ];
+
+  for (const v of variants) {
+    const item = document.createElement('div');
+    item.className = 'px-4 py-2 text-sm text-text-secondary hover:bg-accent/10 hover:text-accent cursor-pointer transition-colors';
+    item.textContent = v.label;
+    item.onclick = () => {
+      menu.remove();
+      callback(/** @type {'default'|'concise'|'detailed'} */(v.id));
+    };
+    menu.appendChild(item);
+  }
+
+  document.body.appendChild(menu);
+
+  // 点击外部关闭菜单
+  setTimeout(() => {
+    const closeHandler = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    document.addEventListener('click', closeHandler);
+  }, 0);
+
+  // ESC 键关闭菜单
+  const escHandler = (e) => {
+    if (e.key === 'Escape') {
+      menu.remove();
+      document.removeEventListener('keydown', escHandler);
+    }
+  };
+  document.addEventListener('keydown', escHandler);
+}
 
 // ============================================================
 // 模型标识格式化（TC-QA-004）
@@ -62,7 +135,7 @@ export function updateModelPill() {
   pill.classList.remove('hidden');
   const iconEl = document.getElementById('modelPillIcon');
   const nameEl = document.getElementById('modelPillName');
-  if (iconEl) iconEl.textContent = mode === 'local' ? '💻' : '☁️';
+  if (iconEl) iconEl.innerHTML = mode === 'local' ? icon('keyboard', 'sm') : icon('cloud', 'sm');
   let displayName = model;
   if (mode === 'local') {
     const parts = model.split('/');
@@ -95,12 +168,21 @@ export function showApp() {
  */
 export function resetChatArea(title, desc) {
   const chatArea = $('chatArea');
+  // REQ-RAG-018: 传入文档名列表以生成动态建议（AC-3）
+  const allDocs = get('kbAllDocs') || [];
+  const docNames = allDocs.map((d) => d.name || d.title || '').filter(Boolean).slice(0, 5);
   renderEmptyState(chatArea, {
+    docNames,
     onPickQuestion: (question) => {
       const input = $('queryInput');
       if (input) {
         input.value = question;
         input.focus();
+        // REQ-RAG-018 AC-2: 点击建议卡片自动填入输入框并发送
+        const sendBtn = $('sendBtn');
+        if (sendBtn && !sendBtn.disabled) {
+          sendBtn.click();
+        }
       }
     },
     onImport: () => {
@@ -135,10 +217,14 @@ export function appendBlock(role) {
   const wrap = document.createElement('div');
   wrap.className = `msg-block message-in msg-${role} animate-message-in`;
   if (role === 'user') {
-    // DeepSeek 风格：用户消息纯文本右对齐（无气泡背景/边框）
-    wrap.className = 'msg-block message-in msg-user animate-message-in w-fit max-w-[var(--msg-user-max-width)] ml-auto mr-0 mb-1 group';
-    wrap.innerHTML = `<div class="msg-content msg-user-content text-text-primary text-base leading-normal whitespace-pre-wrap break-words cursor-text" title="${t('chat.edit') || '点击编辑'}"></div>`;
+    // DeepSeek 风格：用户消息右对齐气泡（浅蓝背景 + 22px 大圆角 + padding）
+    // DeepSeek 实测：background rgb(237,243,254) + border-radius 22px + padding 10px 16px + fontSize 16px
+    wrap.className = 'msg-block message-in msg-user animate-message-in flex flex-col items-end mb-1 group';
+    wrap.innerHTML = `<div class="msg-content msg-user-content text-text-primary text-base leading-normal whitespace-pre-wrap break-words cursor-text" style="background: var(--msg-user-bg); border: 1px solid var(--msg-user-border); border-radius: var(--msg-user-radius); padding: 10px 16px; max-width: var(--msg-user-max-width); transition: background 0.3s ease;" title="${t('chat.edit') || '点击编辑'}"></div>`;
   } else {
+    // DeepSeek 风格：AI 消息透明背景
+    // DeepSeek 实测：AI 正文 ds-assistant-message-main-content 用 16px + color rgb(15,17,21) 深色
+    // 思考链内 ds-markdown 用 14px + color rgb(97,102,107) 灰色
     wrap.className = 'msg-block message-in msg-assistant animate-message-in w-full mb-8 group';
     const thinkingPanel = createThinkingPanel();
     wrap.innerHTML = `
@@ -146,14 +232,14 @@ export function appendBlock(role) {
         <div class="md text-text-primary text-base leading-normal"></div>
         <div class="sources mt-2"></div>
       </div>
-      <div class="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-fast msg-actions"></div>`;
+      <div class="flex gap-1 mt-3 pt-3 opacity-0 group-hover:opacity-100 transition-opacity duration-normal msg-actions"></div>`;
     wrap.querySelector('.msg-content').insertBefore(thinkingPanel.container, wrap.querySelector('.md'));
     wrap._thinkingPanel = thinkingPanel;
   }
   $('chatArea').appendChild(wrap);
   if (role === 'user') {
     const actions = document.createElement('div');
-    actions.className = 'flex justify-end gap-1 mt-1 transition-opacity duration-fast';
+    actions.className = 'flex justify-end gap-2 pt-3 pb-2 transition-opacity duration-normal';
     actions.dataset.role = 'user-actions';
     wrap.after(actions);
   }
@@ -267,7 +353,7 @@ async function commitEdit(blockEl, originalContent, newContent) {
   removeFollowups(blockEl);
 
   // 5. 就地重发（不创建新的 user/assistant block）
-  await sendFromEdit(blockEl, newContent, turnGroup, newVersion);
+  await _chatActions.sendFromEdit?.(blockEl, newContent, turnGroup, newVersion);
 }
 
 /**
@@ -295,7 +381,7 @@ async function editAttachHandler() {
  */
 async function loadDocumentsSafe() {
   try {
-    const docs = await invoke('list_documents');
+    const docs = await invoke('get_documents');
     setState({ documents: docs });
   } catch (err) {
     eprintlnSafe(`刷新文档列表失败: ${err}`);
@@ -326,14 +412,42 @@ export function appendAiDisclaimer(assistantEl) {
 // 流式渲染调度
 // ============================================================
 
+/** 流式渲染最小帧间隔 ms（V3.1 P4-1）：rAF 合帧之上再加 fps 上限。
+ *  每帧成本 = marked.parse + DOMPurify + innerHTML 全量重建（O(n)），
+ *  token 高频到达时限帧可避免 60fps 满帧率下的 CPU 空转。 */
+const STREAM_MIN_FRAME_MS = 66; // ≈15fps，视觉流畅度足够
+
+/** 超长文本降频阈值与间隔：>32KB 时降到 ≈8fps */
+const STREAM_LONG_TEXT_THRESHOLD = 32 * 1024;
+const STREAM_LONG_FRAME_MS = 125;
+
+let _lastStreamRenderAt = 0;
+let _streamTimer = null;
+
 /**
- * 调度一次 rAF 渲染周期（防抖：已有待执行帧时跳过）。
+ * 调度一次流式渲染（V3.1 P4-1：rAF 合帧 + 最小帧间隔限频）。
+ * 非流式调用方请直接调 renderMarkdown。
  */
 export function scheduleRender() {
   if (get('renderScheduled')) return;
+
+  // 帧间隔限频：距上次渲染不足最小间隔时，安排一个延时帧（合并不了的长尾 token）
+  const len = (get('currentRawMarkdown') || '').length;
+  const minInterval = len > STREAM_LONG_TEXT_THRESHOLD ? STREAM_LONG_FRAME_MS : STREAM_MIN_FRAME_MS;
+  const elapsed = Date.now() - _lastStreamRenderAt;
+  if (elapsed < minInterval) {
+    if (_streamTimer) return; // 已有待执行的延时帧
+    _streamTimer = setTimeout(() => {
+      _streamTimer = null;
+      scheduleRender();
+    }, minInterval - elapsed);
+    return;
+  }
+
   setState({ renderScheduled: true });
   requestAnimationFrame(() => {
     setState({ renderScheduled: false });
+    _lastStreamRenderAt = Date.now();
     const assistantEl = get('currentAssistantEl');
     if (!assistantEl) return;
     const mdEl = assistantEl.querySelector('.md');
@@ -497,10 +611,10 @@ export function showMsgActions(blockEl, rawMarkdown, role = 'assistant') {
 
   if (role === 'user') {
     const copyBtn = document.createElement('button');
-    copyBtn.className = 'msg-action-btn p-1.5 rounded-md text-text-secondary hover:text-accent hover:bg-accent/10 transition-colors duration-fast';
+    copyBtn.className = 'msg-action-btn';
     copyBtn.title = t('chat.copy_all');
     copyBtn.setAttribute('aria-label', t('chat.copy_all'));
-    copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    copyBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
     copyBtn.onclick = async () => {
       // 优先复制当前显示的版本（版本切换后 dataset.fullText 为最新内容）
       const ok = await copyToClipboard(blockEl.dataset.fullText || rawMarkdown);
@@ -510,10 +624,10 @@ export function showMsgActions(blockEl, rawMarkdown, role = 'assistant') {
     bar.appendChild(copyBtn);
   } else {
     const copyBtn = document.createElement('button');
-    copyBtn.className = 'msg-action-btn p-1.5 rounded-md text-text-secondary hover:text-accent hover:bg-accent/10 transition-colors duration-fast';
+    copyBtn.className = 'msg-action-btn';
     copyBtn.title = t('chat.copy_all');
     copyBtn.setAttribute('aria-label', t('chat.copy_all'));
-    copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    copyBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
     copyBtn.onclick = async () => {
       // 优先复制当前显示的版本（版本切换后 dataset 为最新内容）
       const mdEl = blockEl.querySelector('.md');
@@ -525,10 +639,10 @@ export function showMsgActions(blockEl, rawMarkdown, role = 'assistant') {
     bar.appendChild(copyBtn);
 
     const copyPlainBtn = document.createElement('button');
-    copyPlainBtn.className = 'msg-action-btn p-1.5 rounded-md text-text-secondary hover:text-accent hover:bg-accent/10 transition-colors duration-fast';
+    copyPlainBtn.className = 'msg-action-btn';
     copyPlainBtn.title = t('chat.copy_plain');
     copyPlainBtn.setAttribute('aria-label', t('chat.copy_plain'));
-    copyPlainBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>';
+    copyPlainBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>';
     copyPlainBtn.onclick = async () => {
       const mdEl = blockEl.querySelector('.md');
       let plainText;
@@ -559,12 +673,71 @@ export function showMsgActions(blockEl, rawMarkdown, role = 'assistant') {
     const ttsBtn = createTtsButton(blockEl, rawMarkdown);
     if (ttsBtn) bar.appendChild(ttsBtn);
 
+    // 消息级书签按钮（REQ-RAG-053）：在 TTS 之后、重新生成之前
+    const msgId = blockEl.dataset.msgId;
+    const convId = get('currentConversationId');
+    if (msgId && convId) {
+      const bookmarkBtn = document.createElement('button');
+      bookmarkBtn.className = 'msg-action-btn msg-action-btn-bookmark';
+      bookmarkBtn.title = t('chat.bookmark') || '书签';
+      bookmarkBtn.setAttribute('aria-label', t('chat.bookmark') || '书签');
+      bookmarkBtn.innerHTML = icon('book', 'sm');
+      bookmarkBtn.onclick = async () => {
+        try {
+          // 检查是否已加书签
+          const existing = await invoke('get_message_bookmark', { messageId: msgId });
+          if (existing) {
+            // 已有书签 → 删除
+            await invoke('remove_bookmark', { conversationId: convId });
+            bookmarkBtn.classList.remove('text-amber-400');
+            bookmarkBtn.title = t('chat.bookmark') || '书签';
+            toast(t('chat.bookmark_removed') || '已移除书签', 'info');
+          } else {
+            // 添加消息级书签
+            const mdEl = blockEl.querySelector('.md');
+            const content = mdEl?.dataset.rawMarkdown || rawMarkdown || ''
+            const summary = content.slice(0, 50);
+            await invoke('add_bookmark', {
+              conversationId: convId,
+              note: null,
+              messageId: msgId,
+              summary: summary,
+            });
+            bookmarkBtn.classList.add('text-amber-400');
+            bookmarkBtn.title = t('chat.bookmark_remove') || '移除书签';
+            toast(t('chat.bookmark_added') || '已添加书签', 'success');
+          }
+          // 刷新侧栏书签列表
+          window.__refreshBookmarks?.();
+        } catch (err) {
+          toastError(err instanceof Error ? err.message : String(err));
+        }
+      };
+
+      // 异步加载书签状态
+      (async () => {
+        try {
+          const existing = await invoke('get_message_bookmark', { messageId: msgId });
+          if (existing) {
+            bookmarkBtn.classList.add('text-amber-400');
+            bookmarkBtn.title = t('chat.bookmark_remove') || '移除书签';
+          }
+        } catch { /* 静默降级 */ }
+      })();
+
+      bar.appendChild(bookmarkBtn);
+    }
+
     const regenBtn = document.createElement('button');
-    regenBtn.className = 'msg-action-btn p-1.5 rounded-md text-text-secondary hover:text-accent hover:bg-accent/10 transition-colors duration-fast';
+    regenBtn.className = 'msg-action-btn';
     regenBtn.title = t('chat.regenerate');
     regenBtn.setAttribute('aria-label', t('chat.regenerate'));
-    regenBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
-    regenBtn.onclick = () => {
+    regenBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+    /**
+     * 执行重新生成，可选传入变体模式。
+     * @param {'default'|'concise'|'detailed'} [variant] - 重新生成变体
+     */
+    function doRegenerate(variant = 'default') {
       const query = blockEl.dataset.query;
       if (!query) return;
       let carousel = getExistingCarousel(blockEl);
@@ -575,12 +748,90 @@ export function showMsgActions(blockEl, rawMarkdown, role = 'assistant') {
         const currentSources = get('lastSources');
         addCarouselVersion(carousel, currentContent, currentSources);
       }
-      $('queryInput').value = query;
+      // 根据变体模式拼接查询前缀
+      let actualQuery = query;
+      if (variant === 'concise') {
+        actualQuery = query + t('chat.regen_concise_prompt');
+      } else if (variant === 'detailed') {
+        actualQuery = query + t('chat.regen_detailed_prompt');
+      }
+      $('queryInput').value = actualQuery;
       // 存轮播引用到 assistantEl（JS 属性），流结束时由 finalizeStream 追加新版本
       blockEl._regenCarousel = carousel;
-      send();
+      _chatActions.send?.();
+    }
+    // 左键点击：默认重新生成；长按或右键：弹出变体菜单
+    let _regenMenuTimer = null;
+    regenBtn.onclick = (e) => {
+      // 如果有变体菜单已打开，先关闭
+      const existingMenu = document.querySelector('.regen-variant-menu');
+      if (existingMenu) {
+        existingMenu.remove();
+        return;
+      }
+      doRegenerate('default');
     };
+    // 右键弹出变体菜单
+    regenBtn.oncontextmenu = (e) => {
+      e.preventDefault();
+      _showRegenVariantMenu(e.clientX, e.clientY, doRegenerate);
+    };
+    // 长按弹出变体菜单（移动端友好）
+    regenBtn.onmousedown = () => {
+      _regenMenuTimer = setTimeout(() => {
+        const rect = regenBtn.getBoundingClientRect();
+        _showRegenVariantMenu(rect.left, rect.bottom + 4, doRegenerate);
+      }, 500);
+    };
+    regenBtn.onmouseup = () => { if (_regenMenuTimer) clearTimeout(_regenMenuTimer); };
+    regenBtn.onmouseleave = () => { if (_regenMenuTimer) clearTimeout(_regenMenuTimer); };
     bar.appendChild(regenBtn);
+  }
+
+  // 删除消息按钮（REQ-RAG-013）：user 和 assistant 均可删除
+  if (!get('streaming') && !get('auditingDocId')) {
+    const msgId = blockEl.dataset.msgId;
+    const convId = get('currentConversationId');
+    if (msgId && convId) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'msg-action-btn msg-action-btn-danger';
+      delBtn.title = t('chat.delete_message') || '删除';
+      delBtn.setAttribute('aria-label', t('chat.delete_message') || '删除');
+      delBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+      delBtn.onclick = async () => {
+        const isUser = role === 'user';
+        const confirmMsg = isUser
+          ? (t('chat.delete_user_confirm') || '将同时删除对应的 AI 回答，确定删除？')
+          : (t('chat.delete_assistant_confirm') || '确定删除这条消息？');
+        const confirmed = await showConfirmDialog({
+          title: t('chat.delete_message') || '删除消息',
+          body: confirmMsg,
+          confirmText: t('common.delete') || '删除',
+          cancelText: t('common.cancel') || '取消',
+          danger: true,
+        });
+        if (!confirmed) return;
+        try {
+          await convApi.deleteMessage(convId, msgId);
+          // 从 DOM 移除消息块
+          if (isUser) {
+            // user 消息：移除自身 + 下一个 assistant 块 + 操作栏
+            const actionsBar = blockEl.nextElementSibling;
+            const assistantBlock = actionsBar?.nextElementSibling;
+            if (actionsBar && actionsBar.dataset.role === 'user-actions') actionsBar.remove();
+            if (assistantBlock && assistantBlock.classList.contains('md-block')) assistantBlock.remove();
+            blockEl.remove();
+          } else {
+            // assistant 消息：仅移除自身
+            blockEl.remove();
+          }
+          toast(t('chat.deleted') || '已删除', 'success');
+        } catch (err) {
+          toastError(err instanceof Error ? err.message : String(err));
+        }
+      };
+      bar.appendChild(delBtn);
+    }
   }
 }
 
@@ -684,4 +935,551 @@ export function showCollapsedHint(payload) {
   if (insertAfter) {
     insertAfter.after(hint);
   }
+}
+
+// ============================================================
+// 流式光标管理（原 caret.js 已合并到本模块）
+// ============================================================
+
+/** 光标 Tailwind 工具类集合。 */
+const CARET_CLASS = 'inline-block w-[2px] h-[1.1em] bg-accent ml-[2px] animate-caret-blink align-text-bottom rounded-[1px] motion-reduce:animate-none motion-reduce:opacity-50';
+
+/**
+ * 在指定容器末尾显示流式光标。
+ * @param {HTMLElement} container - Markdown 渲染容器（.md 元素）
+ */
+export function showCaret(container) {
+  if (!container) return;
+  if (container.querySelector('[data-stream-caret]')) return;
+
+  const caret = document.createElement('span');
+  caret.className = CARET_CLASS;
+  caret.setAttribute('data-stream-caret', '');
+  caret.setAttribute('aria-hidden', 'true');
+  caret.textContent = '▋';
+  container.appendChild(caret);
+}
+
+/**
+ * 从指定容器移除流式光标。
+ * @param {HTMLElement} container - Markdown 渲染容器
+ */
+export function removeCaret(container) {
+  if (!container) return;
+  const caret = container.querySelector('[data-stream-caret]');
+  if (caret) caret.remove();
+}
+
+/**
+ * 检查指定容器中是否活跃着流式光标。
+ * @param {HTMLElement} container - Markdown 渲染容器
+ * @returns {boolean}
+ */
+export function isCaretActive(container) {
+  if (!container) return false;
+  return container.querySelector('[data-stream-caret]') !== null;
+}
+
+// ============================================================
+// 隐私状态可视化（原 privacy-indicator.js 已合并到本模块）
+// ============================================================
+
+/** 隐私状态文案 i18n key 映射（V3.1 P3-3：原硬编码中文改为三语言 key） */
+export const PRIVACY_STATUS_TEXT = {
+  encrypted: 'privacy.encrypted',
+  notEncrypted: 'privacy.not_encrypted',
+  piiOn: 'privacy.pii_on',
+  piiOff: 'privacy.pii_off',
+  auditChainOk: 'privacy.audit_chain_ok',
+  auditChainOff: 'privacy.audit_chain_off',
+};
+
+/**
+ * 从 state 读取当前隐私状态。
+ * @returns {{encrypted: boolean, piiEnabled: boolean, locked: boolean, auditEnabled: boolean}}
+ */
+export function getPrivacyStatus() {
+  const securityState = get('securityState') || 'unencrypted';
+  const piiDetectionEnabled = get('piiDetectionEnabled') || false;
+  return {
+    encrypted: securityState !== 'unencrypted',
+    piiEnabled: piiDetectionEnabled,
+    locked: securityState === 'locked',
+    auditEnabled: securityState !== 'unencrypted',
+  };
+}
+
+/**
+ * 格式化隐私状态文案。
+ * @param {{encrypted: boolean, piiEnabled: boolean, auditEnabled: boolean}} status
+ * @returns {{encryption: string, pii: string, audit: string}}
+ */
+export function formatPrivacyText(status) {
+  const encryption = status.encrypted
+    ? t(PRIVACY_STATUS_TEXT.encrypted)
+    : t(PRIVACY_STATUS_TEXT.notEncrypted);
+
+  const pii = status.piiEnabled
+    ? t(PRIVACY_STATUS_TEXT.piiOn)
+    : t(PRIVACY_STATUS_TEXT.piiOff);
+
+  const audit = status.auditEnabled
+    ? t(PRIVACY_STATUS_TEXT.auditChainOk)
+    : t(PRIVACY_STATUS_TEXT.auditChainOff);
+
+  return { encryption, pii, audit };
+}
+
+/**
+ * 在指定容器中渲染隐私状态指示器。
+ * @param {HTMLElement} container - 目标容器
+ * @param {Object} [options] - 选项
+ * @param {Function} [options.onClick] - 点击加密状态时的回调
+ * @returns {HTMLElement}
+ */
+export function renderPrivacyIndicator(container, options = {}) {
+  const status = getPrivacyStatus();
+  const text = formatPrivacyText(status);
+
+  const existing = container.querySelector('.privacy-indicator');
+  if (existing) existing.remove();
+
+  const indicator = document.createElement('div');
+  indicator.className = 'privacy-indicator';
+
+  const encryptionEl = document.createElement('span');
+  encryptionEl.className = 'privacy-tag privacy-encryption';
+  if (status.encrypted) {
+    encryptionEl.classList.add('privacy-encrypted');
+  } else {
+    encryptionEl.classList.add('privacy-not-encrypted');
+  }
+
+  const encIcon = document.createElement('span');
+  encIcon.className = 'privacy-encryption-icon';
+  encIcon.innerHTML = status.encrypted ? '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' : '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>';
+  const encText = document.createElement('span');
+  encText.textContent = text.encryption;
+  encryptionEl.appendChild(encIcon);
+  encryptionEl.appendChild(encText);
+
+  if (options.onClick) {
+    encryptionEl.style.cursor = 'pointer';
+    encryptionEl.onclick = () => options.onClick();
+  }
+
+  const piiEl = document.createElement('span');
+  piiEl.className = 'privacy-tag privacy-pii';
+  piiEl.classList.toggle('pii-on', status.piiEnabled);
+  piiEl.classList.toggle('pii-off', !status.piiEnabled);
+  const piiIcon = document.createElement('span');
+  piiIcon.innerHTML = icon('shield', 'sm');
+  const piiText = document.createElement('span');
+  piiText.textContent = text.pii;
+  piiEl.appendChild(piiIcon);
+  piiEl.appendChild(piiText);
+
+  const auditEl = document.createElement('span');
+  auditEl.className = 'privacy-tag privacy-audit';
+  auditEl.classList.toggle('audit-ok', status.auditEnabled);
+  const auditIcon = document.createElement('span');
+  auditIcon.innerHTML = '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>';
+  const auditText = document.createElement('span');
+  auditText.textContent = text.audit;
+  auditEl.appendChild(auditIcon);
+  auditEl.appendChild(auditText);
+
+  indicator.appendChild(encryptionEl);
+  indicator.appendChild(piiEl);
+  indicator.appendChild(auditEl);
+
+  container.appendChild(indicator);
+  return indicator;
+}
+
+// ============================================================
+// 重新生成轮播（原 regen-carousel.js，AC-QA-014）
+// ============================================================
+
+/**
+ * @typedef {Object} CarouselVersion
+ * @property {string} content - Markdown 原文
+ * @property {Array|null} sources - 引用来源
+ */
+
+/**
+ * @typedef {Object} CarouselState
+ * @property {number} current - 当前选中版本索引
+ * @property {number} total - 版本总数
+ * @property {CarouselVersion[]} versions - 所有版本
+ */
+
+/**
+ * 在 assistant 消息块中创建轮播容器。
+ */
+export function createCarousel(blockEl) {
+  const existing = blockEl.querySelector('.regen-carousel');
+  if (existing) return existing;
+
+  const carousel = document.createElement('div');
+  carousel.className = 'regen-carousel';
+  carousel.dataset.currentIndex = '0';
+  carousel.dataset.total = '0';
+
+  /** @type {CarouselVersion[]} */
+  carousel._versions = [];
+
+  const content = blockEl.querySelector('.msg-content');
+  if (content && content.nextSibling) {
+    content.parentNode.insertBefore(carousel, content.nextSibling);
+  } else if (content) {
+    content.parentNode.appendChild(carousel);
+  } else {
+    blockEl.appendChild(carousel);
+  }
+
+  return carousel;
+}
+
+/**
+ * 向轮播中添加一个版本。
+ */
+export function addCarouselVersion(carousel, content, sources) {
+  if (!carousel._versions) {
+    carousel._versions = [];
+  }
+
+  /** @type {CarouselVersion} */
+  const version = { content, sources };
+  carousel._versions.push(version);
+
+  const newIndex = carousel._versions.length - 1;
+  carousel.dataset.total = String(carousel._versions.length);
+  carousel.dataset.currentIndex = String(newIndex);
+
+  if (carousel._versions.length > 1) {
+    renderCarouselControls(carousel);
+  }
+
+  return newIndex;
+}
+
+/**
+ * 在轮播中导航到上一个或下一个版本。
+ */
+export function navigateCarousel(carousel, direction) {
+  const total = carousel._versions ? carousel._versions.length : 0;
+  if (total <= 1) return;
+
+  let current = parseInt(carousel.dataset.currentIndex || '0', 10);
+
+  if (direction === 'left') {
+    current = (current - 1 + total) % total;
+  } else {
+    current = (current + 1) % total;
+  }
+
+  carousel.dataset.currentIndex = String(current);
+  updateControlsDisplay(carousel);
+}
+
+/**
+ * 获取轮播当前状态。
+ */
+export function getCarouselState(carousel) {
+  const versions = /** @type {CarouselVersion[]} */ (carousel._versions || []);
+  const current = parseInt(carousel.dataset.currentIndex || '0', 10);
+  return {
+    current,
+    total: versions.length,
+    versions,
+  };
+}
+
+/**
+ * 更新 .md 容器显示当前选中版本的内容。
+ */
+export function updateCarouselDisplay(carousel, mdContainer) {
+  const state = getCarouselState(carousel);
+  if (state.total === 0 || !state.versions[state.current]) return;
+
+  const version = state.versions[state.current];
+  mdContainer.textContent = version.content;
+  mdContainer.dataset.rawMarkdown = version.content;
+
+  const blockEl = carousel.closest('.msg-block');
+  if (blockEl) {
+    const sourcesEl = blockEl.querySelector('.sources');
+    if (sourcesEl && version.sources) {
+      blockEl.dataset.pendingSources = JSON.stringify(version.sources);
+    }
+  }
+}
+
+/**
+ * 渲染轮播控制栏（◀ 1/N ▶）。
+ */
+export function renderCarouselControls(carousel) {
+  const total = carousel._versions ? carousel._versions.length : 0;
+  if (total === 0) return null;
+
+  const existing = carousel.querySelector('.regen-carousel-controls');
+  if (existing) existing.remove();
+
+  const controls = document.createElement('div');
+  controls.className = 'regen-carousel-controls';
+
+  const prevBtn = document.createElement('button');
+  prevBtn.className = 'regen-carousel-btn regen-carousel-prev';
+  prevBtn.innerHTML = '◀';
+  prevBtn.setAttribute('aria-label', t('chat.regen_prev') || '上一个版本');
+  prevBtn.onclick = () => navigateCarousel(carousel, 'left');
+
+  const current = parseInt(carousel.dataset.currentIndex || '0', 10);
+  const counter = document.createElement('span');
+  counter.className = 'regen-carousel-counter';
+  counter.textContent = `${current + 1}/${total}`;
+
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'regen-carousel-btn regen-carousel-next';
+  nextBtn.innerHTML = '▶';
+  nextBtn.setAttribute('aria-label', t('chat.regen_next') || '下一个版本');
+  nextBtn.onclick = () => navigateCarousel(carousel, 'right');
+
+  controls.appendChild(prevBtn);
+  controls.appendChild(counter);
+  controls.appendChild(nextBtn);
+
+  carousel.insertBefore(controls, carousel.firstChild);
+
+  return controls;
+}
+
+/**
+ * 更新控制栏的显示状态。
+ */
+function updateControlsDisplay(carousel) {
+  const counter = carousel.querySelector('.regen-carousel-counter');
+  const state = getCarouselState(carousel);
+  if (counter) {
+    counter.textContent = `${state.current + 1}/${state.total}`;
+  }
+}
+
+/**
+ * 检查消息块是否已有轮播容器。
+ */
+export function getExistingCarousel(blockEl) {
+  return blockEl.querySelector('.regen-carousel') || null;
+}
+
+// ============================================================
+// 后续问题建议（followup.js 已合并到此）
+// ============================================================
+
+/**
+ * EchoMind 后续问题建议模块 — 回答完成后展示 2-3 个后续追问。
+ *
+ * 职责：
+ * 1. 从 assistant 回答中提取关键实体/概念（纯规则，零 LLM 调用）
+ * 2. 基于模板生成后续问题建议（3 种策略：实体追问 / 对比 / 例外）
+ * 3. 渲染后续建议卡片（可点击发送 + 可关闭）
+ * 4. 最多 3 条建议，避免选择困难
+ */
+
+/** 后续建议最大数量 */
+const MAX_SUGGESTIONS = 3;
+
+const FOLLOWUP_TEMPLATES = {
+  entity_deep: [
+    '关于 {entity} 还有哪些规定？',
+    '{entity} 的具体适用条件是什么？',
+    '{entity} 的计算方式是怎样的？',
+    '{entity} 有哪些例外情况？',
+    'What else should I know about {entity}?',
+    'What are the specific conditions for {entity}?',
+  ],
+  compare: [
+    '对比 {entity} 和其他相关规定的异同',
+    'Compare {entity} with related regulations',
+  ],
+  exception: [
+    '{entity} 有哪些例外或特殊情形？',
+    'What are the exceptions to {entity}?',
+  ],
+};
+
+const STOP_WORDS = new Set([
+  '的', '了', '是', '在', '和', '与', '或', '为', '以', '及', '等', '中',
+  '可', '以', '对', '从', '到', '由', '将', '被', '让', '使', '给', '向',
+  '这', '那', '其', '此', '该', '之', '所', '一', '不', '无', '有',
+  '可以', '应当', '不得', '或者', '但是', '如果', '因此', '所以',
+  '根据', '关于', '对于', '按照', '依据', '以下', '以上', '其中',
+  '本文', '本条', '本法', '规定', '情形', '以下',
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'and', 'or', 'but', 'if', 'then', 'else', 'when', 'where', 'why', 'how',
+  'this', 'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their',
+  'to', 'of', 'in', 'on', 'at', 'by', 'for', 'with', 'from', 'as', 'such',
+  'can', 'may', 'must', 'should', 'would', 'could', 'will', 'shall',
+]);
+
+/**
+ * 从文本中提取关键实体/概念。
+ * @param {string} text - assistant 回答文本
+ * @param {number} [maxEntities=5] - 最大实体数量
+ * @returns {string[]} 提取的实体列表
+ */
+export function extractEntities(text, maxEntities = 5) {
+  if (!text || typeof text !== 'string') return [];
+  const entities = [];
+  const seen = new Set();
+  const bookMatches = text.matchAll(/《([^》]{2,20})》/g);
+  for (const m of bookMatches) {
+    const entity = m[1].trim();
+    if (entity && !seen.has(entity)) { seen.add(entity); entities.push(entity); }
+    if (entities.length >= maxEntities) return entities;
+  }
+  const quoteMatches = text.matchAll(/[""「]([^""」]{2,30})[""」]/g);
+  for (const m of quoteMatches) {
+    const entity = m[1].trim();
+    if (entity && !seen.has(entity) && !STOP_WORDS.has(entity)) { seen.add(entity); entities.push(entity); }
+    if (entities.length >= maxEntities) return entities;
+  }
+  const headingMatches = text.matchAll(/^#{1,6}\s+(.+)$/gm);
+  for (const m of headingMatches) {
+    const entity = m[1].trim();
+    if (entity && !seen.has(entity) && !STOP_WORDS.has(entity)) { seen.add(entity); entities.push(entity); }
+    if (entities.length >= maxEntities) return entities;
+  }
+  const cjkMatches = text.matchAll(/[\u4e00-\u9fff]{2,6}/g);
+  const cjkFreq = new Map();
+  for (const m of cjkMatches) {
+    const term = m[0];
+    if (!STOP_WORDS.has(term)) { cjkFreq.set(term, (cjkFreq.get(term) || 0) + 1); }
+  }
+  const sortedCjk = [...cjkFreq.entries()].sort((a, b) => b[1] - a[1]).map(([term]) => term);
+  for (const term of sortedCjk) {
+    if (entities.length >= maxEntities) break;
+    if (!seen.has(term) && !STOP_WORDS.has(term)) { seen.add(term); entities.push(term); }
+  }
+  if (entities.length < maxEntities) {
+    const engMatches = text.matchAll(/\b([A-Z][a-z]{2,}|[A-Z]{2,})\b/g);
+    for (const m of engMatches) {
+      if (entities.length >= maxEntities) break;
+      const term = m[1];
+      if (!seen.has(term) && !STOP_WORDS.has(term.toLowerCase())) { seen.add(term); entities.push(term); }
+    }
+  }
+  return entities.slice(0, maxEntities);
+}
+
+/**
+ * 基于提取的实体和用户原始查询生成后续问题建议。
+ * @param {string[]} entities
+ * @param {string} [userQuery='']
+ * @returns {string[]} 后续问题建议列表
+ */
+export function generateFollowups(entities, userQuery = '') {
+  if (!entities || entities.length === 0) {
+    return [
+      t('chat.followup_generic_1') || '还有哪些相关内容？',
+      t('chat.followup_generic_2') || '能否更详细地解释？',
+      t('chat.followup_generic_3') || '有什么需要注意的？',
+    ].slice(0, MAX_SUGGESTIONS);
+  }
+  const suggestions = [];
+  const seen = new Set();
+  if (entities[0]) {
+    const q = FOLLOWUP_TEMPLATES.entity_deep[0].replace('{entity}', entities[0]);
+    if (!seen.has(q)) { seen.add(q); suggestions.push(q); }
+  }
+  if (entities[0] && suggestions.length < MAX_SUGGESTIONS) {
+    const q = FOLLOWUP_TEMPLATES.exception[0].replace('{entity}', entities[0]);
+    if (!seen.has(q)) { seen.add(q); suggestions.push(q); }
+  }
+  if (entities[1] && suggestions.length < MAX_SUGGESTIONS) {
+    const q = FOLLOWUP_TEMPLATES.entity_deep[1].replace('{entity}', entities[1]);
+    if (!seen.has(q)) { seen.add(q); suggestions.push(q); }
+  }
+  if (entities.length >= 2 && suggestions.length < MAX_SUGGESTIONS) {
+    const q = FOLLOWUP_TEMPLATES.compare[0].replace('{entity}', `${entities[0]}与${entities[1]}`);
+    if (!seen.has(q)) { seen.add(q); suggestions.push(q); }
+  }
+  let templateIdx = 2;
+  let entityIdx = 0;
+  while (suggestions.length < MAX_SUGGESTIONS && entityIdx < entities.length) {
+    const entity = entities[entityIdx];
+    const templates = FOLLOWUP_TEMPLATES.entity_deep;
+    if (templateIdx < templates.length) {
+      const q = templates[templateIdx].replace('{entity}', entity);
+      if (!seen.has(q)) { seen.add(q); suggestions.push(q); }
+      templateIdx++;
+    } else {
+      entityIdx++;
+      templateIdx = 0;
+    }
+  }
+  return suggestions.slice(0, MAX_SUGGESTIONS);
+}
+
+/**
+ * 在 assistant 消息块下方渲染后续问题建议卡片。
+ * @param {HTMLElement} blockEl
+ * @param {string[]} suggestions
+ * @param {function} onPick
+ * @returns {HTMLElement|null}
+ */
+export function renderFollowups(blockEl, suggestions, onPick) {
+  if (!blockEl) return null;
+  if (!suggestions || suggestions.length === 0) return null;
+  removeFollowups(blockEl);
+  const container = document.createElement('div');
+  container.className = 'followup-suggestions';
+  const header = document.createElement('div');
+  header.className = 'followup-header';
+  const titleText = t('chat.followup_title') || '💡 你可能还想问：';
+  header.innerHTML = `<span class="followup-title-text">${titleText}</span>`;
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'followup-close-btn';
+  closeBtn.setAttribute('aria-label', t('common.close') || '关闭');
+  closeBtn.innerHTML = '✕';
+  closeBtn.onclick = (e) => { e.stopPropagation(); removeFollowups(blockEl); };
+  header.appendChild(closeBtn);
+  container.appendChild(header);
+  const list = document.createElement('div');
+  list.className = 'followup-list';
+  suggestions.forEach((text) => {
+    const card = document.createElement('button');
+    card.className = 'followup-card';
+    card.textContent = text;
+    card.onclick = () => { if (onPick) onPick(text); };
+    list.appendChild(card);
+  });
+  container.appendChild(list);
+  blockEl.appendChild(container);
+  return container;
+}
+
+/**
+ * 移除指定消息块中的后续建议容器。
+ * @param {HTMLElement} blockEl
+ */
+export function removeFollowups(blockEl) {
+  if (!blockEl) return;
+  const existing = blockEl.querySelector('.followup-suggestions');
+  if (existing) existing.remove();
+}
+
+/**
+ * 从 assistant 回答文本生成后续问题建议并渲染。
+ * @param {HTMLElement} blockEl
+ * @param {string} answerText
+ * @param {string} [userQuery='']
+ * @param {function} [onPick]
+ * @returns {HTMLElement|null}
+ */
+export function renderFollowupSuggestions(blockEl, answerText, userQuery = '', onPick) {
+  const entities = extractEntities(answerText);
+  const suggestions = generateFollowups(entities, userQuery);
+  return renderFollowups(blockEl, suggestions, onPick);
 }

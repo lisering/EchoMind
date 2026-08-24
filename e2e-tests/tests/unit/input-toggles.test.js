@@ -2,6 +2,8 @@
  * TC-DS-010~012: input-toggles.js 单元测试
  *
  * 验证输入区快速 Toggle 组件的创建、状态切换、初始激活态。
+ *
+ * 注意：使用 vitest.config.ts 提供的 jsdom 环境，无需自定义 DOM mock。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
@@ -10,17 +12,32 @@ vi.mock('../../../ui/src/i18n.js', () => ({
   t: (key) => {
     const map = {
       'chat.toggle_hybrid': '混合搜索',
-      'chat.toggle_agent': 'Agent 模式',
+      'chat.toggle_agent': '深度思考',
     };
     return map[key] || key;
   },
 }));
 
-// Mock ipc
+// Mock ipc（S09 统一入口：settingsApi.update_setting）
 vi.mock('../../../ui/src/ipc.js', () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
   listen: vi.fn(),
+  settingsApi: {
+    update: vi.fn().mockResolvedValue(undefined),
+    setBool: vi.fn().mockResolvedValue(undefined),
+    get: vi.fn().mockResolvedValue(''),
+  },
 }));
+
+// Mock state
+vi.mock('../../../ui/src/state.js', () => {
+  const state = {};
+  return {
+    get: (k) => state[k],
+    setState: (patch) => { Object.assign(state, patch); },
+    subscribe: (_k, _fn) => () => {},
+  };
+});
 
 import { createInputToggle, getToggleState } from '../../../ui/src/input-toggles.js';
 

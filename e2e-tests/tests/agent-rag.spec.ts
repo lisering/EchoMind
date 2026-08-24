@@ -37,7 +37,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
   test('E2E-AGENT-002 Agentic 模式——启用后持久化', async ({ page }) => {
     // 启用 Agentic 模式
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_agent_enabled', { enabled: true })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.agent_enabled', value: String(true) })
     );
 
     // 验证 mock state 已更新
@@ -46,7 +46,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
 
     // 关闭
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_agent_enabled', { enabled: false })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.agent_enabled', value: String(false) })
     );
 
     const enabledAfter = await page.evaluate(() => window.__mock.state.agentEnabled);
@@ -58,7 +58,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
   test('E2E-AGENT-003 Agentic 模式——agent_step 事件推送', async ({ page }) => {
     // 启用 Agentic 模式
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_agent_enabled', { enabled: true })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.agent_enabled', value: String(true) })
     );
 
     // 监听 agent_step 事件
@@ -85,7 +85,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
   test('E2E-AGENT-004 Agentic 模式——多步检索 Thought/Action/Observation', async ({ page }) => {
     // 启用 Agentic 模式
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_agent_enabled', { enabled: true })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.agent_enabled', value: String(true) })
     );
 
     // 监听 agent_step 事件，记录所有步骤
@@ -118,7 +118,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
 
   test('E2E-AGENT-005 Agentic 模式——最终答案以 chat_token 流式输出', async ({ page }) => {
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_agent_enabled', { enabled: true })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.agent_enabled', value: String(true) })
     );
 
     // 监听 chat_token 事件
@@ -144,7 +144,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
   test('E2E-AGENT-006 Agentic 模式——最大迭代次数限制', async ({ page }) => {
     // 启用 Agentic 模式
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_agent_enabled', { enabled: true })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.agent_enabled', value: String(true) })
     );
 
     // 监听 agent_step 事件以计数迭代轮数
@@ -175,7 +175,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
   test('E2E-AGENT-007 Agentic 模式——解析失败降级为标准 RAG', async ({ page }) => {
     // 启用 Agentic 模式
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_agent_enabled', { enabled: true })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.agent_enabled', value: String(true) })
     );
 
     // 设置非预期格式的 LLM 响应
@@ -211,7 +211,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
   test('E2E-AGENT-008 Agentic 模式——取消保留已生成内容', async ({ page }) => {
     // 启用 Agentic 模式
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_agent_enabled', { enabled: true })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.agent_enabled', value: String(true) })
     );
 
     await page.locator('#queryInput').fill('取消测试');
@@ -236,7 +236,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
 
   test('E2E-AGENT-009 Agentic 模式——引用来源聚合', async ({ page }) => {
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_agent_enabled', { enabled: true })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.agent_enabled', value: String(true) })
     );
 
     await page.locator('#queryInput').fill('来源聚合测试');
@@ -253,7 +253,7 @@ test.describe('E2E-AGENT Agentic RAG 多步推理边界场景（REQ-RAG-022）',
   test('E2E-AGENT-010 Agentic 模式——标准 RAG 共存', async ({ page }) => {
     // 禁用 Agentic 模式
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_agent_enabled', { enabled: false })
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.agent_enabled', value: String(false) })
     );
 
     // 标准 RAG 应正常工作

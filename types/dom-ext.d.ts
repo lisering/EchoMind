@@ -21,15 +21,24 @@ interface ThinkingPanelHandle {
   appendReasoning(text: string): void;
   renderReasoning(text: string): void;
   finalizeReasoning(): void;
-  appendStage(text: string): void;
-  setMsgId(msgId: string | null): void;
+appendStage(text: string): void;
+/** REQ-RAG-052: 追加 Agent 步骤卡片 */
+appendAgentStep(step: { step_type: string; content: string; tool?: string; input?: string; iteration: number }): void;
+/** REQ-RAG-052: 设置 Agent 进度条 */
+setAgentProgress(current: number, max: number): void;
+setMsgId(msgId: string | null): void;
   isExpanded(): boolean;
   collapse(): void;
   expand(): void;
-  setComplete(text?: string): void;
+  setComplete(text?: string): Promise<void>;
   reset(): void;
   clearContent(): void;
   getReasoning(): string | null;
+  startThinking(): void;
+  markFirstTokenReceived(): void;
+  isFirstTokenReceived(): boolean;
+  getThinkDuration(): number | null;
+  ensureMinLoadingDelay(): Promise<void>;
 }
 
 /** 扩展 Element，添加代码中通过 Element 访问的 HTMLElement 特有属性 */
@@ -178,8 +187,46 @@ interface Window {
   __printMockCalled?: number;
   /** PDF 导出最近打印 HTML（E2E 测试用，REQ-EXP-005） */
   __lastPrintHtml?: string | null;
+  /** 开发者模式快捷键处理器安装标志（S5 审计 P0-6） */
+  _devModeHandlerInstalled?: boolean;
   /** 导出对话为 PDF（全局暴露供内联 onclick / E2E 测试调用，REQ-EXP-005） */
   exportConversationToPdf?: (conversationId: string, title?: string) => Promise<void>;
-  /** 导出文档为 PDF（全局暴露供内联 onclick / E2E 测试调用，REQ-EXP-005） */
-  exportDocumentToPdf?: (docId: string) => Promise<void>;
+/** 导出文档为 PDF（全局暴露供内联 onclick / E2E 测试调用，REQ-EXP-005） */
+exportDocumentToPdf?: (docId: string) => Promise<void>;
+/** 导出对话为 HTML（全局暴露供内联 onclick / E2E 测试调用，REQ-EXP-007） */
+exportConversationToHtml?: (conversationId: string, title?: string) => Promise<void>;
+/** 导出文档为 HTML（全局暴露供内联 onclick / E2E 测试调用，REQ-EXP-007） */
+exportDocumentToHtml?: (docId: string) => Promise<void>;
+/** 日期格式化工具（E2E 测试用，REQ-I18N-002） */
+__formatDate?: (timestamp: number | string | Date) => string;
+/** 相对时间格式化工具（E2E 测试用，REQ-I18N-002） */
+__formatRelativeTime?: (timestamp: number | string | Date) => string;
+/** 文件大小格式化工具（E2E 测试用，REQ-I18N-003） */
+__formatFileSize?: (bytes: number) => string;
+/** 数字格式化工具（E2E 测试用，REQ-I18N-003） */
+__formatNumber?: (num: number) => string;
+/** 关于面板打开/关闭（E2E 测试用，REQ-HELP-003） */
+__openAboutPanel?: () => void;
+__closeAboutPanel?: () => void;
+/** KB 统计仪表盘打开/关闭（E2E 测试用，REQ-KB-003 v1.5） */
+__openKbStats?: () => Promise<void>;
+__closeKbStats?: () => void;
+/** 帮助面板打开/关闭（E2E 测试用，REQ-HELP-001 v1.5） */
+__openHelpPanel?: (tab?: string) => void;
+__closeHelpPanel?: () => void;
+/** 会话列表刷新（E2E 测试用，REQ-IX-002 v1.16） */
+__loadConversations?: () => Promise<void>;
+/** 会话列表缓存（书签模块查询标题用，REQ-RAG-047） */
+__echomindConversations?: Array<{ id: string; title: string }>;
+/** 刷新侧栏书签列表（REQ-RAG-053 消息级书签按钮调用） */
+__refreshBookmarks?: () => void;
+/** 更新检查结果（REQ-HELP-004 S87，E2E 测试注入 mock 数据用） */
+__updateInfo?: { has_update: boolean; current_version: string; latest_version: string; release_notes: string | null; download_url: string | null };
+/** 导出全量数据备份（REQ-EXP-002 v1.17） */
+exportBackup?: () => Promise<void>;
+/** 从备份恢复数据（REQ-EXP-003 v1.17） */
+importBackup?: () => Promise<void>;
 }
+
+/** 应用版本号（scripts/build-ui.mjs 构建期从 tauri.conf.json 注入） */
+declare const __APP_VERSION__: string;

@@ -15,9 +15,10 @@
  */
 
 import { $, isInputFocused } from './utils.js';
-import { openCommandPalette, closeCommandPalette } from './command-palette.js';
 import { createDefaultRegistry, setGlobalRegistry } from './action.js';
 import { closeTopPanel, hasOpenPanels } from './panel-stack.js';
+import { openKeyboardHelp, closeKeyboardHelp, isKeyboardHelpOpen } from './help-panel.js';
+import { openCommandPalette, closeCommandPalette, closeGlobalSearch } from './search-ui.js';
 
 /**
  * 初始化全局键盘快捷键。
@@ -30,14 +31,18 @@ import { closeTopPanel, hasOpenPanels } from './panel-stack.js';
  * @param {() => void} handlers.onImport - 导入文件
  * @param {() => void} handlers.onSettings - 打开设置
  * @param {() => void} [handlers.onToggleSidebar] - 折叠/展开侧栏（⌘B）
+ * @param {() => void} [handlers.onKeyboardHelp] - 显示快捷键帮助（⌘/）
  * @param {() => void} handlers.onAbort - 停止生成/审计
  * @param {() => void} handlers.onCloseVlm - 关闭 VLM 确认弹窗
  * @param {() => void} handlers.onClosePaywall - 关闭付费墙
  * @param {() => void} handlers.onCloseSettings - 关闭设置面板
  * @param {() => void} handlers.onCloseSearchPopup - 关闭会话搜索弹框
  * @param {() => void} [handlers.onCloseGraph] - 关闭知识图谱查看器
+ * @param {() => void} [handlers.onGlobalSearch] - 全局搜索（⌘⇧F）
+ * @param {() => void} [handlers.onExport] - 导出当前对话（⌘E）
  */
 export function initKeyboardShortcuts(handlers) {
+  handlersRef = handlers;
   // 创建 Action 注册表并注册为全局单例
   const registry = createDefaultRegistry({
     onNewChat: handlers.onNewChat,
@@ -45,6 +50,9 @@ export function initKeyboardShortcuts(handlers) {
     onSettings: handlers.onSettings,
     onToggleSidebar: handlers.onToggleSidebar,
     onCommandPalette: openCommandPalette,
+    onKeyboardHelp: openKeyboardHelp,
+    onGlobalSearch: handlers.onGlobalSearch,
+    onExport: handlers.onExport,
     isInputFocused: isInputFocused,
     isAppVisible: () => {
       const app = $('app');
@@ -67,39 +75,33 @@ export function initKeyboardShortcuts(handlers) {
       // 优先关闭 panel-stack 中的栈顶面板
       if (closeTopPanel()) return;
 
-      // 然后检查静态面板（按优先级）
-      // 命令面板优先级最高
-      const searchPopup = $('convSearchPopup');
-      if (searchPopup && !searchPopup.classList.contains('hidden')) {
-        handlers.onCloseSearchPopup();
-        return;
-      }
-      const cmdPalette = $('commandPalette');
-      if (cmdPalette && !cmdPalette.classList.contains('hidden')) {
-        closeCommandPalette();
-        return;
-      }
-      const vlmConfirm = $('vlmConfirm');
-      if (vlmConfirm && !vlmConfirm.classList.contains('hidden')) {
-        handlers.onCloseVlm();
-        return;
-      }
-      const paywall = $('paywall');
-      if (paywall && !paywall.classList.contains('hidden')) {
-        handlers.onClosePaywall();
-        return;
-      }
-      const settingsModal = $('settingsModal');
-      if (settingsModal && !settingsModal.classList.contains('hidden')) {
-        handlers.onCloseSettings();
-        return;
-      }
-      // 知识库弹框（REQ-KB-001 AC-5: Esc 关闭弹窗）
-      const kbModal = $('kbModal');
-      if (kbModal && !kbModal.classList.contains('hidden')) {
-        kbModal.classList.add('hidden');
-        return;
+      // 静态面板（数据驱动优先级表，V3.1 P3-6：消除硬编码 if 链）
+      for (const entry of STATIC_ESC_PANELS) {
+        const el = $(entry.id);
+        if (el && !el.classList.contains('hidden')) {
+          if (typeof entry.close === 'function') entry.close();
+          else el.classList.add('hidden');
+          return;
+        }
       }
     }
   });
 }
+
+/**
+ * 静态面板 Esc 关闭注册表（按优先级从高到低）。
+ * close 为函数时调用之；缺省则直接 addClass('hidden')。
+ * 新增面板只需在此表加一行。
+ */
+const STATIC_ESC_PANELS = [
+  { id: 'convSearchPopup', close: () => handlersRef.onCloseSearchPopup() },
+  { id: 'commandPalette', close: () => closeCommandPalette() },
+  { id: 'globalSearch', close: () => closeGlobalSearch() },
+  { id: 'vlmConfirm', close: () => handlersRef.onCloseVlm() },
+  { id: 'paywall', close: () => handlersRef.onClosePaywall() },
+  { id: 'settingsModal', close: () => handlersRef.onCloseSettings() },
+  { id: 'kbModal' }, // REQ-KB-001 AC-5：Esc 关闭知识库弹框
+];
+
+/** initKeyboardShortcuts 的 handlers 引用（STATIC_ESC_PANELS 闭包使用） */
+let handlersRef = {};

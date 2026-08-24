@@ -23,18 +23,48 @@
 import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 import esbuild from 'esbuild';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const rootDir = resolve(__dirname, '..');
 const uiDir = resolve(__dirname, '../ui');
 const srcDir = join(uiDir, 'src');
 const stylesDir = join(uiDir, 'styles');
 const htmlPath = join(uiDir, 'index.html');
 
 const isDevMode = process.argv.includes('--dev');
+const isReleaseMode = process.argv.includes('--release');
+
+// 开发者工具模块 — Release 模式不打包（与后端 #[cfg(debug_assertions)] 对齐）
+// 通过 onResolve + onLoad 将开发者工具模块替换为空模块，
+// 确保 Release 构建中不包含 trace-panel / rag-eval / embed-eval 代码。
+const DEV_TOOL_PLUGINS = [
+  {
+    name: 'exclude-trace-panel',
+    setup(build) {
+      build.onResolve({ filter: /\/trace-panel\.js$/ }, () => ({ path: 'trace-panel-excluded', namespace: 'dev-tool-excluded' }));
+      build.onLoad({ filter: /.*/, namespace: 'dev-tool-excluded' }, () => ({ contents: '// trace-panel excluded in release build', loader: 'js' }));
+    },
+  },
+  {
+    name: 'exclude-rag-eval',
+    setup(build) {
+      build.onResolve({ filter: /\/rag-eval\.js$/ }, () => ({ path: 'rag-eval-excluded', namespace: 'dev-tool-excluded' }));
+      build.onLoad({ filter: /.*/, namespace: 'dev-tool-excluded' }, () => ({ contents: '// rag-eval excluded in release build', loader: 'js' }));
+    },
+  },
+  {
+    name: 'exclude-embed-eval',
+    setup(build) {
+      build.onResolve({ filter: /\/embed-eval\.js$/ }, () => ({ path: 'embed-eval-excluded', namespace: 'dev-tool-excluded' }));
+      build.onLoad({ filter: /.*/, namespace: 'dev-tool-excluded' }, () => ({ contents: '// embed-eval excluded in release build', loader: 'js' }));
+    },
+  },
+];
 
 // CSS 文件列表（按加载顺序）
-const CSS_FILES = ['tokens.css', 'typography.css', 'components.css', 'graph-viewer.css', 'print.css'];
+const CSS_FILES = ['tokens.css', 'typography.css', 'components.css', 'icons.css', 'graph-viewer.css', 'print.css'];
 
 // ============================================================
 // 标记注释常量（用于在 HTML 中定位 CSS/JS 区域）
@@ -55,18 +85,27 @@ const JS_MARKER = '<!-- ============ 入口模块';
  * @returns {Promise<string>} 打包后的 JavaScript 代码
  */
 async function buildInlineScript() {
+  // 版本号单一来源：tauri.conf.json（构建期内联为 __APP_VERSION__ 常量）
+  const tauriConf = JSON.parse(readFileSync(join(rootDir, 'crates', 'tauri-app', 'tauri.conf.json'), 'utf8'));
+  const appVersion = tauriConf?.version ?? '0.0.0';
+
   const result = await esbuild.build({
     entryPoints: [join(srcDir, 'main.js')],
     bundle: true,
     format: 'iife',
     target: 'es2022',
     write: false,
-    minify: false,
+    minify: true,
     sourcemap: false,
     logLevel: 'warning',
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion),
+    },
     // vendor 库（marked, DOMPurify, mermaid, hljs, katex, Chart）通过
     // <script> 标签全局加载，不参与打包
     external: [],
+    // Release 模式排除开发者工具模块（trace-panel / rag-eval）
+    plugins: isReleaseMode ? DEV_TOOL_PLUGINS : [],
   });
 
   const code = result.outputFiles[0].text;
@@ -156,43 +195,77 @@ ${links}`;
  * @returns {string} 替换后的 HTML
  */
 function replaceBlock(html, marker, newBlock, blockType) {
-  const markerEscaped = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // 使用字符串索引替代正则匹配，避免 minified JS 中 </head>/<body> 字符串字面量
+  // 导致正则误匹配（esbuild minify 会将 <\/body> 反转义为 </body>）。
+  const markerIdx = html.indexOf(marker);
+  const closeTag = blockType === 'css' ? '</head>' : '</body>';
+  // CSS 用 indexOf（第一个 </head> = 真正的 HTML 标签）；
+  // JS 用 lastIndexOf（最后一个 </body> = 真正的 HTML 标签，跳过 minified JS 字符串字面量中的 </body>）
+  const closeIdx = blockType === 'css' ? html.indexOf(closeTag) : html.lastIndexOf(closeTag);
 
-  if (blockType === 'css') {
-    // 非贪婪匹配：匹配从 CSS_MARKER 到第一个 </head>
-    // 原因：JS bundle 内的 PDF 导出模板字符串含有 </head>，
-    // 贪婪匹配会跨越 HTML body 到 JS 字符串中的 </head>，吞掉整个 body。
-    const regex = new RegExp(
-      '[ \\t]*' + markerEscaped + '[\\s\\S]*?(?=\\n[ \\t]*</head>)'
-    );
-    if (regex.test(html)) {
-      return html.replace(regex, newBlock);
+  if (markerIdx !== -1 && closeIdx !== -1 && markerIdx < closeIdx) {
+    // 找到标记行起始位置（包含前导空白和换行符）
+    let startIdx = markerIdx;
+    while (startIdx > 0 && (html[startIdx - 1] === ' ' || html[startIdx - 1] === '\t')) {
+      startIdx--;
     }
-    // 标记缺失：在 </head> 前注入
-    console.warn(`⚠ 未找到 CSS 标记区域，将在 </head> 前自动注入`);
-    return html.replace(/(\n[ \t]*<\/head>)/, '\n' + newBlock + '$1');
-  } else {
-    // 贪婪匹配：确保匹配到文件末尾真正的 </body>，而非 JS bundle 内部字符串中的 </body>
-    // 原因：export.js buildPrintHtml 模板字面量中的 </body> 会被懒惰匹配误命中，
-    // 造成 esbuild bundle 每次构建被重复追加（文件从 ~12K 行膨胀到 126K 行）
-    const regex = new RegExp(
-      '[ \\t]*' + markerEscaped + '[\\s\\S]*(?=\\n[ \\t]*</body>)'
-    );
-    if (regex.test(html)) {
-      return html.replace(regex, newBlock);
+    if (startIdx > 0 && html[startIdx - 1] === '\n') {
+      startIdx--;
     }
-    // 标记缺失：在 </body> 前注入
-    console.warn(`⚠ 未找到 JS 标记区域，将在 </body> 前自动注入`);
-    return html.replace(/(\n[ \t]*<\/body>)/, '\n' + newBlock + '\n$1');
+    return html.substring(0, startIdx) + '\n' + newBlock + '\n' + html.substring(closeIdx);
   }
+
+  // 标记缺失：在对应闭合标签前注入
+  if (closeIdx !== -1) {
+    console.warn(`⚠ 未找到 ${blockType.toUpperCase()} 标记区域，将在 ${closeTag} 前自动注入`);
+    return html.substring(0, closeIdx) + newBlock + '\n' + html.substring(closeIdx);
+  }
+
+  console.warn(`⚠ 未找到 ${closeTag} 标签，跳过 ${blockType.toUpperCase()} 块替换`);
+  return html;
 }
 
 // ============================================================
 // 主流程
 // ============================================================
 
+/**
+ * 运行 Mermaid 自定义 esbuild 打包（从 npm mermaid v11 ESM 源码 tree-shake + 压缩）。
+ * 替代 vendor/mermaid.min.js (3.4MB UMD 预构建)，输出 vendor/mermaid-custom.min.js。
+ */
+function buildMermaid() {
+  console.log('📦 Mermaid 自定义打包：esbuild tree-shaking + minify...');
+  try {
+    execSync('node scripts/build-mermaid.mjs', { cwd: resolve(__dirname, '..'), stdio: 'pipe' });
+  } catch {
+    console.warn('⚠ Mermaid 打包失败（使用已有 vendor/mermaid-custom.min.js）');
+  }
+}
+
+/**
+ * 运行 Tailwind CSS CLI 预构建（扫描 ui/src/*.js + ui/index.html 生成静态 CSS）。
+ *
+ * 替代 vendor/tailwindcss.js (441KB JIT 运行时)，预构建 CSS 仅包含实际使用的工具类。
+ * 配置见 tailwind.config.js，输入 ui/styles/tailwind-input.css，输出 ui/vendor/tailwind-prebuilt.css。
+ */
+function buildTailwind() {
+  console.log('🎨 Tailwind CSS 预构建：扫描源码 → 生成静态 CSS');
+  const cmd = 'npx tailwindcss -i ui/styles/tailwind-input.css -o ui/vendor/tailwind-prebuilt.css --minify';
+  try {
+    execSync(cmd, { cwd: resolve(__dirname, '..'), stdio: 'pipe' });
+    const size = readFileSync(join(uiDir, 'vendor/tailwind-prebuilt.css'), 'utf-8').length;
+    console.log(`✓ Tailwind 预构建完成: ${(size / 1024).toFixed(0)}KB`);
+  } catch {
+    console.warn('⚠ Tailwind 预构建失败（使用已有 vendor/tailwind-prebuilt.css）');
+  }
+}
+
 async function buildProduction() {
-  console.log('🔨 生产模式构建：esbuild 打包 JS + 内联 CSS → 单文件 ui/index.html');
+  console.log('🔨 生产模式构建：Tailwind 预构建 + esbuild 打包 JS + 内联 CSS → 单文件 ui/index.html');
+
+  // 0. Mermaid 自定义打包 + Tailwind CSS 预构建
+  buildMermaid();
+  buildTailwind();
 
   let html = readFileSync(htmlPath, 'utf-8');
 

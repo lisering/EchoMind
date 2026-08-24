@@ -262,8 +262,9 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
     );
 
     expect(stats).toBeTruthy();
-    expect(typeof stats.daily_limit).toBe('number');
-    expect(typeof stats.spent_today).toBe('number');
+    // Mock returns daily_limit_usd / daily_spent_usd (matching backend field names)
+    expect(typeof (stats.daily_limit_usd ?? stats.daily_limit)).toBe('number');
+    expect(typeof (stats.daily_spent_usd ?? stats.spent_today)).toBe('number');
     expect('remaining' in stats).toBe(true);
   });
 
@@ -275,7 +276,7 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
     const stats = await page.evaluate(() =>
       window.__TAURI__.core.invoke('get_budget_stats'),
     );
-    expect(stats.daily_limit).toBe(5.0);
+    expect(stats.daily_limit_usd ?? stats.daily_limit).toBe(5.0);
   });
 
   test('TC-QM-E2E-017 预算未设置时 remaining 为 Infinity', async ({ page }) => {
@@ -283,8 +284,8 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
       window.__TAURI__.core.invoke('get_budget_stats'),
     );
 
-    // 默认 daily_limit=0 → remaining=Infinity
-    expect(stats.daily_limit).toBe(0);
+    // 默认 daily_limit_usd=0 → remaining=Infinity
+    expect(stats.daily_limit_usd ?? stats.daily_limit).toBe(0);
     expect(stats.remaining).toBe(Infinity);
   });
 
@@ -297,8 +298,8 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
     const stats = await page.evaluate(() =>
       window.__TAURI__.core.invoke('get_budget_stats'),
     );
-    expect(stats.daily_limit).toBe(10.0);
-    expect(stats.spent_today).toBe(3.5);
+    expect(stats.daily_limit_usd ?? stats.daily_limit).toBe(10.0);
+    expect(stats.daily_spent_usd ?? stats.spent_today).toBe(3.5);
     expect(stats.remaining).toBeCloseTo(6.5, 2);
   });
 
@@ -455,17 +456,17 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
 
   test('TC-QM-E2E-025 set_compression_ratio 设置压缩比', async ({ page }) => {
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_compression_ratio', { ratio: 0.5 }),
+      window.__TAURI__.core.invoke('update_setting', { key: 'compression.ratio', value: String(0.5) }),
     );
     const ratio = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('get_compression_ratio'),
+      (async () => parseFloat(await window.__TAURI__.core.invoke('get_setting', { key: 'compression.ratio' })))(),
     );
     expect(ratio).toBe(0.5);
   });
 
   test('TC-QM-E2E-026 get_compression_ratio 默认返回初始值', async ({ page }) => {
     const ratio = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('get_compression_ratio'),
+      (async () => parseFloat(await window.__TAURI__.core.invoke('get_setting', { key: 'compression.ratio' })))(),
     );
     expect(typeof ratio).toBe('number');
     expect(ratio).toBeGreaterThanOrEqual(0);
@@ -508,7 +509,7 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
 
   test('TC-QM-E2E-030 set_retrieval_memory_enabled 开关切换', async ({ page }) => {
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_retrieval_memory_enabled', { enabled: true }),
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.retrieval_memory_enabled', value: String(true) }),
     );
     // 验证状态已更新（通过 mock state 检查）
     const enabled = await page.evaluate(() => window.__mock.state.retrievalMemoryEnabled);
@@ -538,7 +539,7 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
 
   test('TC-QM-E2E-033 reset_retrieval_memory 重置统计', async ({ page }) => {
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_retrieval_memory_enabled', { enabled: true }),
+      window.__TAURI__.core.invoke('update_setting', { key: 'rag.retrieval_memory_enabled', value: String(true) }),
     );
     const result = await page.evaluate(() =>
       window.__TAURI__.core.invoke('reset_retrieval_memory'),
@@ -636,7 +637,7 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
   test('TC-QM-E2E-041 压缩比 + 缓存清空互不影响', async ({ page }) => {
     // 设置压缩比
     await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_compression_ratio', { ratio: 0.3 }),
+      window.__TAURI__.core.invoke('update_setting', { key: 'compression.ratio', value: String(0.3) }),
     );
     // 清空缓存
     await page.evaluate(() =>
@@ -644,7 +645,7 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
     );
     // 压缩比不应被缓存清空影响
     const ratio = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('get_compression_ratio'),
+      (async () => parseFloat(await window.__TAURI__.core.invoke('get_setting', { key: 'compression.ratio' })))(),
     );
     expect(ratio).toBe(0.3);
     // 缓存统计应已清空

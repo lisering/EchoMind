@@ -15,46 +15,57 @@
 // ============================================================
 
 import { getState, setState, get, subscribe } from './state.js';
-import { $, WORKSPACE, isInputFocused } from './utils.js';
+import { $, WORKSPACE, isInputFocused, makeKeyboardClickable } from './utils.js';
 import { invoke, listen, openDialog } from './ipc.js';
 import { toast, toastError, toastSuccess } from './toast.js';
 import { resetChatArea, appendBlock, appendUserBlock, showApp, showWizard, scrollToBottom,
         scheduleRender, renderSources, showMsgActions, showCollapsedHint,
         hideEmptyState, updateModelPill, appendAiDisclaimer } from './chat-render.js';
 import { send, onStop, auditDocument, setInputState, finalizeStream,
-        initChatEventListeners } from './chat.js';
-import { resetFeedbackTracking } from './retrieval-feedback.js';
+        initChatEventListeners, checkStreamResume } from './chat.js';
+import { resetFeedbackTracking } from './feedback.js';
 import { renderMarkdown, renderRichContent } from './markdown.js';
 import { initSidebar, toggleSidebar, openSearchPopup, closeSearchPopup, initSearchPopup, filterDocuments, isMultiSelectMode, setReloadDocsCallback, setFilterChangeCallback, restoreSidebarState } from './sidebar.js';
-import { initCommandPalette, openCommandPalette, closeCommandPalette } from './command-palette.js';
+import { initCommandPalette, openCommandPalette, closeCommandPalette, initGlobalSearch, openGlobalSearch, closeGlobalSearch } from './search-ui.js';
 import { initKeyboardShortcuts } from './keyboard.js';
+import { initKeyboardHelp } from './help-panel.js';
 import { initWizard, renderPresetCards, applyPreset, startWizard, showWizardStep } from './wizard.js';
+import { demoModeApi } from './ipc.js';
 import { initSettings, openSettings, closeSettings, initEmbedder, clearModelCache } from './settings.js';
-import { initPaywall, showPaywall, hidePaywall, activatePro, deactivatePro, updateProStatus } from './paywall.js';
+import { initPaywall, showPaywall, hidePaywall, activatePro, deactivatePro, updateProStatus } from './wizard.js';
 import { initDragDrop, initFilePicker, initImportCancel, importPaths,
          showImportProgress, hideImportProgress } from './import.js';
 import { initI18n, t } from './i18n.js';
+import { setMermaidInitFn } from './lazy-loader.js';
 import { initConvNav } from './conv-nav.js';
 import { initContextMenu } from './context-menu.js';
+// doc-keyboard + breadcrumb merged into doc-nav.js
 import { initSecurity, getSecurityCommands } from './security.js';
 import { createInputToggle } from './input-toggles.js';
-import { syncChatInputState, updateInputUI } from './guards.js';
-import { navigateHistoryUp, navigateHistoryDown, resetHistoryNav, saveDraft, restoreDraft, clearDraft, updateTokenEstimate } from './input-history.js';
-import { clearQueue, getQueueSize } from './queue-send.js';
+import { updateInputUI } from './action.js';
+import { navigateHistoryUp, navigateHistoryDown, resetHistoryNav, saveDraft, restoreDraft, clearDraft, updateTokenEstimate } from './input-utils.js';
+import { clearQueue, getQueueSize } from './chat-utils.js';
 import { initDownloadManager } from './download-manager.js';
 import { openGraphViewer, closeGraphViewer, initGraphResize } from './graph-viewer.js';
 import { buildTurnTree, setTurnTree, getTurn, applyActiveVersions, getVersionCount, openConversationTreePanel, closeConversationTreePanel } from './turn-tree.js';
 import { renderBranchPagination } from './message-edit.js';
-import { openCodeExecutorPanel, closeCodeExecutorPanel, initCodeExecutor } from './code-executor.js';
 import { openDreamPanel, closeDreamPanel, initDreamPanel } from './dream-panel.js';
 import { openSymbolSearch, closeSymbolSearch, initSymbolSearch } from './symbol-search.js';
-import { openWorkflowPanel, closeWorkflowPanel, initWorkflowPanel } from './workflow-panel.js';
 import { initVoiceInput, stopAllTTS } from './voice-input.js';
-import { initExportButtons } from './export.js';
-import { initSessionStrip } from './session-strip.js';
-import { loadCustomTemplates } from './slash-commands.js';
+import { initExportButtons, exportConversationToHtml, exportDocumentToHtml, exportConversationToPdf } from './export.js';
+import { initErrorBoundary, initOfflineDetector } from './network-utils.js';
+import { initBreadcrumb, updateBreadcrumb, clearBreadcrumb, initDocKeyboard } from './doc-nav.js';
+import { openKbStats, closeKbStats, openDocPreview, closeDocPreview } from './doc-panels.js';
+import { initBookmarks, refreshBookmarks, createBookmarkButton, createBookmarkNavigator } from './bookmarks.js';
+import { showSkeleton, hideSkeleton } from './utils.js';
+import { openHelpPanel, closeHelpPanel, openAboutPanel, closeAboutPanel, initAboutPanel } from './help-panel.js';
+import { formatDate, formatRelativeTime, formatFileSize, formatNumber } from './utils.js';
+import { loadCustomTemplates, loadSkills } from './slash-commands.js';
+import { initUpdateBanner } from './help-panel.js';
 import { convApi } from './ipc.js';
-import { createInputKeyHandler } from './input-keymap.js';
+import { createInputKeyHandler } from './input-utils.js';
+import { initWorkspaceSelector, getCurrentWorkspaceId, setSwitchWorkspaceCallback } from './workspace.js';
+import { icon, fileIcon } from './utils.js';
 
 // ============================================================
 // 聊天输入框状态控制
@@ -62,7 +73,7 @@ import { createInputKeyHandler } from './input-keymap.js';
 
 /**
  * 根据知识库文档数和流式状态更新聊天输入框和发送按钮的禁用状态。
- * 委托给 guards.syncChatInputState（集中化防御性编程守卫）。
+ * 直接委托 updateInputUI（action.js 集中守卫）。
  */
 function updateChatInputState() {
   updateInputUI();
@@ -80,12 +91,11 @@ function closeAllPanels() {
   // 关闭所有动态面板（通过 panel-stack）
   closeSettings();
   closeGraphViewer();
-  closeCodeExecutorPanel();
   closeDreamPanel();
   closeSymbolSearch();
-  closeWorkflowPanel();
   closeSearchPopup();
   closeCommandPalette();
+  closeGlobalSearch();
   hidePaywall();
   closeConversationTreePanel();
 }
@@ -101,6 +111,15 @@ function closeAllPanels() {
  *
  * 流式期间：自动中断当前流（保存已生成内容），然后继续新建会话。
  */
+/**
+ * 更新窗口标题为当前会话标题（窗口标题动态显示）。
+ * @param {string} [convTitle] - 会话标题；空则使用默认标题
+ */
+function _updateWindowTitle(convTitle) {
+  const appName = 'EchoMind';
+  document.title = convTitle ? `${convTitle} — ${appName}` : appName;
+}
+
 async function newChat() {
   if (get('streaming')) {
     await onStop();
@@ -121,6 +140,7 @@ if (get('isNewConversation')) { restoreDraft(); updateInputUI(); return; }
   setState({ currentConversationId: id, history: [], isNewConversation: true });
   resetHistoryNav();
   resetChatArea(t('chat.placeholder_title'), t('chat.placeholder_desc'));
+  _updateWindowTitle(); // 窗口标题重置为默认
   resetFeedbackTracking(); // REQ-PERF-012：新对话重置反馈跟踪
   await loadConversations();
   $('queryInput').focus();
@@ -133,7 +153,7 @@ if (get('isNewConversation')) { restoreDraft(); updateInputUI(); return; }
  * 流式期间：自动中断当前流（保存已生成内容），然后继续切换会话。
  * @param {string} id - 会话 ID
  */
-async function loadConversation(id) {
+async function loadConversation(id, searchQuery) {
   if (get('streaming')) {
     await onStop();
     // 等待 finalizeStream 完成状态清理
@@ -156,6 +176,10 @@ async function loadConversation(id) {
     console.warn('get_turn_active_versions IPC 失败:', err);
   }
   setState({ currentConversationId: id, history: messages, isNewConversation: false });
+  // 窗口标题动态显示：查找会话标题
+  const convList = await invoke('get_conversations', { workspaceId: getCurrentWorkspaceId() });
+  const conv = convList.find(c => c.id === id);
+  _updateWindowTitle(conv?.title);
   resetFeedbackTracking(); // REQ-PERF-012：切换会话重置反馈跟踪
   $('chatArea').innerHTML = '';
   if (messages.length === 0) {
@@ -256,6 +280,37 @@ async function loadConversation(id) {
   updateInputUI();
   scrollToBottom();
   await loadConversations();
+  // 搜索跳转高亮：如果从搜索结果进入，滚动到匹配消息并高亮
+  if (searchQuery) {
+    setTimeout(() => highlightSearchMatch(searchQuery), 200);
+  }
+}
+
+/**
+ * 高亮搜索匹配文本：在聊天区域中查找包含搜索词的消息块，滚动到该位置并高亮。
+ * @param {string} query - 搜索关键词
+ */
+function highlightSearchMatch(query) {
+  if (!query || !query.trim()) return;
+  const term = query.trim().toLowerCase();
+  const chatArea = $('chatArea');
+  if (!chatArea) return;
+  // 遍历所有消息块，查找包含搜索词的文本
+  const blocks = chatArea.querySelectorAll('.msg-block');
+  for (const block of blocks) {
+    const text = (block.textContent || '').toLowerCase();
+    if (text.includes(term)) {
+      // 滚动到匹配的消息块
+      block.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      // 添加高亮动画类
+      block.classList.add('search-highlight-flash');
+      // 3 秒后移除高亮类
+      setTimeout(() => {
+        block.classList.remove('search-highlight-flash');
+      }, 3000);
+      return;
+    }
+  }
 }
 
 /**
@@ -343,11 +398,156 @@ function getConvBucketLabel(bucket) {
 
 /**
  * 拉取会话列表并渲染到侧栏，按时间分组（今天/昨天/一周内/一个月内/月份），
- * 高亮当前会话。支持搜索框过滤。
+ * 高亮当前会话。支持搜索框过滤。支持拖拽排序（REQ-IX-002）。
  */
-async function loadConversations() {
-  const list = await invoke('get_conversations', { workspaceId: WORKSPACE });
+
+/** 拖拽中的会话 ID（REQ-IX-002） */
+let _draggedConvId = null;
+
+/**
+ * 收集 #convList 中所有会话 ID 的当前 DOM 顺序。
+ * 跳过分组头元素（仅收集 [data-conv-id] 的元素）。
+ * @returns {string[]}
+ */
+function _collectConvOrder() {
   const box = $('convList');
+  if (!box) return [];
+  return Array.from(box.querySelectorAll('[data-conv-id]'))
+    .map(el => el.dataset.convId)
+    .filter(Boolean);
+}
+
+/**
+ * 拖拽排序后持久化并重新渲染（REQ-IX-002 AC-4）。
+ * 收集 DOM 中的新顺序，调用 IPC 持久化，然后重新加载列表。
+ */
+async function _persistConvReorder() {
+  const orderedIds = _collectConvOrder();
+  if (orderedIds.length === 0) return;
+  try {
+    await invoke('reorder_conversations', { orderedIds });
+  } catch (_) {
+    // IPC 失败时静默降级（E2E 测试环境）
+  }
+  // 不重新加载列表 — DOM 已是用户期望的顺序，避免闪烁
+}
+
+/**
+ * 为会话列表项绑定拖拽事件（REQ-IX-002）。
+ * @param {HTMLElement} item - 会话列表项 DOM 元素
+ */
+function _bindDragEvents(item) {
+  item.draggable = true;
+
+  item.addEventListener('dragstart', (e) => {
+    _draggedConvId = item.dataset.convId;
+    item.classList.add('opacity-50');
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', _draggedConvId);
+    }
+  });
+
+  item.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (!_draggedConvId || _draggedConvId === item.dataset.convId) return;
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    // 计算插入位置：鼠标 Y < 项中点 → 上方，否则下方
+    const rect = item.getBoundingClientRect();
+    const isAbove = e.clientY < rect.top + rect.height / 2;
+    // 移除其他项的插入线
+    document.querySelectorAll('#convList .conv-drop-indicator').forEach(el => el.remove());
+    // 添加插入线
+    const indicator = document.createElement('div');
+    indicator.className = 'conv-drop-indicator h-0.5 bg-accent mx-2 rounded-full';
+    if (isAbove) {
+      item.parentNode.insertBefore(indicator, item);
+    } else {
+      item.parentNode.insertBefore(indicator, item.nextSibling);
+    }
+  });
+
+  item.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (!_draggedConvId || _draggedConvId === item.dataset.convId) return;
+    // 移除插入线
+    document.querySelectorAll('#convList .conv-drop-indicator').forEach(el => el.remove());
+    // DOM 移动：将拖拽项移动到目标位置
+    const draggedEl = document.querySelector(`#convList [data-conv-id="${_draggedConvId}"]`);
+    if (!draggedEl || draggedEl === item) return;
+    const rect = item.getBoundingClientRect();
+    const isAbove = e.clientY < rect.top + rect.height / 2;
+    if (isAbove) {
+      item.parentNode.insertBefore(draggedEl, item);
+    } else {
+      item.parentNode.insertBefore(draggedEl, item.nextSibling);
+    }
+    // 持久化新顺序
+    _persistConvReorder();
+  });
+
+  item.addEventListener('dragend', () => {
+    item.classList.remove('opacity-50');
+    document.querySelectorAll('#convList .conv-drop-indicator').forEach(el => el.remove());
+    _draggedConvId = null;
+  });
+}
+
+// ============================================================
+// 字符计数器（P1-2：DeepSeek 风格输入字符计数 + 超限拦截）
+// ============================================================
+
+/** 最大输入字符数（超过此值阻止发送） */
+const MAX_INPUT_CHARS = 32000;
+
+/**
+ * 更新字符计数器显示。
+ * @param {string} text - 当前输入文本
+ */
+function _updateCharCounter(text) {
+  const counter = $('charCounter');
+  if (!counter) return;
+  const len = text.length;
+  if (len === 0) {
+    counter.classList.add('hidden');
+    return;
+  }
+  counter.classList.remove('hidden');
+  counter.textContent = `${len.toLocaleString()} / ${MAX_INPUT_CHARS.toLocaleString()}`;
+  // 接近上限时变色警示
+  if (len > MAX_INPUT_CHARS * 0.9) {
+    counter.className = 'text-[11px] text-amber-400 ml-auto';
+  } else if (len > MAX_INPUT_CHARS) {
+    counter.className = 'text-[11px] text-red-400 ml-auto font-medium';
+  } else {
+    counter.className = 'text-[11px] text-text-quaternary ml-auto';
+  }
+  // 超限拦截：禁用发送按钮
+  const sendBtn = $('sendBtn');
+  if (sendBtn && !get('streaming')) {
+    sendBtn.disabled = len > MAX_INPUT_CHARS;
+  }
+}
+
+/** 会话列表初始渲染限制（P2-3：性能优化，避免大量会话一次性渲染） */
+const CONV_INITIAL_RENDER_LIMIT = 50;
+/** doc-status-changed 全量列表刷新合流窗口（V3.1 P2-2） */
+const DOC_REFRESH_DEBOUNCE_MS = 500;
+
+// V3.1 P3-5：统一书签/搜索跳转回调（原 4 处内联复制 → 单一实现）。
+// 注意：须在首次使用前定义（loadConversations/_renderConvItem 均会引用）。
+const _navigateToMessage = createBookmarkNavigator({ loadConversation });
+
+async function loadConversations() {
+const convBox = $('convList');
+if (convBox) showSkeleton(convBox, 'conv', 4);
+const list = await invoke('get_conversations', { workspaceId: getCurrentWorkspaceId() });
+// 暴露会话列表供书签模块查询标题（REQ-RAG-047）
+window.__echomindConversations = list;
+// 刷新书签面板（会话标题可能变化）— 兼容消息级书签跳转（V3.1 P3-5 统一导航器）
+refreshBookmarks({ onNavigate: (convId, messageId) => _navigateToMessage(convId, messageId) });
+const box = $('convList');
+if (box) hideSkeleton(box);
   box.innerHTML = '';
 
   if (list.length === 0) {
@@ -363,16 +563,42 @@ async function loadConversations() {
     ? list.filter(c => c.id !== get('currentConversationId'))
     : list;
 
+  // 置顶会话（从 localStorage 读取）
+  const pinnedIds = _getPinnedConvIds();
+  const pinnedConvs = filtered.filter(c => pinnedIds.has(c.id));
+  const normalConvs = filtered.filter(c => !pinnedIds.has(c.id));
+
+  // 渲染置顶分组（如果有置顶会话）
+  if (pinnedConvs.length > 0) {
+    const header = document.createElement('div');
+    header.className = 'conv-group-header';
+    header.textContent = t('chat.pinned') || '置顶';
+    box.appendChild(header);
+
+    for (const c of pinnedConvs) {
+      _renderConvItem(box, c, get('currentConversationId'), true);
+    }
+  }
+
   // 按时间分组（保持倒序，因为后端已按 created_at 倒序返回）
   const groups = new Map();
-  for (const c of filtered) {
+  for (const c of normalConvs) {
     const bucket = getConvTimeBucket(c.created_at);
     if (!groups.has(bucket)) groups.set(bucket, []);
     groups.get(bucket).push(c);
   }
 
+  // V3.1 P2-4：分批渲染 — 超过 CONV_INITIAL_RENDER_LIMIT 时先渲染前 N 条，
+  // 追加「加载更多」按钮续渲（死常量接线；百级会话用户切换侧栏不再整列重建）
+  let renderedCount = pinnedConvs.length;
+  const remainingGroups = [];
+
   // 渲染每个分组
   for (const [bucket, convs] of groups) {
+    if (renderedCount >= CONV_INITIAL_RENDER_LIMIT) {
+      remainingGroups.push([bucket, convs]);
+      continue;
+    }
     // 分组头（sticky）
     const header = document.createElement('div');
     header.className = 'conv-group-header';
@@ -381,23 +607,148 @@ async function loadConversations() {
 
     // 分组下的会话条目
     for (const c of convs) {
-      const item = document.createElement('div');
-      const active = c.id === get('currentConversationId');
-      item.className = `group flex items-center justify-between px-3 py-2.5 rounded-xl text-sm cursor-pointer ${active ? 'bg-accent/15 text-accent' : 'text-slate-300 hover:bg-white/5'}`;
-      const title = document.createElement('span');
-      title.className = 'truncate';
-      title.textContent = c.title;
-      const del = document.createElement('button');
-      del.className = 'invisible group-hover:visible text-text-quaternary hover:text-red-400 ml-2 shrink-0 px-1';
-      del.textContent = '×';
-      del.title = t('chat.delete_conversation');
-      del.onclick = async (ev) => { ev.stopPropagation(); await removeConversation(c.id); };
-      item.appendChild(title);
-      item.appendChild(del);
-      item.onclick = () => loadConversation(c.id);
-      box.appendChild(item);
+      if (renderedCount >= CONV_INITIAL_RENDER_LIMIT) {
+        remainingGroups.push([null, [c]]);
+        continue;
+      }
+      _renderConvItem(box, c, get('currentConversationId'), false);
+      renderedCount++;
     }
   }
+
+  // 「加载更多」：逐批渲染剩余会话（每次点击 +50）
+  if (remainingGroups.length > 0) {
+    const hiddenCount = remainingGroups.reduce((sum, [, cs]) => sum + cs.length, 0);
+    const moreBtn = document.createElement('button');
+    moreBtn.id = 'convLoadMoreBtn';
+    moreBtn.type = 'button';
+    moreBtn.className = 'w-full px-3 py-2 text-center text-[11px] text-text-quaternary hover:text-text-secondary hover:bg-surface-2 transition-colors cursor-pointer border-none bg-transparent';
+    moreBtn.textContent = t('chat.load_more', { count: hiddenCount }) || `加载更多（${hiddenCount}）`;
+    moreBtn.onclick = () => {
+      // 续渲：把剩余项按原顺序补到列表尾部（分组头仅在批次起点重建）
+      let budget = CONV_INITIAL_RENDER_LIMIT;
+      let i = 0;
+      while (i < remainingGroups.length && budget > 0) {
+        const [bucket, cs] = remainingGroups[i];
+        if (bucket !== null) {
+          const header = document.createElement('div');
+          header.className = 'conv-group-header';
+          header.textContent = getConvBucketLabel(bucket);
+          box.appendChild(header);
+        }
+        for (const c of cs) {
+          if (budget <= 0) break;
+          _renderConvItem(box, c, get('currentConversationId'), false);
+          budget--;
+        }
+        i++;
+      }
+      remainingGroups.splice(0, i);
+      const left = remainingGroups.reduce((sum, [, cs]) => sum + cs.length, 0);
+      if (left > 0) {
+        moreBtn.textContent = t('chat.load_more', { count: left }) || `加载更多（${left}）`;
+      } else {
+        moreBtn.remove();
+      }
+    };
+    box.appendChild(moreBtn);
+  }
+}
+
+// ============================================================
+// 会话置顶功能（P0-4：DeepSeek 风格会话置顶）
+// ============================================================
+
+/** localStorage 存储键：置顶会话 ID 列表 */
+const PINNED_CONVS_KEY = 'echomind_pinned_conversations';
+
+/**
+ * 获取置顶会话 ID 集合。
+ * @returns {Set<string>}
+ */
+function _getPinnedConvIds() {
+  try {
+    const raw = localStorage.getItem(PINNED_CONVS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch (_) { return new Set(); }
+}
+
+/**
+ * 切换会话置顶状态。
+ * @param {string} convId - 会话 ID
+ */
+function _togglePinConversation(convId) {
+  const pinned = _getPinnedConvIds();
+  if (pinned.has(convId)) {
+    pinned.delete(convId);
+  } else {
+    pinned.add(convId);
+  }
+  try {
+    localStorage.setItem(PINNED_CONVS_KEY, JSON.stringify([...pinned]));
+  } catch (_) { /* 隐私模式 */ }
+}
+
+/**
+ * 渲染单个会话条目（复用逻辑：置顶和普通分组共用）。
+ * @param {HTMLElement} box - 容器
+ * @param {object} c - 会话对象
+ * @param {string} currentConvId - 当前会话 ID
+ * @param {boolean} isPinned - 是否置顶
+ */
+function _renderConvItem(box, c, currentConvId, isPinned) {
+  const item = document.createElement('div');
+  const active = c.id === currentConvId;
+  item.className = `group flex items-center justify-between px-3 py-2.5 rounded-xl text-sm cursor-pointer ${active ? 'bg-accent/15 text-accent' : 'text-slate-300 hover:bg-white/5'}`;
+  item.dataset.convId = c.id;
+  item.dataset.convTitle = c.title || '';
+  item.setAttribute('role', 'listitem');
+  item.setAttribute('aria-label', c.title || t('backend.placeholder_title'));
+  const title = document.createElement('span');
+  title.className = 'truncate flex-1';
+  title.textContent = c.title;
+  // 置顶图标（固定指示器）
+  if (isPinned) {
+    const pinIcon = document.createElement('span');
+    pinIcon.className = 'shrink-0 text-text-quaternary mr-1';
+    pinIcon.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-8H8a2 2 0 0 0 0 8h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>';
+    title.insertBefore(pinIcon, title.firstChild);
+  }
+  // 置顶/取消置顶按钮
+  const pinBtn = document.createElement('button');
+  pinBtn.className = 'invisible group-hover:visible text-text-quaternary hover:text-accent ml-1 shrink-0 px-1';
+  pinBtn.title = isPinned ? (t('chat.unpin') || '取消置顶') : (t('chat.pin') || '置顶');
+  pinBtn.setAttribute('aria-label', isPinned ? (t('chat.unpin') || '取消置顶') : (t('chat.pin') || '置顶'));
+  pinBtn.innerHTML = isPinned
+    ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-8H8a2 2 0 0 0 0 8h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>'
+    : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-8H8a2 2 0 0 0 0 8h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/><line x1="12" y1="17" x2="12" y2="22"/></svg>';
+  pinBtn.onclick = async (ev) => {
+    ev.stopPropagation();
+    _togglePinConversation(c.id);
+    await loadConversations();
+  };
+  const del = document.createElement('button');
+  del.className = 'invisible group-hover:visible text-text-quaternary hover:text-red-400 ml-2 shrink-0 px-1';
+  del.innerHTML = icon('close', 'sm');
+  del.title = t('chat.delete_conversation');
+  del.setAttribute('aria-label', t('chat.delete_conversation'));
+  del.onclick = async (ev) => { ev.stopPropagation(); await removeConversation(c.id); };
+  item.appendChild(title);
+  // 书签按钮（REQ-RAG-047）
+  const bookmarkBtn = createBookmarkButton(c.id, {
+    onToggle: () => { refreshBookmarks({ onNavigate: (convId, messageId) => _navigateToMessage(convId, messageId) }); },
+  });
+  item.appendChild(bookmarkBtn);
+  item.appendChild(pinBtn);
+  item.appendChild(del);
+  item.onclick = () => loadConversation(c.id);
+  // V3.1 P3-6：键盘可达（Enter/Space 触发）
+  makeKeyboardClickable(item);
+  // 拖拽排序（REQ-IX-002）
+  _bindDragEvents(item);
+  box.appendChild(item);
 }
 
 // ============================================================
@@ -421,12 +772,10 @@ let _kbRenderedCount = 0;
 /** IntersectionObserver 实例 */
 let _kbObserver = null;
 
-/** 文件类型图标映射 */
-const FILE_ICONS = {
-  md: '📝', txt: '📄', pdf: '📕', docx: '📘', html: '🌐',
-  pptx: '📊', epub: '📖', xlsx: '📗', csv: '📗',
-  rs: '🦀', ts: '🔷', tsx: '🔷', py: '🐍', go: '🐹',
-};
+/** 文件类型图标 — 使用 SVG inline 图标（REQ-DS-004）替代 Emoji */
+function getFileIcon(ext) {
+  return fileIcon(ext, 'sm');
+}
 
 /** 状态颜色映射（圆点指示器） */
 const STATUS_DOT_COLORS = {
@@ -439,12 +788,18 @@ const STATUS_DOT_COLORS = {
 /**
  * 加载知识库文档列表（从后端获取全部，前端分页渲染）。
  * 同步更新配额计数，然后调用 applyKbFilters() 进行筛选和渲染。
+ * REQ-ING-008 v1.10：支持排序参数传递。
  */
+let _kbSortBy = null;
+let _kbSortOrder = null;
+
 async function loadDocuments() {
+  const docList = $('docList');
+  if (docList) showSkeleton(docList, 'doc', 4);
   try {
-    _kbAllDocs = await invoke('get_documents');
+    _kbAllDocs = await invoke('get_documents', { sortBy: _kbSortBy, sortOrder: _kbSortOrder });
     const isPro = get('isPro');
-    setState({ docCount: _kbAllDocs.length });
+    setState({ docCount: _kbAllDocs.length, kbAllDocs: _kbAllDocs });
     updateChatInputState();
     const countEl = $('kbDocCount');
     if (countEl) {
@@ -455,6 +810,8 @@ async function loadDocuments() {
     applyKbFilters();
   } catch (err) {
     toastError(err);
+  } finally {
+    if (docList) hideSkeleton(docList);
   }
 }
 
@@ -555,11 +912,11 @@ function _createDocItem(d, isPro, multiSelect) {
     item.appendChild(checkbox);
   }
 
-  // 文件类型图标
-  const icon = document.createElement('span');
-  icon.className = 'shrink-0 text-sm leading-none';
-  icon.textContent = FILE_ICONS[ext] || '📄';
-  item.appendChild(icon);
+  // 文件类型图标（SVG inline，REQ-DS-004）
+  const fileIconEl = document.createElement('span');
+  fileIconEl.className = 'shrink-0 leading-none';
+  fileIconEl.innerHTML = getFileIcon(ext);
+  item.appendChild(fileIconEl);
 
   // 状态指示圆点
   const dot = document.createElement('span');
@@ -567,11 +924,14 @@ function _createDocItem(d, isPro, multiSelect) {
   dot.title = t('knowledge_base.' + labelKey);
   item.appendChild(dot);
 
-  // 文件名
+  // 文件名（可点击预览 REQ-ING-010）
   const left = document.createElement('span');
-  left.className = 'truncate flex-1 text-text-primary';
+  left.className = 'truncate flex-1 text-text-primary cursor-pointer hover:text-accent transition-colors';
   left.textContent = name;
   left.title = d.file_path;
+  left.onclick = () => openDocPreview(d.id);
+  // V3.1 P3-6：键盘可达（Enter/Space 触发预览）
+  makeKeyboardClickable(left);
   item.appendChild(left);
 
   // 标签（内联显示，最多 3 个 + 溢出计数）
@@ -598,9 +958,17 @@ function _createDocItem(d, isPro, multiSelect) {
   const actions = document.createElement('span');
   actions.className = 'shrink-0 flex items-center gap-0.5';
 
+  // 文档预览按钮（REQ-ING-010）
+  const previewBtn = document.createElement('button');
+  previewBtn.className = 'invisible group-hover:visible text-text-quaternary hover:text-accent px-1 transition-opacity';
+  previewBtn.innerHTML = icon('eye', 'sm');
+  previewBtn.title = t('doc.preview_title') || '预览';
+  previewBtn.onclick = (ev) => { ev.stopPropagation(); openDocPreview(d.id); };
+  actions.appendChild(previewBtn);
+
   const sumToggle = document.createElement('button');
-  sumToggle.className = 'invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity';
-  sumToggle.textContent = '📝';
+  sumToggle.className = 'invisible group-hover:visible text-text-quaternary hover:text-accent px-1 transition-opacity';
+  sumToggle.innerHTML = icon('summary', 'sm');
   sumToggle.title = t('knowledge_base.summary_toggle');
   sumToggle.style.display = status === 'Indexed' ? '' : 'none';
   sumToggle.onclick = async (ev) => {
@@ -621,24 +989,24 @@ function _createDocItem(d, isPro, multiSelect) {
   actions.appendChild(sumToggle);
 
   const retry = document.createElement('button');
-  retry.className = 'invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity';
-  retry.textContent = '↻';
+  retry.className = 'invisible group-hover:visible text-text-quaternary hover:text-accent px-1 transition-opacity';
+  retry.innerHTML = icon('retry', 'sm');
   retry.title = t('knowledge_base.retry_index');
   retry.style.display = status === 'Failed' ? '' : 'none';
   retry.onclick = async (ev) => { ev.stopPropagation(); await retryDocument(d.id, name); };
   actions.appendChild(retry);
 
   const audit = document.createElement('button');
-  audit.className = 'invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity';
-  audit.textContent = '🔍';
+  audit.className = 'invisible group-hover:visible text-text-quaternary hover:text-accent px-1 transition-opacity';
+  audit.innerHTML = icon('search', 'sm');
   audit.title = t('knowledge_base.audit_doc');
   audit.style.display = (isPro && status === 'Indexed') ? '' : 'none';
   audit.onclick = async (ev) => { ev.stopPropagation(); await auditDocument(d.id, name); };
   actions.appendChild(audit);
 
   const tagBtn = document.createElement('button');
-  tagBtn.className = 'invisible group-hover:visible text-text-quaternary hover:text-accent px-1 text-xs transition-opacity';
-  tagBtn.textContent = '#';
+  tagBtn.className = 'invisible group-hover:visible text-text-quaternary hover:text-accent px-1 transition-opacity';
+  tagBtn.innerHTML = icon('tag', 'sm');
   tagBtn.title = t('knowledge_base.tag_input_placeholder');
   tagBtn.onclick = (ev) => {
     ev.stopPropagation();
@@ -651,9 +1019,9 @@ function _createDocItem(d, isPro, multiSelect) {
   actions.appendChild(tagBtn);
 
   const del = document.createElement('button');
-  del.className = 'invisible group-hover:visible text-text-quaternary hover:text-red-400 px-1 text-xs transition-opacity';
+  del.className = 'invisible group-hover:visible text-text-quaternary hover:text-red-400 px-1 transition-opacity';
   del.dataset.action = 'delete';
-  del.textContent = '×';
+  del.innerHTML = icon('close', 'sm');
   del.title = t('knowledge_base.delete_doc');
   del.onclick = async (ev) => { ev.stopPropagation(); await removeDocument(d.id, name); };
   actions.appendChild(del);
@@ -718,13 +1086,13 @@ function _renderKbEmptyState(box, isEmpty) {
   empty.className = 'px-3 py-8 text-center text-xs text-text-quaternary';
   if (isEmpty) {
     empty.innerHTML = `
-      <div class="text-3xl mb-3 opacity-50">📚</div>
+      <div class="mb-3 opacity-50 flex justify-center">${icon('book', 'lg')}</div>
       <div class="mb-1">${t('knowledge_base.empty_title')}</div>
       <div class="text-[11px] opacity-70">${t('knowledge_base.empty_hint')}</div>
       <div class="text-[10px] opacity-50 mt-2">${t('knowledge_base.empty_formats')}</div>`;
   } else {
     empty.innerHTML = `
-      <div class="text-2xl mb-2 opacity-50">🔍</div>
+      <div class="mb-2 opacity-50 flex justify-center">${icon('search', 'md')}</div>
       <div>${t('knowledge_base.no_match')}</div>`;
   }
   box.appendChild(empty);
@@ -821,7 +1189,7 @@ async function retryDocument(docId, docName) {
  */
 async function initConversations() {
   try {
-    const list = await invoke('get_conversations', { workspaceId: WORKSPACE });
+    const list = await invoke('get_conversations', { workspaceId: getCurrentWorkspaceId() });
     if (list.length === 0) await newChat();
     else await loadConversation(list[0].id);
     await loadDocuments();
@@ -836,19 +1204,19 @@ async function initConversations() {
 
 function getCommands() {
   return [
-    { group: t('command_palette.group_navigation'), icon: '💬', label: t('command_palette.cmd_new_chat'), shortcut: '⌘N', action: () => newChat() },
-    { group: t('command_palette.group_navigation'), icon: '🔍', label: t('command_palette.cmd_search_conv'), action: () => openSearchPopup() },
-    { group: t('command_palette.group_navigation'), icon: '＋', label: t('command_palette.cmd_import'), shortcut: '⌘O', action: () => $('plusBtn').click() },
-    { group: t('command_palette.group_navigation'), icon: '⚙', label: t('command_palette.cmd_settings'), shortcut: '⌘,', action: () => openSettings() },
-    { group: t('command_palette.group_navigation'), icon: '‹', label: t('command_palette.cmd_toggle_sidebar'), action: () => toggleSidebar() },
-    { group: t('command_palette.group_chat'), icon: '□', label: t('command_palette.cmd_focus_input'), shortcut: '⌘L', action: () => $('queryInput').focus() },
-    { group: t('command_palette.group_chat'), icon: '■', label: t('command_palette.cmd_stop'), shortcut: 'Esc', action: () => { if (get('streaming')) onStop(); } },
-    { group: t('command_palette.group_chat'), icon: '🗑', label: t('command_palette.cmd_clear_chat'), shortcut: '⌘⇧⌫', action: () => { if (!get('streaming')) newChat(); } },
-    { group: t('command_palette.group_config'), icon: '👁', label: t('command_palette.cmd_toggle_vlm'), action: () => { /* settings.js onVlmToggle */ } },
-    { group: t('command_palette.group_config'), icon: '↓', label: t('command_palette.cmd_download_model'), action: () => initEmbedder() },
-    { group: t('command_palette.group_license'), icon: '◈', label: t('command_palette.cmd_activate_pro'), action: () => { if (!get('isPro')) showPaywall(t('paywall.reason_cmd_palette')); } },
-    ...getSecurityCommands().map(cmd => ({ group: t('security.section_title', 'Security'), icon: cmd.id.includes('lock') ? '🔒' : cmd.id.includes('verify') ? '✅' : '📋', label: cmd.label, action: cmd.action })),
-    { group: t('command_palette.group_help'), icon: '⌨', label: t('command_palette.cmd_shortcuts'), shortcut: '⌘/', action: () => toast(t('command_palette.shortcuts_hint'), 'info') },
+    { group: t('command_palette.group_navigation'), icon: icon('chat', 'sm'), label: t('command_palette.cmd_new_chat'), shortcut: '⌘N', action: () => newChat() },
+    { group: t('command_palette.group_navigation'), icon: icon('search', 'sm'), label: t('command_palette.cmd_search_conv'), action: () => openSearchPopup() },
+    { group: t('command_palette.group_navigation'), icon: icon('plus', 'sm'), label: t('command_palette.cmd_import'), shortcut: '⌘O', action: () => $('plusBtn').click() },
+    { group: t('command_palette.group_navigation'), icon: icon('settings', 'sm'), label: t('command_palette.cmd_settings'), shortcut: '⌘,', action: () => openSettings() },
+    { group: t('command_palette.group_navigation'), icon: icon('collapse', 'sm'), label: t('command_palette.cmd_toggle_sidebar'), action: () => toggleSidebar() },
+    { group: t('command_palette.group_chat'), icon: icon('send', 'sm'), label: t('command_palette.cmd_focus_input'), shortcut: '⌘L', action: () => $('queryInput').focus() },
+    { group: t('command_palette.group_chat'), icon: icon('stop', 'sm'), label: t('command_palette.cmd_stop'), shortcut: 'Esc', action: () => { if (get('streaming')) onStop(); } },
+    { group: t('command_palette.group_chat'), icon: icon('trash', 'sm'), label: t('command_palette.cmd_clear_chat'), shortcut: '⌘⇧⌫', action: () => { if (!get('streaming')) newChat(); } },
+    { group: t('command_palette.group_config'), icon: icon('eye', 'sm'), label: t('command_palette.cmd_toggle_vlm'), action: () => { /* settings.js onVlmToggle */ } },
+    { group: t('command_palette.group_config'), icon: icon('download', 'sm'), label: t('command_palette.cmd_download_model'), action: () => initEmbedder() },
+    { group: t('command_palette.group_license'), icon: icon('brand', 'sm'), label: t('command_palette.cmd_activate_pro'), action: () => { if (!get('isPro')) showPaywall(t('paywall.reason_cmd_palette')); } },
+    ...getSecurityCommands().map(cmd => ({ group: t('security.section_title', 'Security'), icon: cmd.id.includes('lock') ? icon('lock', 'sm') : cmd.id.includes('verify') ? icon('check', 'sm') : icon('clipboard', 'sm'), label: cmd.label, action: cmd.action })),
+    { group: t('command_palette.group_help'), icon: icon('keyboard', 'sm'), label: t('command_palette.cmd_shortcuts'), shortcut: '⌘/', action: () => toast(t('command_palette.shortcuts_hint'), 'info') },
   ];
 }
 
@@ -905,21 +1273,26 @@ function initFullscreenDetection() {
  * 应用启动入口：主题初始化 → i18n 初始化 → Mermaid 初始化 → 预设渲染 → LLM 配置检查。
  */
 async function boot() {
+  // 防御性检查前置（V3.1 P2-3）：Tauri 运行时未就绪时直接重试，
+  // 不先执行 initTheme/initI18n（其内部有 IPC 调用，未就绪时必然失败；
+  // 且整体重启 boot 会导致主题/i18n 重复初始化）。
+  if (!window.__TAURI__ || !window.__TAURI__.core || !window.__TAURI__.event) {
+    console.warn('[EchoMind] Tauri runtime not ready, retrying boot() in 200ms…');
+    setTimeout(boot, 200);
+    return;
+  }
+
   // 主题初始化（REQ-UI-011）：必须在 UI 渲染前完成，避免暗色闪烁
   await initTheme();
 
   // i18n 初始化（必须在 UI 渲染前完成，确保所有文案就绪）
   await initI18n();
 
-  // S56：加载自定义快捷指令模板（非阻塞，失败时静默降级）
-  loadCustomTemplates().catch(() => {});
+// S56：加载自定义快捷指令模板（非阻塞，失败时静默降级）
+loadCustomTemplates().catch(() => {});
 
-  // 防御性检查：等待 Tauri 运行时初始化完成
-  if (!window.__TAURI__ || !window.__TAURI__.core || !window.__TAURI__.event) {
-    console.warn('[EchoMind] Tauri runtime not ready, retrying boot() in 200ms…');
-    setTimeout(boot, 200);
-    return;
-  }
+// B09 v1.8：加载 Skill 文件（非阻塞，失败时静默降级）
+loadSkills().catch(() => {});
 
   // 全屏检测：macOS 全屏时 traffic lights 消失，移除 78px padding 让按钮左移填补
   initFullscreenDetection();
@@ -939,12 +1312,21 @@ async function boot() {
   });
   marked.setOptions({ breaks: true, gfm: true });
 
-  // Mermaid 初始化（主题已在 initTheme 中设置，此处为默认初始化）
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: 'dark',
-    securityLevel: 'strict',
-    fontFamily: 'inherit',
+  // Mermaid 延迟加载回调（mermaid.min.js 3.4MB 仅在有图表时加载）
+  // applyTheme() 中的 typeof mermaid !== 'undefined' 守卫保证主题切换安全
+  setMermaidInitFn(() => {
+    const theme = document.documentElement.dataset.theme || 'dark';
+    const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+    let effective = theme === 'system' ? (prefersLight ? 'light' : 'dark') : theme;
+    if (theme === 'high-contrast') effective = 'dark';
+    if (typeof mermaid !== 'undefined') {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: effective,
+        securityLevel: 'strict',
+        fontFamily: 'inherit',
+      });
+    }
   });
 
   // 初始化各模块
@@ -952,12 +1334,54 @@ async function boot() {
   applyPreset();
   initWizard(initConversations);
   initSidebar();
+
+// 初始化书签面板（REQ-RAG-047 + REQ-RAG-053）
+initBookmarks({ onNavigate: _navigateToMessage });
+// 暴露刷新函数供 chat-render.js 的书签按钮调用（REQ-RAG-053）
+window.__refreshBookmarks = () => refreshBookmarks({ onNavigate: _navigateToMessage });
+
+  // REQ-A11Y-001 AC-6 / REQ-A11Y-004 AC-5：自动为按钮内装饰性 SVG 添加 aria-hidden
+  document.querySelectorAll('button[aria-label] svg, button[data-i18n-aria-label] svg').forEach((svg) => {
+    svg.setAttribute('aria-hidden', 'true');
+  });
+
 setReloadDocsCallback(loadDocuments);
 setFilterChangeCallback(applyKbFilters);
+
+// REQ-ING-008 v1.10：文档排序选择处理
+if ($('docSortSelect')) {
+$('docSortSelect').addEventListener('change', async () => {
+const val = $('docSortSelect').value;
+if (val) {
+const [by, order] = val.split(':');
+_kbSortBy = by;
+_kbSortOrder = order;
+} else {
+_kbSortBy = null;
+_kbSortOrder = null;
+}
+await loadDocuments();
+});
+}
+
 // REQ-NAV-001 AC-4：恢复侧栏折叠状态
 restoreSidebarState();
+
+  // REQ-WS-001：初始化知识库选择器 + 注册切换回调
+  setSwitchWorkspaceCallback(async () => {
+    await loadConversations();
+    await loadDocuments();
+  });
+  initWorkspaceSelector().catch(() => {});
+
   initSearchPopup(loadConversation);
-  initCommandPalette(getCommands());
+  initCommandPalette(/** @type {any} */ (getCommands()));
+  initGlobalSearch({
+    onLoadConversation: (id) => loadConversation(id),
+    onOpenDocPreview: (docId) => openDocPreview(docId),
+    onOpenGraphViewer: (entityText) => openGraphViewerWithEntity(entityText),
+  });
+  initKeyboardHelp();
   initPaywall();
   initSettings();
   initDragDrop(async () => { await loadDocuments(); });
@@ -966,11 +1390,53 @@ restoreSidebarState();
   initConvNav();
   initContextMenu();
 
+  // REQ-IX-001：暴露 send() 供右键菜单「重新生成」调用
+  window.__echomindSend = send;
+
+  // REQ-IX-001：右键菜单事件监听
+  document.addEventListener('ctx-refresh-conversations', async () => {
+    await loadConversations();
+  });
+  document.addEventListener('ctx-refresh-documents', async () => {
+    await loadDocuments();
+  });
+document.addEventListener('ctx-regenerate', (e) => {
+// 由 context-menu.js 触发的重新生成 — 直接调用 send()
+// P0-3：支持变体参数（concise/detailed/force_search）
+const detail = /** @type {CustomEvent} */ (e).detail || {};
+const variant = detail.variant || 'default';
+if (variant === 'force_search') {
+  // 强制检索模式：临时启用混合搜索，chat_done 后恢复
+  invoke('update_setting', { key: 'rag.hybrid_search', value: 'true' }).catch(() => {});
+  // 标记需要在 chat_done 后恢复
+  window.__echomindRegenForceSearch = true;
+}
+const sendFn = window.__echomindSend;
+if (typeof sendFn === 'function') sendFn();
+});
+
+  // REQ-KB-004：文档列表键盘快捷键初始化
+  initDocKeyboard({
+    onRefresh: async () => { await loadDocuments(); },
+  });
+
   // 初始化安全模块（同步加密状态、监听锁屏事件、绑定活动监听）
   initSecurity();
 
   // 初始化下载管理器（事件监听 + 崩溃恢复检查，REQ-LLM-004 v2）
   initDownloadManager();
+
+  // 初始化离线检测（REQ-ERR-003 离线模式降级）
+  initOfflineDetector();
+
+  // 初始化面包屑（REQ-NAV-004 面包屑与上下文指示）
+  initBreadcrumb({
+    onNavigateKb: () => {
+      // 跳转到知识库分区
+      const kbTab = $('kbTab');
+      if (kbTab) kbTab.click();
+    },
+  });
 
   // 延迟初始化非关键面板（性能优化：不阻塞首屏渲染）
   // 图谱/代码执行/AutoDream/符号搜索/工作流面板仅在用户交互时需要
@@ -982,32 +1448,62 @@ restoreSidebarState();
     }
   };
 
-  // 按钮点击处理立即绑定（面板打开时会懒初始化）
-  if ($('graphBtn')) {
-    $('graphBtn').onclick = () => openGraphViewer();
+  // P1-1: 工具下拉菜单切换
+  if ($('toolsBtn')) {
+    $('toolsBtn').onclick = (e) => {
+      e.stopPropagation();
+      const menu = $('toolsMenu');
+      if (menu) menu.classList.toggle('hidden');
+    };
   }
-  if ($('dreamBtn')) {
-    $('dreamBtn').onclick = () => openDreamPanel();
-  }
+  // 点击外部关闭工具菜单
+  document.addEventListener('click', (e) => {
+    const menu = $('toolsMenu');
+    const dropdown = $('toolsDropdown');
+    if (menu && dropdown && !dropdown.contains(e.target)) {
+      menu.classList.add('hidden');
+    }
+  });
+
+// 按钮点击处理立即绑定（面板打开时会懒初始化）
+if ($('graphBtn')) {
+  $('graphBtn').onclick = () => { openGraphViewer(); $('toolsMenu')?.classList.add('hidden'); };
+}
+
+/**
+ * 打开知识图谱查看器并定位到指定实体（REQ-IX-008 全局搜索跳转）。
+ * @param {string} entityText - 实体文本
+ */
+async function openGraphViewerWithEntity(entityText) {
+  await openGraphViewer();
+  // 延迟执行搜索定位，等待图谱面板和 D3 加载完成
+  setTimeout(() => {
+    const searchInput = document.getElementById('graphSearchInput');
+    if (searchInput) {
+      searchInput.value = entityText;
+      searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    }
+  }, 800);
+}
+
+if ($('dreamBtn')) {
+  $('dreamBtn').onclick = () => { openDreamPanel(); $('toolsMenu')?.classList.add('hidden'); };
+}
   if ($('symbolBtn')) {
-    $('symbolBtn').onclick = () => openSymbolSearch();
+    $('symbolBtn').onclick = () => { openSymbolSearch(); $('toolsMenu')?.classList.add('hidden'); };
   }
-  if ($('workflowBtn')) {
-    $('workflowBtn').onclick = () => openWorkflowPanel();
-  }
+  // P1-5: workflowBtn 已移除（F 级模块删除）
 
   // 延迟初始化面板内部组件（不阻塞首屏）
   _deferInit(() => {
     initGraphResize();
-    initCodeExecutor();
     initDreamPanel();
     initSymbolSearch();
-    initWorkflowPanel();
   });
 
   // 对话分支树按钮（REQ-RAG-039）
   if ($('branchTreeBtn')) {
-    $('branchTreeBtn').onclick = () => openConversationTreePanel();
+    $('branchTreeBtn').onclick = () => { openConversationTreePanel(); $('toolsMenu')?.classList.add('hidden'); };
   }
 
   // 包装 invoke 以集中处理导入错误（付费墙 / 格式错误）
@@ -1035,19 +1531,13 @@ $('sendBtn').onclick = () => {
 $('newChatBtn').onclick = newChat;
 $('settingsBtn').onclick = () => openSettings();
 
-// DeepSeek 风格输入区快速 Toggle（混合搜索 / Agent / 子代理 / 记忆）
+// DeepSeek 风格输入区快速 Toggle（S5 审计精简：5 → 2，仅保留混合搜索 + Agent）
 const inputTogglesContainer = $('inputToggles');
 if (inputTogglesContainer) {
   const hybridToggle = createInputToggle('hybrid', true);
   inputTogglesContainer.appendChild(hybridToggle);
   const agentToggle = createInputToggle('agent', false);
   inputTogglesContainer.appendChild(agentToggle);
-  const subAgentToggle = createInputToggle('sub_agent', false);
-  inputTogglesContainer.appendChild(subAgentToggle);
-  const memoryToggle = createInputToggle('memory', false);
-  inputTogglesContainer.appendChild(memoryToggle);
-  const webSearchToggle = createInputToggle('web_search', false);
-  inputTogglesContainer.appendChild(webSearchToggle);
 }
 
 // ⌘ J / Ctrl J 全局快捷键 → 新对话（DeepSeek 风格）
@@ -1089,6 +1579,8 @@ document.addEventListener('keydown', (e) => {
       updateInputUI();
     }
     updateTokenEstimate();
+    // P1-2：字符计数器更新
+    _updateCharCounter(ta.value);
   });
   // 失焦时保存草稿 + 重置历史导航
   queryInputEl.addEventListener('blur', () => {
@@ -1108,6 +1600,11 @@ document.addEventListener('keydown', (e) => {
     onCloseSettings: () => closeSettings(),
     onCloseSearchPopup: () => closeSearchPopup(),
     onCloseGraph: () => closeGraphViewer(),
+    onGlobalSearch: () => openGlobalSearch(),
+    onExport: () => {
+      const convId = get('currentConversationId');
+      if (convId) exportConversationToPdf(convId);
+    },
   });
 
 // 初始化语音输入（REQ-RAG-034）：检测 Web Speech API 支持，绑定麦克风按钮
@@ -1116,13 +1613,59 @@ initVoiceInput();
 // 初始化 PDF 导出按钮（REQ-EXP-005）
 initExportButtons();
 
-// 初始化 Session Strip（REQ-RAG-046）
-initSessionStrip();
+// 初始化快捷键帮助面板（REQ-HELP-002 v1.5）
+initKeyboardHelp();
+
+// 初始化全局错误边界（REQ-ERR-002 v1.5）
+initErrorBoundary();
+
+// KB 统计仪表盘按钮（REQ-KB-003 v1.5）
+{
+  const kbStatsBtn = document.getElementById('kbStatsBtn');
+  if (kbStatsBtn) kbStatsBtn.onclick = openKbStats;
+}
+
+// 暴露给 E2E 测试
+window.__openKbStats = openKbStats;
+window.__closeKbStats = closeKbStats;
+window.__openHelpPanel = openHelpPanel;
+window.__closeHelpPanel = closeHelpPanel;
+window.__loadConversations = loadConversations;
+
+// 导出为 HTML 全局函数（REQ-EXP-007）
+window.exportConversationToHtml = exportConversationToHtml;
+window.exportDocumentToHtml = exportDocumentToHtml;
+
+// 关于面板（REQ-HELP-003 v1.6）
+initAboutPanel();
+window.__openAboutPanel = openAboutPanel;
+window.__closeAboutPanel = closeAboutPanel;
+
+// 帮助面板按钮（REQ-HELP-001 v1.5）
+{
+  const helpBtn = document.getElementById('helpBtn');
+  if (helpBtn) helpBtn.onclick = () => openHelpPanel();
+}
 
 // 注册对话流事件监听
+// V3.1 P2-2：doc-status-changed 合流刷新（trailing 500ms）。
+// 批量导入时每个文件发射 4-5 次状态事件，若每次都全量 get_documents + 列表重建，
+// 导入 50 文件会产生 ~200 次 IPC 风暴与 skeleton 闪动；合流后每个静默窗口最多刷新一次。
+let docRefreshTimer = null;
+const debouncedLoadDocuments = () => {
+  if (docRefreshTimer) clearTimeout(docRefreshTimer);
+  docRefreshTimer = setTimeout(async () => {
+    docRefreshTimer = null;
+    await loadDocuments();
+  }, DOC_REFRESH_DEBOUNCE_MS);
+};
+window.addEventListener('pagehide', () => {
+  if (docRefreshTimer) { clearTimeout(docRefreshTimer); docRefreshTimer = null; }
+});
+
 initChatEventListeners({
     onChatDone: async () => { setState({ isNewConversation: false }); await loadConversations(); },
-    onDocStatusChanged: async () => { await loadDocuments(); },
+    onDocStatusChanged: debouncedLoadDocuments,
     onImportProgress: (p) => {
       if (!p) { hideImportProgress(); return; }
       const percent = p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0;
@@ -1190,18 +1733,41 @@ initChatEventListeners({
 resetChatArea(t('chat.placeholder_title'), t('chat.placeholder_desc'));
 
 try {
-// Step 1: 检查向量模型下载状态
-const embedderStatus = await invoke('check_embedder_status');
+// V3.1 P2-3：启动 IPC 并行化 — 4 个独立调用从串行（~4×RTT）改为并行（~1×RTT）
+const [embedderStatus, settings, isDemoMode, proStatus] = await Promise.all([
+  invoke('check_embedder_status'),
+  invoke('get_settings'),
+  demoModeApi.isDemoMode().catch(() => false),
+  invoke('get_pro_status'),
+]);
 const embedderReady = embedderStatus === 'ready';
-
-// Step 2: 检查 LLM 配置
-const settings = await invoke('get_settings');
 const llmConfigured = settings.has_llm_config;
 
-if (embedderReady && llmConfigured) {
+if (isDemoMode) {
+// 演示模式：直接进入主界面，显示提示栏
+setState({
+  isPro: proStatus,
+  demoMode: true,
+  llmConfigured: true,
+  currentModel: t('wizard.demo_mode'),
+  currentLlmMode: 'remote',
+  hybridEnabled: settings.hybrid_search || false,
+  agentEnabled: settings.agent_enabled || false,
+  subAgentEnabled: settings.sub_agent_enabled || false,
+  memoryEnabled: settings.memory_enabled || false,
+  webSearchEnabled: settings.web_search_enabled || false,
+});
+updateModelPill();
+updateProStatus();
+showApp();
+await initConversations();
+await loadDocuments();
+updateChatInputState();
+showDemoModeBanner();
+} else if (embedderReady && llmConfigured) {
 // 全部就绪：直接进入主界面
 setState({
-  isPro: await invoke('get_pro_status'),
+  isPro: proStatus,
   vlmEnabled: settings.vlm_enabled,
   currentModel: settings.model || '',
   currentLlmMode: settings.llm_mode || 'remote',
@@ -1232,6 +1798,15 @@ showWizardStep(2);
 showWizard();
 showWizardStep(1);
 }
+
+  // P2-1：流恢复检测 — 页面加载时检查是否有未完成的流
+  const streamState = checkStreamResume();
+  if (streamState) {
+    toast(t('chat.stream_resume_detected', { query: streamState.query?.slice(0, 30) }) || `检测到上次未完成的对话：${streamState.query?.slice(0, 30)}…`, 'info');
+  }
+
+  // REQ-HELP-004 S87：启动后 5s 异步检查更新（非阻塞，网络不可用时静默跳过）
+  initUpdateBanner();
 }
 
 // ============================================================
@@ -1254,7 +1829,9 @@ function applyTheme(theme) {
 
   // 计算实际生效的主题（system 模式需解析 prefers-color-scheme）
   const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-  const effective = theme === 'system' ? (prefersLight ? 'light' : 'dark') : theme;
+  let effective = theme === 'system' ? (prefersLight ? 'light' : 'dark') : theme;
+  // 高对比度模式使用暗色 Mermaid 主题（REQ-A11Y-005）
+  if (theme === 'high-contrast') effective = 'dark';
 
   // 更新 Mermaid 主题（mermaid 是全局常量，vendor.d.ts 已声明）
   if (typeof mermaid !== 'undefined') {
@@ -1320,6 +1897,56 @@ async function initTheme() {
 
 // 暴露为全局函数（设置面板需要调用）
 window.setTheme = setTheme;
+
+// ============================================================
+// REQ-RAG-051: 演示模式提示栏
+// ============================================================
+
+/** 显示演示模式提示栏（REQ-RAG-051 AC-4） */
+function showDemoModeBanner() {
+  let banner = $('demoModeBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'demoModeBanner';
+    banner.className = 'demo-mode-banner';
+    banner.innerHTML = `<span class="demo-mode-text">${t('wizard.demo_mode_banner')}</span>`;
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'demo-mode-close';
+    closeBtn.textContent = '×';
+    closeBtn.setAttribute('aria-label', t('common.close'));
+    closeBtn.onclick = () => { banner.remove(); };
+    banner.appendChild(closeBtn);
+    // 插入到主容器顶部
+    const mainContent = document.querySelector('main') || document.body;
+    mainContent.insertBefore(banner, mainContent.firstChild);
+  }
+  banner.classList.remove('hidden');
+}
+
+/** 隐藏演示模式提示栏 */
+function hideDemoModeBanner() {
+  const banner = $('demoModeBanner');
+  if (banner) banner.remove();
+}
+
+/**
+ * 从设置面板配置 LLM 后退出演示模式（REQ-RAG-051 AC-5）。
+ * 用户配置 API Key 后自动退出演示模式，清除示例文档。
+ */
+async function exitDemoModeIfActive() {
+  try {
+    const isDemo = await demoModeApi.isDemoMode();
+    if (isDemo) {
+      await demoModeApi.exit();
+      setState({ demoMode: false });
+      hideDemoModeBanner();
+      toast(t('wizard.demo_mode_exited'), 'success');
+    }
+  } catch (_) { /* 静默降级 */ }
+}
+
+// 暴露为全局函数（设置面板 LLM 配置保存后调用）
+window.exitDemoModeIfActive = exitDemoModeIfActive;
 
 // 启动
 boot();

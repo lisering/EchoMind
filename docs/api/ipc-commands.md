@@ -1,35 +1,51 @@
 # IPC 命令契约
 
-> **状态**：活跃 | **最后审阅**：2026-08-10（v12 新增 Session Strip 3 个命令，共 194 个命令；v11 新增 RAG 评估指标 4 个命令，共 191 个命令；v10 全量同步 187 个命令：补充 Q01-Q11/B05-B08/B09-B10/S69-S70 新增 37 个命令 + 安全态势/Shadow 筛查/Scratch 记忆/Burst Buffer/语音转写/网页搜索/文档标签/会话待办/预算追踪/Token 预算/Trace 系统/主题切换/下载管理；v9 补充 KV Cache 跨会话复用 5 个命令；v8 补充 model_load_progress 事件）
+> **状态**：活跃 | **最后审阅**：2026-08-10（v13 新增 v1.6 窗口管理 2 个命令 + 错误日志导出 1 个命令，共 197 个命令；v12 新增 Session Strip 3 个命令，共 194 个命令；v11 新增 RAG 评估指标 4 个命令，共 191 个命令；v10 全量同步 187 个命令：补充 Q01-Q11/B05-B08/B09-B10/S69-S70 新增 37 个命令 + 安全态势/Shadow 筛查/Scratch 记忆/Burst Buffer/语音转写/网页搜索/文档标签/会话待办/预算追踪/Token 预算/Trace 系统/主题切换/下载管理；v9 补充 KV Cache 跨会话复用 5 个命令；v8 补充 model_load_progress 事件）
 >
 > 本文档定义所有 Tauri IPC 命令的签名、参数、返回值与事件负载。
 > 源码：`crates/tauri-app/src/commands/` + `crates/tauri-app/src/lib.rs`。
 
 ---
 
-## 1. 命令总览（194 个 Free / 206 个 Pro，含 12 个编译时 Pro 门控）
+## 1. 命令总览（~233 个 Debug / ~212 个 Release，含 12 个编译时 Pro 门控 + 21 个 `#[cfg(debug_assertions)]` 门控）
+
+> **S09 变更**：以下 `set_xxx` 命令已合并为 `update_setting(key, value)` 统一入口，不再在 `generate_handler!` 中注册：
+> `set_compression_ratio`、`get_compression_ratio`、`set_retrieval_memory_enabled`、`set_graph_retriever_enabled`、`set_progressive_injection`、`set_speculative_enabled`、`set_quality_gate_enabled`、`set_memory_enabled`、`set_contextual_retrieval`、`set_web_search_enabled`、`set_close_to_tray`、`set_sidebar_collapsed`。
+> 前端已迁移到 `settingsApi.update(key, value)`。
+> 新增 `get_setting(key)` 统一读取命令。
 
 | 分类 | 命令 | 参数 | 返回值 |
 |---|---|---|---|
 | 导入 | `import_files` | `paths: Vec<String>` | `Vec<String>` (成功导入的文件名) |
+| 导入 | `replace_document` | `path: String, doc_id: String` | `String` (新文档 ID) |
 | 导入 | `abort_import` | — | `()` |
 | 文件 | `get_file_sizes` | `paths: Vec<String>` | `Vec<(String, u64)>` (路径→大小) |
 | 文件 | `get_file_size_limits` | — | `(u64, u64)` (警告阈值, 硬上限) |
 | 文档 | `get_documents` | — | `Vec<Document>` |
 | 文档 | `delete_document` | `id: String` | `()` |
 | 文档 | `retry_index` | `id: String` | `()` |
+| 文档 | `rebuild_index` | `doc_id: String` | `()` |
 | 文档 | `reclassify_document` | `doc_id: String` | `String` (分类领域) |
 | 对话 | `chat` | `query: String, history: Vec<ChatMessage>, conversation_id: String` | `()` |
 | 对话 | `abort_chat` | `conversation_id: String` | `()` |
 | 会话 | `create_conversation` | `workspace_id: String` | `String` (会话 ID) |
 | 会话 | `get_conversations` | `workspace_id: String` | `Vec<Conversation>` |
 | 会话 | `get_conversations_paginated` | `workspace_id: String, limit: Option<usize>, offset: Option<usize>` | `PaginatedResult<Conversation>` |
+| 会话 | `rename_conversation` | `id: String, title: String` | `()` |
+| 会话 | `reorder_conversations` | `items: Vec<ReorderItem>` | `()` |
+| 书签 | `add_bookmark` | `conversation_id: String, note: Option<String>` | `()` |
+| 书签 | `remove_bookmark` | `conversation_id: String` | `()` |
+| 书签 | `list_bookmarks` | — | `Vec<BookmarkEntry>` |
+| 书签 | `is_bookmarked` | `conversation_id: String` | `bool` |
 | 会话 | `get_messages` | `conversation_id: String` | `Vec<ChatMessage>` |
 | 会话 | `get_messages_paginated` | `conversation_id: String, limit: Option<usize>, offset: Option<usize>` | `PaginatedResult<ChatMessage>` |
 | 会话 | `edit_user_message` | `conversation_id: String, turn_group: String, new_content: String, original_message_id: Option<String>` | `i32` (新版本号) |
 | 会话 | `delete_conversation` | `id: String` | `()` |
 | 导出 | `export_conversation_markdown` | `conversation_id: String` | `(String, String)` (Markdown 内容, 默认文件名) |
 | 导出 | `save_text_file` | `path: String, content: String` | `()` |
+| 导出 | `read_text_file` | `path: String` | `String` (文件内容) |
+| 备份 | `export_backup` | — | `String` (备份文件路径) |
+| 备份 | `import_backup` | `backup_path: String` | `()` |
 | 配置 | `test_llm_connection` | `api_key: String, base_url: String, model: String` | `String` |
 | 配置 | `update_llm_config` | `config: LlmConfig` | `()` |
 | 配置 | `get_settings` | — | `SettingsPayload` |
@@ -41,6 +57,10 @@
 | 配置 | `set_coordinator_mode` | `enabled: bool` | `()` |
 | 配置 | `set_sub_agent_enabled` | `enabled: bool` | `()` |
 | 配置 | `set_embedding_model` | `model: String` | `()` |
+| 统一设置 | `update_setting` | `key: String, value: String` | `()` |
+| 统一设置 | `get_setting` | `key: String` | `Option<String>` |
+| 分块 | `get_chunk_params` | — | `(usize, usize)` (chunk_size, overlap) |
+| 分块 | `set_chunk_params` | `chunk_size: usize, overlap: usize` | `()` |
 | 嵌入模型 | `upload_custom_embedding_model` | `name: String, onnx_path: String, tokenizer_files: Vec<String>` | `CustomModelInfo` (Pro) |
 | 嵌入模型 | `list_custom_models` | — | `Vec<CustomModelInfo>` (Pro) |
 | 嵌入模型 | `delete_custom_model` | `name: String` | `()` (Pro) |
@@ -72,6 +92,7 @@
 | 安全 | `set_clipboard_config` | `enabled: bool, clear_after_secs: u64` | `()` |
 | 安全 | `get_audit_logs` | `limit: Option<usize>` | `Vec<AuditEntry>` |
 | 安全 | `clear_audit_logs` | — | `()` |
+| 安全 | `export_audit_report` | `format: String` | `String` (报告内容) |
 | 安全 | `check_password_strength` | `password: String` | `{ level, percentage, suggestions }` |
 | 本地LLM | `list_local_models` | — | `Vec<ModelInfo>` |
 | 本地LLM | `get_recommended_models` | — | `Vec<RecommendedModel>` |
@@ -99,25 +120,17 @@
 | 缓存 | `clear_cache` | — | `()` |
 | 缓存 | `set_cache_settings` | `settings: CacheSettingsPayload` | `()` |
 | 缓存 | `get_cache_settings` | — | `CacheSettingsPayload` |
-| 压缩 | `set_compression_ratio` | `ratio: f32` | `()` |
-| 压缩 | `get_compression_ratio` | — | `f32` |
 | 检索增强 | `rebuild_bm25_index` | — | `()` |
 | 检索增强 | `rebuild_proposition_index` | — | `()` |
 | 检索增强 | `build_summary_tree` | `doc_id: String` | `()` |
-| 检索增强 | `set_embedder_model` | `model: String` | `()` |
-| 检索记忆 | `set_retrieval_memory_enabled` | `enabled: bool` | `()` |
+| 检索增强 (Pro) | `set_embedder_model` | `model: String` | `()` |
 | 检索记忆 | `get_retrieval_memory_stats` | — | `Vec<MemoryRecord>` |
 | 检索记忆 | `reset_retrieval_memory` | — | `()` |
 | 检索记忆 | `record_retrieval_feedback` | `signal: FeedbackSignal` | `()` |
-| 图检索 | `set_graph_retriever_enabled` | `enabled: bool` | `()` |
-| 性能优化 | `set_progressive_injection` | `enabled: bool` | `()` |
-| 性能优化 | `set_speculative_enabled` | `enabled: bool` | `()` |
-| 性能优化 | `set_quality_gate_enabled` | `enabled: bool` | `()` |
 | 图谱可视化 | `get_graph_data` | `limit?: number` | `Vec<GraphTriple>` |
 | 图谱可视化 | `get_entity_relations` | `entityText: string` | `Vec<EntityRelation>` |
 | 图谱可视化 | `get_graph_stats` | — | `GraphStats` |
 | 图谱可视化增强 | `get_entity_types` | `entities: string[]` | `HashMap<String, String>` |
-| 记忆系统 | `set_memory_enabled` | `enabled: bool` | `()` |
 | 记忆系统 | `get_memories` | `tier?: string` | `Vec<MemoryEntry>` |
 | 记忆系统 | `pin_memory` | `conversation_id: string, content: string` | `MemoryEntry` |
 | 记忆系统 | `promote_memory` | `memory_id: string` | `()` |
@@ -126,23 +139,32 @@
 | 对话模板 | `save_prompt_template` | `template: PromptTemplate` | `String` (template ID) |
 | 对话模板 | `list_prompt_templates` | — | `Vec<PromptTemplate>` |
 | 对话模板 | `delete_prompt_template` | `templateId: String` | `()` |
+| Skill | `discover_skills` | — | `Vec<Skill>` |
 | Wiki链接 | `get_forward_links` | `docId: String` | `Vec<WikiLink>` |
 | Wiki链接 | `get_backlinks` | `docName: String` | `Vec<WikiLink>` |
 | Wiki链接 | `rebuild_wiki_links` | — | `usize` (链接总数) |
 | 对话分支树 | `get_conversation_tree` | `conversationId: String` | `ConversationTree` |
 | 对话分支树 | `branch_from_message` | `conversationId: String, messageId: String, newContent: String` | `BranchResult { new_version, turn_group }` |
 | 对话搜索 | `search_conversations` | `query: String, limit?: usize` | `Vec<MessageSearchResult>` |
+| 全局搜索 | `global_search` | `query: String, limit?: usize` | `GlobalSearchResults { messages, documents, entities }` |
 | Session Strip | `strip_messages` | `conversation_id: String, from_index: usize, to_index: usize, replace_with_summary: bool, summary_text: Option<String>` | `StripResult` |
 | Session Strip | `strip_keeping_recent` | `conversation_id: String, keep_last_n: usize, replace_with_summary: bool, summary_text: Option<String>` | `StripResult` |
 | Session Strip | `preview_strip` | `conversation_id: String, from_index: usize, to_index: usize` | `StripPreview` |
 | 对话分支 | `set_turn_active_version` | `conversation_id: String, turn_group: String, active_version: i32` | `()` |
 | 对话分支 | `get_turn_active_versions` | `conversation_id: String` | `Vec<TurnActiveVersion>` |
-| Contextual Retrieval | `set_contextual_retrieval` | `enabled: bool` | `()` |
 | Contextual Retrieval | `rebuild_contextual_embeddings` | — | `()` |
+| 全库嵌入重建 | `rebuild_all_embeddings` | — | `()` |
+| Late Chunking | `set_late_chunking` | `enabled: bool` | `()` |
+| Late Chunking | `get_late_chunking` | — | `bool` |
+| 嵌入评估 | `run_embed_comparison` | `request: EmbedComparisonRequest` | `Vec<EmbedComparisonResult>` |
 | 文档标签 | `add_document_tag` | `doc_id: String, tag: String` | `()` |
 | 文档标签 | `remove_document_tag` | `doc_id: String, tag: String` | `()` |
 | 文档标签 | `list_all_tags` | — | `Vec<String>` |
 | 文档标签 | `filter_documents_by_tag` | `tag: String` | `Vec<Document>` |
+| 批量操作 | `batch_delete_documents` | `ids: Vec<String>` | `BatchResult` |
+| 批量操作 | `batch_move_documents` | `ids: Vec<String>, target_workspace_id: String` | `BatchResult` |
+| 批量操作 | `batch_add_tags` | `ids: Vec<String>, tags: Vec<String>` | `BatchResult` |
+| KB 统计 | `get_kb_stats` | — | `KbStats` |
 | 文档摘要 | `get_document_summary` | `docId: String` | `String \| null` |
 | 文档摘要 | `regenerate_summary` | `docId: String` | `String` |
 | 主题 | `get_theme` | — | `String` |
@@ -166,7 +188,6 @@
 | 语音转写 | `transcribe_audio` | `audio_path: String` | `String` |
 | 语音转写 | `get_stt_config` | — | `JSON` |
 | 语音转写 | `set_stt_config` | `config: JSON` | `()` |
-| 网页搜索 | `set_web_search_enabled` | `enabled: bool` | `()` |
 | 网页搜索 | `web_search` | `query: String` | `Vec<SearchResult>` |
 | AutoDream | `trigger_dream` | — | `()` |
 | AutoDream | `get_dream_suggestions` | — | `Vec<DreamSuggestion>` |
@@ -201,6 +222,35 @@
 | Trace 系统 | `get_trace_count` | — | `u64` |
 | 用量追踪 | `get_conversation_cost` | `conversation_id: String` | `ConversationCost` |
 | 用量追踪 | `set_token_budget` | `budget: u64` | `()` |
+| 窗口管理 | `get_close_to_tray` | — | `bool` |
+| 错误日志 | `export_error_logs` | — | `String` (日志文本) |
+| 文档预览 | `get_document_preview` | `doc_id: String` | `String` (预览内容) |
+| 文档预览 | `get_document_chunks` | `doc_id: String` | `Vec<Chunk>` |
+| 文档导出 | `export_document_original` | `doc_id: String` | `(String, String)` (内容, 文件名) |
+| 消息 | `delete_message` | `message_id: String` | `()` |
+| RAG 参数 | `get_rag_params` | — | `RagParams` |
+| RAG 参数 | `set_rag_params` | `params: RagParams` | `()` |
+| 生成参数 | `get_generation_params` | — | `GenerationParams` |
+| 生成参数 | `set_generation_params` | `params: GenerationParams` | `()` |
+| 自启动 | `get_autostart` | — | `bool` |
+| 更新检查 | `check_for_updates` | — | `JSON` (更新信息) |
+| 更新检查 | `get_update_check_config` | — | `JSON` (配置信息) |
+| 智能模式 | `set_smart_mode` | `enabled: bool` | `()` |
+| 智能模式 | `get_smart_mode` | — | `bool` |
+| 演示模式 | `is_demo_mode` | — | `bool` |
+| 演示模式 | `exit_demo_mode` | — | `()` |
+| 演示模式 | `load_demo_documents` | — | `()` |
+| 导入历史 | `get_import_history` | `limit?: usize` | `Vec<ImportLogEntry>` |
+| 导入历史 | `clear_import_history` | — | `()` |
+| 工作空间 | `create_workspace` | `name: String` | `String` (工作空间 ID) |
+| 工作空间 | `list_workspaces` | — | `Vec<Workspace>` |
+| 工作空间 | `switch_workspace` | `id: String` | `()` |
+| 工作空间 | `get_current_workspace` | — | `String` |
+| 工作空间 | `rename_workspace` | `id: String, name: String` | `()` |
+| 工作空间 | `delete_workspace` | `id: String` | `()` |
+| 工作空间 | `get_workspace_stats` | `id: String` | `WorkspaceStats` |
+| 工作空间 | `get_workspace_quota` | `id: String` | `JSON` (配额信息) |
+| 工作空间 | `migrate_document` | `doc_id: String, target_workspace: String` | `()` |
 
 ---
 
@@ -412,7 +462,7 @@ invoke('set_embedding_model', { model: string }): Promise<void>
 ```
 
 - **行为**：将嵌入模型标识持久化到 settings 表 `vec.embedding_model`，并销毁当前 embedder 实例（下次调用 `embedder()` 时用新模型重新初始化）
-- **支持的模型标识**：`all-MiniLM-L6-v2`（384d EN）、`bge-small-zh-v1.5`（512d ZH）、`e5-small-v2`（384d Multi）
+- **支持的模型标识**：`all-MiniLM-L6-v2`（384d EN，默认）、`bge-small-en-v1.5`（384d EN，推荐）、`bge-small-zh-v1.5`（512d ZH）、`e5-small-v2`（384d Multi）、`bge-base-en-v1.5`（768d EN）、`bge-m3`（1024d Multi，REQ-VEC-015）、`custom:{name}`（自定义 ONNX，Pro 门控）
 - **注意**：切换模型后已索引文档的向量维度可能与新模型不匹配，建议用户重建索引
 - **错误**：不支持的模型标识 → `Err("不支持的嵌入模型: {model}")`
 - **关联需求**：REQ-VEC-012 嵌入模型运行时切换
@@ -910,7 +960,6 @@ invoke('set_kv_cache_enabled', { enabled: boolean }): Promise<void>
 | `get_locale` | `get_locale_inner` |
 | `set_locale` | `set_locale_inner` |
 | `get_sidebar_collapsed` | `get_sidebar_collapsed_inner` |
-| `set_sidebar_collapsed` | `set_sidebar_collapsed_inner` |
 | `reclassify_document` | `reclassify_document_inner` |
 | `audit_document` | `audit_document_inner` |
 | `retry_index` | `retry_index_inner` |
@@ -1023,7 +1072,7 @@ invoke('build_summary_tree', { doc_id: string }): Promise<void>
 invoke('set_embedder_model', { model: string }): Promise<void>
 ```
 
-- **行为**：设置嵌入模型（如 "all-MiniLM-L6-v2" / "bge-small-zh-v1.5" / "e5-small-v2"），持久化到 settings 表。
+- **行为**：设置嵌入模型（如 "all-MiniLM-L6-v2" / "bge-small-en-v1.5" / "bge-small-zh-v1.5" / "e5-small-v2" / "bge-base-en-v1.5" / "bge-m3" / "custom:{name}"），持久化到 settings 表。
 - **关联**：REQ-PERF-009 ｜ Session S6
 
 ### 2.47.11 set_retrieval_memory_enabled
@@ -1527,3 +1576,130 @@ invoke('set_rag_eval_settings', { settings: RagEvalSettings }): Promise<void>
 - **行为**：将 RAG 评估配置序列化为 JSON 并存储到 settings 表（`rag.eval_settings` 键）。
 - **参数**：`settings: RagEvalSettings` — 评估配置
 - **关联**：REQ-RAG-045
+
+### 2.55 窗口管理（2 个，REQ-WIN-003）
+
+#### 2.55.1 get_close_to_tray
+
+```typescript
+invoke('get_close_to_tray'): Promise<boolean>
+```
+
+- **行为**：从 settings 表读取 `ui.close_to_tray` 键值，返回当前 close-to-tray 是否启用。
+- **返回**：`boolean` — `true` 表示关闭窗口时最小化到系统托盘而非退出
+- **关联**：REQ-WIN-003
+
+#### 2.55.2 set_close_to_tray
+
+```typescript
+invoke('set_close_to_tray', { enabled: boolean }): Promise<void>
+```
+
+- **行为**：将 `ui.close_to_tray` 设置持久化到 settings 表。启用后，窗口关闭按钮拦截 `CloseRequested` 事件，执行 `prevent_close()` + `window.hide()` 最小化到托盘。
+- **参数**：`enabled: boolean` — 是否启用 close-to-tray
+- **关联**：REQ-WIN-003
+
+### 2.56 错误日志导出（1 个，REQ-ERR-005）
+
+#### 2.56.1 export_error_logs
+
+```typescript
+invoke('export_error_logs'): Promise<string>
+```
+
+- **行为**：从本地日志系统（`crates/infra/src/local_logger.rs`）导出 ERROR 级别日志条目，格式化为可读文本。日志系统使用 JSON Lines 格式 + 日期轮转，此命令过滤 `level == "error"` 条目并拼接为纯文本。
+- **返回**：`string` — 格式化的错误日志文本（每行一条 ERROR 日志）
+- **关联**：REQ-ERR-005
+
+### 2.57 MCP 服务器管理（6 个，REQ-ARCH-016）
+
+#### 2.57.1 add_mcp_server
+
+```typescript
+invoke('add_mcp_server', { config: McpServerConfig }): Promise<void>
+```
+
+- **行为**：添加 MCP 服务器配置到 settings 表（`mcp.servers` 键，JSON 数组）。如果配置启用，自动尝试连接服务器。
+- **参数**：`config: McpServerConfig` — 服务器配置（id/name/transport/command/url/enabled 等）
+- **关联**：REQ-ARCH-016 AC-1
+
+#### 2.57.2 remove_mcp_server
+
+```typescript
+invoke('remove_mcp_server', { id: string }): Promise<void>
+```
+
+- **行为**：从配置列表中删除指定 MCP 服务器，并断开运行时连接。
+- **参数**：`id: string` — 服务器 ID
+- **关联**：REQ-ARCH-016 AC-1
+
+#### 2.57.3 list_mcp_servers
+
+```typescript
+invoke('list_mcp_servers'): Promise<McpServerStatus[]>
+```
+
+- **行为**：列出所有已配置的 MCP 服务器及其当前连接状态。
+- **返回**：`McpServerStatus[]` — 服务器状态列表（config + status + error_message + tool_count）
+- **关联**：REQ-ARCH-016 AC-6
+
+#### 2.57.4 toggle_mcp_server
+
+```typescript
+invoke('toggle_mcp_server', { id: string, enabled: boolean }): Promise<void>
+```
+
+- **行为**：启用/禁用 MCP 服务器。启用时自动尝试连接，禁用时断开连接。
+- **参数**：`id: string` — 服务器 ID，`enabled: boolean` — 是否启用
+- **关联**：REQ-ARCH-016 AC-1
+
+#### 2.57.5 get_mcp_tools
+
+```typescript
+invoke('get_mcp_tools'): Promise<McpTool[]>
+```
+
+- **行为**：获取所有已连接 MCP 服务器暴露的工具列表（聚合）。
+- **返回**：`McpTool[]` — 工具列表（name/description/input_schema/server_id/server_name）
+- **关联**：REQ-ARCH-016 AC-4
+
+#### 2.57.6 call_mcp_tool
+
+```typescript
+invoke('call_mcp_tool', { serverId: string, toolName: string, arguments: object }): Promise<McpToolCallResult>
+```
+
+- **行为**：调用指定 MCP 服务器的工具。**安全说明**：前端必须在调用前弹出确认对话框并获得用户许可。
+- **参数**：`serverId: string` — 服务器 ID，`toolName: string` — 工具名称，`arguments: object` — 工具参数
+- **返回**：`McpToolCallResult` — 工具执行结果（success/content/is_error）
+- **关联**：REQ-ARCH-016 AC-5
+#### 2.58 磁盘空间管理（V3.1 P1-5 前端接线）
+
+#### 2.58.1 get_disk_space_info
+
+```typescript
+invoke('get_disk_space_info'): Promise<string>  // JSON 序列化的 DiskSpaceInfo
+```
+
+- **行为**：读取数据目录所在磁盘的空间信息。
+- **返回**：`JSON.stringify({ free_bytes, total_bytes, used_bytes, free_percent, is_low, threshold_bytes })`
+- **关联**：REQ-ERR-004
+
+#### 2.58.2 cleanup_disk_space
+
+```typescript
+invoke('cleanup_disk_space'): Promise<number>  // 释放的字节数
+```
+
+- **行为**：清理可回收空间（缓存/临时文件），不删除已导入文档与向量索引。
+- **关联**：REQ-ERR-004
+
+#### 2.58.3 check_disk_space
+
+```typescript
+invoke('check_disk_space', { requiredBytes: number }): Promise<void>
+```
+
+- **行为**：导入大量文档前预检磁盘空间，不足时 reject（错误消息含缺口）。
+- **参数**：`requiredBytes: number` — 预估所需空间（字节）
+- **关联**：REQ-ERR-004

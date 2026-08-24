@@ -1,6 +1,6 @@
 # 前端模块参考
 
-> **状态**：活跃 | **最后审阅**：2026-08-10（v2.6 全量同步 56 个 JS 模块：新增 queue-send / voice-input / context-menu / context-bar / error-detail / feedback / retrieval-feedback / empty-state / action / scroll-lock / privacy-indicator / followup / doc-mention / conv-nav / caret / regen-carousel / guards / command-palette 模块概要；v2.5 新增 §11 前端架构基础设施模块）
+> **状态**：活跃 | **最后审阅**：2026-08-16（v2.8 v2.0 S17 文档同步：更新模块计数 58→76（S12 删除 4 个 F 级 + S5/S6 新增 ~22 个模块）；vendor 更新：`tailwindcss.js` → `tailwind-prebuilt.css`（S12 体积优化），`mermaid.min.js` → `mermaid-custom.min.js`（esbuild 自定义打包）；新增模块概要：about-panel / bookmarks / breadcrumb / date-utils / doc-keyboard / doc-preview / error-recovery / global-search / graph-renderer / help-panel / icons / ime-guard / kb-stats / keyboard-help / lazy-loader / offline-detector / settings-advanced / settings-general / skeleton / trace-panel / workspace；v2.7 新增 v1.6 date-utils / about-panel 模块，共 58 个 JS 模块）
 >
 > 本文档记录 `ui/index.html` 的模块划分与函数职责。
 > 前端为单文件 SPA（vanilla JS + Tailwind CSS 本地构建），**无框架、无 CDN**。
@@ -14,12 +14,12 @@
 
 | 文件 | 用途 | 版本 |
 |------|------|------|
-| `tailwindcss.js` | CSS 框架（本地构建，非 CDN） | Tailwind v4+ |
+| `tailwind-prebuilt.css` | CSS 框架（预构建，S12 体积优化：441KB JIT → 36KB prebuilt） | Tailwind v4+ |
 | `marked.min.js` | Markdown → HTML 解析 | marked.js |
 | `purify.min.js` | DOMPurify 白名单消毒（REQ-SEC-002） | DOMPurify |
-| `highlight.min.js` | 代码语法高亮 | highlight.js |
+| `highlight.min.js` | 代码语法高亮（S12 体积优化：eager → lazy 加载） | highlight.js |
 | `github-dark.min.css` | highlight.js 暗色主题 | — |
-| `mermaid.min.js` | Mermaid 图表渲染（REQ-VIZ-001） | v11.16.0 |
+| `mermaid-custom.min.js` | Mermaid 图表渲染（S12 体积优化：esbuild 自定义打包，3371KB vs 原 UMD 3482KB） | v11.16.0 |
 | `katex/katex.min.js` | LaTeX 数学公式渲染（REQ-VIZ-002） | v0.18.1 |
 | `katex/katex.min.css` | KaTeX 样式 | v0.18.1 |
 | `katex/katex-mhchem.min.js` | KaTeX 化学方程式插件 | — |
@@ -477,7 +477,7 @@ finalizeStream()
 | `ui/styles/graph-viewer.css` | `.graph-node-icon` / `.graph-node-searched` | 实体类型图标 + 搜索高亮节点样式（Session 4 新增） |
 | `ui/styles/graph-viewer.css` | `.graph-edge-hidden` / `.graph-node-hidden` | 过滤隐藏状态样式（Session 4 新增） |
 | `ui/styles/graph-viewer.css` | `.graph-entity-badge` | 详情面板实体类型徽章样式（Session 4 新增） |
-| `ui/src/graph-viewer.js` | `switchLayout(mode)` | 切换图谱布局模式（force/hierarchical/radial）。更新按钮状态，停止旧 simulation，根据模式重新渲染。（Session 5 新增） |
+| `ui/src/graph-viewer.js` | `switchLayout(mode)` | 切换图谱布局模式（force/hierarchical/radial）。调用 `get_graph_layout` IPC 获取后端布局建议（Free 命令），更新按钮状态，停止旧 simulation，根据模式重新渲染。（Session 5 新增，Zombie Zero 接线 `get_graph_layout`） |
 | `ui/src/graph-viewer.js` | `findPath()` | 查找最短路径并高亮显示。调用 `get_shortest_path` IPC 获取路径，在图谱上高亮路径节点和边。（Session 5 新增） |
 | `ui/src/graph-viewer.js` | `toggleCommunities()` | 切换社区检测着色。调用 `get_communities` IPC 获取社区映射，按社区 ID 为节点着色。再次点击关闭。（Session 5 新增） |
 | `ui/src/graph-viewer.js` | `renderPathSelectors()` | 渲染路径分析实体选择器下拉框，填充所有节点实体。（Session 5 新增） |
@@ -563,6 +563,9 @@ finalizeStream()
 |---|---|
 | `exportConversationToPdf(conversationId, title?)` | 导出当前对话为 PDF：加载会话全部消息（`get_messages` IPC）→ 构建打印 HTML（复用 Markdown 渲染管线 marked → DOMPurify → highlight.js）→ 隐藏 iframe 写入 HTML → `iframe.contentWindow.print()` 触发浏览器打印对话框。空对话显示 toast 错误，不崩溃。 |
 | `exportDocumentToPdf(docId)` | 导出知识库文档为 PDF：加载文档全文（`get_documents` + `get_document_chunks` IPC）→ 构建打印 HTML → `print()`。 |
+| `exportConversationToHtml(conversationId, title?)` | 导出当前对话为 HTML：加载会话全部消息 → `buildExportHtml()` 构建独立可打开的 HTML 文件（内联 CSS，无外部依赖）→ `save_text_file` IPC 保存。复用 Markdown 渲染管线（v1.6，REQ-EXP-007）。 |
+| `exportDocumentToHtml(docId)` | 导出知识库文档为 HTML：加载文档全文 → `buildExportHtml()` 构建 HTML → `save_text_file` IPC 保存（v1.6，REQ-EXP-007）。 |
+| `buildExportHtml(title, contentBlocks, options?)` | 构建导出专用 HTML 文档：内联 CSS 样式（消息块 + 代码高亮 + 引用来源）+ 消息块 HTML + 页头（标题 + 导出时间）+ 页脚（v1.6）。 |
 | `buildPrintHtml(title, contentBlocks, options?)` | 构建打印专用 HTML 文档：内联 `@page` CSS（页面大小 + 页边距）+ `@media print` 隐藏规则 + 消息块 HTML（用户/助手角色标签 + Markdown 渲染内容 + 引用来源）+ 页头（标题 + 导出时间）+ 页脚。 |
 | `initExportButtons()` | 初始化导出按钮事件监听：`#exportPdfBtn` 绑定对话导出、`[data-action="export-pdf-doc"]` 委托文档导出。在 `main.js` `boot()` 中调用。 |
 | `getPdfPageSize()` | 读取 PDF 页面大小设置（localStorage `export.pdf_page_size`，默认 `A4`）。 |
@@ -682,7 +685,7 @@ finalizeStream()
 
 ---
 
-## 12. 辅助模块概要（56 个 JS 模块全量索引）
+## 12. 辅助模块概要（58 个 JS 模块全量索引）
 
 以下模块为 `ui/src/` 目录中的全部 JS 模块，按功能域分组：
 
@@ -723,15 +726,15 @@ finalizeStream()
 |---|---|---|
 | `import.js` | `importPaths()` | 文档导入（拖拽 + 文件选择 + 文件监听） |
 | `empty-state.js` | `showEmptyState()` / `hideEmptyState()` | 空知识库引导界面 |
-| `context-menu.js` | `showContextMenu()` / `hideContextMenu()` | 右键上下文菜单（文档/会话/消息） |
+| `context-menu.js` | `showContextMenu()` / `hideContextMenu()` / `_showDocMenu()` | 右键上下文菜单（文档/会话/消息 + 重分类 + 导出 HTML v1.6） |
 | `context-bar.js` | `renderContextBar()` | 上下文栏（当前选中文档/标签筛选） |
 
 ### 12.4 设置与安全
 
 | 模块文件 | 主要函数 | 说明 |
 |---|---|---|
-| `settings.js` | `openSettings()` / `closeSettings()` / `initSettings()` | 设置面板主逻辑 |
-| `settings-local-llm.js` | `loadLocalModels()` / `downloadLocalModel()` / `loadSamplingParams()` | 本地 LLM 模型选择 + 采样参数 UI |
+| `settings.js` | `openSettings()` / `closeSettings()` / `initSettings()` / `renderWindowSettings()` / `renderErrorLogsSettings()` | 设置面板主逻辑 + 窗口管理设置（close-to-tray v1.6）+ 错误日志导出（v1.6） |
+| `settings-local-llm.js` | `loadLocalModels()` / `downloadLocalModel()` / `loadSamplingParams()` / `renderKvCacheSettings()` / `renderDeviceKindSettings()` / `renderEmbedderModelSettings()` / `renderPagedAttnSettings()` / `renderKernelModeSettings()` | 本地 LLM 模型选择 + 采样参数 + KV Cache 管理 + 硬件加速状态 + 嵌入模型切换 + PagedAttention 设置 + GEMV 内核模式 UI |
 | `security.js` | `showEncryptDialog()` / `showLockOverlay()` / `showAuditLogPanel()` | 安全/加密/PII/审计 UI |
 | `privacy-indicator.js` | `updatePrivacyIndicator()` | 隐私指示器（VLM/代理状态可视化） |
 | `paywall.js` | `showPaywall()` / `hidePaywall()` / `activatePro()` | 付费墙与 License 管理 |
@@ -743,7 +746,7 @@ finalizeStream()
 |---|---|---|
 | `main.js` | `boot()` | 应用启动入口 |
 | `state.js` | `initialState` / `EchoState` | 全局状态管理 |
-| `ipc.js` | `invoke()` 封装 + API 对象 | Tauri IPC 类型安全封装 |
+| `ipc.js` | `invoke()` 封装 + API 对象（llmApi / convApi / docApi / chatApi / securityApi / traceApi / budgetApi / memoryExtApi / durableApi / todoApi / kvCacheApi / symbolApi / webSearchApi / windowSettingsApi / errorLogsApi 等） | Tauri IPC 类型安全封装 |
 | `i18n.js` | `t()` / `initI18n()` / `setLocale()` | i18n 国际化 |
 | `toast.js` | `toast()` / `toastSuccess()` / `toastError()` | Toast 通知系统 |
 | `confirm-dialog.js` | `showConfirmDialog()` | 统一确认对话框 |
@@ -757,4 +760,32 @@ finalizeStream()
 | `utils.js` | `formatBytes()` / `debounce()` / `throttle()` | 通用工具函数 |
 | `error-detail.js` | `showErrorDetail()` | 错误详情面板（可展开的错误信息） |
 | `rag-eval.js` | `showRagEvalModal()` / `evaluateBatch()` / `renderRagEvalSettings()` | RAG 评估指标面板（RAGAS 风格，REQ-RAG-045） |
-| `session-strip.js` | `openStripPanel()` / `closeStripPanel()` / `initSessionStrip()` | Session Strip 会话条带化面板（REQ-RAG-046，DS4 DS-03 借鉴） |
+| `embed-eval.js` | `openEmbedEvalPanel()` / `closeEmbedEvalPanel()` | 嵌入模型对比评估面板（REQ-VEC-018，模型多选 + 数据集选择 + 结果表格 + SVG 柱状图 + 逐模型进度展示） |
+| `keyboard-help.js` | `openKeyboardHelp()` / `closeKeyboardHelp()` / `initKeyboardHelp()` | 快捷键帮助面板（REQ-HELP-002 v1.5，? 键触发） |
+| `error-recovery.js` | `withRetry()` / `classifyError()` / `friendlyErrorMessage()` / `initErrorBoundary()` | 全局错误恢复机制（REQ-ERR-002 v1.5，错误边界 + 自动重试） |
+| `kb-stats.js` | `openKbStats()` / `closeKbStats()` | KB 统计仪表盘面板（REQ-KB-003 v1.5） |
+| `help-panel.js` | `openHelpPanel()` / `closeHelpPanel()` | 帮助文档面板（REQ-HELP-001 v1.5，快速入门/快捷键/FAQ/隐私说明/关于） |
+| `date-utils.js` | `formatDate()` / `formatRelativeTime()` / `formatFileSize()` / `formatNumber()` / `formatPercent()` | 日期时间本地化工具（REQ-I18N-002 v1.6，YYYY-MM-DD HH:mm / 相对时间 / 文件大小 / 千分位 / 百分比） |
+| `about-panel.js` | `openAboutPanel()` / `closeAboutPanel()` / `initAboutPanel()` | 关于页面面板（REQ-HELP-003 v1.6，应用名称/Logo/版本号/技术栈/隐私政策/开源许可） |
+| `bookmarks.js` | `toggleBookmark()` / `loadBookmarks()` | 对话书签管理（REQ-RAG-047） |
+| `breadcrumb.js` | `renderBreadcrumb()` | 面包屑导航（工作空间/知识库路径） |
+| `update-banner.js` | `initUpdateBanner()` | 自动更新检查横幅（REQ-HELP-004 S87：启动后 5s 异步调用 + 黄色横幅 + 版本号/更新日志/下载按钮） |
+| `doc-keyboard.js` | `initDocKeyboard()` | 文档列表快捷键导航（REQ-KB-004） |
+| `doc-preview.js` | `openDocPreview()` / `closeDocPreview()` | 文档预览面板（REQ-ING-010） |
+| `global-search.js` | `openGlobalSearch()` / `closeGlobalSearch()` / `executeGlobalSearch()` / `renderSearchResults()` / `highlightSearchMatch()` / `makeSnippet()` | 全局搜索面板（⌘⇧F，统一搜索消息+文档+实体，REQ-IX-008 S90） |
+| `graph-renderer.js` | `renderGraph()` / `zoomGraph()` / `highlightNode()` | D3 force-directed graph 渲染器 |
+| `icons.js` | `getIcon()` / `iconSvg()` | 统一图标管理（SVG 图标库） |
+| `ime-guard.js` | `initImeGuard()` | IME 输入法防护（合成文字期间不触发快捷键） |
+| `lazy-loader.js` | `loadHighlight()` / `loadMermaid()` | 第三方库懒加载器（S12 体积优化） |
+| `offline-detector.js` | `initOfflineDetector()` | 离线状态检测器 |
+| `settings-advanced.js` | `renderPromptTemplateSettings()` / `exportAllTemplates()` / `exportSingleTemplate()` / `importTemplates()` / `renderWindowSettings()` / `renderErrorLogsSettings()` / `renderStartupSettings()` / `renderRagLlmParams()` / `loadSamplingParams()` / `saveSamplingParams()` / `resetSamplingParams()` / `onCoordinatorToggle()` / `onSubAgentToggle()` / `loadCustomModels()` / `onUploadCustomModel()` / `loadWatchedFolders()` / `loadContextTokenLimit()` / `loadTokenCostSettings()` | 高级设置面板子模块（S56 模板管理 + S88 模板导入/导出 + REQ-WIN-003 close-to-tray + REQ-ERR-005 错误日志 + REQ-HELP-004 更新检查 + REQ-RAG-014/015 参数设置） |
+| `settings-general.js` | `openGeneralSettings()` | 通用设置面板子模块 |
+| `skeleton.js` | `showSkeleton()` / `hideSkeleton()` | 骨架屏加载占位 |
+| `trace-panel.js` | `openTracePanel()` / `closeTracePanel()` | RAG 链路追踪面板（S70 借鉴） |
+| `workspace.js` | `createWorkspace()` / `switchWorkspace()` / `deleteWorkspace()` | 多知识库工作空间管理（REQ-WS-001） |
+| `wiki-links.js` | `getForwardLinks()` / `getBacklinks()` / `rebuildWikiLinks()` | Wiki 双向链接前端（REQ-ING-020） |
+| `download-manager.js` | `initDownloadManager()` / `pauseDownload()` / `abortDownload()` | 模型下载管理器 |
+| `dream-panel.js` | `openDreamPanel()` / `closeDreamPanel()` | AutoDream 知识库整理面板 |
+| `mcp-settings.js` | `openMcpSettingsPanel()` | MCP 服务器配置面板（REQ-ARCH-016：添加/删除/启用/禁用 + 传输类型切换 + 工具列表 + 确认调用 + 状态显示） |
+| `disk-space.js` | `renderDiskSpaceCard()` | 存储空间卡片（V3.1 P1-5 / REQ-ERR-004：数据分区磁盘用量进度条 + 清理缓存按钮，IPC: get_disk_space_info / cleanup_disk_space） |
+| `bookmarks.js` 增 | `createBookmarkNavigator()` | 消息级书签导航器工厂（V3.1 P3-5：统一 4 处高亮跳转回调） |

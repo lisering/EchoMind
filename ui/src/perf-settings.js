@@ -16,7 +16,7 @@
  */
 
 import { $ } from './utils.js';
-import { invoke } from './ipc.js';
+import { invoke, settingsApi, smartModeApi } from './ipc.js';
 import { t } from './i18n.js';
 import { toast, toastError, toastSuccess } from './toast.js';
 
@@ -37,7 +37,7 @@ export async function renderPerfSettings(container) {
   try {
     cacheStats = await invoke('get_cache_stats');
     cacheSettings = await invoke('get_cache_settings');
-    compressionRatio = await invoke('get_compression_ratio');
+    compressionRatio = parseFloat(await settingsApi.get('compression.ratio')) || 1.0;
     retrievalMemoryStats = await invoke('get_retrieval_memory_stats');
     settings = await invoke('get_settings');
   } catch (err) {
@@ -48,6 +48,11 @@ export async function renderPerfSettings(container) {
     ? Math.round(((cacheStats.exact_hits + cacheStats.semantic_hits + cacheStats.retrieval_hits) / cacheStats.total_queries) * 100)
     : 0;
 
+  let smartModeOn = true;
+  try {
+    smartModeOn = await smartModeApi.get();
+  } catch (_) { /* 默认 true */ }
+
   const progressiveOn = settings?.progressive_injection ?? false;
   const speculativeOn = settings?.speculative_enabled ?? false;
   const qualityGateOn = settings?.quality_gate_enabled ?? false;
@@ -56,8 +61,21 @@ export async function renderPerfSettings(container) {
 
   container.innerHTML = `
     <div class="bg-surface-2 border border-border-default rounded-xl px-4 py-3 space-y-4">
-      <h4 class="side-label text-[11px] uppercase tracking-wider text-text-quaternary mb-2">${t('perf.title')}</h4>
+      <h4 class="side-label text-[11px] uppercase tracking-wider text-text-quaternary mb-6">${t('perf.title')}</h4>
 
+      <!-- 智能模式单一开关（S5 审计 P0-1） -->
+      <div class="flex items-center justify-between py-2 border-b border-border-subtle">
+        <div class="flex-1">
+          <div class="text-sm font-medium text-text-primary">${t('perf.smart_mode')}</div>
+          <div class="text-xs text-text-quaternary mt-0.5">${t('perf.smart_mode_desc')}</div>
+        </div>
+        <label class="relative inline-flex items-center cursor-pointer ml-3">
+          <input type="checkbox" id="smartModeToggle" class="sr-only peer" ${smartModeOn ? 'checked' : ''}>
+          <div class="w-9 h-5 bg-surface-3 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-accent/30 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-s" after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
+        </label>
+      </div>
+
+      <div class="space-y-4 ${smartModeOn ? 'hidden' : ''}">
       <!-- 语义缓存 -->
       <div class="flex items-center justify-between">
         <div>
@@ -165,8 +183,26 @@ export async function renderPerfSettings(container) {
         <button id="perfRebuildProposition" class="w-full text-xs px-3 py-2 rounded-lg border border-border-default text-text-tertiary hover:text-text-secondary hover:bg-surface-3 transition-colors">${t('perf.rebuild_proposition')}</button>
         <button id="perfBuildSummaryTree" class="w-full text-xs px-3 py-2 rounded-lg border border-border-default text-text-tertiary hover:text-text-secondary hover:bg-surface-3 transition-colors">${t('perf.build_summary_tree')}</button>
       </div>
+      </div>
     </div>
   `;
+
+  // 智能模式 toggle 事件
+  const smartModeToggleEl = document.getElementById('smartModeToggle');
+  if (smartModeToggleEl) {
+    smartModeToggleEl.onchange = async () => {
+      const enabled = smartModeToggleEl.checked;
+      try {
+        await smartModeApi.set(enabled);
+        toast(enabled ? t('perf.smart_mode_on') : t('perf.smart_mode_off'), 'success');
+        // 重新渲染面板
+        await renderPerfSettings(container);
+      } catch (err) {
+        toastError(err);
+        smartModeToggleEl.checked = !enabled;
+      }
+    };
+  }
 
   initPerfHandlers(
     cacheSettings?.enabled ?? true,
@@ -232,7 +268,7 @@ function initPerfHandlers(cacheEnabled, progressiveOn, speculativeOn, qualityGat
     slider.onchange = async () => {
       const val = parseFloat(slider.value);
       try {
-        await invoke('set_compression_ratio', { ratio: val });
+        await invoke('update_setting', { key: 'compression.ratio', value: String(val) });
         toast(t('perf.compression_label') + ': ' + (val > 1 ? val + 'x' : t('perf.compression_off')), 'success');
       } catch (err) {
         toastError(err);
@@ -248,7 +284,7 @@ function initPerfHandlers(cacheEnabled, progressiveOn, speculativeOn, qualityGat
       const newEnabled = !enabled;
       updateToggleVisual(memToggle, newEnabled);
       try {
-        await invoke('set_retrieval_memory_enabled', { enabled: newEnabled });
+        await invoke('update_setting', { key: 'rag.retrieval_memory_enabled', value: String(newEnabled) });
       } catch (err) {
         updateToggleVisual(memToggle, !newEnabled);
         toastError(err);
@@ -279,7 +315,7 @@ function initPerfHandlers(cacheEnabled, progressiveOn, speculativeOn, qualityGat
       const newEnabled = !enabled;
       updateToggleVisual(progToggle, newEnabled);
       try {
-        await invoke('set_progressive_injection', { enabled: newEnabled });
+        await invoke('update_setting', { key: 'rag.progressive_injection', value: String(newEnabled) });
       } catch (err) {
         updateToggleVisual(progToggle, !newEnabled);
         toastError(err);
@@ -296,7 +332,7 @@ function initPerfHandlers(cacheEnabled, progressiveOn, speculativeOn, qualityGat
       const newEnabled = !enabled;
       updateToggleVisual(specToggle, newEnabled);
       try {
-        await invoke('set_speculative_enabled', { enabled: newEnabled });
+        await invoke('update_setting', { key: 'rag.speculative_enabled', value: String(newEnabled) });
       } catch (err) {
         updateToggleVisual(specToggle, !newEnabled);
         toastError(err);
@@ -313,7 +349,7 @@ function initPerfHandlers(cacheEnabled, progressiveOn, speculativeOn, qualityGat
       const newEnabled = !enabled;
       updateToggleVisual(qgToggle, newEnabled);
       try {
-        await invoke('set_quality_gate_enabled', { enabled: newEnabled });
+        await invoke('update_setting', { key: 'rag.quality_gate_enabled', value: String(newEnabled) });
       } catch (err) {
         updateToggleVisual(qgToggle, !newEnabled);
         toastError(err);
@@ -330,7 +366,7 @@ function initPerfHandlers(cacheEnabled, progressiveOn, speculativeOn, qualityGat
       const newEnabled = !enabled;
       updateToggleVisual(grToggle, newEnabled);
       try {
-        await invoke('set_graph_retriever_enabled', { enabled: newEnabled });
+        await invoke('update_setting', { key: 'rag.graph_retriever_enabled', value: String(newEnabled) });
       } catch (err) {
         updateToggleVisual(grToggle, !newEnabled);
         toastError(err);
@@ -347,7 +383,7 @@ function initPerfHandlers(cacheEnabled, progressiveOn, speculativeOn, qualityGat
       const newEnabled = !enabled;
       updateToggleVisual(ctxToggle, newEnabled);
       try {
-        await invoke('set_contextual_retrieval', { enabled: newEnabled });
+        await invoke('update_setting', { key: 'rag.contextual_retrieval', value: String(newEnabled) });
       } catch (err) {
         updateToggleVisual(ctxToggle, !newEnabled);
         toastError(err);
