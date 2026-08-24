@@ -10,7 +10,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use tempfile::TempDir;
@@ -42,6 +42,12 @@ fn embedder_cache_dir() -> PathBuf {
 #[tokio::test]
 #[ignore = "真实文件性能测试：手动运行 cargo test -p echomind-infra -- --ignored perf_real --nocapture"]
 async fn perf_real_e2e_lisp_rs() {
+    // 语料守卫（V3.1 阶段一）：测试依赖本机真实语料（lisp-rs README_zh），
+    // CI/其他机器无此文件时静默跳过（避免 chaos --include-ignored 误报）。
+    if !Path::new(TEST_FILE).exists() {
+        eprintln!("⚠️ 跳过：语料不存在 {}（CI 环境预期行为）", TEST_FILE);
+        return;
+    }
     let sep = "=".repeat(80);
     let dash = "-".repeat(60);
     println!("\n{sep}");
@@ -394,6 +400,12 @@ async fn perf_real_e2e_lisp_rs() {
 #[tokio::test]
 #[ignore = "真实文件性能测试：手动运行 cargo test -p echomind-infra -- --ignored perf_real_query --nocapture"]
 async fn perf_real_query_latency() {
+    // 语料守卫（V3.1 阶段一）：测试依赖本机真实语料（lisp-rs README_zh），
+    // CI/其他机器无此文件时静默跳过（避免 chaos --include-ignored 误报）。
+    if !Path::new(TEST_FILE).exists() {
+        eprintln!("⚠️ 跳过：语料不存在 {}（CI 环境预期行为）", TEST_FILE);
+        return;
+    }
     let sep = "=".repeat(80);
     println!("\n{sep}");
     println!("🔄 重复查询延迟测试（5 次查询平均）");
