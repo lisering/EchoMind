@@ -4,7 +4,7 @@
 >
 > 每次 session 结束时**必须更新**此文件，确保反映最新状态。
 >
-> **最后更新**: 2026-08-24 | **更新人**: AI Agent (V3.1.0 发版完成。P4 结构性重构收尾：长会话两段式渐进渲染（首屏20条+查看更早prepend）、chat-render⇄chat 循环依赖解除（registerChatActions）、main.js 拆分 2033→1000 行（kb-panel.js 444行 + conversation-list.js ~640行，boot 作为组装层保留）、临时标志入 state store；P4-6 导入流水线经技术论证关闭（ONNX 全核下 CPU 并行无收益）；修复顶栏层叠 bug（topBar z=30 > sidebar z=20）；real-data-e2e.yml 可选 CI workflow 关闭 V5 漏洞；版本号 3.0.0→3.1.0。验证：E2E bridge 1602 passed 0 failed / Vitest 1826 passed / tsc 0 errors / Rust Free 1699 passed（基线）。评估报告 docs/PROJECT_ASSESSMENT_2026-08-24.md。)
+> **最后更新**: 2026-08-24（晚） | **更新人**: AI Agent (阶段一「信任基建」完成。①Flaky 根治：混沌全量两轮实证 1732 passed 0 failed；tc_perf_003 阈值根因修复（量化容差 0.99→0.98 对齐 TC-PERF-004 先例）；E2E 重试策略本地 0/CI 1。②L3 质量门首跑：mutants encryption.rs 检出率 65%→93.2%（补 25 个断言缺口，BruteForce/PasswordStrength 行为级测试）；fuzz 新基建 2 targets，**semantic_splitter 首跑抓到真实 crash 并修复**（控制字符输入穿透空白块→出口统一过滤）+ 回归测试；miri 发现 weight_repack 量化内核零覆盖→新增 3 指针安全测试（aarch64 平台 half asm 限制→x86_64 CI 落地）。③quality-gate.yml 每周质量门 workflow。报告 docs/QUALITY_GATE_FIRST_RUN.md。)
 
 ---
 

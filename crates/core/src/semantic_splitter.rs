@@ -299,6 +299,12 @@ impl Splitter for SemanticSplitter {
                 all_chunks.push(current_parts.join("\n\n"));
             }
 
+            // V3.1 L3c fuzz 修复（crash-f4203398）：控制字符密集输入会经
+            // merge_pieces_static / split_recursive_static 产出纯空白块
+            // （如 "\n"——这些层只做 is_empty 长度检查）。在唯一出口统一
+            // 过滤语义空白块，保证下游嵌入与索引不接收空块。
+            all_chunks.retain(|c| !c.trim().is_empty());
+
             Ok(all_chunks)
         })
         .await
@@ -550,5 +556,28 @@ mod tests {
             code_chunk.unwrap().contains("print('hello')"),
             "代码块内容应完整"
         );
+    }
+
+    /// V3.1 阶段一 L3c：模糊测试发现的 crash 回归测试。
+    ///
+    /// 输入特征：大量控制字符 + 零宽/空白混合（\x1b\x0b\x09\x00 序列），
+    /// lossy 转换后产生大量空白行。crash 根因见修复 commit。
+    #[tokio::test]
+    async fn regression_fuzz_crash_f4203398_empty_chunks() {
+        use base64::Engine;
+        let data = base64::engine::general_purpose::STANDARD
+            .decode("GwtbCQALAAsLCxsJWwkACyALCwsJAAsgCwsLG/cAAAsKSgpBG4wJACsACwv/yRv3AAALCkoKQRuMCQArAAsL/8maOw==")
+            .expect("内嵌语料 base64 解码");
+        let text = String::from_utf8_lossy(&data);
+
+        let splitter = SemanticSplitter::new(64, 8).unwrap();
+        let chunks = splitter.split(&text).await.unwrap();
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert!(
+                !chunk.trim().is_empty(),
+                "第 {i} 块为纯空白（fuzz crash 回归）: {:?}",
+                chunk.chars().take(32).collect::<Vec<_>>()
+            );
+        }
     }
 }

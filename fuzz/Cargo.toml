@@ -1,0 +1,37 @@
+[package]
+name = "echomind-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+# V3.1 阶段一（L3c）：导入/分块解析器的模糊测试目标。
+# 铁律二.5：安全关键代码（解析器、文件处理）必须模糊测试；
+# 每周由 .github/workflows/quality-gate.yml 定期执行。
+[dependencies.echomind-core]
+path = "../crates/core"
+
+[dependencies.tokio]
+version = "1"
+features = ["rt", "time"]
+
+[[bin]]
+name = "semantic_splitter_fuzz"
+path = "fuzz_targets/semantic_splitter_fuzz.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "normalize_query_fuzz"
+path = "fuzz_targets/normalize_query_fuzz.rs"
+test = false
+doc = false
+bench = false

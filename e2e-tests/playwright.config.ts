@@ -27,8 +27,10 @@ export default defineConfig({
   timeout: 60_000,
   // CI 禁止 test.only，本地允许
   forbidOnly: !!process.env.CI,
-  // 不重试（快速失败）
-  retries: 0,
+  // 重试策略（V3.1 阶段一）：本地默认 0 快速失败不掩盖问题；
+  // CI 设 PLAYWRIGHT_RETRIES=1 收敛环境抖动（真实回归在重试后仍会红）。
+  // real-data job 单独用 --retries=1（外部 LLM/网络依赖抖动更大）。
+  retries: process.env.PLAYWRIGHT_RETRIES ? Number(process.env.PLAYWRIGHT_RETRIES) : 0,
   // 并行 worker 数：CI 固定 4，本地用 CPU 核心数的 50%（上限 8）
   workers: process.env.CI ? 4 : Math.min(8, Math.ceil(os.cpus().length / 2)),
   reporter: process.env.CI ? [['list'], ['blob', { outputDir: 'blob-report' }]] : [['list']],

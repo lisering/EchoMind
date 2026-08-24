@@ -372,3 +372,20 @@
 **发版 v3.1.0**：8 crate + tauri.conf.json 版本号升级、CHANGELOG_v3.1.md、SRS changelog v19、Cargo.lock 同步
 
 **验证**：E2E bridge 1602 passed 0 failed ✅ | Vitest 1826 passed ✅ | tsc 0 errors ✅ | cargo check 通过 ✅
+
+
+## 2026-08-24（夜）— 阶段一「信任基建」：L3 质量门首次实跑
+
+**Flaky 根治（实证驱动）**：
+- 连续混沌全量压测（--include-ignored）：第一轮抓到 tc_perf_003 真实失败 → 根因是 fastembed Dynamic 量化 batch 校准容差（cosine=0.9876 < 0.99），对齐 TC-PERF-004 的 0.98 先例修复
+- 第二轮 1732 passed 0 failed 确认稳定；tc_nfr_002/tc_obs_007-008 前序已修（调研清单过时）
+- playwright.config retries 本地 0 / CI PLAYWRIGHT_RETRIES=1
+
+**L3 首跑成果（详见 docs/QUALITY_GATE_FIRST_RUN.md）**：
+- mutants: encryption.rs 检出率 65%→93.2%，补 25 个行为断言缺口（暴力破解防护的退避计算/reset 语义此前零断言）
+- fuzz: 新建 fuzz/ 基建 + semantic_splitter/normalize_query 两 target；splitter 首跑 21 万次内抓到空块 crash → 根因修复（唯一出口 retain 过滤）+ base64 内嵌回归测试
+- miri: weight_repack 量化内核零覆盖 → 补 3 个指针安全测试；aarch64 half asm 平台限制 → quality-gate.yml x86_64 CI 每周执行
+
+**新文件**: fuzz/{Cargo.toml,fuzz_targets/*}、quality-gate.yml、QUALITY_GATE_FIRST_RUN.md
+
+**验证**: 混沌全量 1732 passed ✅ | core+infra 1338 passed ✅ | Vitest 1826 ✅ | fmt/clippy/tsc 干净 ✅
