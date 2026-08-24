@@ -1,6 +1,6 @@
 [package]
 name = "echomind-core"
-version = "3.0.0"
+version = "3.1.0"
 edition = "2024"
 license = "MIT"
 description = "EchoMind 六边形架构核心层：端口 Trait 与领域逻辑，禁止依赖任何具体实现"

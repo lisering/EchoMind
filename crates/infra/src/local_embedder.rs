@@ -1376,13 +1376,21 @@ impl Embedder for LocalEmbedder {
         let _pool_size = self.sessions.len();
         let session = Arc::clone(&self.sessions[0]);
         let owned: Vec<String> = texts.to_vec();
-        tokio::task::spawn_blocking(move || {
+        // V3.1 P2-5：热路径计时埋点（tracing debug 级别）
+        let started = std::time::Instant::now();
+        let result = tokio::task::spawn_blocking(move || {
             let mut model = session
                 .lock()
                 .map_err(|e| anyhow::anyhow!("模型锁获取失败: {e}"))?;
             model.embed(owned, None).context("批量推理失败")
         })
         .await
-        .context("推理任务执行失败")?
+        .context("推理任务执行失败")?;
+        tracing::debug!(
+            batch_size = texts.len(),
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "embed_batch 完成"
+        );
+        result
     }
 }

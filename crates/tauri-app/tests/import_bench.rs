@@ -18,10 +18,17 @@ use echomind_core::{Embedder, Splitter, Storage};
 use echomind_models::Chunk;
 use echomind_tauri_app::state::AppState;
 
-/// 测试文件路径
-const TEST_FILE: &str = "/Users/john/freesoft/lisp-rs/README_zh.md";
+/// 测试文件路径（可用环境变量 `ECHOMIND_BENCH_FILE` 覆盖；默认为本机开发语料）
+const TEST_FILE: &str = match std::option_env!("ECHOMIND_BENCH_FILE") {
+    Some(p) => p,
+    None => "/Users/john/freesoft/lisp-rs/README_zh.md",
+};
 
-/// 真实文件导入分阶段计时测试。
+/// 真实文件导入分阶段计时基准测试。
+///
+/// 默认忽略（`#[ignore]`）：依赖本机语料路径与 ONNX 模型下载（网络），
+/// 离线 / 其他机器上必然失败。手动运行：
+/// `cargo test -p echomind-tauri-app --test import_bench -- --ignored`
 ///
 /// 分阶段测量：
 /// 1. 文件读取 + MD5
@@ -34,6 +41,7 @@ const TEST_FILE: &str = "/Users/john/freesoft/lisp-rs/README_zh.md";
 /// 8. embedder 初始化（ONNX 模型加载，首次）
 /// 9. embed_batch + add_embeddings_batch（向量推理 + 写入）
 #[tokio::test]
+#[ignore = "基准测试：需真实语料与网络（ONNX 模型），仅本地手动运行"]
 async fn bench_real_import_phases() {
     // 确保测试文件存在
     if !std::path::Path::new(TEST_FILE).exists() {

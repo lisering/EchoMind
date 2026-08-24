@@ -767,6 +767,8 @@ impl Storage for SqliteStorage {
         query_embedding: &[f32],
         top_k: usize,
     ) -> anyhow::Result<Vec<RetrievalResult>> {
+        // V3.1 P2-5：热路径计时埋点（tracing debug 级别，生产 INFO 下不输出）
+        let _search_span = std::time::Instant::now();
         // REQ-PERF-017：查询向量归一化一次（内存快照向量已在加载时归一化）。
         // 归一化后余弦相似度退化为点积（1 次乘加/dim，~3× FLOPs 降低）。
         // HNSW 的 DistCosine 与归一化输入组合结果等价（1 - dot = 1 - cos）。
@@ -807,6 +809,13 @@ impl Storage for SqliteStorage {
                             .unwrap_or(std::cmp::Ordering::Equal)
                     });
                     results.truncate(top_k);
+                    tracing::debug!(
+                        path = "hnsw",
+                        top_k,
+                        hits = results.len(),
+                        elapsed_ms = _search_span.elapsed().as_millis() as u64,
+                        "vector_search 完成"
+                    );
                     return Ok(results);
                 }
             }
@@ -985,6 +994,13 @@ impl Storage for SqliteStorage {
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
+        tracing::debug!(
+            path = "scan",
+            top_k,
+            hits = results.len(),
+            elapsed_ms = _search_span.elapsed().as_millis() as u64,
+            "vector_search 完成"
+        );
         Ok(results)
     }
 

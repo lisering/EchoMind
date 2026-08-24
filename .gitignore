@@ -18,3 +18,8 @@ crates/tauri-app/gen/schemas/
 *.log
 .DS_Store
 sreenshot/
+
+# AI 工具私有状态（不入库）
+.reasonix/
+reasonix.toml
+cordis/
