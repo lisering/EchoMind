@@ -1,0 +1,87 @@
+# EchoMind — L3 质量门（铁律二 Vibe Coding 分层测试体系）
+#
+# 每周定期执行重质量工具，不阻塞 PR 流水线：
+#   1. miri  — UB 检测（weight_repack 量化内核 unsafe 指针路径）
+#   2. fuzz  — 导入/分块解析器模糊测试（semantic_splitter / normalize_query）
+#   3. mutants — 突变测试抽样（encryption.rs 安全关键，检出率门槛 ≥90%）
+#
+# 平台注记：miri/fuzz 必须在 x86_64 Linux 跑——`half` crate 的 f16 转换在
+# aarch64 使用内联汇编（miri 不支持），x86_64 走 intrinsics 路径可正常执行。
+name: Quality Gate (weekly)
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # 每周一 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  miri:
+    name: Miri UB detection (weight_repack)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '.'
+          key: miri
+      - name: Miri run quantized-kernel pointer safety tests
+        working-directory: crates/infra
+        run: cargo +nightly miri test --features pro --lib weight_repack_safety
+
+  fuzz:
+    name: Fuzz parsers (${{ matrix.target }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [semantic_splitter_fuzz, normalize_query_fuzz]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Smoke fuzz (120s per target)
+        working-directory: fuzz
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=120
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/
+          retention-days: 7
+
+  mutants:
+    name: Mutants sampling (encryption.rs)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '.'
+          key: mutants
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+      - name: Run mutation testing on encryption.rs
+        run: cargo mutants -p echomind-core --file encryption.rs --timeout 180 --jobs 4 -o mutants-out
+      - name: Enforce catch-rate >= 90%
+        run: |
+          TOTAL=$(grep -c . mutants-out/mutants.out/caught.txt || echo 0)
+          MISSED=$(wc -l < mutants-out/mutants.out/missed.txt | tr -d ' ')
+          UNVIABLE=$( [ -s mutants-out/mutants.out/unviable.txt ] && wc -l < mutants-out/mutants.out/unviable.txt | tr -d ' ' || echo 0)
+          KILLABLE=$((TOTAL + MISSED))
+          RATE=$(awk "BEGIN {printf \"%.1f\", $TOTAL * 100 / $KILLABLE}")
+          echo "caught=$TOTAL missed=$MISSED unviable=$UNVIABLE → catch-rate=${RATE}%"
+          awk -v r="$RATE" 'BEGIN { exit !(r >= 90) }' \
+            || { echo "::error::突变检出率 ${RATE}% 低于安全关键 90% 门槛"; exit 1; }

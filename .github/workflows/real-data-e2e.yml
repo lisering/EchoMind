@@ -1,0 +1,85 @@
+# EchoMind — 真实数据 RAG 集成测试（V3.1 阶段二：V5 漏洞关闭）
+#
+# 验证「导入 → 分块 → 真实 ONNX 嵌入 → 检索 → 真实 LLM 回答」核心链路。
+#
+# 实现说明（2026-08-24）：
+# - 权威路径为 Rust 集成测试 real_data_001（crates/tauri-app/tests/integration/
+#   real_data_tests.rs）——直接驱动 chat_inner/import_files_inner，无需浏览器。
+# - 浏览器版 real-data.spec.ts 因 Tauri v2 不向 remote URL（devUrl HTTP 页面）
+#   注入 __TAURI__ 而暂不可用（存量断裂，见 LOG 2026-08-24）。
+#
+# 触发：仅手动（workflow_dispatch）。需要仓库 secrets：
+#   ECHOMIND_LLM_API_KEY / ECHOMIND_LLM_BASE_URL / ECHOMIND_LLM_MODEL
+name: Real Data E2E
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: real-data-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-data:
+    name: Real RAG pipeline (ubuntu, real ONNX + real LLM)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '.'
+          key: real-data-e2e
+
+      - name: Install system dependencies (ONNX runtime deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev
+
+      - name: Fail fast when LLM secrets are absent
+        env:
+          HAS_KEY: ${{ secrets.ECHOMIND_LLM_API_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::error::缺少 secrets：ECHOMIND_LLM_API_KEY / ECHOMIND_LLM_BASE_URL / ECHOMIND_LLM_MODEL"
+            exit 1
+          fi
+
+      - name: Cache embedding model (bge-small-en-v1.5)
+        uses: actions/cache@v4
+        with:
+          path: target/realdata-models
+          key: bge-small-en-v1.5-v1
+
+      - name: Prepare test doc and model dir
+        run: |
+          mkdir -p target/realdata-models target/realdata-docs
+          # 测试文档：用仓库自身的 README（真实语料，随 checkout 可得）
+          cp README.md target/realdata-docs/README_test.md
+          # 嵌入模型：缓存缺失时由 fastembed 从 HuggingFace 下载（直连，铁律一）
+          ls target/realdata-models/bge-small-en-v1.5/model.onnx 2>/dev/null \
+            || echo "模型将由 fastembed 首次下载"
+
+      - name: Run real RAG pipeline integration test
+        env:
+          ECHOMIND_E2E_REAL_DATA: '1'
+          ECHOMIND_LLM_API_KEY: ${{ secrets.ECHOMIND_LLM_API_KEY }}
+          ECHOMIND_LLM_BASE_URL: ${{ secrets.ECHOMIND_LLM_BASE_URL }}
+          ECHOMIND_LLM_MODEL: ${{ secrets.ECHOMIND_LLM_MODEL }}
+          ECHOMIND_REAL_MODEL_DIR: ${{ github.workspace }}/target/realdata-models
+          ECHOMIND_TEST_DOC: ${{ github.workspace }}/target/realdata-docs/README_test.md
+        run: |
+          cargo test -p echomind-tauri-app --test integration real_data_001 \
+            -- --nocapture --include-ignored
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-data-failure-logs
+          path: |
+            target/realdata-docs/
+          retention-days: 7

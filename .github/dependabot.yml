@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # Rust dependencies
+  # Rust 依赖（workspace root）
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
@@ -15,6 +15,19 @@ updates:
       rust-dependencies:
         patterns:
           - "*"
+
+  # E2E 测试 npm 依赖
+  - package-ecosystem: "npm"
+    directory: "/e2e-tests"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "npm"
+      - "e2e"
+    commit-message:
+      prefix: "chore"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
