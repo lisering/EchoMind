@@ -137,6 +137,11 @@ sync_file "$ROOT_DIR/e2e-tests/wdio.conf.mjs"     "$RELEASE_DIR/e2e-tests/wdio.c
 sync_dir "$ROOT_DIR/e2e-tests/tests"              "$RELEASE_DIR/e2e-tests/tests"
 sync_dir "$ROOT_DIR/e2e-tests/scripts"            "$RELEASE_DIR/e2e-tests/scripts"
 
+# ─── [7.6/10] tests/（混沌测试语料生成器 + loader fixtures）───
+echo ""
+echo -e "${BLUE}[7.6/10] 同步 tests/${NC}"
+sync_dir "$ROOT_DIR/tests"                   "$RELEASE_DIR/tests"
+
 sync_file "$ROOT_DIR/crates/tauri-app/Cargo.toml" "$RELEASE_DIR/crates/tauri-app/Cargo.toml"
 sync_file "$ROOT_DIR/crates/tauri-app/build.rs" "$RELEASE_DIR/crates/tauri-app/build.rs"
 sync_file "$ROOT_DIR/crates/tauri-app/tauri.conf.json" "$RELEASE_DIR/crates/tauri-app/tauri.conf.json"
