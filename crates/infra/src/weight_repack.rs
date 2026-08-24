@@ -423,6 +423,7 @@ pub fn gemv_repacked_dispatch(
 
 #[cfg(test)]
 mod weight_repack_safety_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
 
     /// 构造 Q8_0 权重字节缓冲：每块 = f16 scale + QK8_0 个 i8 分量。
