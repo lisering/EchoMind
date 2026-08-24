@@ -887,4 +887,237 @@ mod tests {
         }
         assert!(!bfp.should_panic_wipe());
     }
+
+    // ---- V3.1 阶段一突变测试补强（cargo-mutants 首轮 31 个 MISSED 的杀灭）----
+
+    #[test]
+    fn test_brute_force_counts_each_failure_exactly_once() {
+        // 杀灭 record_failure 的 `+`→`*` 与 failed_attempts->0 突变
+        let mut bfp = BruteForceProtection::new();
+        assert_eq!(bfp.failed_attempts(), 0);
+        bfp.record_failure();
+        assert_eq!(bfp.failed_attempts(), 1, "第 1 次失败后应恰为 1");
+        bfp.record_failure();
+        bfp.record_failure();
+        assert_eq!(bfp.failed_attempts(), 3, "第 3 次失败后应恰为 3");
+        assert_eq!(bfp.remaining_attempts(), 2, "剩余次数 = max(5) - 已失败(3)");
+    }
+
+    #[test]
+    fn test_brute_force_remaining_attempts_decrements_per_failure() {
+        let mut bfp = BruteForceProtection::new();
+        for i in 1..=4 {
+            bfp.record_failure();
+            assert_eq!(
+                bfp.remaining_attempts(),
+                5 - i,
+                "第 {i} 次失败后剩余应为 {}",
+                5 - i
+            );
+        }
+    }
+
+    #[test]
+    fn test_brute_force_reset_clears_counter_and_lock() {
+        // 杀灭 `replace reset with ()` 突变
+        let mut bfp = BruteForceProtection::new();
+        for _ in 0..5 {
+            bfp.record_failure(); // 触发锁定
+        }
+        assert!(bfp.is_locked());
+
+        bfp.reset();
+        assert_eq!(bfp.failed_attempts(), 0, "reset 应清零失败计数");
+        assert!(!bfp.is_locked(), "reset 应解除锁定");
+        assert_eq!(bfp.remaining_lock_seconds(), 0, "reset 后无剩余锁定时长");
+        assert_eq!(bfp.remaining_attempts(), 5, "reset 后恢复全部尝试次数");
+    }
+
+    #[test]
+    fn test_brute_force_success_also_resets_lock() {
+        let mut bfp = BruteForceProtection::new();
+        for _ in 0..5 {
+            bfp.record_failure();
+        }
+        assert!(bfp.is_locked());
+        bfp.record_success();
+        assert!(!bfp.is_locked(), "成功解锁后不应仍处于锁定态");
+        assert_eq!(bfp.remaining_lock_seconds(), 0);
+    }
+
+    #[test]
+    fn test_brute_force_remaining_lock_seconds_bounds() {
+        // 杀灭 remaining_lock_seconds 的 `-`→`/` 与 `>`→`>=` 突变：
+        // 未锁定时恒为 0；锁定后必在 (0, 30] 区间（lock_duration=30s）。
+        let mut bfp = BruteForceProtection::new();
+        assert_eq!(
+            bfp.remaining_lock_seconds(),
+            0,
+            "未锁定时剩余锁定秒数必须为 0"
+        );
+
+        for _ in 0..5 {
+            bfp.record_failure();
+        }
+        let remaining = bfp.remaining_lock_seconds();
+        assert!(
+            remaining > 0,
+            "刚触发锁定时剩余秒数必须 > 0，实际 {remaining}"
+        );
+        // 下界 25s：lock_duration=30s，测试毫秒级完成，剩余应接近满值。
+        // 该下界同时杀灭 `until - now` → `until / now` 突变（后者恒返回 ~1）。
+        assert!(
+            remaining >= 25,
+            "刚触发锁定时剩余秒数应接近 30（≥25），实际 {remaining}"
+        );
+        assert!(
+            remaining <= 30,
+            "剩余秒数不得超过锁定时长 30s，实际 {remaining}"
+        );
+    }
+
+    // ---- V3.1 阶段一：PasswordStrength 分档边界补强（杀灭 match-arm 删除突变）----
+
+    #[test]
+    fn test_password_strength_boundary_5_chars_single_type_is_very_weak() {
+        // (0..=5, _) => 0：短密码无论多样性一律 VeryWeak
+        assert_eq!(
+            PasswordStrengthChecker::check("Ab1!"),
+            PasswordStrength::VeryWeak
+        );
+    }
+
+    #[test]
+    fn test_password_strength_boundary_6_to_7_chars_two_types() {
+        // (6..=7, 2..=4) => 2（Medium）
+        assert_eq!(
+            PasswordStrengthChecker::check("x7q2mz"),
+            PasswordStrength::Medium
+        );
+        assert_eq!(
+            PasswordStrengthChecker::check("q7w2e!"),
+            PasswordStrength::Medium
+        );
+    }
+
+    #[test]
+    fn test_password_strength_boundary_8_to_11_chars_two_types() {
+        // (8..=11, 2) => 2（Medium）：8 位起但类型不足
+        assert_eq!(
+            PasswordStrengthChecker::check("zx7q4bv2"),
+            PasswordStrength::Medium
+        );
+    }
+
+    #[test]
+    fn test_password_strength_boundary_8_to_11_chars_three_types() {
+        // (8..=11, 3) => 3（Strong）
+        assert_eq!(
+            PasswordStrengthChecker::check("Abcd1234"),
+            PasswordStrength::Strong
+        );
+    }
+
+    #[test]
+    fn test_password_strength_boundary_8_to_11_chars_four_types() {
+        // (8..=11, 4) => 3（Strong，非 VeryStrong）
+        assert_eq!(
+            PasswordStrengthChecker::check("Ab1!bcd2"),
+            PasswordStrength::Strong
+        );
+    }
+
+    #[test]
+    fn test_password_strength_boundary_12_plus_three_types_is_very_strong() {
+        // (12.., 3) / (12.., 4) => 4（VeryStrong）
+        assert_eq!(
+            PasswordStrengthChecker::check("Abcdefgh1234"),
+            PasswordStrength::VeryStrong
+        );
+        assert_eq!(
+            PasswordStrengthChecker::check("Ab1!defg1234"),
+            PasswordStrength::VeryStrong
+        );
+    }
+
+    #[test]
+    fn test_password_strength_single_type_long_is_weak() {
+        // char_type_count == 1 且 len >= 8 => Weak
+        assert_eq!(
+            PasswordStrengthChecker::check("qxvbmzpk"),
+            PasswordStrength::Weak
+        );
+        assert_eq!(
+            PasswordStrengthChecker::check("92847563"),
+            PasswordStrength::Weak
+        );
+    }
+
+    #[test]
+    fn test_password_strength_display_attributes_are_well_formed() {
+        // 杀灭 percentage/color/i18n_key/suggestions 的占位突变：
+        // 每档的展示属性必须满足结构约束。
+        let all = [
+            PasswordStrength::VeryWeak,
+            PasswordStrength::Weak,
+            PasswordStrength::Medium,
+            PasswordStrength::Strong,
+            PasswordStrength::VeryStrong,
+        ];
+        for s in &all {
+            let pct = s.percentage();
+            assert!(pct <= 100, "percentage 必须在 0-100 内，实际 {pct}");
+            assert!(
+                s.color().starts_with('#'),
+                "color 必须为十六进制色值，实际 {}",
+                s.color()
+            );
+            assert!(
+                s.i18n_key().starts_with("pwd_strength_"),
+                "i18n_key 应以 pwd_strength_ 开头，实际 {}",
+                s.i18n_key()
+            );
+        }
+        // 强度递增时百分比严格递增
+        assert!(all[0].percentage() < all[2].percentage());
+        assert!(all[2].percentage() < all[4].percentage());
+        // suggestions 对弱密码给出建议、对强密码为空
+        assert!(
+            !PasswordStrengthChecker::suggestions("abc").is_empty(),
+            "弱密码应有改进建议"
+        );
+        assert!(PasswordStrengthChecker::suggestions("Ab1!cdef123").is_empty());
+
+        // V3.1 阶段一：精确断言每条建议的触发条件（杀灭比较符突变与 ! 删除突变）
+        // 7 位小写+数字（<8 且无大写且无特殊字符）：
+        let tips = PasswordStrengthChecker::suggestions("ab3defg");
+        assert!(tips.contains(&"pwd_tip_length"), "7 位应提示加长: {tips:?}");
+        assert!(
+            tips.contains(&"pwd_tip_uppercase"),
+            "无大写应提示大写: {tips:?}"
+        );
+        assert!(
+            !tips.contains(&"pwd_tip_digit"),
+            "已含数字不应提示数字: {tips:?}"
+        );
+        assert!(
+            tips.contains(&"pwd_tip_special"),
+            "无特殊字符应提示特殊字符: {tips:?}"
+        );
+
+        // 恰好 8 位 + 大写 + 数字 + 特殊字符 → 全部条件满足，仅可能缺 common 字典项
+        let tips = PasswordStrengthChecker::suggestions("Qx7!mzpk");
+        assert!(
+            !tips.contains(&"pwd_tip_length"),
+            "8 位不应提示加长: {tips:?}"
+        );
+        assert!(
+            !tips.contains(&"pwd_tip_uppercase"),
+            "含大写不应提示大写: {tips:?}"
+        );
+        assert!(
+            !tips.contains(&"pwd_tip_special"),
+            "含特殊字符不应提示特殊字符: {tips:?}"
+        );
+    }
 }

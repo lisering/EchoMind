@@ -274,11 +274,16 @@ async fn tc_perf_003_parallel_embed_batch_correctness() {
     }
 
     // 顺序保持：相同文本应产生相同向量（验证分片合并后顺序未乱）
+    //
+    // 阈值 0.98 依据（与 TC-PERF-004 一致）：fastembed Dynamic 量化按 batch 校准
+    // 动态范围，单条 embed() 与大批次 embed_batch() 中同文本的输出存在固有数值
+    // 容差（实测 cosine ≈0.987~0.999），并非顺序错乱。0.99 阈值会在混沌并行跑
+    // 中偶发误报（2026-08-24 实证抓到 cosine=0.987587）。
     let probe = embedder.embed(&texts[50]).await.unwrap();
     let cosine = cosine_similarity(&probe, &vectors[50]);
     assert!(
-        cosine > 0.99,
-        "分片合并后顺序应保持一致（cosine={cosine:.6}）"
+        cosine > 0.98,
+        "分片合并后顺序应保持一致（cosine={cosine:.6}，容差依据见上方注释）"
     );
 }
 
