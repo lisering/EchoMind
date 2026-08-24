@@ -19,9 +19,9 @@ futures = "0.3"
 # 纯计算解析/分词库（无 I/O、无网络），经架构评审准入 core（见 SRS REQ-ARCH-000）
 pulldown-cmark = { version = "0.13", default-features = false }
 tiktoken-rs = "0.12"
-md-5 = "0.10"
+md-5 = "0.11"
 # 纯计算解析库（REQ-PDF-001），与 pulldown-cmark 同类经架构评审准入 core
-lopdf = "0.42"
+lopdf = "0.44"
 # .docx 文件读取与解析（REQ-ING-015），纯 Rust 实现，无 C 依赖
 docx-rs = { version = "0.4", default-features = false }
 # .html 文件读取与解析（REQ-ING-016），纯 Rust HTML → 纯文本转换
@@ -30,16 +30,16 @@ html2text = "0.17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 # License 离线校验（REQ-LIC-001）：Ed25519 签名验证，纯计算库，经架构评审准入 core
-ed25519-dalek = "2.1"
-base64 = "0.22"
+ed25519-dalek = "3.0"
+base64 = "0.23"
 # 零拷贝文件映射（全尺度 I/O 优化）：减小大文件的内存峰值
 memmap2 = "0.9"
 # ---- 安全防御模块（从 rs-pro 移植）----
 # 密钥派生：Argon2id 用于军工级密钥派生（替代 PBKDF2）
 argon2 = "0.5"
 # 兼容旧数据：HMAC-SHA256 用于 PBKDF2 向后兼容
-hmac = "0.12"
-sha2 = "0.10"
+hmac = "0.13"
+sha2 = "0.11"
 # 恒量时间比较：用于密码验证，防止时序攻击
 subtle = "2"
 # 内存擦零：敏感数据用后即焚，防止内存 dump 泄露
@@ -47,7 +47,7 @@ zeroize = { version = "1.8", features = ["derive"] }
 # PII 检测正则表达式
 regex = "1"
 # 随机数生成（salt 生成）
-rand = "0.8"
+rand = "0.10"
 # 结构化日志
 tracing = "0.1"
 # 时间戳（暴力破解防护、审计日志）
