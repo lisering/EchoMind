@@ -236,8 +236,8 @@ fn check_pages_in_ram(ptr: *const u8, size: usize, page_size: usize) -> usize {
             size as libc::size_t,
             #[cfg(target_os = "linux")]
             {
-                // Linux: mincore 第三参为 *mut u8；macOS 为 *mut c_char（i8 别名）
-                vec.as_mut_ptr() as *mut u8
+                // Linux: mincore 第三参为 *mut u8，[u8].as_mut_ptr() 原生匹配（无 cast）
+                vec.as_mut_ptr()
             },
             #[cfg(not(target_os = "linux"))]
             {
