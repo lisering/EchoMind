@@ -179,7 +179,7 @@ jobs:
           - os: macos-latest    # arm64 (Apple Silicon)
             target: aarch64-apple-darwin
             label: macOS-arm64
-          - os: macos-13        # x64 (Intel)
+          - os: macos-15-intel # x64 (Intel)
             target: x86_64-apple-darwin
             label: macOS-x64
           - os: windows-latest  # x64
@@ -237,7 +237,7 @@ jobs:
           - os: macos-latest    # arm64 (Apple Silicon)
             target: aarch64-apple-darwin
             label: macOS-arm64
-          - os: macos-13        # x64 (Intel)
+          - os: macos-15-intel # x64 (Intel)
             target: x86_64-apple-darwin
             label: macOS-x64
           - os: windows-latest  # x64
@@ -278,8 +278,10 @@ jobs:
 
       # ─── macOS: Import signing certificate (if secrets available) ───
       - name: Import macOS signing certificate
-        if: runner.os == 'macOS' && secrets.SIGNING_CERTIFICATE_P12 != ''
+        # HAS_SIGNING_CERT 由 job 级 env 中转（step if 不允许直接引用 secrets 上下文）
+        if: runner.os == 'macOS' && env.HAS_SIGNING_CERT == 'true'
         env:
+          HAS_SIGNING_CERT: ${{ secrets.SIGNING_CERTIFICATE_P12 != '' }}
           SIGNING_CERTIFICATE_P12: ${{ secrets.SIGNING_CERTIFICATE_P12 }}
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
