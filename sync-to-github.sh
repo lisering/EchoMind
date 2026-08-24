@@ -89,6 +89,12 @@ echo -e "${BLUE}[3/10] 同步 crates/prompt${NC}"
 sync_dir "$ROOT_DIR/crates/prompt/src"      "$RELEASE_DIR/crates/prompt/src"
 sync_file "$ROOT_DIR/crates/prompt/Cargo.toml" "$RELEASE_DIR/crates/prompt/Cargo.toml"
 
+# ─── [3.5/10] crates/context（V3.0 新增，workspace 成员）───
+echo ""
+echo -e "${BLUE}[3.5/10] 同步 crates/context${NC}"
+sync_dir "$ROOT_DIR/crates/context/src"      "$RELEASE_DIR/crates/context/src"
+sync_file "$ROOT_DIR/crates/context/Cargo.toml" "$RELEASE_DIR/crates/context/Cargo.toml"
+
 # ─── [4/10] crates/compact ───
 echo ""
 echo -e "${BLUE}[4/10] 同步 crates/compact${NC}"
@@ -132,6 +138,18 @@ sync_file "$ROOT_DIR/ui/logo.svg"           "$RELEASE_DIR/ui/logo.svg"
 sync_dir "$ROOT_DIR/ui/locales"             "$RELEASE_DIR/ui/locales"
 sync_dir "$ROOT_DIR/ui/styles"              "$RELEASE_DIR/ui/styles"
 sync_dir "$ROOT_DIR/ui/vendor"              "$RELEASE_DIR/ui/vendor"
+
+# ─── [9.5/10] .github（CI workflows + 模板）───
+echo ""
+echo -e "${BLUE}[9.5/10] 同步 .github${NC}"
+sync_dir "$ROOT_DIR/.github/workflows"      "$RELEASE_DIR/.github/workflows"
+sync_file "$ROOT_DIR/.github/dependabot.yml" "$RELEASE_DIR/.github/dependabot.yml"
+if [ -d "$ROOT_DIR/.github/ISSUE_TEMPLATE" ]; then
+  sync_dir "$ROOT_DIR/.github/ISSUE_TEMPLATE" "$RELEASE_DIR/.github/ISSUE_TEMPLATE"
+fi
+if [ -f "$ROOT_DIR/.github/pull_request_template.md" ]; then
+  sync_file "$ROOT_DIR/.github/pull_request_template.md" "$RELEASE_DIR/.github/pull_request_template.md"
+fi
 
 # ─── [10/10] 清理构建生成物 ───
 echo ""
