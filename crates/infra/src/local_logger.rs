@@ -361,7 +361,7 @@ fn get_system_memory_mb() -> u64 {
             for line in content.lines() {
                 if line.starts_with("MemTotal:") {
                     let parts: Vec<&str> = line.split_whitespace().collect();
-                    if let Ok(kb) = parts.get(1).map(|s| s.parse::<u64>()).transpose() {
+                    if let Some(Ok(kb)) = parts.get(1).map(|s| s.parse::<u64>()) {
                         return kb / 1024;
                     }
                     break;
