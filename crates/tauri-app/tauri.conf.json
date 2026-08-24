@@ -4,7 +4,8 @@
   "version": "3.1.0",
   "identifier": "com.echomind.app",
   "build": {
-    "frontendDist": "../../ui"
+    "frontendDist": "../../ui",
+    "devUrl": "http://localhost:1420"
   },
   "app": {
     "withGlobalTauri": true,

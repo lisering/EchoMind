@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "EchoMind 默认能力配置：授予主窗口所需的最小权限集（Tauri v2 ACL）。",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:event:default",
@@ -16,5 +18,10 @@
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"
-  ]
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:1420"
+    ]
+  }
 }
