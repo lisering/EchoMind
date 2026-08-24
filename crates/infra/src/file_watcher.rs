@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use anyhow::{Context, bail};
 use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_full::{DebounceEventResult, Debouncer, FileIdMap, new_debouncer};
+use notify_debouncer_full::{DebounceEventResult, Debouncer, RecommendedCache, new_debouncer};
 use tokio_util::sync::CancellationToken;
 
 /// 文件监听器自动重启最大尝试次数（P2-1）。
@@ -36,7 +36,7 @@ const RESTART_BACKOFF_BASE_SECS: u64 = 2;
 #[derive(Debug)]
 pub struct FileWatcherHandle {
     /// Debouncer 实例（Drop 时停止监听）
-    _debouncer: Debouncer<RecommendedWatcher, FileIdMap>,
+    _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
     /// 事件接收 task 的 JoinHandle（Drop 时等待 task 退出）
     _task: tokio::task::JoinHandle<()>,
 }
@@ -44,7 +44,7 @@ pub struct FileWatcherHandle {
 impl FileWatcherHandle {
     /// 构造文件监听句柄（内部构造函数，供 `FileWatcher::start` 使用）。
     fn new(
-        debouncer: Debouncer<RecommendedWatcher, FileIdMap>,
+        debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
         task: tokio::task::JoinHandle<()>,
     ) -> Self {
         Self {
