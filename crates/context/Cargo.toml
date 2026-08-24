@@ -1,0 +1,22 @@
+[package]
+name = "echomind-context"
+version = "3.1.0"
+edition = "2024"
+license = "MIT"
+description = "System Context Registry — 增量上下文管理（OpenCode 借鉴 B01）"
+
+[dependencies]
+echomind-core = { path = "../core" }
+echomind-models = { path = "../models" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+chrono = { version = "0.4", optional = true }
+uuid = { version = "1.0", optional = true }
+
+[dev-dependencies]
+chrono = "0.4"
+uuid = { version = "1.0", features = ["v4"] }
+
+[lints]
+workspace = true
