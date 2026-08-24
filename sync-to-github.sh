@@ -70,6 +70,12 @@ sync_file "$ROOT_DIR/Cargo.lock"            "$RELEASE_DIR/Cargo.lock"
 sync_file "$ROOT_DIR/deny.toml"             "$RELEASE_DIR/deny.toml"
 sync_file "$ROOT_DIR/.gitignore"            "$RELEASE_DIR/.gitignore"
 sync_file "$ROOT_DIR/LICENSE"               "$RELEASE_DIR/LICENSE"
+sync_file "$ROOT_DIR/package.json"          "$RELEASE_DIR/package.json"
+sync_file "$ROOT_DIR/package-lock.json"     "$RELEASE_DIR/package-lock.json"
+sync_file "$ROOT_DIR/tsconfig.json"         "$RELEASE_DIR/tsconfig.json"
+sync_file "$ROOT_DIR/tailwind.config.js"    "$RELEASE_DIR/tailwind.config.js"
+sync_dir "$ROOT_DIR/types"                  "$RELEASE_DIR/types"
+sync_dir "$ROOT_DIR/scripts"                "$RELEASE_DIR/scripts"
 
 # 从发布仓库的 Cargo.toml 中移除 license-issuer 成员（私有工具，不公开）
 if [ -f "$RELEASE_DIR/Cargo.toml" ]; then
