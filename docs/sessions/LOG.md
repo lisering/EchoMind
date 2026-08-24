@@ -389,3 +389,22 @@
 **新文件**: fuzz/{Cargo.toml,fuzz_targets/*}、quality-gate.yml、QUALITY_GATE_FIRST_RUN.md
 
 **验证**: 混沌全量 1732 passed ✅ | core+infra 1338 passed ✅ | Vitest 1826 ✅ | fmt/clippy/tsc 干净 ✅
+
+
+## 2026-08-24（深夜）— 阶段二启动：发布工程审计 + 真机冒烟
+
+**发布工程审计**：
+- 更新链路为「GitHub Releases 通知式」（check_for_updates 查 Releases API + 前端 banner），tauri-plugin-updater 静默自动更新未配置（设计现状记录）
+- 签名 ad-hoc（signingIdentity "-"），自用可用，分发需 Developer ID + 公证（CI 已有占位逻辑）
+- 补建 v3.1.1 GitHub Release（此前有 tag 无 release，会破坏更新检查的版本源）
+
+**反馈渠道**：Issues（已开）+ Discussions（已开启）
+
+**Dogfooding 基建**：docs/dogfood/FRICTION_LOG.md（摩擦清单模板 + 8 项历史审计基线观察点）
+
+**真机构建与冒烟**：
+- cargo tauri build --features pro：14m43s，产物 EchoMind.app（ad-hoc）+ dmg 31MB（bundle size 守卫 4/4 通过，≤50MB 达标）
+- 冒烟（隔离数据目录）：进程稳定存活 / 零 ERROR 日志 / 结构化 JSON 日志合规 / SQLite WAL 正常创建 / WebView 栈正常
+- **发现 2 项新摩擦**：F1 发版未 bump 版本号（流程债）；F2 无单实例锁（双实例可同时指向同一数据目录）
+
+**用户已在实际使用**（/Applications 常驻旧版本）——dogfooding 事实上已开始，friction log 交由用户日常填写。
