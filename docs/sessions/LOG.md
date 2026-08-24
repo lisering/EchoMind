@@ -355,3 +355,20 @@
 **文档同步**: V3.1_ATOMIC_PLAN.md（新建，四阶段进度+P4剩余项实施方案）/ REQ-ERR-007（SRS 新增）/ SRS changelog v18.0.0 / SOFTWARE_ASSET §11（59 模块+i18n 三语）/ frontend-modules.md（disk-space.js 等）/ ipc-commands.md §2.58
 
 **未完成（转入下 session）**: P4-3 main.js 拆分 / P4-4 事件 reducer 化 / P4-5 长会话渐进渲染（方案已定型）/ P4-6 导入流水线乒乓。版本号未升级（v3.0.0→v3.1.0 待发版时统一处理）。变更全部在工作区未提交。
+
+
+## 2026-08-24（下午）— V3.1 P4 重构收尾 + R2 CI + v3.1.0 发版
+
+**P4 完成**：
+- P4-5 长会话渐进渲染：_collectRenderUnits 收集器 + 尾部20条首屏 + 「查看更早消息」prepend（滚动位置补偿）；appendBlock/appendUserBlock 参数化 parent
+- P4-4 reducer 化：/web、/agent、regenForceSearch 三标志并入 state.js（tempWebSearch/tempAgent/regenForceSearch）
+- P4-3 main.js 拆分：kb-panel.js（444行）+ conversation-list.js（~640行），main.js 2033→~1000 行；boot() 作为组装层保留（架构决策）；模块数守卫上限 60→64
+- P4-6 关闭：ONNX intra_threads=None 全核运行 → 流水线并行无收益（技术诚实原则）
+
+**额外发现与修复**：turn-tree.spec 4 个失败排查 → 根因是 baseline 引入的层叠回归（sidebar fixed z=20 盖过 topBar z=0 的工具菜单）→ #topBar z-index 0→30 修复
+
+**R2 关闭**：.github/workflows/real-data-e2e.yml（workflow_dispatch 手动触发，真实 Tauri+ONNX+LLM 全链路，secrets 门控）
+
+**发版 v3.1.0**：8 crate + tauri.conf.json 版本号升级、CHANGELOG_v3.1.md、SRS changelog v19、Cargo.lock 同步
+
+**验证**：E2E bridge 1602 passed 0 failed ✅ | Vitest 1826 passed ✅ | tsc 0 errors ✅ | cargo check 通过 ✅

@@ -1,0 +1,112 @@
+# EchoMind — 真实数据 RAG 集成测试（V3.1 R2 关闭项）
+#
+# 目的：关闭「核心 RAG 链路从未被真实端到端验证」的体系性漏洞
+# （QA ROOT_CAUSE_ANALYSIS V5 / COMPREHENSIVE_RETROSPECTIVE TD-7）。
+# 全部桥接 E2E 走 tauri-stub mock；本 job 用真实 Tauri dev 进程 +
+# 真实 ONNX 嵌入 + 真实 LLM API 验证 导入→分块→嵌入→检索→生成 全链路。
+#
+# 触发：仅手动（workflow_dispatch）。需要仓库 secrets：
+#   ECHOMIND_LLM_API_KEY / ECHOMIND_LLM_BASE_URL / ECHOMIND_LLM_MODEL
+# 不阻塞 PR 与主干流水线；失败在 Actions 页面单独归因。
+name: Real Data E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_doc:
+        description: '测试文档路径（runner 上的绝对路径或 GitHub raw URL）'
+        required: false
+        default: ''
+
+concurrency:
+  group: real-data-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-data:
+    name: Real data RAG integration (ubuntu)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '.'
+          key: real-data-e2e
+
+      - name: Install system dependencies (Tauri Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Fail fast when LLM secrets are absent
+        env:
+          HAS_KEY: ${{ secrets.ECHOMIND_LLM_API_KEY != '' }}
+        run: |
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::error::缺少 secrets：ECHOMIND_LLM_API_KEY / ECHOMIND_LLM_BASE_URL / ECHOMIND_LLM_MODEL"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: e2e-tests/package-lock.json
+
+      - name: Build UI bundle
+        run: node scripts/build-ui.mjs
+
+      - name: Cache embedding model (all-MiniLM-L6-v2)
+        uses: actions/cache@v4
+        with:
+          path: target/fastembed-cache
+          key: fastembed-model-v1-realdata
+
+      - name: Start Tauri dev server
+        env:
+          ECHOMIND_LLM_API_KEY: ${{ secrets.ECHOMIND_LLM_API_KEY }}
+          ECHOMIND_LLM_BASE_URL: ${{ secrets.ECHOMIND_LLM_BASE_URL }}
+          ECHOMIND_LLM_MODEL: ${{ secrets.ECHOMIND_LLM_MODEL }}
+        run: |
+          cargo tauri dev > /tmp/tauri-dev.log 2>&1 &
+          echo $! > /tmp/tauri-dev.pid
+          # 轮询等待 dev server 就绪（最长 10 分钟：首次编译较慢）
+          for i in $(seq 1 120); do
+            if curl -sf http://localhost:1420 > /dev/null 2>&1; then
+              echo "dev server ready after ${i}x5s"
+              break
+            fi
+            sleep 5
+            if [ "$i" = "120" ]; then
+              echo "::error::Tauri dev server 未能在 10 分钟内就绪"
+              tail -100 /tmp/tauri-dev.log
+              exit 1
+            fi
+          done
+
+      - name: Run real-data integration tests
+        working-directory: e2e-tests
+        env:
+          ECHOMIND_E2E_REAL_DATA: '1'
+          ECHOMIND_E2E_URL: http://localhost:1420
+          ECHOMIND_TEST_DOC: ${{ inputs.test_doc }}
+          ECHOMIND_LLM_API_KEY: ${{ secrets.ECHOMIND_LLM_API_KEY }}
+          ECHOMIND_LLM_BASE_URL: ${{ secrets.ECHOMIND_LLM_BASE_URL }}
+          ECHOMIND_LLM_MODEL: ${{ secrets.ECHOMIND_LLM_MODEL }}
+        run: npx playwright test tests/real-data.spec.ts --retries=1
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-data-failure-logs
+          path: |
+            /tmp/tauri-dev.log
+            e2e-tests/test-results/
+            e2e-tests/playwright-report/
+          include-hidden-files: true
+          retention-days: 7

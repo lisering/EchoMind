@@ -301,7 +301,8 @@
     "export_empty": "Nothing to export yet",
     "rename_success": "Renamed",
     "conversation_deleted": "Conversation deleted",
-    "message_deleted": "Message deleted"
+    "message_deleted": "Message deleted",
+    "load_earlier": "Load earlier messages ({count})"
   },
   "knowledge_base": {
     "title": "Knowledge Base",

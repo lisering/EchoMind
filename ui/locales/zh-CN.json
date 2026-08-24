@@ -301,7 +301,8 @@
     "export_empty": "对话内容为空",
     "rename_success": "重命名成功",
     "conversation_deleted": "会话已删除",
-    "message_deleted": "消息已删除"
+    "message_deleted": "消息已删除",
+    "load_earlier": "查看更早消息（{count}）"
   },
   "knowledge_base": {
     "title": "知识库",

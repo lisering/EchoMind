@@ -4,7 +4,7 @@
 >
 > 每次 session 结束时**必须更新**此文件，确保反映最新状态。
 >
-> **最后更新**: 2026-08-24 | **更新人**: AI Agent (V3.1 全面优化 P1-P4 阶段完成。三路深度调研（前端58模块架构/历史债务/性能）→ V3.1_ATOMIC_PLAN 四阶段实施：P1 清债（3 活体幻影修复 + 28 死 mock + 仓库卫生 + 磁盘三件套 REQ-ERR-007）、P2 性能（流式限频 + hljs 豁免 + IPC 合流 + boot 并行 + 会话分批渲染）、P3 i18n（三语言 100% 对齐 + 键盘可达 + Esc 数据驱动）、P4 部分（循环依赖解除）。P4-3/4/5/6 转入下 session（方案已定型见计划文档）。验证：Rust Free 1699 passed / Vitest 1826 passed 93 files / E2E bridge 1566 passed 0 failed / tsc 0 errors / clippy+fmt 零警告。版本号仍为 v3.0.0（未发版，变更在工作区待提交）。)
+> **最后更新**: 2026-08-24 | **更新人**: AI Agent (V3.1.0 发版完成。P4 结构性重构收尾：长会话两段式渐进渲染（首屏20条+查看更早prepend）、chat-render⇄chat 循环依赖解除（registerChatActions）、main.js 拆分 2033→1000 行（kb-panel.js 444行 + conversation-list.js ~640行，boot 作为组装层保留）、临时标志入 state store；P4-6 导入流水线经技术论证关闭（ONNX 全核下 CPU 并行无收益）；修复顶栏层叠 bug（topBar z=30 > sidebar z=20）；real-data-e2e.yml 可选 CI workflow 关闭 V5 漏洞；版本号 3.0.0→3.1.0。验证：E2E bridge 1602 passed 0 failed / Vitest 1826 passed / tsc 0 errors / Rust Free 1699 passed（基线）。评估报告 docs/PROJECT_ASSESSMENT_2026-08-24.md。)
 
 ---
 
@@ -20,7 +20,7 @@
 | 前端单元测试 (Vitest) | **1821 passed**, 92 files, 0 failed | S97 MCP 面板后全量回归通过（v3.0.0 发布回归） |
 | UI 类型检查 | **0 errors** ✅ | `npx tsc --noEmit`（v2.0 S18 修复 5 个 pre-existing errors → 0） |
 | E2E 桥接测试 (Playwright) | **1355 passed**, 0 failed, 10 skipped (9.1m) | ✅ 零回归（S15 后 E2E 全量通过，2 个 pre-existing flaky 不再失败） |
-| 版本号 | **3.0.0** ✅ | tauri.conf.json + 8 crate Cargo.toml（v3.0 发布：MCP 协议 + 设置面板重构 + 模块精简 + 嵌入评估 + Pro ROI 评估） |
+| 版本号 | **3.1.0** ✅ | tauri.conf.json + 8 crate Cargo.toml（v3.0 发布：MCP 协议 + 设置面板重构 + 模块精简 + 嵌入评估 + Pro ROI 评估） |
 | IPC 命令数 | **~221 Free + 12 Pro-only = ~233（Debug）/~212（Release）** | S10: 21 个开发者工具命令 #[cfg(debug_assertions)] 门控，Release 构建中不注册。Debug 构建 ~233（含开发者工具），Release 构建 ~212 |
 | ADR 数 | 15 | 新增 ADR-015 Prompt 注入防护三层防御策略 + ADR-014 mistral.rs bus factor 监控 + ADR-004~008 独立归档 |
 | 僵尸命令数 | **0**（僵尸率 0%） | Zombie Zero ✅ S2 验证：全部 236 命令有前端调用者 |

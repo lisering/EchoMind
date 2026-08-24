@@ -212,7 +212,8 @@ export function hideEmptyState() {
  * @param {'user'|'assistant'} role - 消息角色
  * @returns {HTMLElement} 追加的 Block 根元素
  */
-export function appendBlock(role) {
+export function appendBlock(role, parent = null) {
+  const container = parent || $('chatArea');
   hideEmptyState();
   const wrap = document.createElement('div');
   wrap.className = `msg-block message-in msg-${role} animate-message-in`;
@@ -236,7 +237,7 @@ export function appendBlock(role) {
     wrap.querySelector('.msg-content').insertBefore(thinkingPanel.container, wrap.querySelector('.md'));
     wrap._thinkingPanel = thinkingPanel;
   }
-  $('chatArea').appendChild(wrap);
+  container.appendChild(wrap);
   if (role === 'user') {
     const actions = document.createElement('div');
     actions.className = 'flex justify-end gap-2 pt-3 pb-2 transition-opacity duration-normal';
@@ -251,8 +252,8 @@ export function appendBlock(role) {
  * @param {string} text - 用户消息文本
  * @param {string|null} msgId - 消息行 id（用于首次编辑时定位原始行）
  */
-export function appendUserBlock(text, msgId = null) {
-  const el = appendBlock('user');
+export function appendUserBlock(text, msgId = null, parent = null, { scroll = true } = {}) {
+  const el = appendBlock('user', parent);
   el.dataset.fullText = text;
   el.dataset.msgId = msgId || '';
   el.querySelector('.msg-user-content').textContent = text;
@@ -263,7 +264,7 @@ export function appendUserBlock(text, msgId = null) {
     triggerEdit(el, el.dataset.fullText || text);
   });
   showMsgActions(el, text, 'user');
-  scrollToBottom();
+  if (scroll) scrollToBottom();
   return el;
 }
 

@@ -301,7 +301,8 @@
     "export_empty": "エクスポートする内容がありません",
     "rename_success": "名前を変更しました",
     "conversation_deleted": "会話を削除しました",
-    "message_deleted": "メッセージを削除しました"
+    "message_deleted": "メッセージを削除しました",
+    "load_earlier": "以前のメッセージを読み込む（{count}）"
   },
   "knowledge_base": {
     "title": "ナレッジベース",

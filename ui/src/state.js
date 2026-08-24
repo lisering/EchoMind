@@ -22,6 +22,9 @@
  * @property {boolean} streaming           - 是否正在流式生成
  * @property {HTMLElement|null} currentAssistantEl - 当前 assistant Block DOM
  * @property {boolean} renderScheduled     - rAF 渲染调度标志
+ * @property {boolean} tempWebSearch       - /web 斜杠命令临时启用网页搜索标志（chat_done 后复位）
+ * @property {boolean} tempAgent           - /agent 斜杠命令临时启用 Agent 模式标志（chat_done 后复位）
+ * @property {boolean} regenForceSearch    - 强制检索重生成临时开混合搜索标志（chat_done 后复位）
  * @property {string|null} currentConversationId - 当前会话 ID
  * @property {boolean} isNewConversation   - 是否处于新建未持久化会话状态（懒创建标志）
  * @property {string} activePreset         - 当前选中的 Provider 预设
@@ -71,6 +74,12 @@ const initialState = {
   lastSources: null,
   streaming: false,
   currentAssistantEl: null,
+  /** V3.1 P4-4：/web 斜杠命令的「单次会话临时启用」标志（chat_done 后复位） */
+  tempWebSearch: false,
+  /** V3.1 P4-4：/agent 斜杠命令的「单次会话临时启用」标志（chat_done 后复位） */
+  tempAgent: false,
+  /** V3.1 P4-4：强制检索重生成的「临时开混合搜索」标志（chat_done 后复位） */
+  regenForceSearch: false,
   renderScheduled: false,
   currentConversationId: null,
   isNewConversation: false,

@@ -89,13 +89,7 @@ let _chatAborted = false;
 * P1-3: /web 命令临时启用网页搜索标志。
 * 在 chat_done 后恢复为 false 并关闭网页搜索。
 */
-let _tempWebSearch = false;
-
-/**
-* P1-4: /agent 命令临时启用 Agent 模式标志。
-* 在 chat_done 后恢复为 false 并关闭 Agent 模式。
-*/
-let _tempAgent = false;
+/* P1-3/P1-4 的 /web、/agent 临时标志已并入 state.js（V3.1 P4-4：tempWebSearch/tempAgent） */
 
 /**
  * 启动看门狗计时器。
@@ -363,18 +357,17 @@ export async function send() {
     // S56：快捷指令展开 — /command query → promptTemplate.replace('{query}', query)
     // P1-3: /web 命令特殊处理 — 临时启用网页搜索，不展开 prompt
     const slashResult = processSlashCommand(query);
-    _tempWebSearch = false;
-    _tempAgent = false;
+    setState({ tempWebSearch: false, tempAgent: false });
     if (slashResult.matched) {
       if (slashResult.command?.name === 'web') {
         // /web 命令：使用原始查询，临时启用网页搜索
-        _tempWebSearch = true;
+        setState({ tempWebSearch: true });
         try {
           await invoke('update_setting', { key: 'rag.web_search_enabled', value: 'true' });
         } catch (_e) { /* 网页搜索可能不可用，静默降级 */ }
       } else if (slashResult.command?.name === 'agent') {
         // /agent 命令：使用原始查询，临时启用 Agent 模式
-        _tempAgent = true;
+        setState({ tempAgent: true });
         try {
           await invoke('update_setting', { key: 'rag.agent_enabled', value: 'true' });
         } catch (_e) { /* Agent 模式可能不可用，静默降级 */ }
@@ -880,19 +873,18 @@ export function initChatEventListeners(callbacks) {
     clearChatWatchdog();
     // P2-1：清除流状态
     _clearStreamState();
-    // P1-3: /web 命令完成后恢复网页搜索状态
-    if (_tempWebSearch) {
-      _tempWebSearch = false;
+    // P1-3/P1-4/P0-3：斜杠命令与强制检索的临时开关在会话结束后统一恢复（V3.1 P4-4 状态入 store）
+    const { tempWebSearch, tempAgent, regenForceSearch } = getState();
+    if (tempWebSearch) {
+      setState({ tempWebSearch: false });
       try { await invoke('update_setting', { key: 'rag.web_search_enabled', value: 'false' }); } catch (_e) { /* 静默 */ }
     }
-    // P1-4: /agent 命令完成后恢复 Agent 模式状态
-    if (_tempAgent) {
-      _tempAgent = false;
+    if (tempAgent) {
+      setState({ tempAgent: false });
       try { await invoke('update_setting', { key: 'rag.agent_enabled', value: 'false' }); } catch (_e) { /* 静默 */ }
     }
-    // P0-3: 强制检索重生成完成后恢复混合搜索状态
-    if (typeof window !== 'undefined' && window.__echomindRegenForceSearch) {
-      window.__echomindRegenForceSearch = false;
+    if (regenForceSearch) {
+      setState({ regenForceSearch: false });
       try { await invoke('update_setting', { key: 'rag.hybrid_search', value: 'false' }); } catch (_e) { /* 静默 */ }
     }
     const usage = e.payload;

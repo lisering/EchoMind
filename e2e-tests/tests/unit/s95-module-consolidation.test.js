@@ -15,13 +15,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const srcDir = join(__dirname, '../../../ui/src');
 
 // ============================================================
-// TC-ARCH-MODULE-001: 前端模块数 ≤60
-// ============================================================
+// TC-ARCH-MODULE-001: 前端模块数 ≤64
+// V3.1 P4-3 拆分 main.js 上帝模块（kb-panel / conversation-list / disk-space），
+// 单一职责优先于绝对数量，上限相应放宽至 64。
 
-describe('TC-ARCH-MODULE-001: 前端模块数 ≤60', () => {
-  it('ui/src/ 目录下 JS 模块数不超过 60', () => {
+describe('TC-ARCH-MODULE-001: 前端模块数 ≤64', () => {
+  it('ui/src/ 目录下 JS 模块数不超过 64', () => {
     const files = readdirSync(srcDir).filter(f => f.endsWith('.js'));
-    expect(files.length).toBeLessThanOrEqual(60);
+    expect(files.length).toBeLessThanOrEqual(64);
   });
 
   it('input-utils.js 存在（input-keymap + input-history 合并后）', () => {

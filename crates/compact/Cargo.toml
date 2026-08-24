@@ -1,6 +1,6 @@
 [package]
 name = "echomind-compact"
-version = "3.0.0"
+version = "3.1.0"
 edition = "2024"
 license = "MIT"
 description = "EchoMind 上下文压缩引擎：超限时将旧消息压缩为摘要（替代纯截断）"
