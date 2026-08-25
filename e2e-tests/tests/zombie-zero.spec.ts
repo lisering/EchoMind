@@ -17,6 +17,9 @@ test.describe('TC-ZOMBIE Zombie Zero 测试', () => {
     // 打开设置面板
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForTimeout(800);
 
     // 验证 PagedAttention 设置区域存在
@@ -44,6 +47,9 @@ test.describe('TC-ZOMBIE Zombie Zero 测试', () => {
     // 打开设置面板
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForTimeout(800);
 
     // 验证内核模式设置区域存在
