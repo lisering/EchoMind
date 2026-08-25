@@ -9,7 +9,7 @@
 // E2E-LLM-008: 删除模型
 // E2E-LLM-009: 选择模型并自动切换到 Local 模式
 import { test, expect } from '@playwright/test';
-import { activatePro, enterApp, injectLocales, injectStub, uiUrl } from './helpers.mjs';
+import { activatePro, enterApp, injectLocales, injectStub, uiUrl, showAllSettingsSections } from './helpers.mjs';
 test.describe('E2E-LLM-001~009 本地 LLM 模型管理 UI', () => {
   test.beforeEach(async ({ page }) => {
     await injectStub(page);
@@ -19,6 +19,7 @@ test.describe('E2E-LLM-001~009 本地 LLM 模型管理 UI', () => {
     // 打开设置面板
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await showAllSettingsSections(page);
   });
 
   test('E2E-LLM-001 设置面板显示 LLM 推理模式区域', async ({ page }) => {
@@ -60,6 +61,7 @@ test.describe('E2E-LLM-001~009 本地 LLM 模型管理 UI', () => {
     // 重新打开设置
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await showAllSettingsSections(page);
 
     // RC7 修复：直接调用 IPC 验证模式切换，不依赖 toast 时序
     await page.waitForTimeout(500);
@@ -118,6 +120,7 @@ test.describe('E2E-LLM-001~009 本地 LLM 模型管理 UI', () => {
     await activatePro(page);
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await showAllSettingsSections(page);
 
     // RC7 修复：直接调用 downloadLocalModel 函数，绕过 onclick 时序问题
     // 获取第一个推荐模型的 URL 和 filename
@@ -173,6 +176,7 @@ test.describe('E2E-LLM-001~009 本地 LLM 模型管理 UI', () => {
     await activatePro(page);
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await showAllSettingsSections(page);
 
     // 点击已下载模型的「使用」按钮
     const useBtn = page.locator('#localModelsList button:has-text("使用")').first();

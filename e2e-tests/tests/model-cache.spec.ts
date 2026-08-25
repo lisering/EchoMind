@@ -7,7 +7,7 @@
 // E2E-VEC-006: 清理后缓存大小归零
 // E2E-VEC-007: 空缓存状态展示
 import { test, expect } from '@playwright/test';
-import { enterApp, injectLocales, injectStub, uiUrl } from './helpers.mjs';
+import { enterApp, injectLocales, injectStub, uiUrl, showAllSettingsSections } from './helpers.mjs';
 test.describe('E2E-VEC-001~007 模型缓存管理 UI', () => {
   test.beforeEach(async ({ page }) => {
     await injectStub(page);
@@ -17,6 +17,7 @@ test.describe('E2E-VEC-001~007 模型缓存管理 UI', () => {
     // 打开设置面板
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await showAllSettingsSections(page);
   });
 
   test('E2E-VEC-001 设置面板显示模型缓存大小', async ({ page }) => {
@@ -67,6 +68,7 @@ test.describe('E2E-VEC-001~007 模型缓存管理 UI', () => {
     await page.locator('#settingsClose').click();
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await showAllSettingsSections(page);
 
     // 缓存信息应显示「未安装模型」
     const cacheInfo = page.locator('#settingsCacheInfo');
@@ -82,6 +84,7 @@ test.describe('E2E-VEC-001~007 模型缓存管理 UI', () => {
     await page.locator('#settingsClose').click();
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await showAllSettingsSections(page);
 
     await expect(page.locator('#settingsCacheInfo')).toContainText('未安装模型', { timeout: 5000 });
   });

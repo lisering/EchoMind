@@ -19,6 +19,11 @@ test.describe('性能优化设置 (TC-PERF-UI)', () => {
     await page.waitForSelector('#settingsBtn', { timeout: 5000 });
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    // V3.1 阶段二：S94 Tab 化后 perf 设置在「高级」分区，先切 Tab 再等待容器可见
+    const advancedTab = page.locator('#settingsTabBar [data-tab-id="advanced"]');
+    if (await advancedTab.count()) {
+      await advancedTab.click();
+    }
     // 等待性能设置容器渲染
     await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
     // 关闭智能模式以显示所有性能设置 toggle
