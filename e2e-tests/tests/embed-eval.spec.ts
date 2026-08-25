@@ -15,6 +15,13 @@ import { setupPage } from './helpers.mjs';
 test.describe('嵌入模型对比评估面板 (TC-VEC-EVAL-E2E)', () => {
   test.beforeEach(async ({ page }) => {
     await setupPage(page);
+    // V3.1 阶段二：embed-eval 是开发者工具（S10 设计——prod/Release 构建剔除其 JS）。
+    // CI e2e-bridge 使用 prod 构建产物，面板无响应属预期，条件跳过（避免假失败）。
+    // 本地验证 dev-tool 功能：node scripts/build-ui.mjs --dev 后再跑本 spec。
+    const isDevToolAvailable = await page.evaluate(
+      () => typeof window.openEmbedEvalPanel === 'function'
+    );
+    test.skip(!isDevToolAvailable, 'prod 构建剔除 embed-eval（S10 dev-tool 门控设计）');
   });
 
   // 辅助：打开设置面板并切换到高级 Tab

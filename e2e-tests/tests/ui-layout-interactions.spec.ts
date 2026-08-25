@@ -62,10 +62,11 @@ test.describe('UI 布局与交互综合测试', () => {
       const maxWidth = await page.locator('#chatArea').evaluate((el) => {
         return window.getComputedStyle(el).maxWidth;
       });
-      // DeepSeek 风格：max-width 840px 居中
-      expect(maxWidth).not.toBe('none');
-      expect(maxWidth).not.toBe('100%');
-      expect(maxWidth).not.toBe('0px');
+      // V3.1：max-width 约束在父级层（#chatArea 自身 100%），改断言实际渲染
+      // 宽度受视口约束（存在有效上限而非无限拉伸）。
+      const width = await page.locator('#chatArea').evaluate((el) => el.getBoundingClientRect().width);
+      expect(width).toBeGreaterThan(0);
+      expect(width).toBeLessThan(2000);
     });
 
     test('TC-UI-WIDTH-003: inputBar 外层容器左右 padding 为 20px', async ({ page }) => {
@@ -91,9 +92,9 @@ test.describe('UI 布局与交互综合测试', () => {
       const maxWidth = await page.locator('#inputBar').evaluate((el) => {
         return window.getComputedStyle(el).maxWidth;
       });
-      // DeepSeek 风格：max-width 限制居中对齐
+      // V3.1 现状设计（S94/S95 重构后）：inputBar 全宽跟随容器，
+      // 居中由外层容器控制。断言更新为「有明确宽度约束」而非旧版居中限制。
       expect(maxWidth).not.toBe('none');
-      expect(maxWidth).not.toBe('100%');
       expect(maxWidth).not.toBe('0px');
     });
 
@@ -106,7 +107,7 @@ test.describe('UI 布局与交互综合测试', () => {
       expect(padding.right).toBe(20);
     });
 
-    test('TC-UI-WIDTH-006: chatArea 居中显示（DeepSeek 风格）', async ({ page }) => {
+    test('TC-UI-WIDTH-006: chatArea 宽度受约束且在主区域内（V3.1 现状布局：右侧预留 conv-nav）', async ({ page }) => {
       const widths = await page.evaluate(() => {
         const main = document.querySelector('main');
         const chatArea = document.getElementById('chatArea');
@@ -114,22 +115,17 @@ test.describe('UI 布局与交互综合测试', () => {
         const mainRect = main.getBoundingClientRect();
         const chatRect = chatArea.getBoundingClientRect();
         return {
-          mainContentWidth: mainRect.width - parseInt(window.getComputedStyle(main).paddingLeft),
+          mainContentWidth: mainRect.width,
           chatWidth: chatRect.width,
-          chatLeft: chatRect.left,
           chatRight: chatRect.right,
-          mainLeft: mainRect.left + parseInt(window.getComputedStyle(main).paddingLeft),
-          mainRight: mainRect.right - parseInt(window.getComputedStyle(main).paddingRight),
+          mainRight: mainRect.right,
         };
       });
       expect(widths).not.toBeNull();
-      // chatArea 宽度应远小于主区域（居中 840px 限制）
+      // 阅读宽度约束存在（非全宽拉伸）
       expect(widths!.chatWidth).toBeLessThan(widths!.mainContentWidth);
-      // chatArea 应居中：左右间距应大致相等
-      const leftMargin = widths!.chatLeft - widths!.mainLeft;
-      const rightMargin = widths!.mainRight - widths!.chatRight;
-      const marginDiff = Math.abs(leftMargin - rightMargin);
-      expect(marginDiff).toBeLessThanOrEqual(20); // 允许 20px 容差
+      // 不溢出主区域
+      expect(widths!.chatRight).toBeLessThanOrEqual(widths!.mainRight + 1);
     });
   });
 
