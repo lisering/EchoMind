@@ -1247,7 +1247,7 @@
     "build_summary_tree": "构建摘要树",
     "rebuild_contextual_embeddings": "重建上下文增强嵌入",
     "contextual_retrieval_toggle": "上下文增强嵌入",
-    "contextual_retrieval_desc": "嵌入时拼接文档名前缀，提升检索精度（Anthropic Contextual Retrieval：检索失败率降低 49%）",
+    "contextual_retrieval_desc": "嵌入时拼接文档名前缀，提升检索精度",
     "rebuilding": "重建中…",
     "rebuild_done": "索引重建成功"
   },

@@ -69,6 +69,10 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     // V3.1 校正：智能模式在 advanced 分区（性能设置）
     await page.locator('#settingsTabBar [data-tab-id="advanced"]').click();
     await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
+    // V3.1 阶段二：切 Tab 后补全分区显示（S94 hidden 恢复）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
 
     // 先关闭智能模式以显示所有设置
     await page.evaluate(async () => {
@@ -86,6 +90,10 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
     await page.locator('#settingsTabBar [data-tab-id="advanced"]').click();
     await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
+    // V3.1 阶段二：切 Tab 后补全分区显示（S94 hidden 恢复）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForTimeout(500);
 
     // 验证通俗化文案（不包含技术术语 Cross-Encoder）
@@ -119,6 +127,10 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     // V3.1 校正：智能模式在 advanced 分区（性能设置）
     await page.locator('#settingsTabBar [data-tab-id="advanced"]').click();
     await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
+    // V3.1 阶段二：切 Tab 后补全分区显示（S94 hidden 恢复）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForTimeout(300);
 
     // 智能模式默认 ON — 高级设置区域应隐藏
@@ -149,6 +161,10 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
     await page.locator('#settingsTabBar [data-tab-id="advanced"]').click();
     await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
+    // V3.1 阶段二：切 Tab 后补全分区显示（S94 hidden 恢复）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForTimeout(500);
 
     // 智能模式 OFF 时，高级设置应可见
