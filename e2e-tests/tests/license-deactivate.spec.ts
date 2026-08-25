@@ -7,7 +7,7 @@
 // E2E-LIC-010: 停用后侧栏状态更新
 // E2E-LIC-011: 停用后重新激活可用
 import { test, expect } from '@playwright/test';
-import { activatePro, enterApp, importDocs, injectLocales, injectStub, uiUrl } from './helpers.mjs';
+import { activatePro, enterApp, importDocs, injectLocales, injectStub, uiUrl, showAllSettingsSections } from './helpers.mjs';
 test.describe('E2E-LIC-005~011 License 停用与状态展示', () => {
   test.beforeEach(async ({ page }) => {
     await injectStub(page);
@@ -21,6 +21,9 @@ test.describe('E2E-LIC-005~011 License 停用与状态展示', () => {
   test('E2E-LIC-005 设置面板 Pro 版授权状态展示', async ({ page }) => {
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
 
     // 授权状态区应显示 Pro 版已激活
     const licenseInfo = page.locator('#settingsLicenseInfo');
@@ -31,6 +34,9 @@ test.describe('E2E-LIC-005~011 License 停用与状态展示', () => {
   test('E2E-LIC-006 停用按钮可见', async ({ page }) => {
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
 
     // 停用按钮应存在
     const deactivateBtn = page.locator('#deactivateBtn');
@@ -41,6 +47,9 @@ test.describe('E2E-LIC-005~011 License 停用与状态展示', () => {
   test('E2E-LIC-007 停用后状态回落为免费版', async ({ page }) => {
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
 
     // 点击停用
     await page.locator('#deactivateBtn').click();
@@ -52,6 +61,9 @@ test.describe('E2E-LIC-005~011 License 停用与状态展示', () => {
 
     // 重新打开设置面板（deactivatePro 内部会调用 openSettings）
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
 
     // 授权状态应显示免费版
     const licenseInfo = page.locator('#settingsLicenseInfo');
@@ -61,6 +73,9 @@ test.describe('E2E-LIC-005~011 License 停用与状态展示', () => {
   test('E2E-LIC-008 停用后 toast 提示', async ({ page }) => {
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
 
     await page.locator('#deactivateBtn').click();
 
@@ -87,6 +102,9 @@ test.describe('E2E-LIC-005~011 License 停用与状态展示', () => {
     // 通过设置面板停用 Pro
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.locator('#deactivateBtn').click();
     await page.waitForTimeout(500);
     // 关闭设置面板
@@ -111,6 +129,9 @@ test.describe('E2E-LIC-005~011 License 停用与状态展示', () => {
     // 通过设置面板停用 Pro
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.locator('#deactivateBtn').click();
     await page.waitForTimeout(500);
 
@@ -122,6 +143,9 @@ test.describe('E2E-LIC-005~011 License 停用与状态展示', () => {
     // 先通过设置面板停用
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.locator('#deactivateBtn').click();
     await page.waitForTimeout(500);
     // 关闭设置面板

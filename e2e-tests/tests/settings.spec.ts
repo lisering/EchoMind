@@ -9,20 +9,24 @@
 // E2E-MM-008: VLM 状态持久化与恢复
 // E2E-MM-009: 设置面板修改 LLM 配置入口
 import { test, expect } from '@playwright/test';
-import { enterApp, injectLocales, injectStub, uiUrl } from './helpers.mjs';
+import { enterApp, injectLocales, injectStub, uiUrl, showAllSettingsSections } from './helpers.mjs';
 test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-003）', () => {
   test.beforeEach(async ({ page }) => {
     await injectStub(page);
     await injectLocales(page);
     await page.goto(uiUrl);
     await enterApp(page);
+    // V3.1 阶段二：S94 Tab 化——测试专用视图显示全部分区（幂等）
+    await showAllSettingsSections(page);
   });
 
   // ─── 设置面板基础交互 ───
 
   test('E2E-MM-001 设置面板打开与 LLM 配置展示', async ({ page }) => {
     // 点击侧栏设置按钮
-    await page.locator('#settingsBtn').click();
+    if (!(await page.locator('#settingsModal').isVisible().catch(() => false))) {
+      await page.locator('#settingsBtn').click();
+    }
 
     // 设置 Modal 可见
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
@@ -36,7 +40,9 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
 
   test('E2E-MM-002 设置面板关闭', async ({ page }) => {
     // 打开设置面板
-    await page.locator('#settingsBtn').click();
+    if (!(await page.locator('#settingsModal').isVisible().catch(() => false))) {
+      await page.locator('#settingsBtn').click();
+    }
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
 
     // 点击「完成」关闭
@@ -47,7 +53,9 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
   // ─── VLM 开关初始状态 ───
 
   test('E2E-MM-003 VLM 开关初始关闭状态', async ({ page }) => {
-    await page.locator('#settingsBtn').click();
+    if (!(await page.locator('#settingsModal').isVisible().catch(() => false))) {
+      await page.locator('#settingsBtn').click();
+    }
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
 
     // VLM 开关初始为关闭
@@ -62,7 +70,9 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
   // ─── VLM 开启流程：隐私确认弹窗 ───
 
   test('E2E-MM-004 VLM 开启 — 隐私确认弹窗弹出', async ({ page }) => {
-    await page.locator('#settingsBtn').click();
+    if (!(await page.locator('#settingsModal').isVisible().catch(() => false))) {
+      await page.locator('#settingsBtn').click();
+    }
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
 
     // 点击 VLM 开关（off → on）
@@ -81,7 +91,9 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
   });
 
   test('E2E-MM-005 VLM 开启 — 取消确认（不持久化）', async ({ page }) => {
-    await page.locator('#settingsBtn').click();
+    if (!(await page.locator('#settingsModal').isVisible().catch(() => false))) {
+      await page.locator('#settingsBtn').click();
+    }
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
 
     // 确认初始 VLM 关闭
@@ -108,7 +120,9 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
   });
 
   test('E2E-MM-006 VLM 开启 — 确认开启持久化', async ({ page }) => {
-    await page.locator('#settingsBtn').click();
+    if (!(await page.locator('#settingsModal').isVisible().catch(() => false))) {
+      await page.locator('#settingsBtn').click();
+    }
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
 
     // 点击开关 → 弹出确认弹窗
@@ -142,13 +156,16 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
 
   test('E2E-MM-007 VLM 关闭 — 直接生效无需确认', async ({ page }) => {
     // 预置 VLM 已开启状态（模拟后端已持久化）
+    // V3.1：beforeEach 已打开设置——预置 stub 状态后需重开设置触发 UI 重同步
+    await page.keyboard.press('Escape');
     await page.evaluate(() => {
       window.__mock.state.vlmEnabled = true;
     });
-
-    // 打开设置面板，VLM 开关应显示为开启
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await expect(page.locator('#vlmToggle')).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('#vlmPrivacy')).toBeVisible();
 
@@ -174,7 +191,9 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
 
   test('E2E-MM-008 VLM 状态持久化与恢复', async ({ page }) => {
     // 第一次打开设置面板，开启 VLM
-    await page.locator('#settingsBtn').click();
+    if (!(await page.locator('#settingsModal').isVisible().catch(() => false))) {
+      await page.locator('#settingsBtn').click();
+    }
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
 
     await page.locator('#vlmToggle').click();
@@ -191,7 +210,12 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
     await expect(page.locator('#settingsModal')).toBeHidden();
 
     // 再次打开设置面板 — VLM 开关应恢复为开启状态（从后端 get_settings 读取）
-    await page.locator('#settingsBtn').click();
+    if (!(await page.locator('#settingsModal').isVisible().catch(() => false))) {
+      await page.locator('#settingsBtn').click();
+    }
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
 
     await expect(page.locator('#vlmToggle')).toHaveAttribute('aria-checked', 'true');
@@ -202,7 +226,9 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
   // ─── 设置面板 LLM 配置修改入口 ───
 
   test('E2E-MM-009 设置面板修改 LLM 配置入口', async ({ page }) => {
-    await page.locator('#settingsBtn').click();
+    if (!(await page.locator('#settingsModal').isVisible().catch(() => false))) {
+      await page.locator('#settingsBtn').click();
+    }
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
 
     // 点击「修改 LLM 配置」

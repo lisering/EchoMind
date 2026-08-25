@@ -12,7 +12,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { setupPage } from './helpers.mjs';
+import { setupPage, showAllSettingsSections } from './helpers.mjs';
 
 test.describe('记忆管理面板 (TC-MEM-UI)', () => {
   test.beforeEach(async ({ page }) => {
@@ -21,6 +21,7 @@ test.describe('记忆管理面板 (TC-MEM-UI)', () => {
     await page.waitForSelector('#settingsBtn', { timeout: 5000 });
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await showAllSettingsSections(page);
     // 等待记忆设置内容实际渲染完成（tier 列出现）
     await page.waitForSelector('div[data-tier="wing"]', { timeout: 10000 });
   });
@@ -79,6 +80,10 @@ test.describe('记忆管理面板 (TC-MEM-UI)', () => {
     });
     await page.waitForTimeout(300);
     await page.locator('#settingsBtn').click();
+    // V3.1 阶段二：重开后补全分区显示（S94 Tab 化 hidden 恢复）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForSelector('div[data-tier="wing"]', { timeout: 10000 });
     await page.waitForTimeout(500);
 
@@ -119,6 +124,10 @@ test.describe('记忆管理面板 (TC-MEM-UI)', () => {
     });
     await page.waitForTimeout(300);
     await page.locator('#settingsBtn').click();
+    // V3.1 阶段二：重开后补全分区显示（S94 Tab 化 hidden 恢复）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForSelector('div[data-tier="wing"]', { timeout: 10000 });
     await page.waitForTimeout(500);
 
@@ -151,6 +160,10 @@ test.describe('记忆管理面板 (TC-MEM-UI)', () => {
     });
     await page.waitForTimeout(300);
     await page.locator('#settingsBtn').click();
+    // V3.1 阶段二：重开后补全分区显示（S94 Tab 化 hidden 恢复）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForSelector('div[data-tier="wing"]', { timeout: 10000 });
     await page.waitForTimeout(500);
 

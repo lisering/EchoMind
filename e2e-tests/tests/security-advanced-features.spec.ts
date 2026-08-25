@@ -12,7 +12,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { setupPage } from './helpers.mjs';
+import { setupPage, showAllSettingsSections } from './helpers.mjs';
 
 test.describe('安全面板新区域 (TC-SEC-NEW)', () => {
   test.beforeEach(async ({ page }) => {
@@ -21,6 +21,9 @@ test.describe('安全面板新区域 (TC-SEC-NEW)', () => {
     await page.waitForSelector('#settingsBtn', { timeout: 5000 });
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     // 等待安全设置区块渲染
     await page.waitForSelector('#securitySettingsContainer', { timeout: 10000 });
   });

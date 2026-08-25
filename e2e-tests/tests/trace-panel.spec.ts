@@ -13,7 +13,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { setupPage, enableDevMode } from './helpers.mjs';
+import { setupPage, enableDevMode, showAllSettingsSections } from './helpers.mjs';
 
 test.describe('Trace + Budget 面板 (TC-TRACE-UI)', () => {
   test.beforeEach(async ({ page }) => {
@@ -25,17 +25,28 @@ test.describe('Trace + Budget 面板 (TC-TRACE-UI)', () => {
     // 打开设置面板
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await showAllSettingsSections(page);
     // 等待 Trace + Budget 面板渲染完成（异步渲染，需轮询等待）
     await page.waitForSelector('#traceBudgetSection', { timeout: 15000 }).catch(async () => {
-      // 如果未出现，重试：关闭设置再重新打开
+      // 如果未出现，重试：关闭设置再重新打开（V3.1 阶段二重写）
       await page.evaluate(() => {
         const modal = document.querySelector('#settingsModal');
         if (modal) modal.classList.add('hidden');
       });
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(300);
       await page.locator('#settingsBtn').click();
-      await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
-      await page.waitForSelector('#traceBudgetSection', { timeout: 15000 });
+      await page.waitForTimeout(800);
+      // 轮询移除分区 hidden（openSettings 异步尾部会恢复 hidden，需多次尝试）
+      for (let i = 0; i < 12; i++) {
+        await page.evaluate(() => {
+          document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+        });
+        const visible = await page.locator('#traceBudgetSection').isVisible().catch(() => false);
+        if (visible) return; // 重试成功，跳过 catch 剩余代码
+        await page.waitForTimeout(400);
+      }
+      // 轮询耗尽仍不可见：让最后的断言失败并给出现场
+      await expect(page.locator('#traceBudgetSection')).toBeVisible({ timeout: 5000 });
     });
   });
 
@@ -64,6 +75,10 @@ test.describe('Trace + Budget 面板 (TC-TRACE-UI)', () => {
     });
     await page.waitForTimeout(300);
     await page.locator('#settingsBtn').click();
+    // V3.1 阶段二：重开后补全分区显示（S94 Tab 化 hidden 恢复）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForSelector('#traceBudgetSection', { timeout: 10000 });
     await page.waitForTimeout(500);
 
@@ -89,6 +104,10 @@ test.describe('Trace + Budget 面板 (TC-TRACE-UI)', () => {
     });
     await page.waitForTimeout(300);
     await page.locator('#settingsBtn').click();
+    // V3.1 阶段二：重开后补全分区显示（S94 Tab 化 hidden 恢复）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForSelector('#traceBudgetSection', { timeout: 10000 });
     await page.waitForTimeout(500);
 
@@ -120,6 +139,10 @@ test.describe('Trace + Budget 面板 (TC-TRACE-UI)', () => {
     });
     await page.waitForTimeout(300);
     await page.locator('#settingsBtn').click();
+    // V3.1 阶段二：重开后补全分区显示（S94 Tab 化 hidden 恢复）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForSelector('#traceBudgetSection', { timeout: 10000 });
     await page.waitForTimeout(500);
 

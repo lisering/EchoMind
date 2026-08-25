@@ -24,19 +24,33 @@ test.describe('REQ-HELP-004 S87 自动更新检查', () => {
   test('TC-UPD-002: 发现新版本时显示更新横幅', async ({ page }) => {
     // 注入 mock：有新版本
     await injectStub(page);
+    // V3.1 修复：预配置 LLM（跳过向导直达 #app）+ updateInfo（stub 执行后 __state 才存在，
+    // 但 check_for_updates 在 boot 后 5s 才调用——用 addInitScript 包装 setTimeout 注入）
     await page.addInitScript(() => {
-      window.__state.updateInfo = {
-        has_update: true,
-        current_version: '2.2.0',
-        latest_version: '2.3.0',
-        release_notes: 'Bug fixes and performance improvements',
-        download_url: 'https://github.com/EchoMind/EchoMind/releases/tag/v2.3.0',
+      const origInvoke = window.__TAURI__.core.invoke;
+      window.__TAURI__.core.invoke = async function (cmd, ...args) {
+        if (cmd === 'check_for_updates') {
+          return {
+            has_update: true,
+            current_version: '2.2.0',
+            latest_version: '2.3.0',
+            release_notes: 'Bug fixes and performance improvements',
+            download_url: 'https://github.com/EchoMind/EchoMind/releases/tag/v2.3.0',
+          };
+        }
+        return origInvoke(cmd, ...args);
       };
+      // 预配置：跳过向导
+      const t = setInterval(() => {
+        if (window.__state) {
+          window.__state.configured = true;
+          clearInterval(t);
+        }
+      }, 10);
     });
     await injectLocales(page);
     await page.goto(uiUrl);
     await page.locator('#app').waitFor({ state: 'visible', timeout: 15000 });
-    // 等待 5s 更新检查延迟 + 横幅动画
     await page.locator('#updateBanner').waitFor({ state: 'visible', timeout: 10000 });
     await expect(page.locator('#updateBanner')).toBeVisible();
   });
@@ -44,17 +58,28 @@ test.describe('REQ-HELP-004 S87 自动更新检查', () => {
   test('TC-UPD-003: 横幅含版本号 + 更新日志按钮 + 下载按钮', async ({ page }) => {
     await injectStub(page);
     await page.addInitScript(() => {
-      window.__state.updateInfo = {
-        has_update: true,
-        current_version: '2.2.0',
-        latest_version: '2.3.0',
-        release_notes: 'New features and bug fixes',
-        download_url: 'https://github.com/EchoMind/EchoMind/releases/tag/v2.3.0',
+      const origInvoke = window.__TAURI__.core.invoke;
+      window.__TAURI__.core.invoke = async function (cmd, ...args) {
+        if (cmd === 'check_for_updates') {
+          return {
+            has_update: true,
+            current_version: '2.2.0',
+            latest_version: '2.3.0',
+            release_notes: 'New features and bug fixes',
+            download_url: 'https://github.com/EchoMind/EchoMind/releases/tag/v2.3.0',
+          };
+        }
+        return origInvoke(cmd, ...args);
       };
+      const t = setInterval(() => {
+        if (window.__state) {
+          window.__state.configured = true;
+          clearInterval(t);
+        }
+      }, 10);
     });
     await injectLocales(page);
-    await page.goto(uiUrl);
-    await page.locator('#app').waitFor({ state: 'visible', timeout: 15000 });
+    await page.goto(uiUrl);    await page.locator('#app').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('#updateBanner').waitFor({ state: 'visible', timeout: 10000 });
 
     // 验证版本号
@@ -78,17 +103,28 @@ test.describe('REQ-HELP-004 S87 自动更新检查', () => {
   test('TC-UPD-004: 关闭按钮隐藏横幅', async ({ page }) => {
     await injectStub(page);
     await page.addInitScript(() => {
-      window.__state.updateInfo = {
-        has_update: true,
-        current_version: '2.2.0',
-        latest_version: '2.3.0',
-        release_notes: 'Bug fixes',
-        download_url: 'https://github.com/EchoMind/EchoMind/releases/tag/v2.3.0',
+      const origInvoke = window.__TAURI__.core.invoke;
+      window.__TAURI__.core.invoke = async function (cmd, ...args) {
+        if (cmd === 'check_for_updates') {
+          return {
+            has_update: true,
+            current_version: '2.2.0',
+            latest_version: '2.3.0',
+            release_notes: 'Bug fixes',
+            download_url: 'https://github.com/EchoMind/EchoMind/releases/tag/v2.3.0',
+          };
+        }
+        return origInvoke(cmd, ...args);
       };
+      const t = setInterval(() => {
+        if (window.__state) {
+          window.__state.configured = true;
+          clearInterval(t);
+        }
+      }, 10);
     });
     await injectLocales(page);
-    await page.goto(uiUrl);
-    await page.locator('#app').waitFor({ state: 'visible', timeout: 15000 });
+    await page.goto(uiUrl);    await page.locator('#app').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('#updateBanner').waitFor({ state: 'visible', timeout: 10000 });
 
     // 点击关闭按钮
@@ -99,15 +135,21 @@ test.describe('REQ-HELP-004 S87 自动更新检查', () => {
 
   test('TC-UPD-005: 网络不可用时静默跳过', async ({ page }) => {
     await injectStub(page);
-    // 注入一个让 check_for_updates 抛异常的 mock
+    // 注入一个让 check_for_updates 抛异常的 mock + 预配置跳过向导（V3.1）
     await page.addInitScript(() => {
       const origInvoke = window.__TAURI__.core.invoke;
-      window.__TAURI__.core.invoke = async function(cmd: string, ...args: any[]) {
+      window.__TAURI__.core.invoke = async function (cmd, ...args) {
         if (cmd === 'check_for_updates') {
           throw new Error('Network unreachable');
         }
         return origInvoke(cmd, ...args);
       };
+      const t = setInterval(() => {
+        if (window.__state) {
+          window.__state.configured = true;
+          clearInterval(t);
+        }
+      }, 10);
     });
     await injectLocales(page);
     await page.goto(uiUrl);

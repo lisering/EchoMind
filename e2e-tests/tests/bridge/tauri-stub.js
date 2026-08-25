@@ -3263,7 +3263,15 @@ case 'set_rag_eval_settings':
           case 'rag.sub_agent_enabled': state.subAgentEnabled = enabled; break;
           case 'vec.embedding_model': state.embeddingModel = value; break;
           case 'compression.ratio': state.compressionRatio = parseFloat(value); break;
-          case 'rag.context_token_limit': state.contextTokenLimit = parseInt(value); break;
+          case 'rag.context_token_limit': {
+            // 对齐真实契约（settings.rs：范围 2048-32768，越界拒绝）
+            const limit = parseInt(value, 10);
+            if (!(limit >= 2048 && limit <= 32768)) {
+              throw new Error('VALIDATION: 上下文 token 限制范围为 2048-32768');
+            }
+            state.contextTokenLimit = limit;
+            break;
+          }
           case 'mm.vlm_enabled': state.vlmEnabled = enabled; break;
           case 'rag.progressive_injection': state.progressiveInjection = enabled; break;
           case 'rag.speculative_enabled': state.speculativeEnabled = enabled; break;

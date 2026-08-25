@@ -240,6 +240,42 @@ export async function waitForToast(page, text, timeout = 5000) {
  * 点击 #toolsBtn 展开 #toolsMenu，等待菜单可见后返回。
  * @param {import('@playwright/test').Page} page
  */
+
+/**
+ * 打开设置面板并切换到指定分区（V3.1 阶段二：S94 Tab 化后的统一入口）。
+ * @param {import('@playwright/test').Page} page
+ * @param {string} tabId - 分区 id（appearance/model/kb/retrieval/security/data/application/advanced）
+ */
+
+/**
+ * 打开设置面板并显示全部分区（测试专用视图，V3.1 阶段二）。
+ *
+ * S94 Tab 化后非活动分区带 hidden；功能断言（toggle/文本/按钮）不依赖
+ * 视觉 Tab，移除 hidden 让既有断言按原样工作。仅测试使用。
+ * @param {import('@playwright/test').Page} page
+ */
+export async function showAllSettingsSections(page) {
+  const modal = page.locator('#settingsModal');
+  if (!(await modal.isVisible().catch(() => false))) {
+    await page.locator('#settingsBtn').click();
+    await expect(modal).toBeVisible({ timeout: 5000 });
+  }
+  await page.evaluate(() => {
+    document
+      .querySelectorAll('[data-settings-section]')
+      .forEach((el) => el.classList.remove('hidden'));
+  });
+}
+
+export async function openSettingsTab(page, tabId) {
+  await page.locator('#settingsBtn').click();
+  await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+  const tab = page.locator(`#settingsTabBar [data-tab-id="${tabId}"]`);
+  if (await tab.count()) {
+    await tab.click();
+  }
+}
+
 export async function openToolsDropdown(page) {
   const toolsBtn = page.locator('#toolsBtn');
   await toolsBtn.waitFor({ state: 'visible', timeout: 5000 });
