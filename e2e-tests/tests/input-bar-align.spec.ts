@@ -246,7 +246,8 @@ test.describe('REQ-IX-006 输入框多行与自适应高度', () => {
     await page.evaluate(() =>
       window.__TAURI__.core.invoke('import_files', { paths: ['/mock/rust-guide.md'] })
     );
-    await page.waitForTimeout(300);
+    // V3.1 P2-2：doc-status-changed 合流刷新（500ms debounce）——等发送守卫放行
+    await page.waitForTimeout(800);
 
     const textarea = page.locator('#queryInput');
     await textarea.focus();

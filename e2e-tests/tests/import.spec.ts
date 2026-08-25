@@ -64,8 +64,10 @@ test.describe('E2E-ING-001~008 导入管线', () => {
       window.__TAURI__.core.invoke('import_files', { paths: ['/mock/a/data.md', '/mock/b/data.md'] })
     );
     // 两个同名文件都应入库
-    const docs = await page.locator('#docList [data-doc-name="data.md"]').count();
-    expect(docs, '同名不同内容文件应各自入库').toBe(2);
+    // V3.1 P2-2：doc-status-changed 合流刷新（500ms debounce）——轮询等待列表更新
+    await expect(
+      page.locator('#docList [data-doc-name="data.md"]')
+    ).toHaveCount(2, { timeout: 3000 });
   });
 
   test('E2E-UI-013 索引状态徽标与事件一致', async ({ page }) => {

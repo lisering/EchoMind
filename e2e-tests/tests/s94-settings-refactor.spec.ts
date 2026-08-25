@@ -18,6 +18,10 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     await page.waitForSelector('#settingsBtn', { timeout: 5000 });
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    // V3.1 阶段二：S94 Tab 化——显示全部分区（智能模式/术语在 advanced 区）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
   });
 
   test('TC-UI-SETTINGS-001: 设置面板 8 个分区 Tab', async ({ page }) => {
@@ -42,8 +46,8 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
   });
 
   test('TC-UI-SETTINGS-002: 智能模式开关默认开启', async ({ page }) => {
-    // 切换到 retrieval 分区（智能模式在检索设置中）
-    const retrievalTab = page.locator('[data-tab-id="retrieval"]');
+    // 切换到 advanced 分区（智能模式在性能设置中，V3.1 校正）
+    const retrievalTab = page.locator('#settingsTabBar [data-tab-id="advanced"]');
     await retrievalTab.click();
 
     // 等待性能设置渲染
