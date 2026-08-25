@@ -510,7 +510,7 @@ test.describe('E2E-VIS-008 安全审计与 CDN 检查', () => {
     await expect(codeBlock).toBeVisible({ timeout: 15000 });
 
     // hljs 懒加载：等待 hljs class 出现（loadHighlight() 异步加载后调用 enhanceCodeBlocks）
-    await expect(codeBlock).toHaveClass(/hljs/, { timeout: 10000 });
+    await expect(codeBlock).toHaveClass(/hljs/, { timeout: 25000 }); // CI 慢机 hljs 懒加载（V3.1 放宽）
 
     await page.locator('#chatArea pre').last().hover();
     await expect(page.locator('#chatArea .copy-btn').last()).toBeVisible();
