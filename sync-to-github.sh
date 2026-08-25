@@ -136,6 +136,8 @@ sync_file "$ROOT_DIR/e2e-tests/vitest.config.ts"  "$RELEASE_DIR/e2e-tests/vitest
 sync_file "$ROOT_DIR/e2e-tests/wdio.conf.mjs"     "$RELEASE_DIR/e2e-tests/wdio.conf.mjs" 2>/dev/null || true
 sync_dir "$ROOT_DIR/e2e-tests/tests"              "$RELEASE_DIR/e2e-tests/tests"
 sync_dir "$ROOT_DIR/e2e-tests/scripts"            "$RELEASE_DIR/e2e-tests/scripts"
+sync_file "$ROOT_DIR/e2e-tests/specs/app.smoke.spec.mjs" "$RELEASE_DIR/e2e-tests/specs/app.smoke.spec.mjs"
+mkdir -p "$RELEASE_DIR/e2e-tests/specs" 2>/dev/null || true
 
 # ─── [7.6/10] tests/（混沌测试语料生成器 + loader fixtures）───
 echo ""
