@@ -20,11 +20,11 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
     // V3.1 阶段二：S94 Tab 化——轮询移除分区 hidden（openSettings 异步尾部
     // 会经 _switchTab 恢复，单次移除在 CI 慢机存在时序竞态）
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 15; i++) {
       await page.evaluate(() => {
         document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
       });
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(400);
     }
   });
 

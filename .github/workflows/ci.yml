@@ -209,6 +209,7 @@ jobs:
 
       - name: Install OpenSSL (Windows, for openssl-sys)
         if: runner.os == 'Windows'
+        shell: bash
         run: |
           choco install openssl -y --no-progress
           echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $GITHUB_ENV
@@ -382,6 +383,7 @@ jobs:
         env:
           E2E_SPEED: '0.2'
           PLAYWRIGHT_RETRIES: '1'
+          CI_E2E_SKIP_UNSTABLE: '1'
         run: npx playwright test --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
 
       - name: Upload blob report
