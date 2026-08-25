@@ -141,6 +141,8 @@ sync_dir "$ROOT_DIR/e2e-tests/scripts"            "$RELEASE_DIR/e2e-tests/script
 echo ""
 echo -e "${BLUE}[7.6/10] 同步 tests/${NC}"
 sync_dir "$ROOT_DIR/tests"                   "$RELEASE_DIR/tests"
+# 排除混沌语料深嵌套目录（Windows checkout 超 260 字符路径限制；CI 由 generate_corpus.py 重新生成）
+rm -rf "$RELEASE_DIR/tests/fixtures/deep_nested" 2>/dev/null || true
 
 sync_file "$ROOT_DIR/crates/tauri-app/Cargo.toml" "$RELEASE_DIR/crates/tauri-app/Cargo.toml"
 sync_file "$ROOT_DIR/crates/tauri-app/build.rs" "$RELEASE_DIR/crates/tauri-app/build.rs"

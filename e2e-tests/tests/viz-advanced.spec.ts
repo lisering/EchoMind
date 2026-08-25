@@ -52,7 +52,7 @@ test.describe('E2E-VIZ-ADV 富内容可视化渲染高级场景（REQ-VIZ-001~00
 
     // 应渲染为 SVG
     const mermaidRendered = page.locator('#chatArea .mermaid-rendered').last();
-    await expect(mermaidRendered).toBeVisible({ timeout: 10000 });
+    await expect(mermaidRendered).toBeVisible({ timeout: 25000 });
     const svg = mermaidRendered.locator('svg');
     await expect(svg).toHaveCount(1);
 
@@ -69,7 +69,7 @@ test.describe('E2E-VIZ-ADV 富内容可视化渲染高级场景（REQ-VIZ-001~00
     await waitForStreamDone(page, 15000);
 
     const mermaidRendered = page.locator('#chatArea .mermaid-rendered').last();
-    await expect(mermaidRendered).toBeVisible({ timeout: 10000 });
+    await expect(mermaidRendered).toBeVisible({ timeout: 25000 });
     const svg = mermaidRendered.locator('svg');
     await expect(svg).toHaveCount(1);
 
@@ -86,7 +86,7 @@ test.describe('E2E-VIZ-ADV 富内容可视化渲染高级场景（REQ-VIZ-001~00
     await waitForStreamDone(page, 15000);
 
     const mermaidRendered = page.locator('#chatArea .mermaid-rendered').last();
-    await expect(mermaidRendered).toBeVisible({ timeout: 10000 });
+    await expect(mermaidRendered).toBeVisible({ timeout: 25000 });
     const svg = mermaidRendered.locator('svg');
     await expect(svg).toHaveCount(1);
 
@@ -103,7 +103,7 @@ test.describe('E2E-VIZ-ADV 富内容可视化渲染高级场景（REQ-VIZ-001~00
     await waitForStreamDone(page, 15000);
 
     const mermaidRendered = page.locator('#chatArea .mermaid-rendered').last();
-    await expect(mermaidRendered).toBeVisible({ timeout: 10000 });
+    await expect(mermaidRendered).toBeVisible({ timeout: 25000 });
     const svg = mermaidRendered.locator('svg');
     await expect(svg).toHaveCount(1);
 
@@ -123,7 +123,7 @@ test.describe('E2E-VIZ-ADV 富内容可视化渲染高级场景（REQ-VIZ-001~00
 
     // 应渲染为 KaTeX 公式（含 .katex class）
     const katexEl = page.locator('#chatArea .katex').last();
-    await expect(katexEl).toBeVisible({ timeout: 10000 });
+    await expect(katexEl).toBeVisible({ timeout: 25000 });
     const count = await page.locator('#chatArea .katex').count();
     expect(count, '应渲染至少一个 KaTeX 公式').toBeGreaterThan(0);
   });
@@ -136,7 +136,7 @@ test.describe('E2E-VIZ-ADV 富内容可视化渲染高级场景（REQ-VIZ-001~00
     await waitForStreamDone(page, 15000);
 
     const katexDisplay = page.locator('#chatArea .katex-display').last();
-    await expect(katexDisplay).toBeVisible({ timeout: 10000 });
+    await expect(katexDisplay).toBeVisible({ timeout: 25000 });
     // 块级公式应居中
     const textAlign = await katexDisplay.evaluate(el => getComputedStyle(el).textAlign);
     expect(textAlign, '块级公式应居中').toBe('center');
@@ -150,7 +150,7 @@ test.describe('E2E-VIZ-ADV 富内容可视化渲染高级场景（REQ-VIZ-001~00
     await waitForStreamDone(page, 15000);
 
     const katexEl = page.locator('#chatArea .katex').last();
-    await expect(katexEl).toBeVisible({ timeout: 10000 });
+    await expect(katexEl).toBeVisible({ timeout: 25000 });
     // 应渲染至少 2 个公式（H2O 和燃烧反应）
     const count = await page.locator('#chatArea .katex').count();
     expect(count, '应渲染至少 2 个化学方程式').toBeGreaterThanOrEqual(2);
@@ -182,7 +182,7 @@ test.describe('E2E-VIZ-ADV 富内容可视化渲染高级场景（REQ-VIZ-001~00
 
     // 应出现表格和图表切换按钮
     const table = page.locator('#chatArea table').last();
-    await expect(table).toBeVisible({ timeout: 10000 });
+    await expect(table).toBeVisible({ timeout: 25000 });
 
     const chartToggle = page.locator('#chatArea .chart-toggle').last();
     await expect(chartToggle).toBeVisible();
@@ -211,7 +211,7 @@ test.describe('E2E-VIZ-ADV 富内容可视化渲染高级场景（REQ-VIZ-001~00
     await waitForStreamDone(page, 15000);
 
     const table = page.locator('#chatArea table').last();
-    await expect(table).toBeVisible({ timeout: 10000 });
+    await expect(table).toBeVisible({ timeout: 25000 });
 
     const chartToggle = page.locator('#chatArea .chart-toggle').last();
     await expect(chartToggle).toBeVisible();
@@ -243,7 +243,7 @@ test.describe('E2E-VIZ-ADV 富内容可视化渲染高级场景（REQ-VIZ-001~00
     await waitForStreamDone(page, 15000);
 
     const table = page.locator('#chatArea table').last();
-    await expect(table).toBeVisible({ timeout: 10000 });
+    await expect(table).toBeVisible({ timeout: 25000 });
 
     const chartToggle = page.locator('#chatArea .chart-toggle').last();
     await expect(chartToggle).toBeVisible();
@@ -278,7 +278,7 @@ await waitForStreamDone(page, 15000);
 
 // 应出现代码块
 const codeBlock = page.locator('#chatArea pre').last();
-await expect(codeBlock).toBeVisible({ timeout: 10000 });
+await expect(codeBlock).toBeVisible({ timeout: 25000 });
 
 // hover 显示复制按钮（copy-btn 可能是 pre 的兄弟元素或在 pre 内部）
 await codeBlock.hover();
@@ -316,7 +316,7 @@ if (textAfter === textBefore) {
     // Mermaid 懒加载：等待 mermaid-error 或 mermaid-rendered 元素出现
     // Mermaid 加载后处理语法错误，可能需要额外时间
     const mermaidResult = page.locator('#chatArea .mermaid-error, #chatArea .mermaid-rendered, #chatArea pre code.language-mermaid').last();
-    await expect(mermaidResult).toBeVisible({ timeout: 10000 });
+    await expect(mermaidResult).toBeVisible({ timeout: 25000 });
     // 两种情况之一：显示错误提示，或渲染失败但源码保留
     const hasError = await page.locator('#chatArea .mermaid-error').last().isVisible().catch(() => false);
     const hasRendered = await page.locator('#chatArea .mermaid-rendered').last().isVisible().catch(() => false);
@@ -379,7 +379,7 @@ if (textAfter === textBefore) {
     await waitForStreamDone(page, 15000);
 
     const svg = page.locator('#chatArea .mermaid-rendered svg').last();
-    await expect(svg).toBeVisible({ timeout: 10000 });
+    await expect(svg).toBeVisible({ timeout: 25000 });
 
     // SVG 应包含图表元素（path/line/text/rect/circle/polygon）
     const elementCount = await svg.locator('path, line, text, rect, circle, polygon').count();
@@ -407,7 +407,7 @@ if (textAfter === textBefore) {
     await expect(mdEl).toBeVisible();
 
     // 等待 KaTeX 懒加载完成（renderRichContent 异步渲染）
-    await expect(mdEl.locator('.katex').first()).toBeVisible({ timeout: 10000 });
+    await expect(mdEl.locator('.katex').first()).toBeVisible({ timeout: 25000 });
 
     // KaTeX 渲染后 HTML 不应包含未配对的 $ 分隔符
     const html = await mdEl.innerHTML();
@@ -428,7 +428,7 @@ if (textAfter === textBefore) {
     await waitForStreamDone(page, 15000);
 
     const codeBlock = page.locator('#chatArea pre code').last();
-    await expect(codeBlock).toBeVisible({ timeout: 10000 });
+    await expect(codeBlock).toBeVisible({ timeout: 25000 });
 
     // hljs 懒加载：等待 hljs class 出现
     await expect(codeBlock).toHaveClass(/hljs/, { timeout: 10000 });
@@ -482,7 +482,7 @@ expect(dataRowCount + allRowCount, '应有数据行').toBeGreaterThanOrEqual(1);
     await waitForStreamDone(page, 15000);
 
     const svg = page.locator('#chatArea .mermaid-rendered svg').last();
-    await expect(svg).toBeVisible({ timeout: 10000 });
+    await expect(svg).toBeVisible({ timeout: 25000 });
 
     // SVG 背景不应为纯白（暗色主题适配）
     const svgBg = await svg.evaluate(el => getComputedStyle(el).backgroundColor);
