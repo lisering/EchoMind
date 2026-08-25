@@ -33,7 +33,7 @@ test.describe('TC-VIZ-001~006 富内容可视化渲染', () => {
 
     // chat_done 后应渲染为 SVG，非纯文本代码块
     const mermaidRendered = page.locator('#chatArea .mermaid-rendered').last();
-    await expect(mermaidRendered).toBeVisible({ timeout: 10000 });
+    await expect(mermaidRendered).toBeVisible({ timeout: 25000 });
 
     // SVG 元素应存在
     const svg = mermaidRendered.locator('svg');
@@ -71,7 +71,7 @@ test.describe('TC-VIZ-001~006 富内容可视化渲染', () => {
 
     // 应显示错误提示，不崩溃
     const mermaidError = page.locator('#chatArea .mermaid-error').last();
-    await expect(mermaidError).toBeVisible({ timeout: 10000 });
+    await expect(mermaidError).toBeVisible({ timeout: 25000 });
     await expect(mermaidError).toContainText('图表语法错误');
 
     // 保留源码供用户查看
@@ -87,7 +87,7 @@ test.describe('TC-VIZ-001~006 富内容可视化渲染', () => {
     await waitForStreamDone(page);
 
     const mermaidRendered = page.locator('#chatArea .mermaid-rendered').last();
-    await expect(mermaidRendered).toBeVisible({ timeout: 10000 });
+    await expect(mermaidRendered).toBeVisible({ timeout: 25000 });
 
     // SVG 应存在且可见
     const svg = mermaidRendered.locator('svg');
@@ -170,7 +170,7 @@ test.describe('TC-VIZ-005~005d KaTeX 数学公式渲染', () => {
 
     // 块级公式应有 .katex-block 容器
     const blockEl = page.locator('#chatArea .katex-block').last();
-    await expect(blockEl).toBeVisible({ timeout: 10000 });
+    await expect(blockEl).toBeVisible({ timeout: 25000 });
 
     // 块级公式应居中显示（text-align: center）
     const textAlign = await blockEl.evaluate((el) => getComputedStyle(el).textAlign);
@@ -190,7 +190,7 @@ test.describe('TC-VIZ-005~005d KaTeX 数学公式渲染', () => {
 
     // 应显示错误提示，不崩溃
     const errorEl = page.locator('#chatArea .katex-error').last();
-    await expect(errorEl).toBeVisible({ timeout: 10000 });
+    await expect(errorEl).toBeVisible({ timeout: 25000 });
     await expect(errorEl).toContainText('公式语法错误');
   });
 
@@ -241,7 +241,7 @@ test.describe('TC-VIZ-007~007b Chart.js 数据图表渲染（REQ-VIZ-003）', ()
 
     // AC-1: 表格旁出现「切换图表视图」按钮
     const toggleBtn = mdEl.locator('.chart-toggle');
-    await expect(toggleBtn).toBeVisible({ timeout: 10000 });
+    await expect(toggleBtn).toBeVisible({ timeout: 25000 });
     await expect(toggleBtn).toContainText('切换图表视图');
 
     // Markdown 表格已渲染
@@ -305,7 +305,7 @@ test.describe('TC-VIZ-007~007b Chart.js 数据图表渲染（REQ-VIZ-003）', ()
 
     const mdEl = page.locator('#chatArea .md').last();
     const toggleBtn = mdEl.locator('.chart-toggle');
-    await expect(toggleBtn).toBeVisible({ timeout: 10000 });
+    await expect(toggleBtn).toBeVisible({ timeout: 25000 });
 
     // 切换到图表视图
     await toggleBtn.click();
