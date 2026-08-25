@@ -1247,7 +1247,7 @@
     "build_summary_tree": "Build Summary Tree",
     "rebuild_contextual_embeddings": "Rebuild Contextual Embeddings",
     "contextual_retrieval_toggle": "Context-Enhanced Embeddings",
-    "contextual_retrieval_desc": "Prepend document name prefix to chunk text before embedding (Anthropic Contextual Retrieval: 49% fewer retrieval failures)",
+    "contextual_retrieval_desc": "Prepend document name prefix to chunk text before embedding",
     "rebuilding": "Rebuilding…",
     "rebuild_done": "Index rebuilt successfully"
   },

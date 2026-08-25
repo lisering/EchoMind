@@ -207,13 +207,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - name: Install OpenSSL (Windows, for openssl-sys)
+      - name: Install OpenSSL (Windows, for bundled-sqlcipher)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           choco install openssl -y --no-progress
-          echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $GITHUB_ENV
-          echo "RUSTFLAGS=-C target-feature=+crt-static" >> $GITHUB_ENV
+          # 探测实际安装路径（choco 版本不同路径不同）
+          FOUND=""
+          for d in "/c/Program Files/OpenSSL-Win64" "/c/Program Files/OpenSSL"                    "/c/Program Files (x86)/OpenSSL-Win64" "/c/Program Files (x86)/OpenSSL"; do
+            if [ -d "$d/include" ] && [ -d "$d/lib" ]; then FOUND="$d"; break; fi
+          done
+          if [ -z "$FOUND" ]; then
+            echo "::error::OpenSSL 安装后未找到 include/lib 目录"
+            ls "/c/Program Files" 2>/dev/null || true
+            exit 1
+          fi
+          # 转为 Windows 路径格式（libsqlite3-sys build.rs 需要）
+          WIN_PATH=$(echo "$FOUND" | sed 's|^/c/|C:/|')
+          echo "OPENSSL_DIR=$WIN_PATH" >> $GITHUB_ENV
+          echo "OpenSSL 目录: $WIN_PATH"
 
       - name: Cache embedding model (all-MiniLM-L6-v2)
         uses: actions/cache@v4
