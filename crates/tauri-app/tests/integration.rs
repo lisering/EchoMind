@@ -508,6 +508,17 @@ mod chaos_tests {
     /// 断言所有子目录的文件被成功遍历并导入，无遗漏（REQ-CHAOS-007）。
     #[tokio::test]
     async fn tc_chaos_007_deep_nested_directory_batch() {
+        // V3.1 阶段二：语料守卫——deep_nested 由 generate_corpus.py 生成，
+        // 发布仓库不含该目录（Windows 路径长度限制）；缺失时跳过，
+        // CI 的 chaos 步骤（先生成语料再 --include-ignored）会覆盖本用例。
+        let deep_nested_fixture = fixtures_dir().join("deep_nested");
+        if !deep_nested_fixture.exists() {
+            eprintln!(
+                "⚠️ 跳过 tc_chaos_007：语料缺失 {}（先运行 python3 tests/fixtures/generate_corpus.py）",
+                deep_nested_fixture.display()
+            );
+            return;
+        }
         let dir = TempDir::new().unwrap();
         let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
         let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
