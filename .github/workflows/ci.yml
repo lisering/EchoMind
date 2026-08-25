@@ -290,6 +290,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install root dependencies
+        run: npm ci
+
       - name: Build UI (esbuild IIFE bundle)
         run: node scripts/build-ui.mjs
 
