@@ -18,6 +18,10 @@ test.describe('TC-V10 v1.10 功能测试', () => {
     // 打开设置面板
     await page.click('#settingsBtn');
     await page.waitForSelector('#settingsModal:not(.hidden)', { timeout: 5000 });
+    // V3.1 阶段二：S94 Tab 化——显示全部分区（RAG/LLM 参数区）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
 
     // 等待 RAG 参数区渲染
     await page.waitForSelector('#ragLlmParamsContainer', { timeout: 5000 });
@@ -44,6 +48,10 @@ test.describe('TC-V10 v1.10 功能测试', () => {
   test('TC-V10-LLM-001 设置面板显示 LLM 参数区', async ({ page }) => {
     await page.click('#settingsBtn');
     await page.waitForSelector('#settingsModal:not(.hidden)', { timeout: 5000 });
+    // V3.1 阶段二：S94 Tab 化——显示全部分区（RAG/LLM 参数区）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForSelector('#ragLlmParamsContainer', { timeout: 5000 });
 
     // Temperature 滑块存在
@@ -66,6 +74,10 @@ test.describe('TC-V10 v1.10 功能测试', () => {
   test('TC-V10-PARAMS-SAVE-001 修改参数后保存并恢复', async ({ page }) => {
     await page.click('#settingsBtn');
     await page.waitForSelector('#settingsModal:not(.hidden)', { timeout: 5000 });
+    // V3.1 阶段二：S94 Tab 化——显示全部分区（RAG/LLM 参数区）
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     await page.waitForSelector('#ragLlmParamsContainer', { timeout: 5000 });
 
     // 修改 top_k 滑块值
