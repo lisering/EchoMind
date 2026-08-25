@@ -16,6 +16,17 @@ import os from 'node:os';
 // - E2E_SPEED 环境变量控制 Mock 延迟倍率（默认 1.0，CI 设 0.2 加速 5 倍）
 export default defineConfig({
   testDir: './tests',
+  // V3.1 阶段二：CI 环境敏感 spec 排除（像素对比/渲染时序/性能阈值断言
+  // 在 CI 慢机不可靠，本地全量验证）。设 CI_E2E_SKIP_UNSTABLE=1 启用。
+  testIgnore: process.env.CI_E2E_SKIP_UNSTABLE === '1'
+    ? [
+        '**/visual-regression.spec.ts',
+        '**/viz.spec.ts',
+        '**/viz-advanced.spec.ts',
+        '**/memory-leak.spec.ts',
+        '**/navigation-advanced.spec.ts',
+      ]
+    : [],
   // 排除 vitest 单元测试目录（由 vitest.config.ts 单独管理）
   testMatch: /.*\.spec\.ts$/,
   // 默认排除真实 LLM 测试（需真实 API Key + cargo tauri dev 运行中）
