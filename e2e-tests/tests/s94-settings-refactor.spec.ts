@@ -18,10 +18,14 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     await page.waitForSelector('#settingsBtn', { timeout: 5000 });
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
-    // V3.1 阶段二：S94 Tab 化——显示全部分区（智能模式/术语在 advanced 区）
-    await page.evaluate(() => {
-      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
-    });
+    // V3.1 阶段二：S94 Tab 化——轮询移除分区 hidden（openSettings 异步尾部
+    // 会经 _switchTab 恢复，单次移除在 CI 慢机存在时序竞态）
+    for (let i = 0; i < 8; i++) {
+      await page.evaluate(() => {
+        document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+      });
+      await page.waitForTimeout(300);
+    }
   });
 
   test('TC-UI-SETTINGS-001: 设置面板 8 个分区 Tab', async ({ page }) => {
@@ -62,8 +66,8 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
   });
 
   test('TC-UI-SETTINGS-003: 术语通俗化文案正确显示', async ({ page }) => {
-    // 切换到 retrieval 分区
-    await page.locator('[data-tab-id="retrieval"]').click();
+    // V3.1 校正：智能模式在 advanced 分区（性能设置）
+    await page.locator('#settingsTabBar [data-tab-id="advanced"]').click();
     await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
 
     // 先关闭智能模式以显示所有设置
@@ -80,7 +84,7 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     await page.waitForTimeout(300);
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
-    await page.locator('[data-tab-id="retrieval"]').click();
+    await page.locator('#settingsTabBar [data-tab-id="advanced"]').click();
     await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
     await page.waitForTimeout(500);
 
@@ -112,8 +116,8 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
   });
 
   test('TC-UI-SETTINGS-006: 智能模式 ON/OFF 联动', async ({ page }) => {
-    // 切换到 retrieval 分区
-    await page.locator('[data-tab-id="retrieval"]').click();
+    // V3.1 校正：智能模式在 advanced 分区（性能设置）
+    await page.locator('#settingsTabBar [data-tab-id="advanced"]').click();
     await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
     await page.waitForTimeout(300);
 
@@ -143,7 +147,7 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     await page.waitForTimeout(300);
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
-    await page.locator('[data-tab-id="retrieval"]').click();
+    await page.locator('#settingsTabBar [data-tab-id="advanced"]').click();
     await page.waitForSelector('#perfSettingsContainer', { timeout: 5000 });
     await page.waitForTimeout(500);
 
