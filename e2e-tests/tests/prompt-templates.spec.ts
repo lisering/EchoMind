@@ -64,6 +64,10 @@ test.describe('S56: 自定义快捷指令模板系统', () => {
     // 打开设置面板
     await page.locator('#settingsBtn').click();
     await page.waitForTimeout(500);
+    // V3.1 阶段二：S94 Tab 化——模板容器在 advanced 分区，移除 hidden 后再滚动
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
 
     // 验证模板列表中包含创建的模板
     const tmplContainer = page.locator('#promptTemplateContainer');

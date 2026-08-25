@@ -207,6 +207,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
+      - name: Install OpenSSL (Windows, for openssl-sys)
+        if: runner.os == 'Windows'
+        run: |
+          choco install openssl -y --no-progress
+          echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $GITHUB_ENV
+          echo "RUSTFLAGS=-C target-feature=+crt-static" >> $GITHUB_ENV
+
       - name: Cache embedding model (all-MiniLM-L6-v2)
         uses: actions/cache@v4
         with:
@@ -261,6 +268,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install OpenSSL (Windows, for openssl-sys)
+        if: runner.os == 'Windows'
+        run: |
+          choco install openssl -y --no-progress
+          echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $GITHUB_ENV
+          echo "RUSTFLAGS=-C target-feature=+crt-static" >> $GITHUB_ENV
 
       - name: Install Node.js
         uses: actions/setup-node@v4

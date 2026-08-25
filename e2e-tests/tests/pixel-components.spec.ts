@@ -149,9 +149,10 @@ test.describe('顶栏组件像素验证', () => {
     expect(styles.position).toBe('relative');
   });
 
-  test('TC-PIX-COMP-014 顶栏 z-index 为 0', async ({ page }) => {
+  test('TC-PIX-COMP-014 顶栏 z-index 为 30', async ({ page }) => {
+    // V3.1 P4-5：topBar z=30 > sidebar z=20（修复工具下拉被侧栏遮挡）
     const styles = await getComputedStyles(page, '#topBar', 'zIndex');
-    expect(styles.zIndex).toBe('0');
+    expect(styles.zIndex).toBe('30');
   });
 
   test('TC-PIX-COMP-015 main padding-left 为 240px (侧栏占位)', async ({ page }) => {
