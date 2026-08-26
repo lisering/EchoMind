@@ -13,6 +13,9 @@ test.describe('TC-TPL-EXP 对话模板导入/导出（REQ-RAG-054）', () => {
     // 打开设置面板
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    await page.evaluate(() => {
+      document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
+    });
     // 等待模板区域渲染（promptTemplateContainer 内含模板卡片）
     await page.locator('#promptTemplateContainer').waitFor({ state: 'visible', timeout: 5000 });
   });
