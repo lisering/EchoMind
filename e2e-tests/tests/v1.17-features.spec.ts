@@ -7,7 +7,7 @@
  * - TC-V17-BACKUP-001~003: 数据备份与恢复（REQ-EXP-002/003）
  */
 import { test, expect } from '@playwright/test';
-import { injectStub, injectLocales, uiUrl } from './helpers.mjs';
+import { injectStub, injectLocales, uiUrl, showAllSettingsSections } from './helpers.mjs';
 
 /**
  * 设置带文档数据的测试页面（用于建议卡片测试）。
@@ -38,6 +38,7 @@ test.describe('v1.17 REQ-A11Y-005 High Contrast Mode', () => {
     await page.locator('#app').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('#settingsBtn').click();
     await page.locator('#settingsModal').waitFor({ state: 'visible', timeout: 10000 });
+    await showAllSettingsSections(page);
 
     const hcBtn = page.locator('[data-theme-value="high-contrast"]');
     await expect(hcBtn).toBeVisible();
@@ -51,6 +52,7 @@ test.describe('v1.17 REQ-A11Y-005 High Contrast Mode', () => {
     await page.locator('#app').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('#settingsBtn').click();
     await page.locator('#settingsModal').waitFor({ state: 'visible', timeout: 10000 });
+    await showAllSettingsSections(page);
 
     await page.locator('[data-theme-value="high-contrast"]').click();
 
@@ -171,6 +173,7 @@ test.describe('v1.17 REQ-EXP-002/003 Data Backup & Restore', () => {
     await page.locator('#app').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('#settingsBtn').click();
     await page.locator('#settingsModal').waitFor({ state: 'visible', timeout: 10000 });
+    await showAllSettingsSections(page);
 
     const exportBtn = page.locator('#exportBackupBtn');
     await expect(exportBtn).toBeVisible();
@@ -184,6 +187,7 @@ test.describe('v1.17 REQ-EXP-002/003 Data Backup & Restore', () => {
     await page.locator('#app').waitFor({ state: 'visible', timeout: 15000 });
     await page.locator('#settingsBtn').click();
     await page.locator('#settingsModal').waitFor({ state: 'visible', timeout: 10000 });
+    await showAllSettingsSections(page);
 
     const importBtn = page.locator('#importBackupBtn');
     await expect(importBtn).toBeVisible();
