@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 网络客户端权限：LLM API 调用 + 更新检查 + Web 搜索 + 模型下载 -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- 网络服务端权限：本地 LLM 推理引擎监听（预留） -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <!-- 用户选择的文件读写权限：文档导入（md/txt/pdf/docx/html/pptx/epub/xlsx/csv） -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- 摄像头权限：多模态 PDF 导入（VLM 图片理解，Pro 功能预留） -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
+    <!-- 允许 JIT：ONNX Runtime 推理优化（fastembed 嵌入模型） -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- 允许 unsigned memory：ONNX Runtime / mistral.rs 原生库需要 -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- 允许 dyld 环境变量：GPU 加速库（Metal/CUDA）加载需要 -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+
+    <!-- 硬件加速：Metal GPU -->
+    <key>com.apple.security.device.audio</key>
+    <true/>
+</dict>
+</plist>
