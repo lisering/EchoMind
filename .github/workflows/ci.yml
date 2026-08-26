@@ -326,7 +326,15 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: cargo tauri build --features pro --target ${{ matrix.target }}
+        run: |
+          # Skip codesign if no signing identity is set
+          if [ -z "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "No signing identity — building without codesign"
+            # Tauri reads tauri.conf.json; no signingIdentity = no codesign attempt
+            # But env var empty string triggers codesign with empty identity, so unset it
+            unset APPLE_SIGNING_IDENTITY
+          fi
+          cargo tauri build --features pro --target ${{ matrix.target }}
 
       - name: Upload installers (macOS)
         if: runner.os == 'macOS'
