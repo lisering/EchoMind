@@ -13,11 +13,12 @@ test.describe('TC-TPL-EXP 对话模板导入/导出（REQ-RAG-054）', () => {
     // 打开设置面板
     await page.locator('#settingsBtn').click();
     await expect(page.locator('#settingsModal')).toBeVisible({ timeout: 5000 });
+    // 显示所有设置分区（S94 重构后使用 hidden class 控制可见性）
     await page.evaluate(() => {
       document.querySelectorAll('[data-settings-section]').forEach((el) => el.classList.remove('hidden'));
     });
-    // 等待模板区域渲染（promptTemplateContainer 内含模板卡片）
-    await page.locator('#promptTemplateContainer').waitFor({ state: 'visible', timeout: 5000 });
+    // 等待模板区域内容渲染（容器内出现至少 1 个按钮）
+    await page.locator('#promptTemplateContainer button').first().waitFor({ state: 'attached', timeout: 10000 });
   });
 
   test('TC-TPL-EXP-001 设置面板模板区域有「导出全部」按钮', async ({ page }) => {
@@ -33,7 +34,7 @@ test.describe('TC-TPL-EXP 对话模板导入/导出（REQ-RAG-054）', () => {
     const exportBtns = page.locator('#promptTemplateContainer [data-export-template]');
     const count = await exportBtns.count();
     // 应至少有 2 个模板（mock 预填了 2 个测试模板）
-    expect(count).toBeGreaterThanOr(2);
+    expect(count).toBeGreaterThanOrEqual(2);
   });
 
   test('TC-TPL-EXP-003 「导入」按钮存在且可点击', async ({ page }) => {
@@ -91,7 +92,7 @@ test.describe('TC-TPL-EXP 对话模板导入/导出（REQ-RAG-054）', () => {
       const exportData = {
         version: '1.0',
         exported_at: new Date().toISOString(),
-        templates: templates.map((t: any) => ({
+        templates: templates.map((t) => ({
           name: t.name,
           label: t.label,
           description: t.description,
@@ -109,12 +110,12 @@ test.describe('TC-TPL-EXP 对话模板导入/导出（REQ-RAG-054）', () => {
     });
 
     // 验证导出 JSON 格式
-    expect(exportData.version).toBe('1.0');
-    expect(exportData.exported_at).toBeTruthy();
-    expect(Array.isArray(exportData.templates)).toBe(true);
-    expect(exportData.templates.length).toBeGreaterThanOr(2);
+    expect(exportResult.version).toBe('1.0');
+    expect(exportResult.exported_at).toBeTruthy();
+    expect(Array.isArray(exportResult.templates)).toBe(true);
+    expect(exportResult.templates.length).toBeGreaterThanOrEqual(2);
     // 每个模板应含必要字段
-    const firstTpl = exportData.templates[0];
+    const firstTpl = exportResult.templates[0];
     expect(firstTpl).toHaveProperty('name');
     expect(firstTpl).toHaveProperty('label');
     expect(firstTpl).toHaveProperty('prompt_template');
