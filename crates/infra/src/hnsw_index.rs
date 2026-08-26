@@ -87,14 +87,14 @@ impl HnswIndex {
         // 构建 usize ID → chunk_id 映射
         let id_map: Vec<String> = vectors.iter().map(|(id, _)| id.clone()).collect();
 
-        // 批量插入数据：使用 parallel_insert_slice（接受 &[f32]）
-        let data_for_insertion: Vec<(&[f32], usize)> = vectors
-            .iter()
-            .enumerate()
-            .map(|(idx, (_, vec))| (vec.as_slice(), idx))
-            .collect();
-
-        hnsw.parallel_insert_slice(&data_for_insertion);
+        // 批量插入数据：串行 insert（V3.1 阶段二）。
+        // 弃用 parallel_insert_slice：多线程插入存在图质量竞争——
+        // 高核数机器上偶发「搜自身 top-3 不含自身」（CI x86 实证，
+        // 测试 hnsw_free_001/005 失败）。串行构建 10k 向量 ~1-2s
+        //（spawn_blocking 内一次性成本），换取确定性图质量。
+        for (idx, (_, vec)) in vectors.iter().enumerate() {
+            hnsw.insert((vec.as_slice(), idx));
+        }
         hnsw.set_searching_mode(true);
 
         // 保留原始向量用于持久化
