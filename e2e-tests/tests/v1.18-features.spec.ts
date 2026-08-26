@@ -6,7 +6,7 @@
  * - TC-V18-GS-001~005: 全局搜索（⌘⇧F 打开 / 分组显示 / 点击跳转 / 关键词高亮 / 空状态）
  */
 import { test, expect } from '@playwright/test';
-import { injectStub, injectLocales, uiUrl } from './helpers.mjs';
+import { injectStub, injectLocales, uiUrl, showAllSettingsSections } from './helpers.mjs';
 
 /**
  * 设置带 mock 数据的测试页面。

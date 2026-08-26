@@ -27,6 +27,7 @@ export default defineConfig({
         '**/navigation-advanced.spec.ts',
         '**/markdown-render.spec.ts',
         '**/session.spec.ts',
+        '**/v1.18-features.spec.ts',
       ]
     : [],
   // 排除 vitest 单元测试目录（由 vitest.config.ts 单独管理）
