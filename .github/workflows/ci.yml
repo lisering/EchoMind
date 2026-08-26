@@ -441,12 +441,16 @@ jobs:
 
       - name: Merge reports
         working-directory: e2e-tests
+        continue-on-error: true
         run: |
           if [ ! -d blob-report ] || [ -z "$(ls -A blob-report 2>/dev/null)" ]; then
             echo "::warning::无 blob-report 输入（上游 e2e-bridge 全部跳过/失败），跳过合并"
             exit 0
           fi
-          npx playwright merge-reports --reporter=html blob-report
+          npx playwright merge-reports --reporter=html blob-report || {
+            echo "::warning::blob-report 合并失败（可能是下载不完整），跳过"
+            exit 0
+          }
 
       - name: Upload HTML report
         uses: actions/upload-artifact@v4
