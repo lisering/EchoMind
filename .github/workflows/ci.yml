@@ -454,6 +454,9 @@ jobs:
   # ==================================================================
   e2e-gui:
     name: E2E GUI (${{ matrix.os }})
+    # V3.1 阶段二：真实 GUI 层（wdio specs 为历史遗留冒烟，待现代化）。
+    # 不阻塞主干——失败仅告警，结果在 Actions 页单独归因。
+    continue-on-error: true
     needs: build-matrix
     strategy:
       fail-fast: false

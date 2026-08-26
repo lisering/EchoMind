@@ -149,6 +149,7 @@ rm -rf "$RELEASE_DIR/tests/fixtures/deep_nested" 2>/dev/null || true
 sync_file "$ROOT_DIR/crates/tauri-app/Cargo.toml" "$RELEASE_DIR/crates/tauri-app/Cargo.toml"
 sync_file "$ROOT_DIR/crates/tauri-app/build.rs" "$RELEASE_DIR/crates/tauri-app/build.rs"
 sync_file "$ROOT_DIR/crates/tauri-app/tauri.conf.json" "$RELEASE_DIR/crates/tauri-app/tauri.conf.json"
+sync_file "$ROOT_DIR/crates/tauri-app/entitlements.plist" "$RELEASE_DIR/crates/tauri-app/entitlements.plist"
 
 # ─── [8/10] license-issuer（跳过） ───
 echo ""
