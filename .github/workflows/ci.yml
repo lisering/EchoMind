@@ -490,6 +490,23 @@ jobs:
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked
 
+      - name: Install OpenSSL (Windows, for bundled-sqlcipher)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          choco install openssl -y --no-progress
+          FOUND=""
+          for d in "/c/Program Files/OpenSSL-Win64" "/c/Program Files/OpenSSL" \
+                   "/c/Program Files (x86)/OpenSSL-Win64" "/c/Program Files (x86)/OpenSSL"; do
+            if [ -d "$d/include" ] && [ -d "$d/lib" ]; then FOUND="$d"; break; fi
+          done
+          if [ -z "$FOUND" ]; then
+            echo "::error::OpenSSL 安装后未找到 include/lib 目录"
+            exit 1
+          fi
+          WIN_PATH=$(echo "$FOUND" | sed 's|^/c/|C:/|')
+          echo "OPENSSL_DIR=$WIN_PATH" >> $GITHUB_ENV
+
       - name: Build application
         run: cargo build --workspace
 
