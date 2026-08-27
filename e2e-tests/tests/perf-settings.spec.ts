@@ -1,12 +1,14 @@
 /**
- * E2E 测试：性能优化设置（TC-PERF-UI-001~005）。
+ * E2E 测试：性能优化设置（TC-PERF-UI-001~003）。
  *
- * 验证性能优化设置区块：
+ * 大简化重构后精简版，验证：
  * - 性能优化 section 在设置面板中显示
- * - 语义缓存 toggle + 统计展示
- * - Prompt 压缩比滑块
- * - 检索记忆 toggle + 统计
- * - 索引重建按钮（BM25 / Proposition / Summary Tree）
+ * - 智能模式 toggle
+ * - Contextual Retrieval toggle
+ * - 索引重建按钮（BM25 / Contextual Embeddings）
+ *
+ * 学术 RAG 优化模块已删除：缓存、压缩、检索记忆、渐进式注入、
+ * Speculative RAG、质量门控、知识图谱检索、Proposition 索引、Summary Tree。
  */
 
 import { test, expect } from '@playwright/test';
@@ -48,21 +50,14 @@ test.describe('性能优化设置 (TC-PERF-UI)', () => {
   test('TC-PERF-UI-001: 性能优化 section 显示', async ({ page }) => {
     const container = page.locator('#perfSettingsContainer');
     await expect(container).toBeVisible();
-    // 验证有缓存 toggle
-    await expect(page.locator('#perfCacheToggle')).toBeVisible();
-    // 验证有压缩比滑块
-    await expect(page.locator('#perfCompressionSlider')).toBeVisible();
+    // 验证有 Contextual Retrieval toggle
+    await expect(page.locator('#perfContextualToggle')).toBeVisible();
   });
 
-  test('TC-PERF-UI-002: 缓存 toggle + 统计', async ({ page }) => {
-    const toggle = page.locator('#perfCacheToggle');
+  test('TC-PERF-UI-002: Contextual Retrieval toggle 切换', async ({ page }) => {
+    const toggle = page.locator('#perfContextualToggle');
     await expect(toggle).toBeVisible();
     await expect(toggle).toHaveAttribute('aria-checked', 'true'); // 默认启用
-
-    // 验证统计信息存在
-    const container = page.locator('#perfSettingsContainer');
-    const text = await container.textContent();
-    expect(text).not.toBe('');
 
     // 点击切换
     await toggle.click();
@@ -73,43 +68,10 @@ test.describe('性能优化设置 (TC-PERF-UI)', () => {
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
   });
 
-  test('TC-PERF-UI-003: 压缩 ratio 滑块', async ({ page }) => {
-    const slider = page.locator('#perfCompressionSlider');
-    await expect(slider).toBeVisible();
-
-    // 验证初始值为 1.0
-    const initialValue = await slider.inputValue();
-    expect(initialValue).toBe('1');
-
-    // 拖动滑块到 3
-    await slider.fill('3');
-    const newValue = await slider.inputValue();
-    expect(newValue).toBe('3');
-
-    // 验证值标签更新
-    const valueLabel = page.locator('#perfCompressionValue');
-    const labelText = await valueLabel.textContent();
-    expect(labelText).toContain('3');
-  });
-
-  test('TC-PERF-UI-004: 检索记忆 toggle + 统计', async ({ page }) => {
-    const toggle = page.locator('#perfMemoryToggle');
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toHaveAttribute('aria-checked', 'false'); // 默认禁用
-
-    // 点击启用
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-checked', 'true');
-
-    // 验证重置按钮存在
-    await expect(page.locator('#perfMemoryReset')).toBeVisible();
-  });
-
-  test('TC-PERF-UI-005: 索引重建按钮', async ({ page }) => {
-    // 验证三个重建按钮存在
+  test('TC-PERF-UI-003: 索引重建按钮', async ({ page }) => {
+    // 验证两个重建按钮存在
     await expect(page.locator('#perfRebuildBM25')).toBeVisible();
-    await expect(page.locator('#perfRebuildProposition')).toBeVisible();
-    await expect(page.locator('#perfBuildSummaryTree')).toBeVisible();
+    await expect(page.locator('#perfRebuildContextualEmbeddings')).toBeVisible();
 
     // 点击 BM25 重建
     const btn = page.locator('#perfRebuildBM25');
@@ -121,61 +83,5 @@ test.describe('性能优化设置 (TC-PERF-UI)', () => {
     await page.waitForTimeout(500);
     const finalText = await btn.textContent();
     expect(finalText).not.toBe('');
-  });
-
-  test('TC-PERF-UI-006: 渐进式注入 toggle 切换', async ({ page }) => {
-    const toggle = page.locator('#perfProgressiveToggle');
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toHaveAttribute('aria-checked', 'false'); // 默认禁用
-
-    // 点击启用
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-checked', 'true');
-
-    // 切换回来
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  });
-
-  test('TC-PERF-UI-007: Speculative RAG toggle 切换', async ({ page }) => {
-    const toggle = page.locator('#perfSpeculativeToggle');
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toHaveAttribute('aria-checked', 'false'); // 默认禁用
-
-    // 点击启用
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-checked', 'true');
-
-    // 切换回来
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  });
-
-  test('TC-PERF-UI-008: 质量门控 toggle 切换', async ({ page }) => {
-    const toggle = page.locator('#perfQualityGateToggle');
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toHaveAttribute('aria-checked', 'false'); // 默认禁用
-
-    // 点击启用
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-checked', 'true');
-
-    // 切换回来
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  });
-
-  test('TC-PERF-UI-009: 知识图谱检索 toggle 切换', async ({ page }) => {
-    const toggle = page.locator('#perfGraphRetrieverToggle');
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toHaveAttribute('aria-checked', 'false'); // 默认禁用
-
-    // 点击启用
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-checked', 'true');
-
-    // 切换回来
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-checked', 'false');
   });
 });

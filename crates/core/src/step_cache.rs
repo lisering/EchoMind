@@ -22,7 +22,13 @@ use std::sync::Mutex;
 
 use sha2::{Digest, Sha256};
 
-use crate::cache::normalize_query;
+/// 归一化查询文本：小写化 + 压缩连续空白。
+fn normalize_query(s: &str) -> String {
+    s.to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 /// 默认容量上限（条目数）。
 const DEFAULT_CAPACITY: usize = 256;

@@ -101,17 +101,6 @@ pub async fn delete_document_inner(id: &str, state: &AppState) -> Result<(), Str
         warn!("文档副本清理失败（可忽略）: {path}: {err}");
     }
 
-    // **性能/一致性**：删除文档 → 按文档名精确失效相关缓存条目
-    // （新鲜度感知：保留引用其他文档的有效缓存命中，替代全库清空）
-    if let Some(fp) = &file_path {
-        let doc_name = Path::new(fp)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        if let Err(e) = state.cache.invalidate_by_doc(&doc_name).await {
-            warn!("删除文档后失效缓存失败: {e:#}");
-        }
-    }
     // P2-1 StepCache：删除文档 → 清空步骤级缓存（检索结果可能引用被删文档）
     state.step_cache.clear();
     Ok(())
@@ -124,18 +113,11 @@ pub async fn delete_document_inner(id: &str, state: &AppState) -> Result<(), Str
 /// 分类失败时设为 `"general"`（AC-5 优雅降级）。
 pub(crate) async fn classify_and_update_domain(
     storage: &SqliteStorage,
-    embedder: &echomind_infra::local_embedder::LocalEmbedder,
+    _embedder: &echomind_infra::local_embedder::LocalEmbedder,
     doc_id: &str,
 ) -> anyhow::Result<()> {
-    let chunks = storage.list_chunks(doc_id).await?;
-    if chunks.is_empty() {
-        storage.update_document_domain(doc_id, "general").await?;
-        return Ok(());
-    }
-    let chunk_texts: Vec<String> = chunks.iter().take(5).map(|c| c.content.clone()).collect();
-    let classifier = EmbeddingDomainClassifier::new(embedder.clone()).await?;
-    let domain = classifier.classify(&chunk_texts).await?;
-    storage.update_document_domain(doc_id, &domain).await?;
+    // Domain classification module removed in R1 simplification — default to "general"
+    storage.update_document_domain(doc_id, "general").await?;
     Ok(())
 }
 
@@ -757,17 +739,10 @@ pub async fn batch_delete_documents_inner(
         .await
         .map_err(|e| format!("{e:#}"))?;
 
-    // 清理文件副本和缓存（失败不阻塞）
+    // 清理文件副本（失败不阻塞）
     for (doc_id, file_path) in &file_paths {
         if let Err(err) = tokio::fs::remove_file(file_path).await {
             warn!("文档副本清理失败（可忽略）: {file_path}: {err}");
-        }
-        if let Some(doc_name) = std::path::Path::new(file_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            && let Err(e) = state.cache.invalidate_by_doc(&doc_name).await
-        {
-            warn!("删除文档后失效缓存失败: {e:#}");
         }
         let _ = &doc_id; // doc_id 保留以备日志
     }
@@ -829,11 +804,6 @@ pub async fn batch_move_documents_inner(
         .batch_move_documents(&ids, &target_workspace_id)
         .await
         .map_err(|e| format!("{e:#}"))?;
-
-    // 清空查询缓存
-    if let Err(e) = state.cache.clear_all().await {
-        tracing::warn!("批量迁移后清空查询缓存失败: {e:#}");
-    }
 
     Ok(BatchResult::all_success(ids.len()))
 }

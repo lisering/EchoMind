@@ -23,7 +23,6 @@ use echomind_infra::file_watcher::FileWatcherHandle;
 use echomind_infra::local_embedder::LocalEmbedder;
 use echomind_infra::local_logger::LocalLogger;
 use echomind_infra::local_reranker::LocalReranker;
-use echomind_infra::sqlite_cache::SqliteCache;
 use echomind_infra::sqlite_storage::SqliteStorage;
 use echomind_models::LlmMode;
 use tokio_util::sync::CancellationToken;
@@ -69,16 +68,8 @@ pub struct AppState {
     pub chat_store: ChatStore,
     /// Dream Engine 状态（后台空闲整理建议）
     pub dream_engine: DreamEngineState,
-    /// 语义缓存（REQ-PERF-001：L0 精确 + L1 语义 + L3 检索结果三级缓存）
-    pub cache: SqliteCache,
     /// 步骤级缓存（P2-1 StepCache：Agent/Coordinator 多步推理中间步骤复用）
     pub step_cache: Arc<echomind_core::step_cache::InMemoryStepCache>,
-    /// Prompt 压缩比（REQ-PERF-002：1.0=禁用, 2.0=保守, 3.0=平衡, 5.0=激进）
-    pub compression_ratio: f32,
-    /// Speculative RAG 是否启用（REQ-PERF-011：小模型草稿 → 大模型验证）
-    pub speculative_enabled: bool,
-    /// 自进化检索记忆是否启用（REQ-PERF-012：记录检索效果，自适应选择最佳策略）
-    pub retrieval_memory_enabled: bool,
     /// 知识图谱图遍历检索是否启用（REQ-RAG-027：沿实体关系图边扩展到关联 chunk）
     pub graph_retriever_enabled: bool,
     /// RAG 质量门控是否启用（REQ-RAG-028：检索后评估结果质量，低质量时记录告警）
@@ -91,9 +82,6 @@ pub struct AppState {
     /// 默认 true：嵌入管线已使用 build_contextual_text() 构建上下文文本。
     /// 关闭后新导入文档的嵌入使用纯 chunk 文本（不含文档名前缀）。
     pub contextual_retrieval_enabled: bool,
-    /// Late Chunking 是否启用（REQ-RAG-049：嵌入时拼接文档前缀摘要，使 chunk 向量包含全文上下文）
-    /// 默认 false：需用户在性能设置中开启。开启后新导入文档的嵌入使用 build_late_chunking_text()。
-    pub late_chunking_enabled: bool,
     /// Agent 生命周期 Hooks 注册表（REQ-RAG-029：插件式扩展 Agent/Coordinator 行为）
     /// `None` = 未注册 hook，引擎行为与之前完全一致
     pub hook_registry: Option<Arc<HookRegistry>>,
@@ -239,8 +227,6 @@ impl AppState {
 
         let settings_keys = &[
             "compression.ratio",
-            "rag.speculative_enabled",
-            "rag.retrieval_memory_enabled",
             "rag.graph_retriever_enabled",
             "rag.quality_gate_enabled",
             "memory.enabled",
@@ -270,27 +256,10 @@ impl AppState {
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
 
-        // 初始化语义缓存（REQ-PERF-001）：共享 SqliteStorage 连接池
-        let cache = SqliteCache::new(storage.pool_clone()).context("初始化语义缓存失败")?;
-
         // 初始化步骤级缓存（P2-1 StepCache）：内存实现，默认容量 256 条
         let step_cache = Arc::new(echomind_core::step_cache::InMemoryStepCache::default());
 
         // S7: 从批量读取结果解析各设置项（原逐个 get_setting 串行查询）
-        let compression_ratio = settings_map
-            .get("compression.ratio")
-            .and_then(|v| v.parse::<f32>().ok())
-            .filter(|v| *v >= 1.0 && *v <= 10.0)
-            .unwrap_or(1.0);
-
-        let speculative_enabled = settings_map
-            .get("rag.speculative_enabled")
-            .is_some_and(|&v| v == "true");
-
-        let retrieval_memory_enabled = settings_map
-            .get("rag.retrieval_memory_enabled")
-            .is_some_and(|&v| v == "true");
-
         let graph_retriever_enabled = settings_map
             .get("rag.graph_retriever_enabled")
             .is_some_and(|&v| v == "true");
@@ -311,10 +280,6 @@ impl AppState {
             .get("rag.contextual_retrieval")
             .map(|&v| v != "false")
             .unwrap_or(true);
-
-        let late_chunking_enabled = settings_map
-            .get("rag.late_chunking")
-            .is_some_and(|&v| v == "true");
 
         let log_level = settings_map
             .get("log.level")
@@ -380,17 +345,12 @@ impl AppState {
             document_store,
             chat_store,
             dream_engine: DreamEngineState::new(),
-            cache,
             step_cache,
-            compression_ratio,
-            speculative_enabled,
-            retrieval_memory_enabled,
             graph_retriever_enabled,
             quality_gate_enabled,
             memory_enabled,
             web_search_enabled,
             contextual_retrieval_enabled,
-            late_chunking_enabled,
             hook_registry: None,
             trace_store: Arc::new(RwLock::new(echomind_core::trace::TraceStore::new(50))),
             session_coordinator: Arc::new(
@@ -755,39 +715,16 @@ mod boot_tests {
     fn parse_settings(
         settings_map: &std::collections::HashMap<&str, &str>,
     ) -> (
-        f32,    // compression_ratio
-        bool,   // speculative_enabled
-        bool,   // retrieval_memory_enabled
         bool,   // graph_retriever_enabled
-        bool,   // quality_gate_enabled
         bool,   // memory_enabled
         bool,   // web_search_enabled
         bool,   // contextual_retrieval_enabled
-        bool,   // late_chunking_enabled
         String, // log_level
         SecurityPosture,
         String, // local_model
     ) {
-        let compression_ratio = settings_map
-            .get("compression.ratio")
-            .and_then(|v| v.parse::<f32>().ok())
-            .filter(|v| *v >= 1.0 && *v <= 10.0)
-            .unwrap_or(1.0);
-
-        let speculative_enabled = settings_map
-            .get("rag.speculative_enabled")
-            .is_some_and(|&v| v == "true");
-
-        let retrieval_memory_enabled = settings_map
-            .get("rag.retrieval_memory_enabled")
-            .is_some_and(|&v| v == "true");
-
         let graph_retriever_enabled = settings_map
             .get("rag.graph_retriever_enabled")
-            .is_some_and(|&v| v == "true");
-
-        let quality_gate_enabled = settings_map
-            .get("rag.quality_gate_enabled")
             .is_some_and(|&v| v == "true");
 
         let memory_enabled = settings_map
@@ -802,10 +739,6 @@ mod boot_tests {
             .get("rag.contextual_retrieval")
             .map(|&v| v != "false")
             .unwrap_or(true);
-
-        let late_chunking_enabled = settings_map
-            .get("rag.late_chunking")
-            .is_some_and(|&v| v == "true");
 
         let log_level = settings_map
             .get("log.level")
@@ -823,15 +756,10 @@ mod boot_tests {
             .unwrap_or_default();
 
         (
-            compression_ratio,
-            speculative_enabled,
-            retrieval_memory_enabled,
             graph_retriever_enabled,
-            quality_gate_enabled,
             memory_enabled,
             web_search_enabled,
             contextual_retrieval_enabled,
-            late_chunking_enabled,
             log_level,
             security_posture,
             local_model,
@@ -844,31 +772,21 @@ mod boot_tests {
     #[test]
     fn tc_boot_001_parallel_init_results_match() {
         let mut map = std::collections::HashMap::new();
-        map.insert("compression.ratio", "2.5");
-        map.insert("rag.speculative_enabled", "true");
-        map.insert("rag.retrieval_memory_enabled", "true");
         map.insert("rag.graph_retriever_enabled", "false");
         map.insert("rag.quality_gate_enabled", "true");
         map.insert("memory.enabled", "false");
         map.insert("rag.web_search_enabled", "true");
         map.insert("rag.contextual_retrieval", "false");
-        map.insert("rag.late_chunking", "true");
         map.insert("log.level", "debug");
         map.insert("security.posture", "strict");
         map.insert("llm.local_model", "mistral-7b");
 
-        let (comp, spec, mem_retr, graph, gate, mem, web, ctx, late, log, posture, model) =
-            parse_settings(&map);
+        let (graph, mem, web, ctx, log, posture, model) = parse_settings(&map);
 
-        assert!((comp - 2.5).abs() < 0.01, "compression_ratio 应为 2.5");
-        assert!(spec, "speculative_enabled 应为 true");
-        assert!(mem_retr, "retrieval_memory_enabled 应为 true");
         assert!(!graph, "graph_retriever_enabled 应为 false");
-        assert!(gate, "quality_gate_enabled 应为 true");
         assert!(!mem, "memory_enabled 应为 false");
         assert!(web, "web_search_enabled 应为 true");
         assert!(!ctx, "contextual_retrieval_enabled 应为 false");
-        assert!(late, "late_chunking_enabled 应为 true");
         assert_eq!(log, "debug");
         assert_eq!(posture, SecurityPosture::Strict);
         assert_eq!(model, "mistral-7b");
@@ -883,32 +801,24 @@ mod boot_tests {
         // 空 map（模拟 DB 查询失败或首次启动无 settings）
         let map = std::collections::HashMap::new();
 
-        let (comp, spec, mem_retr, graph, gate, mem, web, ctx, late, log, posture, model) =
-            parse_settings(&map);
+        let (graph, mem, web, ctx, log, posture, model) = parse_settings(&map);
 
         // 所有项应回退到默认值
-        assert!((comp - 1.0).abs() < 0.01, "compression_ratio 默认 1.0");
-        assert!(!spec, "speculative_enabled 默认 false");
-        assert!(!mem_retr, "retrieval_memory_enabled 默认 false");
         assert!(!graph, "graph_retriever_enabled 默认 false");
-        assert!(!gate, "quality_gate_enabled 默认 false");
         assert!(!mem, "memory_enabled 默认 false");
         assert!(!web, "web_search_enabled 默认 false");
         assert!(ctx, "contextual_retrieval_enabled 默认 true");
-        assert!(!late, "late_chunking_enabled 默认 false");
         assert_eq!(log, "info", "log_level 默认 info");
         assert_eq!(posture, SecurityPosture::Auto, "security_posture 默认 Auto");
         assert_eq!(model, "", "local_model 默认空字符串");
 
         // 部分设置存在、部分缺失（模拟部分 DB 读取失败）
         let mut partial = std::collections::HashMap::new();
-        partial.insert("rag.speculative_enabled", "true");
         partial.insert("security.posture", "dangerous");
 
-        let (_, spec2, _, _, _, _, _, ctx2, _, log2, posture2, _) = parse_settings(&partial);
+        let (_, _, _, ctx2, log2, posture2, _) = parse_settings(&partial);
 
         // 存在的项用实际值
-        assert!(spec2, "speculative_enabled 从 DB 读取为 true");
         assert_eq!(posture2, SecurityPosture::Dangerous);
         // 缺失的项用默认值（不受其他项影响）
         assert!(ctx2, "contextual_retrieval 缺失 → 默认 true");

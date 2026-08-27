@@ -190,19 +190,6 @@ pub async fn import_files_inner<R: Runtime>(
                                         warn!("领域分类失败（doc_id={doc_id}）: {e:#}");
                                     }
                                 });
-                                // REQ-PERF-007：后台异步嵌入 proposition（不阻塞导入完成事件）
-                                let prop_storage = state.storage.clone();
-                                let prop_doc_id = doc.id.clone();
-                                let prop_embedder = shared_embedder.clone();
-                                tokio::spawn(async move {
-                                    if let Some(emb) = prop_embedder
-                                        && let Err(e) =
-                                            embed_propositions(&prop_storage, &emb, &prop_doc_id)
-                                                .await
-                                    {
-                                        warn!("Proposition 嵌入失败（doc_id={prop_doc_id}）: {e}");
-                                    }
-                                });
                                 // REQ-ING-019：后台异步生成文档摘要（不阻塞导入完成事件）
                                 let sum_storage = state.storage.clone();
                                 let sum_doc_id = doc.id.clone();
@@ -284,12 +271,8 @@ pub async fn import_files_inner<R: Runtime>(
         }
     }
 
-    // **性能/一致性**：知识库已变更 → 清空查询缓存，防止缓存答案引用已删除/过期的文档
+    // P2-1 StepCache：知识库变更 → 清空步骤级缓存（检索结果可能引用旧文档）
     if !imported.is_empty() {
-        if let Err(e) = state.cache.clear_all().await {
-            warn!("导入后清空查询缓存失败: {e:#}");
-        }
-        // P2-1 StepCache：知识库变更 → 清空步骤级缓存（检索结果可能引用旧文档）
         state.step_cache.clear();
     }
 
@@ -391,10 +374,6 @@ pub async fn replace_document_inner<R: Runtime>(
                     match embed_document_chunks(app, state, &doc.id, &name).await {
                         Ok(count) => {
                             emit_status(app, "done", format!("替换完成：{name}（{count} 向量）"));
-                            // 清空查询缓存
-                            if let Err(e) = state.cache.clear_all().await {
-                                warn!("替换后清空查询缓存失败: {e:#}");
-                            }
                             state.step_cache.clear();
                             Ok(doc.id)
                         }
@@ -549,42 +528,15 @@ pub(crate) async fn embed_document_chunks<R: Runtime>(
     // REQ-RAG-049 Late Chunking：嵌入时拼接文档前缀摘要（前 500 字符），使 chunk 向量
     // 包含全文语义上下文（Jina AI 2024 Late Chunking 技术）。与 Contextual Retrieval
     // 可组合：Late Chunking 前缀 + 文档名前缀 + chunk 内容。
+    // 大简化重构：Late Chunking 已删除，仅保留 Contextual Retrieval
     let use_contextual = state.contextual_retrieval_enabled;
-    let use_late_chunking = state.late_chunking_enabled;
-
-    // Late Chunking：提取文档前缀摘要
-    let doc_prefix = if use_late_chunking {
-        // 从已入库的 chunks 拼接文档全文，提取前 500 字符作为上下文前缀
-        let all_chunks = state
-            .storage
-            .list_chunks(doc_id)
-            .await
-            .map_err(|e| format!("{e:#}"))?;
-        let full_text: String = all_chunks
-            .iter()
-            .map(|c| c.content.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        extract_doc_prefix(&full_text, 500)
-    } else {
-        String::new()
-    };
 
     for batch in chunks.chunks(EMBED_BATCH_SIZE) {
         // 构建嵌入文本 + 计算内容指纹
         let texts_and_hashes: Vec<(String, String)> = batch
             .iter()
             .map(|c| {
-                // 嵌入文本构建优先级：Late Chunking + Contextual Retrieval > Contextual Retrieval > 纯 chunk
-                let text = if use_late_chunking && !doc_prefix.is_empty() {
-                    // Late Chunking 开启：文档前缀 + (可选)文档名前缀 + chunk 内容
-                    if use_contextual {
-                        let contextual = build_contextual_text(doc_name, &c.content);
-                        build_late_chunking_text(&doc_prefix, &contextual)
-                    } else {
-                        build_late_chunking_text(&doc_prefix, &c.content)
-                    }
-                } else if use_contextual {
+                let text = if use_contextual {
                     build_contextual_text(doc_name, &c.content)
                 } else {
                     c.content.clone()
@@ -675,47 +627,6 @@ pub(crate) async fn embed_document_chunks<R: Runtime>(
         );
     }
     Ok(total)
-}
-
-/// Proposition 嵌入写入链路（REQ-PERF-007）：列出 proposition → 批量 embed → 写入。
-///
-/// 在 `embed_document_chunks` 完成后调用，为文档的所有 proposition 计算嵌入向量。
-/// 失败时不阻塞导入流程（proposition 检索不可用时降级为 chunk 级检索）。
-async fn embed_propositions(
-    storage: &SqliteStorage,
-    embedder: &echomind_infra::local_embedder::LocalEmbedder,
-    doc_id: &str,
-) -> Result<usize, String> {
-    let propositions = storage
-        .list_propositions_by_doc(doc_id)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-
-    if propositions.is_empty() {
-        return Ok(0);
-    }
-
-    let mut embeddings: Vec<(String, Vec<f32>)> = Vec::with_capacity(propositions.len());
-
-    // 微批次处理 proposition 嵌入
-    for batch in propositions.chunks(EMBED_BATCH_SIZE) {
-        let texts: Vec<String> = batch.iter().map(|p| p.content.clone()).collect();
-        let vectors = embedder
-            .embed_batch(&texts)
-            .await
-            .map_err(|e| format!("{e:#}"))?;
-
-        for (prop, vector) in batch.iter().zip(vectors) {
-            embeddings.push((prop.id.clone(), vector));
-        }
-    }
-
-    storage
-        .add_proposition_embeddings(&embeddings)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-
-    Ok(embeddings.len())
 }
 
 /// 重试索引失败文档（REQ-VEC-005）。

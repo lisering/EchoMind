@@ -193,7 +193,6 @@ pub fn run() {
             commands::delete_document,
             commands::retry_index,
             commands::rebuild_index,
-            commands::reclassify_document,
             commands::activate_pro,
             commands::deactivate_pro,
             commands::get_pro_status,
@@ -269,34 +268,6 @@ pub fn run() {
             // Token 用量追踪与预算
             commands::get_conversation_cost,
             commands::set_token_budget,
-            // 语义缓存（REQ-PERF-001）
-            commands::get_cache_stats,
-            commands::clear_cache,
-            commands::set_cache_settings,
-            commands::get_cache_settings,
-            // Prompt 压缩（REQ-PERF-002）（S09: set_compression_ratio → update_setting）
-            // Contextual BM25 + 实体链接（REQ-PERF-005/006）
-            commands::rebuild_bm25_index,
-            // Proposition 级原子分割（REQ-PERF-007）
-            commands::rebuild_proposition_index,
-            // RAPTOR 摘要树（REQ-PERF-009）
-            commands::build_summary_tree,
-            // ColBERT 多向量嵌入模式切换（REQ-PERF-008, Pro feature）
-            // Note: set_embedder_model is Pro-gated and stays as a separate command
-            // (it switches between single/multi vector embedding, not a simple settings write)
-            #[cfg(feature = "pro")]
-            commands::set_embedder_model,
-            // 后台空闲整理引擎（Auto Dream Engine）
-            commands::trigger_dream,
-            commands::get_dream_suggestions,
-            commands::abort_dream,
-            // 自进化检索记忆（REQ-PERF-012）（S09: set_retrieval_memory_enabled → update_setting）
-            commands::get_retrieval_memory_stats,
-            commands::reset_retrieval_memory,
-            commands::record_retrieval_feedback,
-            // 知识图谱图遍历检索（REQ-RAG-027）（S09: set_graph_retriever_enabled → update_setting）
-            // 渐进式注入 / Speculative RAG / 质量门控（REQ-PERF-010/011, REQ-RAG-028）
-            // S09: set_progressive_injection, set_speculative_enabled, set_quality_gate_enabled → update_setting
             // 知识图谱可视化（REQ-RAG-027 前端图谱面板）
             commands::get_graph_data,
             commands::get_entity_relations,
@@ -381,12 +352,10 @@ pub fn run() {
             commands::rebuild_contextual_embeddings,
             // 全库嵌入重建（REQ-VEC-016 嵌入模型切换后维度迁移）
             commands::rebuild_all_embeddings,
-            // 嵌入模型对比评估（REQ-VEC-018，开发者工具门控）
-            #[cfg(debug_assertions)]
-            commands::run_embed_comparison,
-            // Late Chunking 上下文感知嵌入（REQ-RAG-049）
-            commands::set_late_chunking,
-            commands::get_late_chunking,
+            // 嵌入重建（REQ-VEC-016 嵌入模型切换后维度迁移 + REQ-RAG-041 Contextual Retrieval）
+            commands::rebuild_bm25_index,
+            commands::rebuild_contextual_embeddings,
+            commands::rebuild_all_embeddings,
             // 文档标签系统（REQ-ING-022 用户自定义标签管理）
             commands::add_document_tag,
             commands::remove_document_tag,

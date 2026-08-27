@@ -452,26 +452,7 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
     expect(stats.agree).toBe(3);
   });
 
-  // ─── Q03: 双阈值压缩 + 压缩比设置 ───
-
-  test('TC-QM-E2E-025 set_compression_ratio 设置压缩比', async ({ page }) => {
-    await page.evaluate(() =>
-      window.__TAURI__.core.invoke('update_setting', { key: 'compression.ratio', value: String(0.5) }),
-    );
-    const ratio = await page.evaluate(() =>
-      (async () => parseFloat(await window.__TAURI__.core.invoke('get_setting', { key: 'compression.ratio' })))(),
-    );
-    expect(ratio).toBe(0.5);
-  });
-
-  test('TC-QM-E2E-026 get_compression_ratio 默认返回初始值', async ({ page }) => {
-    const ratio = await page.evaluate(() =>
-      (async () => parseFloat(await window.__TAURI__.core.invoke('get_setting', { key: 'compression.ratio' })))(),
-    );
-    expect(typeof ratio).toBe('number');
-    expect(ratio).toBeGreaterThanOrEqual(0);
-    expect(ratio).toBeLessThanOrEqual(1);
-  });
+  // ─── Q03: 双阈值压缩已删除（大简化重构）───
 
   // ─── Q04: Token 级预算 + 对话费用追踪 ───
 
@@ -505,114 +486,15 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
     expect(cost.token_budget).toBe(0);
   });
 
-  // ─── Q07: 检索记忆 + 反馈记录 ───
+  // ─── Q07: 检索记忆已删除（大简化重构）───
 
-  test('TC-QM-E2E-030 set_retrieval_memory_enabled 开关切换', async ({ page }) => {
-    await page.evaluate(() =>
-      window.__TAURI__.core.invoke('update_setting', { key: 'rag.retrieval_memory_enabled', value: String(true) }),
-    );
-    // 验证状态已更新（通过 mock state 检查）
-    const enabled = await page.evaluate(() => window.__mock.state.retrievalMemoryEnabled);
-    expect(enabled).toBe(true);
-  });
+  // ─── Q10: 缓存统计已删除（大简化重构）───
 
-  test('TC-QM-E2E-031 get_retrieval_memory_stats 返回统计数组', async ({ page }) => {
-    const stats = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('get_retrieval_memory_stats'),
-    );
-    expect(Array.isArray(stats)).toBe(true);
-  });
-
-  test('TC-QM-E2E-032 record_retrieval_feedback 记录反馈', async ({ page }) => {
-    const result = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('record_retrieval_feedback', {
-        query: 'test query',
-        doc_id: 'doc-1',
-        feedback: 'positive',
-      }),
-    );
-    expect(result).toBeNull();
-    // 验证反馈已记录
-    const stats = await page.evaluate(() => window.__mock.state.retrievalMemoryStats);
-    expect(stats.length).toBeGreaterThan(0);
-  });
-
-  test('TC-QM-E2E-033 reset_retrieval_memory 重置统计', async ({ page }) => {
-    await page.evaluate(() =>
-      window.__TAURI__.core.invoke('update_setting', { key: 'rag.retrieval_memory_enabled', value: String(true) }),
-    );
-    const result = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('reset_retrieval_memory'),
-    );
-    expect(result).toBeNull();
-    const stats = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('get_retrieval_memory_stats'),
-    );
-    expect(stats).toHaveLength(0);
-  });
-
-  // ─── Q10: 缓存统计 + 配置 ───
-
-  test('TC-QM-E2E-034 get_cache_stats 返回缓存统计', async ({ page }) => {
-    const stats = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('get_cache_stats'),
-    );
-    expect(stats).toBeTruthy();
-    expect(typeof stats.exact_hits).toBe('number');
-    expect(typeof stats.semantic_hits).toBe('number');
-    expect(typeof stats.retrieval_hits).toBe('number');
-    expect(typeof stats.cache_size_entries).toBe('number');
-    expect(typeof stats.estimated_token_saved).toBe('number');
-  });
-
-  test('TC-QM-E2E-035 clear_cache 清空缓存统计', async ({ page }) => {
-    await page.evaluate(() =>
-      window.__TAURI__.core.invoke('clear_cache'),
-    );
-    const stats = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('get_cache_stats'),
-    );
-    expect(stats.exact_hits).toBe(0);
-    expect(stats.semantic_hits).toBe(0);
-    expect(stats.retrieval_hits).toBe(0);
-    expect(stats.cache_size_entries).toBe(0);
-    expect(stats.estimated_token_saved).toBe(0);
-  });
-
-  test('TC-QM-E2E-036 set_cache_settings + get_cache_settings', async ({ page }) => {
-    await page.evaluate(() =>
-      window.__TAURI__.core.invoke('set_cache_settings', {
-        settings: { enabled: true, max_entries: 500, ttl_seconds: 3600 },
-      }),
-    );
-    const settings = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('get_cache_settings'),
-    );
-    expect(settings).toBeTruthy();
-    expect(settings.enabled).toBe(true);
-    expect(settings.max_entries).toBe(500);
-    expect(settings.ttl_seconds).toBe(3600);
-  });
-
-  // ─── Q11: 索引重建 + 摘要树 ───
+  // ─── Q11: 索引重建 ───
 
   test('TC-QM-E2E-037 rebuild_bm25_index 完成无错误', async ({ page }) => {
     const result = await page.evaluate(() =>
       window.__TAURI__.core.invoke('rebuild_bm25_index'),
-    );
-    expect(result).toBeNull();
-  });
-
-  test('TC-QM-E2E-038 rebuild_proposition_index 完成无错误', async ({ page }) => {
-    const result = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('rebuild_proposition_index'),
-    );
-    expect(result).toBeNull();
-  });
-
-  test('TC-QM-E2E-039 build_summary_tree 完成无错误', async ({ page }) => {
-    const result = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('build_summary_tree'),
     );
     expect(result).toBeNull();
   });
@@ -634,24 +516,4 @@ test.describe('QM 借鉴功能 E2E 测试', () => {
     expect(cost.total_tokens).toBeLessThanOrEqual(cost.token_budget);
   });
 
-  test('TC-QM-E2E-041 压缩比 + 缓存清空互不影响', async ({ page }) => {
-    // 设置压缩比
-    await page.evaluate(() =>
-      window.__TAURI__.core.invoke('update_setting', { key: 'compression.ratio', value: String(0.3) }),
-    );
-    // 清空缓存
-    await page.evaluate(() =>
-      window.__TAURI__.core.invoke('clear_cache'),
-    );
-    // 压缩比不应被缓存清空影响
-    const ratio = await page.evaluate(() =>
-      (async () => parseFloat(await window.__TAURI__.core.invoke('get_setting', { key: 'compression.ratio' })))(),
-    );
-    expect(ratio).toBe(0.3);
-    // 缓存统计应已清空
-    const stats = await page.evaluate(() =>
-      window.__TAURI__.core.invoke('get_cache_stats'),
-    );
-    expect(stats.exact_hits).toBe(0);
-  });
 });

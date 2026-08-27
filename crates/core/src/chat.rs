@@ -17,11 +17,10 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 
 use crate::memory_store::MemoryRetriever;
-use crate::progressive_injector::ProgressiveInfo;
 use crate::quality_gate::{GateConfig, GateScore};
 use crate::splitter::bpe;
 use crate::web_search::{self, DEFAULT_SEARCH_THRESHOLD};
-use crate::{LLMProvider, PromptCompressor, Retriever, WebSearchProvider};
+use crate::{LLMProvider, Retriever, WebSearchProvider};
 use echomind_prompt::build_rag_prompt_segmented;
 
 /// 空上下文固定拒答文案（REQ-RAG-003-AC-1）
@@ -37,8 +36,6 @@ pub enum ChatOutcome {
         stream: BoxStream<'static, anyhow::Result<String>>,
         /// token 用量统计（远程 API 模式下来自 SSE usage 字段；本地推理模式为 None）
         token_usage: Option<TokenUsage>,
-        /// 渐进式注入元数据（None 表示渐进式注入已禁用）
-        progressive_info: Option<ProgressiveInfo>,
         /// 质量门控评分结果（None 表示门控未启用，REQ-RAG-028）
         gate_score: Option<GateScore>,
     },
@@ -53,12 +50,6 @@ pub enum ChatOutcome {
 pub struct ChatEngine<R: Retriever, L: LLMProvider> {
     retriever: R,
     llm: L,
-    /// 可选的 Prompt 压缩器（REQ-PERF-002）
-    compressor: Option<Arc<dyn PromptCompressor>>,
-    /// 压缩比（默认 1.0 = 不压缩）
-    compression_ratio: f32,
-    /// 渐进式注入：初始注入的 chunk 数量（None = 已禁用）
-    progressive_initial_count: Option<usize>,
     /// 质量门控配置（None = 已禁用，REQ-RAG-028）
     gate_config: Option<GateConfig>,
     /// 质量门控评分结果（None = 门控未启用或未评估）
@@ -77,36 +68,11 @@ impl<R: Retriever, L: LLMProvider> ChatEngine<R, L> {
         Self {
             retriever,
             llm,
-            compressor: None,
-            compression_ratio: 1.0,
-            progressive_initial_count: None,
             gate_config: None,
             gate_score: None,
             memory: None,
             web_search_provider: None,
         }
-    }
-
-    /// 设置 Prompt 压缩器（REQ-PERF-002）。
-    ///
-    /// 压缩器在检索片段注入 prompt 前对每个 chunk 内容做 token 级压缩，
-    /// 减少注入的动态上下文 token 数。
-    pub fn with_compressor(mut self, compressor: Arc<dyn PromptCompressor>, ratio: f32) -> Self {
-        self.compressor = Some(compressor);
-        self.compression_ratio = ratio;
-        self
-    }
-
-    /// 启用渐进式上下文注入（REQ-PERF-010）。
-    ///
-    /// 启用后，`chat()` 仅将 top-N 个检索片段注入初始 prompt（N = `initial_count`），
-    /// 其余片段保留供 LLM 输出检测到"信息不足"信号时逐步追加。
-    /// 预期平均注入 chunk 数 5 → 2-3，token 消耗 ↓40-60%。
-    ///
-    /// 与 Prompt 压缩（S2）兼容：压缩全部 source 后，仅注入初始子集。
-    pub fn with_progressive(mut self, initial_count: usize) -> Self {
-        self.progressive_initial_count = Some(initial_count);
-        self
     }
 
     /// 启用质量门控（REQ-RAG-028）。
@@ -189,7 +155,7 @@ impl<R: Retriever, L: LLMProvider> ChatEngine<R, L> {
         &self,
         history: &[ChatMessage],
         query: &str,
-        mut sources: Vec<RetrievalResult>,
+        sources: Vec<RetrievalResult>,
     ) -> anyhow::Result<ChatOutcome> {
         if sources.is_empty() {
             // 空上下文拦截：固定提示，不调用 LLM（REQ-RAG-003-AC-2）
@@ -220,40 +186,7 @@ impl<R: Retriever, L: LLMProvider> ChatEngine<R, L> {
         // 注意：ChatEngine 是不可变引用（&self），无法写入字段。
         // 评分结果通过返回值传递给调用方。
 
-        // REQ-PERF-002：检索片段压缩（仅压缩 chunk 内容，不压缩系统提示和用户查询）
-        if let Some(compressor) = &self.compressor {
-            let ratio = self.compression_ratio;
-            for src in &mut sources {
-                match compressor.compress(&src.chunk.content, ratio, query).await {
-                    Ok(compressed) => {
-                        src.chunk.content = compressed;
-                    }
-                    Err(e) => {
-                        // 压缩失败优雅降级：保留原始内容
-                        warn!("Prompt 压缩失败，保留原文: {e:#}");
-                    }
-                }
-            }
-        }
-
-        // REQ-PERF-010：渐进式上下文注入
-        //
-        // 启用后仅将前 N 个 source 注入初始 prompt，其余保留供后续追加。
-        // 与压缩兼容：压缩全部 source 后，仅注入初始子集。
-        let (progressive_info, prompt_sources) =
-            if let Some(initial_count) = self.progressive_initial_count {
-                let count = initial_count.min(sources.len());
-                let info = ProgressiveInfo {
-                    total_sources: sources.len(),
-                    injected_count: count,
-                    can_expand: count < sources.len(),
-                };
-                (Some(info), &sources[..count])
-            } else {
-                (None, sources.as_slice())
-            };
-
-        let segmented = build_rag_prompt_segmented(prompt_sources);
+        let segmented = build_rag_prompt_segmented(&sources);
 
         // REQ-RAG-032：对话记忆注入
         //
@@ -287,7 +220,6 @@ impl<R: Retriever, L: LLMProvider> ChatEngine<R, L> {
             sources,
             stream,
             token_usage: None,
-            progressive_info,
             gate_score,
         })
     }

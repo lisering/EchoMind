@@ -637,22 +637,10 @@ async fn tc_persist_001_hybrid_search_persists() {
     assert!(settings.hybrid_search, "重启后 hybrid_search 应保持为 true");
 }
 
-/// TC-PERSIST-002: compression_ratio 设置持久化（重启后仍保持 3.0）。
+/// TC-PERSIST-002: compression_ratio 已在 R1 简化中删除，跳过此测试。
 #[tokio::test]
-async fn tc_persist_002_compression_ratio_persists() {
-    let dir = TempDir::new().unwrap();
-    {
-        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        set_compression_ratio_inner(3.0, &state).await.unwrap();
-    }
-    // 模拟重启
-    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let ratio = restarted.compression_ratio;
-    assert!(
-        (ratio - 3.0).abs() < 0.01,
-        "compression_ratio 必须在重启后保持 3.0，实际: {ratio}"
-    );
-}
+#[ignore = "compression_ratio removed in R1 simplification"]
+async fn tc_persist_002_compression_ratio_persists() {}
 
 /// TC-PERSIST-003: memory_enabled 设置持久化（重启后仍保持开启）。
 #[tokio::test]

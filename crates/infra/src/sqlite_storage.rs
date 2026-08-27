@@ -70,14 +70,11 @@ use aes_gcm::Aes256Gcm;
 use anyhow::{Context, bail};
 use echomind_core::Storage;
 use echomind_core::privacy::{AuditEntry, AuditLogger};
-use echomind_core::retrieval_memory::{
-    MemoryRecord, QueryType, RetrievalMemoryStore, RetrievalMethod,
-};
 use echomind_models::{
     BudgetStats, ChatMessage, Chunk, CodeSymbol, Conversation, DocStatus, Document, EntityRelation,
     GlobalSearchResults, MemoryEntry, MemorySource, MemoryTier, MessageSearchResult, PendingInput,
-    Proposition, RetrievalResult, ScratchLogEntry, SessionTodo, SummaryNode, SymbolKind,
-    TodoStatus, TurnActiveVersion, WikiLink,
+    RetrievalResult, ScratchLogEntry, SessionTodo, SymbolKind, TodoStatus, TurnActiveVersion,
+    WikiLink,
 };
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
@@ -1672,63 +1669,6 @@ impl Storage for SqliteStorage {
         entities::entity_search(&self.pool, query_entities, top_k).await
     }
 
-    // ---- Proposition（REQ-PERF-007）----
-    async fn add_propositions(&self, propositions: &[Proposition]) -> anyhow::Result<()> {
-        entities::add_propositions(&self.pool, propositions).await
-    }
-
-    async fn add_proposition_embeddings(
-        &self,
-        embeddings: &[(String, Vec<f32>)],
-    ) -> anyhow::Result<()> {
-        entities::add_proposition_embeddings(&self.pool, embeddings).await
-    }
-
-    async fn list_propositions_by_doc(&self, doc_id: &str) -> anyhow::Result<Vec<Proposition>> {
-        entities::list_propositions_by_doc(&self.pool, doc_id).await
-    }
-
-    async fn proposition_search(
-        &self,
-        query_embedding: &[f32],
-        top_k: usize,
-    ) -> anyhow::Result<Vec<RetrievalResult>> {
-        entities::proposition_search(&self.pool, query_embedding, top_k).await
-    }
-
-    async fn rebuild_proposition_index(&self) -> anyhow::Result<()> {
-        entities::rebuild_proposition_index(&self.pool).await
-    }
-
-    // ---- RAPTOR 摘要树（REQ-PERF-009）----
-    async fn add_summary_nodes(&self, nodes: &[SummaryNode]) -> anyhow::Result<()> {
-        entities::add_summary_nodes(&self.pool, nodes).await
-    }
-
-    async fn update_summary_embedding(
-        &self,
-        node_id: &str,
-        embedding: &[f32],
-    ) -> anyhow::Result<()> {
-        entities::update_summary_embedding(&self.pool, node_id, embedding).await
-    }
-
-    async fn list_summary_nodes(&self, doc_id: &str) -> anyhow::Result<Vec<SummaryNode>> {
-        entities::list_summary_nodes(&self.pool, doc_id).await
-    }
-
-    async fn summary_search(
-        &self,
-        query_embedding: &[f32],
-        top_k: usize,
-    ) -> anyhow::Result<Vec<RetrievalResult>> {
-        entities::summary_search(&self.pool, query_embedding, top_k).await
-    }
-
-    async fn rebuild_summary_tree(&self) -> anyhow::Result<()> {
-        entities::rebuild_summary_tree(&self.pool).await
-    }
-
     // ---- 实体关系图谱（REQ-RAG-026）----
     async fn add_relation(&self, relation: &EntityRelation) -> anyhow::Result<()> {
         entities::add_relation(&self.pool, relation).await
@@ -2252,37 +2192,6 @@ impl AuditLogger for SqliteStorage {
             .await
             .context("审计日志统计任务失败")?
         })
-    }
-}
-
-// ============================================================
-// RetrievalMemoryStore 实现（REQ-PERF-012 自进化检索记忆）
-// ============================================================
-
-impl RetrievalMemoryStore for SqliteStorage {
-    /// S03 拆分委托：检索记忆 CRUD 委托至 `misc` 子模块。
-    async fn get_memory(
-        &self,
-        query_type: QueryType,
-        method: RetrievalMethod,
-    ) -> anyhow::Result<Option<MemoryRecord>> {
-        misc::get_memory(&self.pool, query_type.as_str(), method.as_str()).await
-    }
-
-    async fn upsert_memory(&self, record: &MemoryRecord) -> anyhow::Result<()> {
-        misc::upsert_memory(&self.pool, record).await
-    }
-
-    async fn list_memories(&self, query_type: QueryType) -> anyhow::Result<Vec<MemoryRecord>> {
-        misc::list_memories(&self.pool, query_type.as_str()).await
-    }
-
-    async fn list_all_memories(&self) -> anyhow::Result<Vec<MemoryRecord>> {
-        misc::list_all_memories(&self.pool).await
-    }
-
-    async fn clear_all_memories(&self) -> anyhow::Result<()> {
-        misc::clear_all_memories(&self.pool).await
     }
 }
 

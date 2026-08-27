@@ -26,11 +26,7 @@
 //   代码符号: search_symbols / get_symbols_for_chunk / rebuild_symbol_index
 //   代码执行: execute_code_snippet
 //   AutoDream: trigger_dream / get_dream_suggestions / abort_dream
-//   性能优化: get_cache_stats / clear_cache / set_cache_settings / get_cache_settings /
-//             set_compression_ratio / get_compression_ratio / rebuild_bm25_index /
-//             rebuild_proposition_index / build_summary_tree /
-//             set_retrieval_memory_enabled / get_retrieval_memory_stats /
-//             reset_retrieval_memory / record_retrieval_feedback
+//   性能优化: rebuild_bm25_index / rebuild_contextual_embeddings / rebuild_all_embeddings
 //   导出: export_conversation_markdown / save_text_file
 //   同步: add_watched_folder / remove_watched_folder / get_watched_folders
 //   可观测性: get_log_level / set_log_level / export_logs / export_diagnostics / open_data_dir
@@ -443,19 +439,6 @@ burstBuffer: [],
     // ============================================================
     /** 符号索引是否已构建 */
     symbolIndexBuilt: false,
-    // ============================================================
-    // 性能优化状态
-    // ============================================================
-    /** 压缩比 */
-    compressionRatio: 1.0,
-    /** 缓存设置 */
-    cacheSettings: { enabled: true, ttl_secs: 86400, semantic_threshold: 0.92, privacy_mode: false },
-    /** 缓存统计 */
-    cacheStats: { enabled: true, exact_hits: 5, semantic_hits: 3, retrieval_hits: 8, total_queries: 50, cache_size_entries: 16, estimated_token_saved: 12000 },
-    /** 检索记忆开关 */
-    retrievalMemoryEnabled: false,
-    /** 检索记忆统计 */
-    retrievalMemoryStats: [],
     /** 子代理开关 */
     subAgentEnabled: false,
     /** 网页搜索开关（REQ-RAG-036） */
@@ -469,12 +452,7 @@ burstBuffer: [],
     docSortOrder: null,
     /** 协调模式开关 */
     coordinatorEnabled: false,
-    /** 渐进式注入开关 */
-    progressiveInjection: false,
 contextualRetrieval: true,
-lateChunking: false,
-    /** Speculative RAG 开关 */
-    speculativeEnabled: false,
     // ============================================================
     // 可观测性状态（REQ-OBS-001）
     // ============================================================
@@ -706,8 +684,8 @@ lateChunking: false,
     switch (cmd) {
       case 'get_settings':
         return state.configured
-          ? { has_llm_config: true, base_url: 'http://mock.local', model: 'mock-llm', api_key_masked: '****-e2e', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, llm_mode: state.llmMode, local_model: state.localModel, quality_gate_enabled: state.qualityGateEnabled || false, sub_agent_enabled: state.subAgentEnabled || false, progressive_injection: state.progressiveInjection || false, speculative_enabled: state.speculativeEnabled || false, graph_retriever_enabled: state.graphRetrieverEnabled || false, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true }
-          : { has_llm_config: false, base_url: '', model: '', api_key_masked: '', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, llm_mode: state.llmMode, local_model: state.localModel, quality_gate_enabled: state.qualityGateEnabled || false, sub_agent_enabled: state.subAgentEnabled || false, progressive_injection: state.progressiveInjection || false, speculative_enabled: state.speculativeEnabled || false, graph_retriever_enabled: state.graphRetrieverEnabled || false, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true };
+          ? { has_llm_config: true, base_url: 'http://mock.local', model: 'mock-llm', api_key_masked: '****-e2e', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, llm_mode: state.llmMode, local_model: state.localModel, sub_agent_enabled: state.subAgentEnabled || false, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true }
+          : { has_llm_config: false, base_url: '', model: '', api_key_masked: '', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, llm_mode: state.llmMode, local_model: state.localModel, sub_agent_enabled: state.subAgentEnabled || false, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true };
 
       case 'update_llm_config':
         state.configured = true;
@@ -2577,37 +2555,9 @@ return null;
         return null;
 
       // ============================================================
-      // 性能优化：缓存（REQ-PERF-001）
-      // ============================================================
-      case 'get_cache_stats':
-        return state.cacheStats;
-
-      case 'clear_cache':
-        state.cacheStats = { ...state.cacheStats, exact_hits: 0, semantic_hits: 0, retrieval_hits: 0, cache_size_entries: 0, estimated_token_saved: 0 };
-        return null;
-
-      case 'set_cache_settings':
-        state.cacheSettings = { ...state.cacheSettings, ...args.settings };
-        return null;
-
-      case 'get_cache_settings':
-        return state.cacheSettings;
-
-      // ============================================================
-      // 性能优化：Prompt 压缩（REQ-PERF-002）
-      // ============================================================
-
-
-      // ============================================================
       // 性能优化：索引重建
       // ============================================================
       case 'rebuild_bm25_index':
-        return null;
-
-      case 'rebuild_proposition_index':
-        return null;
-
-      case 'build_summary_tree':
         return null;
 
       // ============================================================
@@ -2619,13 +2569,6 @@ return null;
 
       case 'rebuild_all_embeddings':
         return null;
-
-      // Late Chunking 上下文感知嵌入（REQ-RAG-049）
-      case 'set_late_chunking':
-        state.lateChunking = args.enabled;
-        return null;
-      case 'get_late_chunking':
-        return state.lateChunking === true;
 
       // ============================================================
       // 文档标签系统（REQ-ING-022：用户自定义标签管理）
@@ -2789,28 +2732,6 @@ return {
         );
         return null;
       }
-
-      // ============================================================
-      // 性能优化：检索记忆（REQ-PERF-012）
-      // ============================================================
-
-      case 'get_retrieval_memory_stats':
-        return state.retrievalMemoryStats;
-
-      case 'reset_retrieval_memory':
-        state.retrievalMemoryStats = [];
-        return null;
-
-      case 'record_retrieval_feedback':
-        // Mock: 记录反馈到统计列表
-        state.retrievalMemoryStats.push({
-          query_type: args.query_type || 'factual',
-          retrieval_method: args.retrieval_method || 'hybrid',
-          hit_rate: args.hit_rate || 0.5,
-          avg_score: args.avg_score || 0.7,
-          sample_count: 1,
-        });
-        return null;
 
       // ============================================================
       // 子代理 + 协调模式
@@ -3263,7 +3184,6 @@ case 'set_rag_eval_settings':
           case 'rag.coordinator_enabled': state.coordinatorEnabled = enabled; break;
           case 'rag.sub_agent_enabled': state.subAgentEnabled = enabled; break;
           case 'vec.embedding_model': state.embeddingModel = value; break;
-          case 'compression.ratio': state.compressionRatio = parseFloat(value); break;
           case 'rag.context_token_limit': {
             // 对齐真实契约（settings.rs：范围 2048-32768，越界拒绝）
             const limit = parseInt(value, 10);
@@ -3274,17 +3194,12 @@ case 'set_rag_eval_settings':
             break;
           }
           case 'mm.vlm_enabled': state.vlmEnabled = enabled; break;
-          case 'rag.progressive_injection': state.progressiveInjection = enabled; break;
-          case 'rag.speculative_enabled': state.speculativeEnabled = enabled; break;
-          case 'rag.quality_gate_enabled': state.qualityGateEnabled = enabled; break;
-          case 'rag.graph_retriever_enabled': state.graphRetrieverEnabled = enabled; break;
           case 'memory.enabled': state.memoryEnabled = enabled; break;
           case 'rag.web_search_enabled': state.webSearchEnabled = enabled; break;
           case 'rag.contextual_retrieval': state.contextualRetrieval = enabled; break;
           case 'window.close_to_tray': state.closeToTray = enabled; break;
           case 'ui.sidebar_collapsed': state.sidebarCollapsed = enabled; break;
           case 'app.autostart': state.autostart = enabled; break;
-          case 'rag.retrieval_memory_enabled': state.retrievalMemoryEnabled = enabled; break;
           case 'update.auto_check': state.updateAutoCheck = enabled; break;
           case 'vec.mirror_source': state.embeddingMirrorSource = value; break;
           default:
@@ -3304,20 +3219,14 @@ case 'set_rag_eval_settings':
           case 'rag.coordinator_enabled': return String(state.coordinatorEnabled);
           case 'rag.sub_agent_enabled': return String(state.subAgentEnabled);
           case 'vec.embedding_model': return state.embeddingModel || 'all-MiniLM-L6-v2';
-          case 'compression.ratio': return String(state.compressionRatio || 1.0);
           case 'rag.context_token_limit': return String(state.contextTokenLimit || 4096);
           case 'mm.vlm_enabled': return String(state.vlmEnabled);
-          case 'rag.progressive_injection': return String(state.progressiveInjection);
-          case 'rag.speculative_enabled': return String(state.speculativeEnabled);
-          case 'rag.quality_gate_enabled': return String(state.qualityGateEnabled);
-          case 'rag.graph_retriever_enabled': return String(state.graphRetrieverEnabled);
           case 'memory.enabled': return String(state.memoryEnabled);
           case 'rag.web_search_enabled': return String(state.webSearchEnabled);
           case 'rag.contextual_retrieval': return String(state.contextualRetrieval);
           case 'window.close_to_tray': return String(state.closeToTray);
           case 'ui.sidebar_collapsed': return String(state.sidebarCollapsed);
           case 'app.autostart': return String(state.autostart);
-          case 'rag.retrieval_memory_enabled': return String(state.retrievalMemoryEnabled);
           case 'update.auto_check': return String(state.updateAutoCheck !== false);
           case 'vec.mirror_source': return state.embeddingMirrorSource || '';
           default: return '';
@@ -3563,11 +3472,6 @@ case 'set_rag_eval_settings':
       // 符号引擎重置
       state.symbolIndexBuilt = false;
       // 性能优化重置
-      state.compressionRatio = 1.0;
-      state.cacheSettings = { enabled: true, ttl_secs: 86400, semantic_threshold: 0.92, privacy_mode: false };
-      state.cacheStats = { enabled: true, exact_hits: 5, semantic_hits: 3, retrieval_hits: 8, total_queries: 50, cache_size_entries: 16, estimated_token_saved: 12000 };
-      state.retrievalMemoryEnabled = false;
-      state.retrievalMemoryStats = [];
 state.subAgentEnabled = false;
 state.webSearchEnabled = false;
 state.ragParams = { top_k: 8, score_threshold: 0.0, chunk_expansion_enabled: true, chunk_expansion_window: 1 };
@@ -3575,8 +3479,6 @@ state.generationParams = { temperature: 0.7, max_tokens: 4096, top_p: 1.0 };
 state.docSortBy = null;
 state.docSortOrder = null;
 state.coordinatorEnabled = false;
-      state.progressiveInjection = false;
-      state.speculativeEnabled = false;
       // 可观测性重置
       state.logLevel = 'info';
       // 下载管理重置
@@ -3689,9 +3591,6 @@ state.coordinatorEnabled = false;
       state.dreamAborted = false;
       state.dreamSuggestions = [];
       state.symbolIndexBuilt = false;
-      state.compressionRatio = 1.0;
-      state.retrievalMemoryEnabled = false;
-      state.retrievalMemoryStats = [];
 state.subAgentEnabled = false;
 state.webSearchEnabled = false;
 state.ragParams = { top_k: 8, score_threshold: 0.0, chunk_expansion_enabled: true, chunk_expansion_window: 1 };
@@ -3699,8 +3598,6 @@ state.generationParams = { temperature: 0.7, max_tokens: 4096, top_p: 1.0 };
 state.docSortBy = null;
 state.docSortOrder = null;
 state.coordinatorEnabled = false;
-      state.progressiveInjection = false;
-      state.speculativeEnabled = false;
       state.logLevel = 'info';
       state.downloadStatuses = {};
       state.tokenBudget = 0;

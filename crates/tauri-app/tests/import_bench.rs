@@ -36,7 +36,7 @@ const TEST_FILE: &str = match std::option_env!("ECHOMIND_BENCH_FILE") {
 /// 3. add_chunks_batch（SQLite 写入）
 /// 4. index_entities（实体抽取）
 /// 5. index_relations（关系抽取）
-/// 6. index_propositions（Proposition 分割）
+/// 6. Wiki-link 解析
 /// 7. index_wiki_links（Wiki 链接解析）
 /// 8. embedder 初始化（ONNX 模型加载，首次）
 /// 9. embed_batch + add_embeddings_batch（向量推理 + 写入）
@@ -136,29 +136,6 @@ async fn bench_real_import_phases() {
     }
     let t_relations = t5.elapsed();
 
-    // ===== 阶段 6: index_propositions =====
-    let t6 = Instant::now();
-    let doc_name = std::path::Path::new(&doc.file_path)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "unknown".to_string());
-    for batch in chunks.chunks(5000) {
-        let propositions: Vec<echomind_models::Proposition> = batch
-            .iter()
-            .flat_map(|chunk| {
-                echomind_core::proposition_splitter::PropositionSplitter::split(
-                    &chunk.content,
-                    &chunk.id,
-                    &doc_name,
-                )
-            })
-            .collect();
-        if !propositions.is_empty() {
-            storage.add_propositions(&propositions).await.unwrap();
-        }
-    }
-    let t_props = t6.elapsed();
-
     // ===== 阶段 7: index_wiki_links =====
     let t7 = Instant::now();
     for batch in chunks.chunks(5000) {
@@ -211,7 +188,6 @@ async fn bench_real_import_phases() {
         + t_chunks
         + t_entities
         + t_relations
-        + t_props
         + t_wiki
         + t_embedder_init
         + t_list_chunks
@@ -247,11 +223,7 @@ async fn bench_real_import_phases() {
         t_relations.as_secs_f64() * 1000.0
     );
     eprintln!(
-        "阶段 6: Proposition 分割 + 索引  : {:>8.1} ms",
-        t_props.as_secs_f64() * 1000.0
-    );
-    eprintln!(
-        "阶段 7: Wiki-link 解析 + 索引   : {:>8.1} ms",
+        "阶段 6: Wiki-link 解析 + 索引   : {:>8.1} ms",
         t_wiki.as_secs_f64() * 1000.0
     );
     eprintln!(

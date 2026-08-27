@@ -22,8 +22,6 @@ pub mod audit_pair;
 pub mod auto_dream;
 /// 预算追踪和速率限制（QM 借鉴）：LLM API 费用控制和请求限流。
 pub mod budget;
-/// 语义缓存金字塔（REQ-PERF-001）：L0 精确 + L1 语义 + L3 检索结果三级缓存。
-pub mod cache;
 pub mod chat;
 /// 代码执行沙箱（REQ-RAG-032，Pro feature）：安全执行代码片段并返回结果。
 ///
@@ -37,10 +35,6 @@ pub mod coordinator;
 /// Coordinator 策略注册表（DH-03 借鉴 DeepSeek Harness SubagentRuntime Provider 注册表）：
 /// 多个协调策略共存，按名字查找，能力验证在执行前完成。
 pub mod coordinator_strategy;
-/// 领域画像自动分类（REQ-VEC-013）：16 领域嵌入质心分类。
-pub mod domain;
-/// 嵌入模型对比评估（REQ-VEC-018）：多模型嵌入 + 检索质量对比。
-pub mod embed_comparison;
 /// 数据库加密模块（Argon2id 密钥派生 + SQLCipher 加密 + 暴力破解防护 + 密码强度检测）。
 pub mod encryption;
 /// NER 实体抽取器（REQ-PERF-006）：纯规则 + 正则，零 LLM/模型依赖。
@@ -66,9 +60,6 @@ pub mod hybrid_retriever;
 /// 幂等性存储 + 统一周期任务抽象：防重复操作（文件同步/AutoDream）+ 后台任务管理。
 pub mod idempotency;
 pub mod import;
-/// Late Chunking 上下文感知嵌入（REQ-RAG-049）：借鉴 Jina AI 2024 Late Chunking
-/// 技术，在嵌入阶段为 chunk 注入文档级上下文前缀。
-pub mod late_chunking;
 pub mod license;
 /// LLM API 类型化错误（B-02 借鉴 Rig ProviderResponseError）：保留原始 HTTP Status + Body。
 pub mod llm_api_error;
@@ -107,13 +98,7 @@ pub mod pipeline_checkpoint;
 /// PortableTool Trait（B-05 借鉴 Rig PortableTool）：context-free 工具抽象，工具注册解耦。
 pub mod portable_tool;
 pub mod privacy;
-/// 渐进式上下文注入（REQ-PERF-010）：按需注入 chunk，LLM 上下文足够时停止追加。
-pub mod progressive_injector;
-/// Prompt 压缩模块（REQ-PERF-002）：规则压缩（Free 默认方案）。
-pub mod prompt_compressor;
 /// 隐私保护模块（PII 检测脱敏 8 类 + 审计日志防篡改哈希链）。
-/// Proposition 级原子分割（REQ-PERF-007）：将 chunk 分解为自包含的原子事实。
-pub mod proposition_splitter;
 /// RAG 质量门控系统（REQ-RAG-028）：检索后评估结果质量，低质量时触发降级策略。
 pub mod quality_gate;
 /// RAG 评估指标系统（REQ-RAG-045，RAGAS 风格）：
@@ -122,8 +107,6 @@ pub mod rag_eval;
 /// RAG 评估数据集与端到端检索质量评估（REQ-RAG-048）：
 /// 标准评估数据集 + run_retrieval_eval 管线。
 pub mod rag_eval_dataset;
-/// 自进化检索记忆（REQ-PERF-012）：记录检索方法效果，自适应选择最佳策略。
-pub mod retrieval_memory;
 /// 检索质量门控（借鉴 OpenMontage slideshow_risk.py）：多维度评分 + verdict 系统。
 pub mod retrieval_quality_gate;
 pub mod retriever;
@@ -142,8 +125,6 @@ pub mod session_strip;
 /// Skill 系统发现（B09 Skill Discovery，REQ-ARCH-010）：
 /// 从 Markdown 文件的 YAML frontmatter 解析技能信息。
 pub mod skill;
-/// Speculative RAG（REQ-PERF-011）：小模型快速生成草稿 → 大模型验证/修正。
-pub mod speculative_rag;
 pub mod splitter;
 /// StepCache 步骤级缓存（P2-1）：Agent/Coordinator 多步推理中间步骤结果复用。
 pub mod step_cache;
@@ -153,8 +134,6 @@ pub mod stream_parse;
 /// 借鉴 Bamboo-agent 子代理系统：主代理可动态创建子代理，每个子代理有独立上下文
 /// 和工具集，通过 mailbox 消息传递协调。支持「分工→并行→汇总」模式。
 pub mod sub_agent;
-/// RAPTOR 摘要树模块（REQ-PERF-009）：多级摘要树索引构建与检索。
-pub mod summary_tree;
 /// 文件监听增量同步模块（REQ-SYNC-002）：对比文件夹与知识库，增量导入/更新/删除。
 pub mod sync;
 /// 工具输出有界截断（B07 Tool Output Bounding，REQ-RAG-043）：
@@ -236,8 +215,8 @@ pub mod workflow;
 use echomind_models::{
     ChatMessage, Chunk, ChunkPreview, CodeExecutorConfig, CodeSymbol, Conversation, DocStatus,
     Document, DocumentPreview, EntityRelation, ExecutionResult, GlobalSearchResults, MemoryEntry,
-    MemoryTier, MessageSearchResult, PendingInput, Proposition, RetrievalResult, ScratchLogEntry,
-    SessionTodo, SummaryNode, SymbolKind, TodoStatus, TurnActiveVersion, WikiLink,
+    MemoryTier, MessageSearchResult, PendingInput, RetrievalResult, ScratchLogEntry, SessionTodo,
+    SymbolKind, TodoStatus, TurnActiveVersion, WikiLink,
 };
 use futures::stream::BoxStream;
 
@@ -963,136 +942,6 @@ pub trait Storage: Send + Sync {
     }
 
     // ------------------------------------------------------------------
-    // Proposition 级原子分割（REQ-PERF-007）
-    // ------------------------------------------------------------------
-
-    /// 批量写入 proposition 索引（REQ-PERF-007）。
-    ///
-    /// 导入文档时将 chunk 分割为 proposition 并批量写入 `propositions` 表。
-    /// proposition 的嵌入向量在导入后由嵌入管线单独计算写入。
-    ///
-    /// # 参数
-    /// - `propositions`: Proposition 列表（id / chunk_id / content / sequence）
-    ///
-    /// 默认实现为空操作；生产适配器应覆盖为批量 SQL INSERT。
-    async fn add_propositions(&self, _propositions: &[Proposition]) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    /// 批量写入 proposition 嵌入向量（REQ-PERF-007）。
-    ///
-    /// 嵌入管线计算完 proposition 嵌入后调用此方法写入。
-    ///
-    /// # 参数
-    /// - `embeddings`: (proposition_id, embedding) 对列表
-    ///
-    /// 默认实现为空操作；生产适配器应覆盖为批量 SQL UPDATE。
-    async fn add_proposition_embeddings(
-        &self,
-        _embeddings: &[(String, Vec<f32>)],
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    /// 列出文档的所有 proposition（REQ-PERF-007）。
-    ///
-    /// 返回指定文档全部分块对应的所有 proposition，
-    /// 按 (chunk_sequence, proposition_sequence) 排序。
-    /// 用于嵌入管线批量计算 proposition 嵌入。
-    ///
-    /// 默认实现返回空 Vec；生产适配器应覆盖为 SQL 查询。
-    async fn list_propositions_by_doc(&self, _doc_id: &str) -> anyhow::Result<Vec<Proposition>> {
-        Ok(vec![])
-    }
-
-    /// Proposition 向量检索（REQ-PERF-007）。
-    ///
-    /// 以查询向量在 proposition 嵌入表中执行 top-k 余弦相似度检索，
-    /// 返回命中的 proposition 对应的 chunk（已去重，每个 chunk 只保留最高分）。
-    ///
-    /// # 参数
-    /// - `query_embedding`: 查询的嵌入向量
-    /// - `top_k`: 返回结果数量上限
-    ///
-    /// 默认实现返回空 Vec；生产适配器应覆盖为 SQL + 向量检索。
-    async fn proposition_search(
-        &self,
-        _query_embedding: &[f32],
-        _top_k: usize,
-    ) -> anyhow::Result<Vec<RetrievalResult>> {
-        Ok(vec![])
-    }
-
-    /// 重建 proposition 索引（REQ-PERF-007）。
-    ///
-    /// 清空 propositions 表后，遍历所有 chunk → 分割为 proposition → 重新写入。
-    /// proposition 嵌入需要由嵌入管线单独重建。
-    ///
-    /// 默认实现为空操作；生产适配器应覆盖为实际重建逻辑。
-    async fn rebuild_proposition_index(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    // ------------------------------------------------------------------
-    // RAPTOR 摘要树（REQ-PERF-009）
-    // ------------------------------------------------------------------
-
-    /// 批量写入摘要树节点（REQ-PERF-009）。
-    ///
-    /// 将 RAPTOR 摘要树构建结果写入 `summary_nodes` 表。
-    /// 节点的 embedding 字段在嵌入管线计算后单独更新。
-    ///
-    /// 默认实现为空操作；生产适配器应覆盖为批量 SQL INSERT。
-    async fn add_summary_nodes(&self, _nodes: &[SummaryNode]) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    /// 更新摘要节点嵌入向量（REQ-PERF-009）。
-    ///
-    /// 嵌入管线计算完摘要节点嵌入后调用此方法。
-    ///
-    /// 默认实现为空操作；生产适配器应覆盖为 SQL UPDATE。
-    async fn update_summary_embedding(
-        &self,
-        _node_id: &str,
-        _embedding: &[f32],
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    /// 列出文档的所有摘要节点（REQ-PERF-009）。
-    ///
-    /// 返回指定文档的全部摘要节点（所有层级），按 level 正序排列。
-    ///
-    /// 默认实现返回空 Vec；生产适配器应覆盖为 SQL 查询。
-    async fn list_summary_nodes(&self, _doc_id: &str) -> anyhow::Result<Vec<SummaryNode>> {
-        Ok(vec![])
-    }
-
-    /// 摘要树向量检索（REQ-PERF-009）。
-    ///
-    /// 以查询向量在摘要节点嵌入中执行 top-k 余弦相似度检索。
-    /// 命中摘要节点后，可通过 `child_ids` 向下展开到具体 chunks。
-    ///
-    /// 默认实现返回空 Vec；生产适配器应覆盖为 SQL + 向量检索。
-    async fn summary_search(
-        &self,
-        _query_embedding: &[f32],
-        _top_k: usize,
-    ) -> anyhow::Result<Vec<RetrievalResult>> {
-        Ok(vec![])
-    }
-
-    /// 重建摘要树索引（REQ-PERF-009）。
-    ///
-    /// 清空 summary_nodes 表，供用户在需要时重建。
-    ///
-    /// 默认实现为空操作；生产适配器应覆盖为 DELETE 重建。
-    async fn rebuild_summary_tree(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    // ------------------------------------------------------------------
     // 代码符号索引（REQ-RAG-031 代码感知 RAG）
     // ------------------------------------------------------------------
 
@@ -1808,218 +1657,6 @@ pub trait LLMProvider: Send + Sync {
     }
 }
 
-/// Prompt 压缩端口（REQ-PERF-002）：检索片段注入前做 token 级压缩，2-5x 减少注入 token。
-///
-/// ## 两层压缩策略
-///
-/// - **Free 版（规则压缩，零依赖）**：`RuleBasedCompressor` — 去除停用词/冗余空白/
-///   代码注释/Markdown 装饰 + 句子级 word-overlap 评分保留 top-N
-/// - **Pro 版（ONNX 模型压缩）**：`OnnxCompressor` — 使用已有 ONNX embedder 做句子级
-///   嵌入相似度评分，精确度更高但需 embedder 初始化
-///
-/// ## 压缩比
-///
-/// - `2.0` = 保守（压缩到 1/2，信息保留率 ≥ 90%）
-/// - `3.0` = 平衡（压缩到 1/3，信息保留率 ≥ 80%）
-/// - `5.0` = 激进（压缩到 1/5，信息保留率 ≥ 60%）
-/// - `1.0` = 禁用（原样返回）
-///
-/// ## 压缩范围
-///
-/// 仅压缩检索片段（`SegmentedPrompt.dynamic_context`），
-/// 不压缩系统提示和用户查询。
-///
-/// ## 调研来源
-///
-/// - LLMLingua-2 (arXiv:2403.12968)：XLM-RoBERTa token 分类压缩，2-5x 压缩比
-///
-/// ## 对象安全设计
-///
-/// 与 `Reranker`/`QueryRewriter` 端口相同，使用手动 `Pin<Box<Future>>` 返回类型
-/// 以保证对象安全（dyn-compatible）。`PromptCompressor` 以 `Option<Arc<dyn PromptCompressor>>`
-/// 形式注入 `ChatEngine`，实现运行时开关——用户可通过 `compression_ratio` 设置
-/// 在运行时启停压缩，无需重编译。
-pub trait PromptCompressor: Send + Sync {
-    /// 压缩文本，返回压缩后的文本。
-    ///
-    /// # 参数
-    /// - `text`: 待压缩的文本（通常是检索到的 chunk 内容）
-    /// - `ratio`: 目标压缩比（2.0 = 压缩到 1/2，5.0 = 压缩到 1/5，1.0 = 不压缩）
-    /// - `query`: 用户查询文本（用于句子级相关性评分）
-    ///
-    /// # 返回
-    /// 压缩后的文本。如果压缩不可用或失败，应返回原始文本（优雅降级），
-    /// 而非返回 Err（Err 会中断整个对话管线）。
-    fn compress<'a>(
-        &'a self,
-        text: &'a str,
-        ratio: f32,
-        query: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<String>> + Send + 'a>>;
-
-    /// 批量压缩多个 chunk。
-    ///
-    /// 默认实现逐条调用 `compress`；适配器可覆盖为真正的批量处理。
-    fn compress_batch<'a>(
-        &'a self,
-        chunks: &'a [String],
-        ratio: f32,
-        query: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Vec<String>>> + Send + 'a>>
-    {
-        Box::pin(async move {
-            let mut results = Vec::with_capacity(chunks.len());
-            for chunk in chunks {
-                results.push(self.compress(chunk, ratio, query).await?);
-            }
-            Ok(results)
-        })
-    }
-}
-
-/// 压缩禁用占位实现（REQ-PERF-002 AC-10）：用户未开启压缩时使用。
-///
-/// `compress` 原样返回文本，使管线天然跳过压缩阶段。
-/// 设计为零大小类型 + `Send + Sync`，可安全跨线程共享。
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoCompressor;
-
-impl PromptCompressor for NoCompressor {
-    fn compress<'a>(
-        &'a self,
-        text: &'a str,
-        _ratio: f32,
-        _query: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<String>> + Send + 'a>>
-    {
-        Box::pin(async move { Ok(text.to_string()) })
-    }
-}
-
-/// 响应缓存端口（REQ-PERF-001）：三级缓存金字塔，减少重复查询的 token 消耗。
-///
-/// ## 缓存层级
-///
-/// - **L0 精确匹配**：`query_hash → answer`，命中率 5-10%，0 token
-/// - **L1 语义匹配**：`embedding similarity → answer`，命中率 10-20%，0 token
-/// - **L3 检索结果**：`query_embedding → chunks`，跳过嵌入+检索计算
-///
-/// ## 实现方
-///
-/// `SqliteCache`（`crates/infra/src/sqlite_cache.rs`）— 使用 SQLite + 向量 BLOB 存储。
-///
-/// ## 调研来源
-///
-/// - Anthropic Prompt Caching (2024.08)：成本 ↓90%，延迟 ↓85%
-/// - Mem0 (2026.04)：语义缓存 + 实体链接，LoCoMo 92.5
-pub trait ResponseCache: Send + Sync {
-    /// L0 精确匹配查询：以归一化查询的 SHA-256 哈希为键查找缓存答案。
-    ///
-    /// # 参数
-    /// - `query_hash`：归一化查询的 SHA-256 十六进制哈希（由 `cache::query_hash()` 计算）
-    /// - `ttl_secs`：缓存存活时间（秒），超过此时间的条目视为未命中
-    /// - `now`：当前时间（Unix 秒级时间戳）
-    ///
-    /// # 返回
-    /// `Some(CacheHit)` 表示命中（包含答案和引用来源 JSON），
-    /// `None` 表示未命中或已过期。
-    async fn lookup_exact(
-        &self,
-        query_hash: &str,
-        ttl_secs: u64,
-        now: i64,
-    ) -> anyhow::Result<Option<echomind_models::CacheHit>>;
-
-    /// L1 语义匹配查询：以查询嵌入向量查找余弦相似度 ≥ 阈值的缓存答案。
-    ///
-    /// # 参数
-    /// - `query_embedding`：查询的嵌入向量
-    /// - `threshold`：余弦相似度阈值（默认 0.92），低于此值不命中
-    /// - `ttl_secs`：缓存存活时间（秒）
-    /// - `now`：当前时间（Unix 秒级时间戳）
-    ///
-    /// # 返回
-    /// `Some(CacheHit)` 表示命中，`None` 表示未命中。
-    async fn lookup_semantic(
-        &self,
-        query_embedding: &[f32],
-        threshold: f32,
-        ttl_secs: u64,
-        now: i64,
-    ) -> anyhow::Result<Option<echomind_models::CacheHit>>;
-
-    /// L3 检索结果缓存查询：以查询嵌入向量查找缓存的检索结果。
-    ///
-    /// # 参数
-    /// - `query_embedding`：查询的嵌入向量
-    /// - `threshold`：余弦相似度阈值（默认 0.90）
-    /// - `ttl_secs`：缓存存活时间（秒）
-    /// - `now`：当前时间（Unix 秒级时间戳）
-    ///
-    /// # 返回
-    /// `Some(String)` 包含序列化的 `Vec<RetrievalResult>` JSON，`None` 表示未命中。
-    async fn lookup_retrieval(
-        &self,
-        query_embedding: &[f32],
-        threshold: f32,
-        ttl_secs: u64,
-        now: i64,
-    ) -> anyhow::Result<Option<String>>;
-
-    /// 写入 L0 精确匹配缓存条目。
-    ///
-    /// # 参数
-    /// - `query_hash`：归一化查询的 SHA-256 哈希
-    /// - `query_text`：原始查询文本（用于调试/展示）
-    /// - `answer_text`：LLM 生成的答案
-    /// - `sources_json`：引用来源的 JSON 序列化
-    /// - `conversation_id`：关联的会话 ID（可选）
-    async fn insert_exact(
-        &self,
-        query_hash: &str,
-        query_text: &str,
-        answer_text: &str,
-        sources_json: &str,
-        conversation_id: Option<&str>,
-    ) -> anyhow::Result<()>;
-
-    /// 写入 L1 语义匹配缓存条目。
-    ///
-    /// # 参数
-    /// - `query_text`：原始查询文本
-    /// - `query_embedding`：查询的嵌入向量
-    /// - `answer_text`：LLM 生成的答案
-    /// - `sources_json`：引用来源的 JSON 序列化
-    /// - `conversation_id`：关联的会话 ID（可选）
-    async fn insert_semantic(
-        &self,
-        query_text: &str,
-        query_embedding: &[f32],
-        answer_text: &str,
-        sources_json: &str,
-        conversation_id: Option<&str>,
-    ) -> anyhow::Result<()>;
-
-    /// 写入 L3 检索结果缓存条目。
-    ///
-    /// # 参数
-    /// - `query_text`：原始查询文本
-    /// - `query_embedding`：查询的嵌入向量
-    /// - `results_json`：检索结果的 JSON 序列化
-    async fn insert_retrieval(
-        &self,
-        query_text: &str,
-        query_embedding: &[f32],
-        results_json: &str,
-    ) -> anyhow::Result<()>;
-
-    /// 清空所有缓存（文档导入/删除时触发）。
-    async fn clear_all(&self) -> anyhow::Result<()>;
-
-    /// 获取缓存统计信息。
-    async fn get_stats(&self) -> anyhow::Result<echomind_models::CacheStats>;
-}
-
 /// 检索端口（对应 REQ-RAG-003）：面向自然语言查询的 top-k 召回。
 pub trait Retriever: Send + Sync {
     /// 对查询做向量化并检索最相关的 top_k 个分块。
@@ -2363,33 +2000,6 @@ pub trait SymbolExtractor: Send + Sync {
     ) -> Vec<(String, usize, usize)>;
 }
 
-/// 领域分类端口（REQ-VEC-013）：将文档内容自动分类到预定义领域。
-///
-/// 实现方案为嵌入质心分类（Embedding Centroid Classification）——
-/// 预计算每个领域的代表性关键词嵌入质心，文档取首 N 个 chunk 的嵌入均值
-/// 与各领域质心做余弦相似度比较，取最高者。
-///
-/// # 零 LLM 成本
-///
-/// 分类完全基于本地嵌入模型（fastembed/ONNX），不调用 LLM，
-/// 零网络请求、零 API 费用，完全离线可用。
-///
-/// # 16 预定义领域
-///
-/// technology / legal / medical / finance / science / education / business /
-/// engineering / literature / government / marketing / hr / design / data /
-/// security / general
-pub trait DomainClassifier: Send + Sync {
-    /// 对文档内容进行领域分类，返回领域标识字符串。
-    ///
-    /// # 参数
-    /// - `chunks`: 文档分块文本列表（通常取前 5 个 chunk 作为样本）
-    ///
-    /// # 返回
-    /// 16 个预定义领域之一的字符串标识。分类失败时返回 `"general"`。
-    async fn classify(&self, chunks: &[String]) -> anyhow::Result<String>;
-}
-
 /// 代码执行器端口（REQ-RAG-032，Pro feature）。
 ///
 /// 借鉴 CodeForge 多语言执行器：在沙箱中安全执行代码片段并返回结果。
@@ -2451,11 +2061,7 @@ mod audit_tests;
 #[cfg(test)]
 mod auto_dream_tests;
 #[cfg(test)]
-mod benchmark_tests;
-#[cfg(test)]
 pub mod budget_tests;
-#[cfg(test)]
-mod cache_tests;
 #[cfg(test)]
 mod chat_tests;
 #[cfg(test)]
@@ -2465,16 +2071,12 @@ mod concurrency_tests;
 #[cfg(test)]
 mod coordinator_tests;
 #[cfg(test)]
-mod domain_tests;
-#[cfg(test)]
 mod entity_extractor_tests;
 #[cfg(test)]
 mod export_tests;
 #[cfg(test)]
 mod finish_reason_tests;
 
-#[cfg(test)]
-mod embed_comparison_tests;
 #[cfg(test)]
 mod graph_analyzer_tests;
 #[cfg(test)]
@@ -2490,8 +2092,6 @@ mod idempotency_tests;
 #[cfg(test)]
 mod import_tests;
 #[cfg(test)]
-mod late_chunking_tests;
-#[cfg(test)]
 mod license_tests;
 #[cfg(test)]
 mod llm_aux_tests;
@@ -2502,15 +2102,7 @@ mod loader_tests;
 #[cfg(test)]
 mod memory_store_tests;
 #[cfg(test)]
-mod perf_optim_tests;
-#[cfg(test)]
-mod progressive_injector_tests;
-#[cfg(test)]
-mod prompt_compressor_tests;
-#[cfg(test)]
 mod property_tests;
-#[cfg(test)]
-mod proposition_splitter_tests;
 #[cfg(test)]
 mod quality_gate_tests;
 #[cfg(test)]
@@ -2518,15 +2110,11 @@ mod rag_eval_dataset_tests;
 #[cfg(test)]
 mod rag_eval_tests;
 #[cfg(test)]
-mod retrieval_memory_tests;
-#[cfg(test)]
 mod retriever_tests;
 #[cfg(test)]
 mod security_tests;
 #[cfg(test)]
 mod session_strip_tests;
-#[cfg(test)]
-mod speculative_rag_tests;
 #[cfg(test)]
 mod splitter_tests;
 #[cfg(test)]
@@ -2535,8 +2123,6 @@ mod step_cache_tests;
 mod stream_parse_tests;
 #[cfg(test)]
 mod sub_agent_tests;
-#[cfg(test)]
-mod summary_tree_tests;
 #[cfg(test)]
 mod sync_tests;
 #[cfg(all(test, feature = "pro"))]

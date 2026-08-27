@@ -290,10 +290,5 @@ pub async fn migrate_document_inner(
         .await
         .map_err(|e| format!("{e:#}"))?;
 
-    // 清空查询缓存（知识库变更）
-    if let Err(e) = state.cache.clear_all().await {
-        tracing::warn!("迁移后清空查询缓存失败: {e:#}");
-    }
-
     Ok(())
 }

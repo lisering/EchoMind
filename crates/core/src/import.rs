@@ -8,7 +8,6 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, anyhow, bail};
 use echomind_models::{Chunk, DocStatus, Document};
 
-use crate::proposition_splitter::PropositionSplitter;
 use crate::{LLMProvider, Loader, Splitter, Storage};
 #[cfg(feature = "pro")]
 use crate::{NoVlm, OcrEngine, PageRenderer, SymbolExtractor, VisionLanguageModel};
@@ -563,7 +562,6 @@ impl<S: Storage> ImportService<S> {
         // 实体关系抽取 + 索引（REQ-RAG-026 知识图谱实体关系检索）
         self.index_relations(&chunks).await?;
         // Proposition 分割 + 索引（REQ-PERF-007 Proposition 级原子分割）
-        self.index_propositions(doc, &chunks).await?;
         // Wiki-link 解析 + 索引（REQ-ING-020 Markdown 笔记双向链接）
         self.index_wiki_links(doc, &chunks).await?;
         Ok(())
@@ -603,7 +601,6 @@ impl<S: Storage> ImportService<S> {
         // 实体关系抽取 + 索引（REQ-RAG-026 知识图谱实体关系检索）
         self.index_relations(&chunks).await?;
         // Proposition 分割 + 索引（REQ-PERF-007 Proposition 级原子分割）
-        self.index_propositions(doc, &chunks).await?;
         // Wiki-link 解析 + 索引（REQ-ING-020 Markdown 笔记双向链接）
         self.index_wiki_links(doc, &chunks).await?;
         Ok(())
@@ -643,7 +640,6 @@ impl<S: Storage> ImportService<S> {
         }
         self.index_entities(&chunks).await?;
         self.index_relations(&chunks).await?;
-        self.index_propositions(doc, &chunks).await?;
         // Wiki-link 解析 + 索引（REQ-ING-020 Markdown 笔记双向链接）
         self.index_wiki_links(doc, &chunks).await?;
         Ok(())
@@ -679,7 +675,6 @@ impl<S: Storage> ImportService<S> {
         }
         self.index_entities(&chunks).await?;
         self.index_relations(&chunks).await?;
-        self.index_propositions(doc, &chunks).await?;
         // Wiki-link 解析 + 索引（REQ-ING-020 Markdown 笔记双向链接）
         self.index_wiki_links(doc, &chunks).await?;
         Ok(())
@@ -737,22 +732,6 @@ impl<S: Storage> ImportService<S> {
     /// 将每个 chunk 分割为自包含的原子事实（proposition），批量写入 `propositions` 表。
     /// proposition 的嵌入向量在导入后由嵌入管线单独计算。
     ///
-    /// 零 LLM 调用：使用规则方案（句子分割 + 代词消解 + 上下文补全）。
-    /// GB 级文件优化：按 CHUNK_BATCH_SIZE 分批分割+写入，控制峰值内存。
-    async fn index_propositions(&self, doc: &Document, chunks: &[Chunk]) -> anyhow::Result<()> {
-        let doc_name = Self::file_name(Path::new(&doc.file_path));
-        for batch in chunks.chunks(CHUNK_BATCH_SIZE) {
-            let propositions: Vec<echomind_models::Proposition> = batch
-                .iter()
-                .flat_map(|chunk| PropositionSplitter::split(&chunk.content, &chunk.id, &doc_name))
-                .collect();
-            if !propositions.is_empty() {
-                self.storage.add_propositions(&propositions).await?;
-            }
-        }
-        Ok(())
-    }
-
     /// Wiki-link 解析 + 批量索引（REQ-ING-020 Markdown 笔记双向链接）。
     ///
     /// 从每个 chunk 中解析 `[[wiki-link]]` 语法，批量写入 `wiki_links` 表。
@@ -1011,7 +990,6 @@ impl<S: Storage> ImportService<S> {
         // 实体/关系/Proposition 索引（与文本路径一致）
         self.index_entities(&chunks).await?;
         self.index_relations(&chunks).await?;
-        self.index_propositions(doc, &chunks).await?;
         // Wiki-link 解析 + 索引（与文本路径一致）
         self.index_wiki_links(doc, &chunks).await?;
 

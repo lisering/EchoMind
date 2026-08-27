@@ -215,7 +215,12 @@ pub async fn get_settings_inner(state: &AppState) -> Result<SettingsPayload, Str
         .await
         .map_err(|e| format!("{e:#}"))?
         .is_some_and(|v| v == "true");
-    let speculative_enabled = state.speculative_enabled;
+    let speculative_enabled = state
+        .storage
+        .get_setting("rag.speculative_enabled")
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .is_some_and(|v| v == "true");
     let graph_retriever_enabled = state.graph_retriever_enabled;
     let contextual_retrieval = state.contextual_retrieval_enabled;
     Ok(match config {
@@ -1537,25 +1542,15 @@ pub async fn update_setting_inner(
         "rag.coordinator_enabled" => set_coordinator_mode_inner(enabled, state).await,
         "rag.sub_agent_enabled" => set_sub_agent_enabled_inner(enabled, state).await,
         "mm.vlm_enabled" => set_vlm_enabled_inner(enabled, state).await,
-        "rag.progressive_injection" => set_progressive_injection_inner(enabled, state).await,
-        "rag.speculative_enabled" => set_speculative_enabled_inner(enabled, state).await,
-        "rag.quality_gate_enabled" => set_quality_gate_enabled_inner(enabled, state).await,
-        "rag.graph_retriever_enabled" => set_graph_retriever_enabled_inner(enabled, state).await,
         "memory.enabled" => set_memory_enabled_inner(enabled, state).await,
         "rag.web_search_enabled" => set_web_search_enabled_inner(enabled, state).await,
         "rag.contextual_retrieval" => set_contextual_retrieval_inner(enabled, state).await,
         "window.close_to_tray" => set_close_to_tray_inner(enabled, state).await,
         "ui.sidebar_collapsed" => set_sidebar_collapsed_inner(enabled, state).await,
-        "rag.retrieval_memory_enabled" => set_retrieval_memory_enabled_inner(enabled, state).await,
         "update.auto_check" => set_update_check_enabled_inner(enabled, state).await,
 
         // ── 数值类（需 parse） ──
-        "compression.ratio" => {
-            let ratio = value
-                .parse::<f32>()
-                .map_err(|_| prefix_error(ERR_VALIDATION, &format!("压缩比必须为数字: {value}")))?;
-            set_compression_ratio_inner(ratio, state).await
-        }
+        // compression.ratio 已删除（大简化重构）
         "rag.context_token_limit" => {
             let limit = value.parse::<usize>().map_err(|_| {
                 prefix_error(ERR_VALIDATION, &format!("token 限制必须为正整数: {value}"))
