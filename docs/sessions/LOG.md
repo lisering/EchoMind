@@ -457,3 +457,22 @@
 4. **v1.19-features.spec.ts 回归**：添加 `ws-secondary` 工作空间后导致 v1.19 知识库删除测试失败。TC-V19-WS003-003/004 期望只有 1 个工作空间。修复：v1.19 beforeEach 重置 `workspaces` 到只有 `default`。本地 8/8 passed ✅。
 
 5. **Release Build macOS codesign 失败**：`Signing with identity "" → no identity found → failed codesign`。根因：`tauri.conf.json` 中 `signingIdentity: "-"` 在无签名证书的 CI 环境下尝试 ad-hoc 签名但失败。第一轮修复：删除 `signingIdentity` 配置项。但仍然失败——因为 CI 的 `APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}` 在无证书时设为空字符串，Tauri 读取空字符串作为有效但为空的身份。第二轮修复：在 `run` 脚本中检测空字符串后 `unset APPLE_SIGNING_IDENTITY`，确保 Tauri 在没有签名身份时跳过签名。
+
+---
+
+### 2026-08-27 — CI E2E Bridge Report 容错增强
+
+| 日期 | Session | 功能 | 测试 | 文件 | 关键产出 |
+|---|---|---|---|---|---|
+| 08-27 | CI 修复 | E2E Bridge Report || true 容错增强 | — | 1 | ci.yml merge-reports 步骤修复 |
+
+**问题**：CI run 32994016879 中 E2E Bridge Report 的 "Merge reports" 步骤失败，根因是 `download-artifact@v4` 下载 blob 时数据截断（`expected 5846932. got only 5837488`），导致 `npx playwright merge-reports` 崩溃（Node.js 未处理的 'error' 事件）。原有的 `|| { exit 0 }` shell 回退未能正确捕获该错误。
+
+**修复**：
+- `ci.yml` — "Merge reports" 步骤：`|| { exit 0 }` → `|| true`（更简单可靠）；"Upload HTML report" 步骤添加 `if: always()` + `if-no-files-found: ignore`
+
+**验证**：
+- CI run 33024377225（上一会话推送）：**全绿 ✅**（E2E Bridge Report: success）
+- CI run 33027743323（本次修复推送）：运行中
+
+**关键发现**：上一个 CI run（33024377225）实际已经全绿了。E2E Bridge Report 在那次运行中成功通过了（可能是 blob 下载恰好完整）。本次修复是**加固**措施，确保即使 blob 下载不完整时 merge-reports 步骤也不会失败。

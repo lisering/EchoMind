@@ -4,7 +4,7 @@
 >
 > 每次 session 结束时**必须更新**此文件，确保反映最新状态。
 >
-> **最后更新**: 2026-08-26 | **更新人**: AI Agent (CI 修复：Release Build macOS Info.plist + codesign + E2E Bridge shard 4/4 修复。sync-to-github.sh 添加 Info.plist 同步；tauri.conf.json 删除 signingIdentity 避免 CI 无证书 codesign 失败；tauri-stub.js 添加第二工作空间 mock；v2.4-template-import-export 修复 beforeEach 等待策略 + toBeGreaterThanOrEqual + 变量名；v1.19-features beforeEach 重置工作空间避免 ws-secondary 回归。)
+> **最后更新**: 2026-08-27 | **更新人**: AI Agent (CI 全链路修复完成。E2E Bridge Report || true 容错加固 + if: always() + if-no-files-found: ignore。CI run 33024377225 全绿确认。)
 
 ---
 
@@ -383,14 +383,15 @@ cd e2e-tests && npm run test:bridge # Playwright E2E
 ## 7. 当前 Git 状态
 
 - **分支**: `main`
-- **本次变更** (CI 修复 2026-08-26):
+- **本次变更** (CI 修复 2026-08-26 + E2E Bridge Report 加固 2026-08-27):
   - `sync-to-github.sh` — 添加 `Info.plist` 同步行 + `git push --set-upstream` 回退逻辑
   - `crates/tauri-app/tauri.conf.json` — 删除 `signingIdentity: "-"` 避免无证书 CI codesign 失败
   - `crates/tauri-app/Info.plist` — 发布仓库同步缺失修复
+  - `.github/workflows/ci.yml` — E2E Bridge Report `|| true` 容错 + `if: always()` + `if-no-files-found: ignore` + Release Build `unset APPLE_SIGNING_IDENTITY`
   - `e2e-tests/tests/bridge/tauri-stub.js` — 添加第二工作空间 `ws-secondary` mock
   - `e2e-tests/tests/v2.4-template-import-export.spec.ts` — 修复 beforeEach 等待策略 + `toBeGreaterThanOrEqual` + 变量名
   - `e2e-tests/tests/v1.19-features.spec.ts` — beforeEach 重置工作空间避免 `ws-secondary` 回归
-- **验证状态**: 本地 E2E 11/11 (v2.4) + 8/8 (v1.19) passed ✅ | CI 运行中
+- **验证状态**: CI run 33024377225 **全绿 ✅**（所有核心 job success）| CI run 33027743323 运行中
 
 ---
 
