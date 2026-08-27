@@ -4,7 +4,7 @@
 >
 > 每次 session 结束时**必须更新**此文件，确保反映最新状态。
 >
-> **最后更新**: 2026-08-27 | **更新人**: AI Agent (CI 全链路修复完成。E2E Bridge Report || true 容错加固 + if: always() + if-no-files-found: ignore。CI run 33024377225 全绿确认。)
+> **最后更新**: 2026-08-27 | **更新人**: AI Agent (大简化重构 Phase 0 完成。冻结基线 + 创建重构分支 + 生成 BASELINE.md + DEPENDENCY_AUDIT.md。)
 
 ---
 
@@ -382,16 +382,15 @@ cd e2e-tests && npm run test:bridge # Playwright E2E
 
 ## 7. 当前 Git 状态
 
-- **分支**: `main`
-- **本次变更** (CI 修复 2026-08-26 + E2E Bridge Report 加固 2026-08-27):
-  - `sync-to-github.sh` — 添加 `Info.plist` 同步行 + `git push --set-upstream` 回退逻辑
-  - `crates/tauri-app/tauri.conf.json` — 删除 `signingIdentity: "-"` 避免无证书 CI codesign 失败
-  - `crates/tauri-app/Info.plist` — 发布仓库同步缺失修复
-  - `.github/workflows/ci.yml` — E2E Bridge Report `|| true` 容错 + `if: always()` + `if-no-files-found: ignore` + Release Build `unset APPLE_SIGNING_IDENTITY`
-  - `e2e-tests/tests/bridge/tauri-stub.js` — 添加第二工作空间 `ws-secondary` mock
-  - `e2e-tests/tests/v2.4-template-import-export.spec.ts` — 修复 beforeEach 等待策略 + `toBeGreaterThanOrEqual` + 变量名
-  - `e2e-tests/tests/v1.19-features.spec.ts` — beforeEach 重置工作空间避免 `ws-secondary` 回归
-- **验证状态**: CI run 33024377225 **全绿 ✅**（所有核心 job success）| CI run 33027743323 运行中
+- **分支**: `refactor/great-simplification` (从 main 切出，大简化重构专用分支)
+- **基线 tag**: `v3.1.0-final` (重构前最后快照)
+- **本次变更** (Phase 0 大简化重构启动 2026-08-27):
+  - `docs/architecture/GREAT_SIMPLIFICATION_PLAN.md` — 新建（~1000 行重构总计划，8 Phase 21 Session）
+  - `docs/refactoring/BASELINE.md` — 新建（基线指标快照：Rust 130,862 行 / 前端 30,923 行 / IPC 228 / 依赖 1,765）
+  - `docs/refactoring/DEPENDENCY_AUDIT.md` — 新建（依赖审计报告：119 重复依赖 / 可删除依赖清单）
+  - `docs/sessions/NEXT.md` — 更新为 Phase 1 R1 衔接提示词
+  - `docs/sessions/LOG.md` — 追加 Phase 0 时间线
+- **验证状态**: 全量测试基线确认 — Free 1714 / Pro 2008 / Clippy Free+Pro 零警告 / fmt 通过 / tsc 0 errors / esbuild 1826 行 / Vitest 1826 passed
 
 ---
 

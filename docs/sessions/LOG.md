@@ -476,3 +476,22 @@
 - CI run 33027743323（本次修复推送）：运行中
 
 **关键发现**：上一个 CI run（33024377225）实际已经全绿了。E2E Bridge Report 在那次运行中成功通过了（可能是 blob 下载恰好完整）。本次修复是**加固**措施，确保即使 blob 下载不完整时 merge-reports 步骤也不会失败。
+
+---
+
+### 2026-08-27 — Phase 0: 冻结与基线 (大简化重构启动)
+
+| 日期 | Session | 功能 | 测试 | 文件 | 关键产出 |
+|---|---|---|---|---|---|
+| 08-27 | Phase 0 | 大简化重构 Phase 0：冻结基线 + 创建重构分支 | Free 1714 / Pro 2008 / Vitest 1826 | 4 新文件 | BASELINE.md + DEPENDENCY_AUDIT.md + git tag v3.1.0-final + 分支 refactor/great-simplification |
+
+**全量复盘**：对项目进行了全量复盘，识别 10 大核心问题（core 巨型上帝 crate 56K 行 / AI Agent 功能膨胀 50+ 功能 / IPC 228 命令 / 前端 31K 行 / 文档 255 个 / 测试 6900 个 / 依赖 1765 个）。制定 8 Phase 21 Session 的"大简化重构"计划，目标削减 60% 代码量。
+
+**Phase 0 执行成果**：
+- ✅ git tag `v3.1.0-final` 创建（重构前最后快照）
+- ✅ 分支 `refactor/great-simplification` 创建并切换
+- ✅ `docs/refactoring/BASELINE.md` 生成（全量基线指标：Rust 130,862 行 / 前端 30,923 行 / IPC 228 / 依赖 1,765 / 测试 3,722+1,826）
+- ✅ `docs/refactoring/DEPENDENCY_AUDIT.md` 生成（依赖审计：119 重复依赖 / 可删除依赖清单）
+- ✅ 全量测试基线确认：Free 1714 / Pro 2008 passed / Clippy Free+Pro 零警告 / fmt 通过 / tsc 0 errors / esbuild 1826 行 / Vitest 1826 passed
+- ✅ `docs/architecture/GREAT_SIMPLIFICATION_PLAN.md` 生成（~1000 行重构总计划）
+- ✅ `docs/sessions/NEXT.md` 更新为 Phase 1 R1 衔接提示词
