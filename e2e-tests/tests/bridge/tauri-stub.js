@@ -267,6 +267,7 @@ aborted: false,
 /** 工作空间列表（REQ-WS-001 多知识库 mock） */
 workspaces: [
   { id: 'default', name: 'Default', created_at: Date.now() },
+  { id: 'ws-secondary', name: 'Secondary', created_at: Date.now() },
 ],
 /** 当前工作空间 ID */
 currentWorkspaceId: 'default',

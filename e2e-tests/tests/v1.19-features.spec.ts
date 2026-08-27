@@ -14,6 +14,16 @@ test.describe('v1.19 多知识库功能 (REQ-WS-001/003)', () => {
 
   test.beforeEach(async ({ page }) => {
     await setupPage(page);
+    // 重置工作空间列表为只有 default（避免其他测试的 mock 数据干扰）
+    await page.evaluate(() => {
+      if (window.__state) {
+        window.__state.workspaces = [
+          { id: 'default', name: 'Default', created_at: Date.now() },
+        ];
+        window.__state.currentWorkspaceId = 'default';
+        window.__state.workspaceSettings['workspace.current'] = 'default';
+      }
+    });
   });
 
   /**

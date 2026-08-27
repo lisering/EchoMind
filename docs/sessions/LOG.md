@@ -432,3 +432,28 @@
 **CI 更新**：real-data-e2e.yml 改跑 Rust 集成测试（无需 dev server/浏览器，ubuntu 直跑）。
 
 **验证**: real_data_001 两次通过 ✅ | cargo build tests 0 error ✅
+
+## 2026-08-26 — CI 修复：Release Build macOS + E2E Bridge shard 4/4
+
+**问题分析**：CI 连续多次失败，根因 3 处：
+
+1. **Release Build (macOS-arm64) 失败**：`failed to parse plist from Info.plist: Io(NotFound)`。根因：`sync-to-github.sh` 同步了 `entitlements.plist` 但遗漏了 `Info.plist` 文件（`tauri.conf.json` 第 38 行引用 `infoPlist: "Info.plist"`），导致发布仓库缺少该文件，Tauri bundler 无法解析。
+
+2. **E2E Bridge shard 4/4 (ubuntu + macos) 各 6 个测试失败**：
+   - `v2.4-template-import-export.spec.ts` 5 个失败：beforeEach 中 `#promptTemplateContainer` visible 等待 5s 超时。根因：S94 设置面板重构后分区使用 `hidden` class 控制，空 div 的 `waitFor({state:'visible'})` 行为不一致。修复：改为等待容器内按钮 `attached`（timeout 10s）+ 修复 `toBeGreaterThanOr`（Playwright 不支持）→ `toBeGreaterThanOrEqual` + 修复 TC-005 变量名错误（`exportData` → `exportResult`）。
+   - `v2.4-batch-ops.spec.ts` TC-ING-BATCH-004 失败：`showBatchMoveDialog` 在 `workspaces.length <= 1` 时直接 return。根因：tauri-stub.js mock 只有 1 个 `default` 工作空间。修复：添加第二个 `ws-secondary` 工作空间 mock。
+
+3. **E2E Bridge Report 失败**：blob 下载不完整（expected 5832471 got 5826341），上游 shard 失败导致的级联问题，无需直接修复。
+
+**修复内容**：
+- `sync-to-github.sh` — 添加 `Info.plist` 同步行 + `git push --set-upstream` 回退逻辑
+- `e2e-tests/tests/bridge/tauri-stub.js` — 添加第二个工作空间 mock
+- `e2e-tests/tests/v2.4-template-import-export.spec.ts` — 修复 beforeEach 等待策略 + 修复 `toBeGreaterThanOr` → `toBeGreaterThanOrEqual` + 修复变量名
+
+**验证**: 本地 E2E 11/11 passed ✅ | 发布仓库已推送 ✅
+
+第二轮修复（v1.19 回归 + macOS codesign）：
+
+4. **v1.19-features.spec.ts 回归**：添加 `ws-secondary` 工作空间后导致 v1.19 知识库删除测试失败。TC-V19-WS003-003/004 期望只有 1 个工作空间。修复：v1.19 beforeEach 重置 `workspaces` 到只有 `default`。本地 8/8 passed ✅。
+
+5. **Release Build macOS codesign 失败**：`Signing with identity "" → no identity found → failed codesign`。根因：`tauri.conf.json` 中 `signingIdentity: "-"` 在无签名证书的 CI 环境下尝试 ad-hoc 签名但失败。第一轮修复：删除 `signingIdentity` 配置项。但仍然失败——因为 CI 的 `APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}` 在无证书时设为空字符串，Tauri 读取空字符串作为有效但为空的身份。第二轮修复：在 `run` 脚本中检测空字符串后 `unset APPLE_SIGNING_IDENTITY`，确保 Tauri 在没有签名身份时跳过签名。

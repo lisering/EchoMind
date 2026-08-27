@@ -4,7 +4,7 @@
 >
 > 每次 session 结束时**必须更新**此文件，确保反映最新状态。
 >
-> **最后更新**: 2026-08-24（晚） | **更新人**: AI Agent (阶段一「信任基建」完成。①Flaky 根治：混沌全量两轮实证 1732 passed 0 failed；tc_perf_003 阈值根因修复（量化容差 0.99→0.98 对齐 TC-PERF-004 先例）；E2E 重试策略本地 0/CI 1。②L3 质量门首跑：mutants encryption.rs 检出率 65%→93.2%（补 25 个断言缺口，BruteForce/PasswordStrength 行为级测试）；fuzz 新基建 2 targets，**semantic_splitter 首跑抓到真实 crash 并修复**（控制字符输入穿透空白块→出口统一过滤）+ 回归测试；miri 发现 weight_repack 量化内核零覆盖→新增 3 指针安全测试（aarch64 平台 half asm 限制→x86_64 CI 落地）。③quality-gate.yml 每周质量门 workflow。报告 docs/QUALITY_GATE_FIRST_RUN.md。)
+> **最后更新**: 2026-08-26 | **更新人**: AI Agent (CI 修复：Release Build macOS Info.plist + codesign + E2E Bridge shard 4/4 修复。sync-to-github.sh 添加 Info.plist 同步；tauri.conf.json 删除 signingIdentity 避免 CI 无证书 codesign 失败；tauri-stub.js 添加第二工作空间 mock；v2.4-template-import-export 修复 beforeEach 等待策略 + toBeGreaterThanOrEqual + 变量名；v1.19-features beforeEach 重置工作空间避免 ws-secondary 回归。)
 
 ---
 
@@ -383,14 +383,14 @@ cd e2e-tests && npm run test:bridge # Playwright E2E
 ## 7. 当前 Git 状态
 
 - **分支**: `main`
-- **本次变更** (S98 v3.0.0 发布完成):
-  - `docs/architecture/PRO_ROI_EVALUATION.md` — 新建（14 个 Pro 功能 ROI 评估报告）
-  - `CHANGELOG_v3.0.md` — 新建（v3.0.0 发布说明）
-  - 8 crate `Cargo.toml` + `tauri.conf.json` — 版本号 2.4.0→3.0.0
-  - `docs/SRS_v1.0.md` — v17.0.0 changelog + P0-3/P0-6 状态更新
-  - `docs/architecture/V3.0_ATOMIC_PLAN.md` — S98 标记 ✅
-  - `Cargo.lock` — 版本号同步
-- **验证状态**: Rust Free 1700 passed ✅ | Rust Pro 1991 passed ✅ | Clippy Free+Pro 零警告 ✅ | fmt 通过 ✅ | tsc 0 errors ✅ | esbuild 1816 行 (prod) / 1471 行 (release) ✅ | Vitest 1821 passed 92 files ✅ | Release build exit_code 0 (23.3m) ✅ | sync-to-github 9 files committed ✅ | git tag v3.0.0 ✅
+- **本次变更** (CI 修复 2026-08-26):
+  - `sync-to-github.sh` — 添加 `Info.plist` 同步行 + `git push --set-upstream` 回退逻辑
+  - `crates/tauri-app/tauri.conf.json` — 删除 `signingIdentity: "-"` 避免无证书 CI codesign 失败
+  - `crates/tauri-app/Info.plist` — 发布仓库同步缺失修复
+  - `e2e-tests/tests/bridge/tauri-stub.js` — 添加第二工作空间 `ws-secondary` mock
+  - `e2e-tests/tests/v2.4-template-import-export.spec.ts` — 修复 beforeEach 等待策略 + `toBeGreaterThanOrEqual` + 变量名
+  - `e2e-tests/tests/v1.19-features.spec.ts` — beforeEach 重置工作空间避免 `ws-secondary` 回归
+- **验证状态**: 本地 E2E 11/11 (v2.4) + 8/8 (v1.19) passed ✅ | CI 运行中
 
 ---
 
