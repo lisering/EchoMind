@@ -447,17 +447,18 @@ jobs:
             echo "::warning::无 blob-report 输入（上游 e2e-bridge 全部跳过/失败），跳过合并"
             exit 0
           fi
-          npx playwright merge-reports --reporter=html blob-report || {
-            echo "::warning::blob-report 合并失败（可能是下载不完整），跳过"
-            exit 0
-          }
+          # download-artifact@v4 偶发 blob 数据截断，merge-reports 可能崩溃。
+          # || true 确保步骤不失败（continue-on-error 是双保险）。
+          npx playwright merge-reports --reporter=html blob-report 2>&1 || true
 
       - name: Upload HTML report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-bridge-html-report
           path: e2e-tests/playwright-report
           retention-days: 7
+          if-no-files-found: ignore
 
   # ==================================================================
   # 8. e2e-gui — 真实 GUI 测试（WebdriverIO + tauri-driver）
