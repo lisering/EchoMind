@@ -14,7 +14,7 @@
     "@playwright/test": "^1.50.0",
     "@wdio/cli": "^9.4.0",
     "@wdio/local-runner": "^9.4.0",
-    "@wdio/mocha-framework": "^9.4.0",
+    "@wdio/mocha-framework": "^9.31.2",
     "@wdio/spec-reporter": "^9.4.0",
     "jsdom": "^25.0.1",
     "vitest": "^3.2.7"
