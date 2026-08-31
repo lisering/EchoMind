@@ -16,7 +16,7 @@
     "@wdio/local-runner": "^9.4.0",
     "@wdio/mocha-framework": "^9.4.0",
     "@wdio/spec-reporter": "^9.4.0",
-    "jsdom": "^25.0.1",
+    "jsdom": "^30.0.1",
     "vitest": "^3.2.7"
   }
 }
