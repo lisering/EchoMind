@@ -5,7 +5,6 @@
 
 mod code_exec;
 mod custom_model;
-mod skill;
 mod stt;
 mod symbol;
 mod template;
@@ -15,7 +14,6 @@ mod wiki;
 
 pub use code_exec::*;
 pub use custom_model::*;
-pub use skill::*;
 pub use stt::*;
 pub use symbol::*;
 pub use template::*;

@@ -346,8 +346,6 @@ pub fn run() {
             commands::get_rag_eval_settings,
             #[cfg(debug_assertions)]
             commands::set_rag_eval_settings,
-            // B09 Skill 系统集成（REQ-ARCH-010 v1.8：斜杠命令面板 Skill 发现）
-            commands::discover_skills,
             // v1.13: 开机自启（REQ-WIN-004）（S09: set_autostart → update_setting）
             commands::get_autostart,
             // v1.13: 应用更新检查（REQ-HELP-004）

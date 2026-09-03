@@ -11,9 +11,6 @@
 /// 文档一致性审计引擎：全量扫描式矛盾检测（REQ-AUDIT-001~005）。
 #[cfg(feature = "pro")]
 pub mod audit;
-/// 审计对 + Turn-Enclosed 模块（DH-04 借鉴 DeepSeek Harness Turn-Enclosed Audit）：
-/// 每次 turn 生成 start/end 审计对，验证完整性。
-pub mod audit_pair;
 /// 预算追踪和速率限制（QM 借鉴）：LLM API 费用控制和请求限流。
 pub mod budget;
 pub mod chat;
@@ -22,16 +19,12 @@ pub mod chat;
 /// 借鉴 CodeForge 多语言执行器：Agent 在回答代码相关问题时可执行代码片段验证结果。
 /// 端口定义在 core，真实实现在 infra（`WasmExecutor`，Pro 门控）。
 pub mod code_executor;
-/// 并发控制模块（Q09 借鉴 QM createKeyedQueue）：按 key 序列化异步操作，消除 SQLite 并发写入竞态。
-pub mod concurrency;
 /// 数据库加密模块（Argon2id 密钥派生 + SQLCipher 加密 + 暴力破解防护 + 密码强度检测）。
 pub mod encryption;
 /// NER 实体抽取器（REQ-PERF-006）：纯规则 + 正则，零 LLM/模型依赖。
 pub mod entity_extractor;
 /// 统一错误分类体系（REQ-ERR-001）：错误前缀常量 + 分类辅助函数。
 pub mod errors;
-/// 事件流自动埋点（借鉴 OpenMontage events.py）：追加写入 JSONL + 容错读取 + 零负担。
-pub mod event_stream;
 /// 对话导出模块：会话 → Markdown 文件（REQ-EXP-001）。
 pub mod export;
 /// FinishReason 归一化枚举（借鉴 Rig `FinishReason`）：归一化 provider 停止原因 + `reconcile_with_output()` + `is_truncated()`。
@@ -50,9 +43,6 @@ pub mod import;
 pub mod license;
 /// LLM API 类型化错误（B-02 借鉴 Rig ProviderResponseError）：保留原始 HTTP Status + Body。
 pub mod llm_api_error;
-/// 多协议 LLM 适配（B10 LLM Protocol Types，REQ-ARCH-012）：
-/// LLM 协议类型枚举 + 协议感知 Provider trait。
-pub mod llm_protocol;
 /// LLM 后端路由器（Q11 借鉴 QM HarnessRouter）：
 /// 按对话或用户偏好动态切换 LLM 后端，切换时通知重置会话状态。
 pub mod llm_router;
@@ -63,15 +53,8 @@ pub mod mcp;
 /// Memory Policy + Compactor + DemotionHook 三层抽象（B-07 借鉴 Rig Memory 体系）。
 pub mod memory_policy;
 /// 语义分块器：段落→句子→子句递归分割，保留代码块完整性。
-/// MMR 多样性重排（借鉴 OpenMontage corpus.py）：Maximal Marginal Relevance。
-pub mod mmr_diversifier;
 /// 性能指标采集（REQ-OBS-002）：关键操作耗时追踪。
 pub mod perf_metrics;
-/// Permission 细粒度控制（B11 Permission Rule Engine，REQ-ARCH-011）：
-/// Wildcard 匹配的 RBAC 权限规则引擎（Allow / Deny / Ask）。
-pub mod permission;
-/// 流水线阶段门控（借鉴 OpenMontage checkpoint.py）：前置检查 + 人审门控 + 历史记录。
-pub mod pipeline_checkpoint;
 /// PortableTool Trait（B-05 借鉴 Rig PortableTool）：context-free 工具抽象，工具注册解耦。
 pub mod portable_tool;
 pub mod privacy;
@@ -84,22 +67,12 @@ pub mod rag_eval;
 /// RAG 评估数据集与端到端检索质量评估（REQ-RAG-048）：
 /// 标准评估数据集 + run_retrieval_eval 管线。
 pub mod rag_eval_dataset;
-/// 检索质量门控（借鉴 OpenMontage slideshow_risk.py）：多维度评分 + verdict 系统。
-pub mod retrieval_quality_gate;
 pub mod retriever;
-/// LLM Provider 评分选择引擎（借鉴 OpenMontage scoring.py）：多维度加权评分 + 可解释选择。
-pub mod scored_selector;
 /// 章节感知分块器：Markdown 标题层级 → section 切分 → 章节路径前缀（REQ-VEC-006）。
 pub mod section_aware_splitter;
 /// 安全管理模块（自动锁屏 + 剪贴板清除 + 紧急销毁 + 系统睡眠检测）。
 pub mod security;
 pub mod semantic_splitter;
-/// Session Run Coordinator（B06 会话运行协调器）：
-/// 同会话串行 / 跨会话并发 / wake 合并 / interrupt 中断。
-pub mod session_coordinator;
-/// Skill 系统发现（B09 Skill Discovery，REQ-ARCH-010）：
-/// 从 Markdown 文件的 YAML frontmatter 解析技能信息。
-pub mod skill;
 pub mod splitter;
 pub mod stream_parse;
 /// 文件监听增量同步模块（REQ-SYNC-002）：对比文件夹与知识库，增量导入/更新/删除。
@@ -2020,8 +1993,6 @@ pub mod budget_tests;
 mod chat_tests;
 #[cfg(test)]
 mod code_executor_tests;
-#[cfg(test)]
-mod concurrency_tests;
 #[cfg(test)]
 mod entity_extractor_tests;
 #[cfg(test)]

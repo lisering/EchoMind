@@ -115,10 +115,10 @@ async fn get_llm_provider(state: &AppState) -> Result<LlmProvider, String> {
 
     let _ = state.get_llm_mode().await;
     let p = OpenAIProvider::new(
-            llm_config.api_key.clone(),
-            llm_config.base_url.clone(),
-            llm_config.model.clone(),
-        )
-        .map_err(|e| prefix_error(ERR_LLM, &format!("{e:#}")))?;
+        llm_config.api_key.clone(),
+        llm_config.base_url.clone(),
+        llm_config.model.clone(),
+    )
+    .map_err(|e| prefix_error(ERR_LLM, &format!("{e:#}")))?;
     Ok(LlmProvider::Remote(p))
 }

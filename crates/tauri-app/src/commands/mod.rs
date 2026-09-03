@@ -28,7 +28,6 @@ use echomind_core::hybrid_retriever::HybridRetriever;
 use echomind_core::import::{ImportOutcome, ImportService};
 use echomind_core::license::verify_license;
 use echomind_core::retriever::build_contextual_text;
-use echomind_core::skill::Skill;
 use echomind_infra::duckduckgo_provider::DuckDuckGoProvider;
 use echomind_infra::hyde_rewriter::HydeRewriter;
 use echomind_infra::openai_provider::OpenAIProvider;
@@ -38,9 +37,8 @@ use echomind_models::{
     ConversationTreeNode, DocStatus, DocStatusPayload, Document, DocumentPreview,
     EmbeddingProgressPayload, EntityRelation, ExecutionResult, GenerationParams,
     GlobalSearchResults, GraphCommunity, GraphPath, GraphStats, GraphTriple, ImportProgressPayload,
-    LlmConfig, LlmMode, LlmSamplingParams, MessageSearchResult, PaginatedResult,
-    PromptTemplate, RagParams, RetrievalResult, SearchResult, SettingsPayload, TokenUsage,
-    TurnActiveVersion,
+    LlmConfig, LlmMode, LlmSamplingParams, MessageSearchResult, PaginatedResult, PromptTemplate,
+    RagParams, RetrievalResult, SearchResult, SettingsPayload, TokenUsage, TurnActiveVersion,
 };
 use futures::FutureExt;
 use futures::StreamExt;

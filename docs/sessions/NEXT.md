@@ -1,15 +1,11 @@
-# Phase 1 R4 — 删除过度工程工具与借鉴
+# Phase 1 R5 — 删除前端过度工程模块
 
-> **衔接提示词已生成**：`docs/sessions/NEXT_SESSION_R3_COMPLETE.md`
->
-> 请直接阅读该文件开始下个 Session。
-
-生成日期：2026-08-27 ｜ Phase 1 R3 已完成
+> 生成日期：2026-08-28 ｜ Phase 1 R4 已完成
 
 当前版本：v3.1.0 ｜ 分支：`refactor/great-simplification` ｜ 基线 tag：`v3.1.0-final`
 
 核心文档：`docs/architecture/GREAT_SIMPLIFICATION_PLAN.md`（重构总计划，必读）
-基线文档：`docs/refactoring/BASELINE.md`（基线指标快照）+ `docs/refactoring/DEPENDENCY_AUDIT.md`（依赖审计）
+基线文档：`docs/refactoring/BASELINE.md`（基线指标快照）
 
 ## 项目概要
 
@@ -17,51 +13,45 @@ EchoMind — Rust + Tauri v2 本地 RAG 知识库。六边形架构 8 crate。�
 
 **重构模式**：所有 session 从"添加功能"转向"删除和简化"。每个 session 的产出不是新功能，而是更少的代码。
 
-## 本次会话成果 — Phase 1 R3：删除过度工程 LLM 功能
+## 本次会话成果 — Phase 1 R4：删除过度工程工具与借鉴
 
-- ✅ 删除 10 个本地 LLM 推理模块（GEMV 内核、量化块、GGUF 解析器、权重重排、层预取、RAM 预算、KV Cache、Prompt 缓存、Robust Downloader、Mistral.rs 适配层、ModelManager）
-- ✅ 移除 `LlmMode::Local` 变体，清理所有引用（llm_router、config_store、trace、tests）
-- ✅ 清理 integration.rs 中所有本地 LLM 相关测试
-- ✅ 更新 SRS REQ-LLM-003/004/005/006/007/008/009 为 Deprecated
-- ✅ 全量测试通过：Rust Free 1,326 passed, 0 failed
-- ✅ Clippy 零警告，fmt 通过
+- ✅ 删除 14 个过度工程模块（audit_pair, concurrency, event_stream, llm_protocol, mmr_diversifier, permission, pipeline_checkpoint, retrieval_quality_gate, scored_selector, session_coordinator, skill + coordination_strategy, speculative_executor, tool_orchestrator 之前已删）
+- ✅ 重写 compact/src/lib.rs：移除 CompactionTrigger, DualThresholdConfig, VerbatimTailConfig, TokenEstimator, heal_dangling_calls, schedule_background_compaction, run_background_compaction, try_acquire_background_compaction, release_background_compaction 等过度工程压缩逻辑
+- ✅ 简化 chat.rs：移除双阈值触发、后台异步压缩、SessionCoordinator 包装、persist_queue 序列化
+- ✅ 清理 AppState：移除 compaction_pending, session_coordinator, persist_queue 字段
+- ✅ 重写 compact_tests.rs：仅保留 10 个有效 TC-COMPACT-001~010 测试
+- ✅ Skill 系统全量清理：删除 skill.rs IPC 命令 + tauri-stub.js mock + lib.rs discover_skills 注册
+- ✅ 全量测试通过：compact 29 tests, core 595 tests, tauri-app 143 tests
+- ✅ Clippy 零警告，fmt 通过，TypeScript 类型检查通过，esbuild 构建成功
 
 ## 基线指标速查
 
-| 维度 | 当前值 (R3 后) | 目标值 | 剩余削减 |
+| 维度 | 当前值 (R4 后) | 目标值 | 剩余削减 |
 |---|---|---|---|
-| Rust 源码总行数 | ~93,000 | ~50,000 | -46% |
-| 最大单 crate 行数 | ~38,000 (core) | ≤ 10,000 | 拆分 |
+| Rust 源码总行数 | ~85,000 | ~50,000 | -41% |
+| 最大单 crate 行数 | ~32,000 (core) | ≤ 10,000 | 拆分 |
 | 前端 JS 总行数 | ~28,000 | ~12,000 | -57% |
-| IPC 命令数 | ~190 | ~80 | -58% |
+| IPC 命令数 | ~180 | ~80 | -56% |
 | 依赖总数 | ~1,600 | ~800 | -50% |
-| Rust 测试数 | ~1,326 | ~1,500 | +13% |
-| Vitest 测试数 | ~1,584 | ~600 | -62% |
-| 文档文件数 | ~258 | ~20 | -92% |
+| Rust 测试数 | ~767 | ~1,500 | +96% |
 
-## 下个 Session 任务 — Phase 1 R4：删除过度工程工具与借鉴
+## 下个 Session 任务 — Phase 1 R5：删除前端过度工程模块
 
-**目标**：删除过度工程的工具模块和零用户使用的借鉴功能，削减 ~5,000 行代码。
+**目标**：删除前端未使用的 UI 组件和功能模块，削减 ~5,000 行 JavaScript/TypeScript 代码。
 
-### 删除清单
+### 清理范围
 
-| 模块 | 文件 | 估计行数 |
+| 模块 | 路径 | 估计行数 |
 |---|---|---|
-| KeyedQueue | `crates/core/src/concurrency.rs` + tests | ~300 |
-| Sweeper (后台压缩) | `crates/compact/src/lib.rs` 部分功能 | ~200 |
-| EventStream | `crates/core/src/event_stream.rs` + tests | ~500 |
-| PipelineCheckpoint | `crates/core/src/pipeline_checkpoint.rs` + tests | ~500 |
-| MMR Diversifier | `crates/core/src/mmr_diversifier.rs` + tests | ~500 |
-| Quality Gate | `crates/core/src/retrieval_quality_gate.rs` + tests | ~500 |
-| Scored Selector | `crates/core/src/scored_selector.rs` + tests | ~500 |
-| CoordinatorStrategy | `crates/core/src/coordinator_strategy.rs` + tests | ~500 |
-| AuditPair | `crates/core/src/audit_pair.rs` + tests | ~500 |
-| SessionCoordinator | `crates/core/src/session_coordinator.rs` + tests | ~500 |
-| LlmProtocol | `crates/core/src/llm_protocol.rs` + tests | ~300 |
-| Permission | `crates/core/src/permission.rs` + tests | ~300 |
-| Skill | `crates/core/src/skill.rs` + tests | ~300 |
+| Skill Panel 组件 | `ui/src/skill/` | ~800 |
+| Event Stream Viewer | `ui/src/event-stream/` | ~600 |
+| Session Coordinator UI | `ui/src/session/` | ~500 |
+| Pipeline Checkpoint UI | `ui/src/pipeline/` | ~500 |
+| Quality Gate Dashboard | `ui/src/quality/` | ~600 |
+| Scored Selector UI | `ui/src/scoring/` | ~500 |
+| Audit Panel | `ui/src/audit/` | ~500 |
 
-**预计削减**: ~5,000 行
+**预计削减**: ~4,000-5,000 行
 
 ## 重构全景路线图
 
@@ -71,8 +61,8 @@ EchoMind — Rust + Tauri v2 本地 RAG 知识库。六边形架构 8 crate。�
 | Phase 1 R1 | 删除学术 RAG 优化 | 1 | ✅ 完成 |
 | Phase 1 R2 | 删除过度工程 Agent 功能 | 1 | ✅ 完成 |
 | Phase 1 R3 | 删除过度工程 LLM 功能 | 1 | ✅ 完成 |
-| **Phase 1 R4** | **删除过度工程工具与借鉴** | **1** | **← 下个 Session** |
-| Phase 1 R5 | 删除前端过度工程模块 | 1 | 待定 |
+| **Phase 1 R4** | **删除过度工程工具与借鉴** | **1** | **✅ 完成** |
+| Phase 1 R5 | 删除前端过度工程模块 | 1 | ← 下个 Session |
 | Phase 2 | Core crate 拆分 | 3 | 待定 |
 | Phase 3 | IPC 命令精简 | 2 | 待定 |
 | Phase 4 | 前端简化 | 3 | 待定 |
@@ -126,7 +116,7 @@ cd e2e-tests && npm run test:unit
 | `docs/refactoring/BASELINE.md` | 基线指标快照 |
 | `docs/refactoring/DEPENDENCY_AUDIT.md` | 依赖审计报告 |
 | `docs/sessions/CURRENT_STATE.md` | 当前项目状态快照 |
-| `docs/sessions/NEXT.md` | 本文件 (Phase 1 R4 衔接提示词) |
+| `docs/sessions/NEXT.md` | 本文件 (Phase 1 R5 衔接提示词) |
 | `docs/sessions/LOG.md` | 会话时间线日志 |
 | `docs/SRS_v1.0.md` | 需求规格唯一依据 |
 | `docs/api/ipc-commands.md` | IPC 命令签名 |
@@ -136,10 +126,10 @@ cd e2e-tests && npm run test:unit
 
 ## Session 结束时必须完成
 
-- ✅ 更新 `docs/sessions/NEXT.md` — 替换为下个 session (Phase 1 R4) 的提示词
+- ✅ 更新 `docs/sessions/NEXT.md` — 替换为下个 session (Phase 1 R5) 的提示词
 - ✅ 追加 `docs/sessions/LOG.md` — 记录本次 session 的时间线和成果
 - ✅ 更新 `docs/sessions/CURRENT_STATE.md` — 更新状态快照
 - ✅ 运行 `./sync-to-github.sh --commit` — 同步到 GitHub 发布仓库
 - ✅ Git commit + push
 
-**下一步**：Phase 1 R4 — 删除过度工程工具与借鉴，削减 ~5,000 行代码
+**下一步**：Phase 1 R5 — 删除前端过度工程模块，削减 ~5,000 行前端代码

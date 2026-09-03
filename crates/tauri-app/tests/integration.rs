@@ -22,15 +22,14 @@ use echomind_tauri_app::commands::{
     delete_conversation_inner, delete_document_inner, edit_user_message_inner,
     edit_user_message_inner_full, export_conversation_markdown_inner,
     export_document_original_inner, forward_stream, get_conversation_cost_inner,
-    get_conversations_inner, get_conversations_paginated_inner,
-    get_locale_inner, get_messages_inner, get_pro_status_inner, get_settings_inner,
-    get_sidebar_collapsed_inner, get_watched_folders_inner, import_files_inner,
-    open_data_dir_inner, persist_exchange, rebuild_index_inner,
-    record_token_usage_inner, remove_watched_folder_inner, retry_index_inner, save_text_file_inner,
-    search_symbols_inner, set_context_token_limit_inner, set_embedding_model_inner,
-    set_hybrid_search_inner, set_hyde_enabled_inner,
-    set_locale_inner, set_rerank_enabled_inner, set_sidebar_collapsed_inner,
-    set_token_budget_inner, update_llm_config_inner,
+    get_conversations_inner, get_conversations_paginated_inner, get_locale_inner,
+    get_messages_inner, get_pro_status_inner, get_settings_inner, get_sidebar_collapsed_inner,
+    get_watched_folders_inner, import_files_inner, open_data_dir_inner, persist_exchange,
+    rebuild_index_inner, record_token_usage_inner, remove_watched_folder_inner, retry_index_inner,
+    save_text_file_inner, search_symbols_inner, set_context_token_limit_inner,
+    set_embedding_model_inner, set_hybrid_search_inner, set_hyde_enabled_inner, set_locale_inner,
+    set_rerank_enabled_inner, set_sidebar_collapsed_inner, set_token_budget_inner,
+    update_llm_config_inner,
 };
 #[cfg(feature = "pro")]
 use echomind_tauri_app::commands::{audit_document_inner, set_vlm_enabled_inner};

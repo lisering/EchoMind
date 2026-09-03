@@ -11,9 +11,7 @@ use echomind_core::budget::estimate_cost_usd;
 /// **Panic 安全**：使用 `catch_unwind` 捕获 `chat_inner` 中的 panic（如 ONNX 运行时崩溃），
 /// 确保前端始终收到 `chat_error` 事件，不会永久停留在「初始化向量化引擎」阶段。
 ///
-/// **S5: SessionCoordinator** — `session_coordinator.run()` 包装对话执行，
-/// 同一 conversation_id 的请求串行化（防止并发写入消息历史损坏），
-/// 不同 conversation_id 并发执行互不阻塞。
+///
 #[tauri::command]
 pub async fn chat(
     app: AppHandle,
@@ -26,54 +24,31 @@ pub async fn chat(
 ) -> Result<(), String> {
     let state_inner = state.inner();
 
-    // S5: SessionCoordinator — 会话级串行化
-    let coord = state_inner.session_coordinator.clone();
-
-    // Clone owned data for Fn closure（每次调用需 clone）
-    let app_c = app.clone();
-    let query_c = query.clone();
-    let history_c = history.clone();
-    let conv_id_c = conversation_id.clone();
-    let tg_c = turn_group.clone();
-    let ver_c = version;
-
-    let coord_result = coord
-        .run(&conversation_id, move || {
-            let app = app_c.clone();
-            let query = query_c.clone();
-            let history = history_c.clone();
-            let conv_id = conv_id_c.clone();
-            let tg = tg_c.clone();
-            let ver = ver_c;
-            async move {
-                // Panic 恢复：捕获 chat_inner 中的 panic
-                let inner_future = std::panic::AssertUnwindSafe(chat_inner(
-                    &app,
-                    &query,
-                    &history,
-                    &conv_id,
-                    tg.as_deref(),
-                    ver,
-                    state_inner,
-                ));
-                inner_future
-                    .catch_unwind()
-                    .await
-                    .map_err(|panic_payload| {
-                        let msg = panic_payload
-                            .downcast_ref::<&str>()
-                            .copied()
-                            .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
-                            .unwrap_or("未知 panic");
-                        anyhow::anyhow!("UNKNOWN: 对话引擎内部错误（panic）: {msg}")
-                    })
-                    .and_then(|r| r.map_err(|e| anyhow::anyhow!(e)))
-            }
+    // Panic 恢复：捕获 chat_inner 中的 panic
+    let inner_future = std::panic::AssertUnwindSafe(chat_inner(
+        &app,
+        &query,
+        &history,
+        &conversation_id,
+        turn_group.as_deref(),
+        version,
+        state_inner,
+    ));
+    let result = inner_future
+        .catch_unwind()
+        .await
+        .map_err(|panic_payload| {
+            let msg = panic_payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("未知 panic");
+            anyhow::anyhow!("UNKNOWN: 对话引擎内部错误（panic）: {msg}")
         })
-        .await;
+        .and_then(|r| r.map_err(|e| anyhow::anyhow!(e)));
 
     // 转换 anyhow::Result<()> → Result<(), String>
-    coord_result.map_err(|e| {
+    result.map_err(|e| {
         let err_str = e.to_string();
         if has_error_prefix(&err_str) {
             err_str
@@ -367,18 +342,14 @@ pub async fn chat_inner<R: Runtime>(
              参考资料：\n{context_text}"
         );
 
-        // 上下文压缩（复用已有逻辑：compact_smart 异步压缩）
+        // 上下文压缩（Token 预算驱动，超限触发 LLM 摘要压缩）
         let max_context_tokens = settings_map
             .get("rag.context_token_limit")
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(4096);
         let compaction = CompactionEngine::new(&provider);
         let compaction_result = compaction
-            .compact_smart(
-                history,
-                max_context_tokens,
-                &echomind_compact::VerbatimTailConfig::default(),
-            )
+            .compact(history, max_context_tokens)
             .await
             .map_err(|e| prefix_error(ERR_LLM, &format!("上下文压缩失败: {e:#}")))?;
         let compacted_history = &compaction_result.history;
@@ -494,86 +465,6 @@ pub async fn chat_inner<R: Runtime>(
 
     let compaction = CompactionEngine::new(&provider);
 
-    // Q04：修复悬空 tool_call（借鉴 QM healDanglingCalls）
-    //
-    // Agent 模式下 tool_call 被中断时（如用户取消、进程崩溃），
-    // assistant 消息中包含 Action 但后续没有对应的 Observation。
-    // 在压缩前自动补全 [interrupted] 占位消息，确保压缩后的历史
-    // 不会包含半完成的 ReAct 循环。
-    let mut healed_history = history.to_vec();
-    echomind_compact::heal_dangling_calls(&mut healed_history);
-    let history: &[ChatMessage] = &healed_history;
-
-    // Q03：双阈值压缩配置（借鉴 QM COMPACT_SOFT/HARD_FRACTION）
-    // Soft 阈值（70%）触发后台异步压缩（不阻塞当前轮次）
-    // Hard 阈值（90%）触发同步压缩（阻塞兜底）
-    let dual_config = echomind_compact::DualThresholdConfig::from_settings(
-        settings_map
-            .get("compaction.soft_threshold")
-            .and_then(|v| v.parse::<f64>().ok()),
-        settings_map
-            .get("compaction.hard_threshold")
-            .and_then(|v| v.parse::<f64>().ok()),
-        settings_map
-            .get("compaction.max_entries")
-            .and_then(|v| v.parse::<usize>().ok()),
-        Some(context_token_limit),
-    );
-    let compaction_trigger = compaction.check_compaction_needed(history, &dual_config);
-
-    // Q03：Background 触发 — 后台异步压缩（不阻塞当前轮次）
-    // S68：使用 schedule_background_compaction 统一封装 try_acquire + run + release
-    if compaction_trigger.is_background() {
-        let bg_history = history.to_vec();
-        let bg_max_tokens = context_token_limit;
-        let bg_pending = std::sync::Arc::clone(&state.compaction_pending);
-        let bg_conv_id = conversation_id.to_string();
-        let _bg_mode = llm_mode;
-
-        {
-            // Remote 路径：创建新 OpenAIProvider 后调度
-            let bg_config = llm_config.clone();
-            if let Ok(bg_provider) = OpenAIProvider::new(
-                bg_config.api_key.clone(),
-                bg_config.base_url.clone(),
-                bg_config.model.clone(),
-            ) && echomind_compact::schedule_background_compaction(
-                bg_conv_id.clone(),
-                bg_history.clone(),
-                bg_max_tokens,
-                bg_provider,
-                bg_pending.clone(),
-            )
-            .await
-            .is_some()
-            {
-                // try_acquire 成功，spawn run + release
-                tokio::spawn(async move {
-                    match OpenAIProvider::new(
-                        bg_config.api_key.clone(),
-                        bg_config.base_url.clone(),
-                        bg_config.model.clone(),
-                    ) {
-                        Ok(bg_provider) => {
-                            echomind_compact::run_background_compaction(
-                                &bg_conv_id,
-                                &bg_history,
-                                bg_max_tokens,
-                                &bg_provider,
-                            )
-                            .await;
-                        }
-                        Err(e) => {
-                            warn!("后台压缩 provider 创建失败: {e:#}");
-                        }
-                    }
-                    echomind_compact::release_background_compaction(&bg_conv_id, bg_pending).await;
-                });
-            }
-        }
-        // Background 模式：当前轮次使用未压缩历史（后台压缩完成后下轮生效）
-    }
-
     // **性能优化（秒出答案）**：标准 RAG 路径下，上下文压缩（仅长历史超限才调 LLM）
     // 与知识库检索互不依赖 → 并行执行，节省串行等待；coordinator/agent/speculative
     // 分支各自内部检索，不预检索（避免浪费）。
@@ -584,26 +475,8 @@ pub async fn chat_inner<R: Runtime>(
     let (compaction_result, prefetched_sources) = if use_parallel_retrieval {
         emit_chat_phase(app, "retrieving", "检索知识库…");
         // 并行 compaction + 检索（使用预计算嵌入）
-        // Q03：Synchronous 触发 → 调用 compact()；None/Background → 跳过压缩
         {
-            // 未命中：并行 compaction + 检索（使用预计算嵌入），完成后写 L3 缓存
-            // Q03：Synchronous 触发 → 调用 compact()；None/Background → 跳过压缩
-            let compact_fut = async {
-                if compaction_trigger.is_synchronous() {
-                    compaction
-                        .compact_smart(
-                            history,
-                            context_token_limit,
-                            &echomind_compact::VerbatimTailConfig::default(),
-                        )
-                        .await
-                } else {
-                    Ok(echomind_models::CompactionResult {
-                        history: history.to_vec(),
-                        info: None,
-                    })
-                }
-            };
+            let compact_fut = async { compaction.compact(history, context_token_limit).await };
             // **性能优化**：使用 retrieve_with_embedding 复用预计算嵌入（省 1 次 ONNX 推理 ~50-100ms）
             // async 块创建单一 future 类型，避免 match 臂 opaque 类型不匹配
             let retrieve_fut = async {
@@ -659,22 +532,10 @@ pub async fn chat_inner<R: Runtime>(
         }
     } else {
         (
-            if compaction_trigger.is_synchronous() {
-                compaction
-                    .compact_smart(
-                        history,
-                        context_token_limit,
-                        &echomind_compact::VerbatimTailConfig::default(),
-                    )
-                    .await
-                    .map_err(|e| prefix_error(ERR_LLM, &format!("上下文压缩失败: {e:#}")))?
-            } else {
-                // Q03：None 或 Background → 当前轮次不压缩
-                echomind_models::CompactionResult {
-                    history: history.to_vec(),
-                    info: None,
-                }
-            },
+            compaction
+                .compact(history, context_token_limit)
+                .await
+                .map_err(|e| prefix_error(ERR_LLM, &format!("上下文压缩失败: {e:#}")))?,
             None,
         )
     };
@@ -972,9 +833,6 @@ pub async fn forward_stream<R: Runtime>(
 
 /// 一轮问答落库（REQ-RAG-006）：首轮自动提取标题；空回答（秒中断）跳过 assistant 记录。
 ///
-/// 使用 KeyedQueue 按 conversation_id 序列化（Q09 借鉴 QM createKeyedQueue），
-/// 消除同一会话并发 persist_exchange 调用的 SQLite 写入竞态。
-///
 /// # 参数
 /// - `reasoning`: 助手消息的推理思考过程（reasoning_content，推理模型才有），
 ///   落库持久化，历史消息加载时可重现思考过程（P2-1 之后的修复）。
@@ -989,30 +847,20 @@ pub async fn persist_exchange(
     turn_group: Option<&str>,
     version: Option<i32>,
 ) -> Result<(), String> {
-    // 按 conversation_id 序列化：同一会话的 persist_exchange 串行执行，
-    // 不同会话并行执行，不影响跨会话性能。
-    let key = conversation_id.to_string();
-    state
-        .persist_queue
-        .run(key, || async {
-            persist_exchange_inner(
-                state,
-                conversation_id,
-                query,
-                answer,
-                sources,
-                reasoning,
-                turn_group,
-                version,
-            )
-            .await
-        })
-        .await
+    persist_exchange_inner(
+        state,
+        conversation_id,
+        query,
+        answer,
+        sources,
+        reasoning,
+        turn_group,
+        version,
+    )
+    .await
 }
 
-/// persist_exchange 的内部实现（无序列化，直接写入 SQLite）。
-///
-/// 由 `persist_exchange` 通过 KeyedQueue 调用，确保同会话串行。
+/// persist_exchange 的内部实现（直接写入 SQLite）。
 #[allow(clippy::too_many_arguments)]
 async fn persist_exchange_inner(
     state: &AppState,

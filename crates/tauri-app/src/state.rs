@@ -10,7 +10,6 @@
 //! `AppState` 保留所有便捷访问方法（委托到各 Store），确保 `commands.rs` 无需大改。
 //! 存储（`SqliteStorage`）仍由 `AppState` 直接持有，各 Store 通过 `Arc` 共享引用。
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -73,15 +72,6 @@ pub struct AppState {
     pub contextual_retrieval_enabled: bool,
     /// RAG 链路追踪存储（S70：Cherry Studio 借鉴 — span 级耗时追踪）
     pub trace_store: Arc<RwLock<echomind_core::trace::TraceStore>>,
-    /// Session Run Coordinator（B06 会话运行协调器）：
-    /// 同会话串行 / 跨会话并发 / wake 合并 / interrupt 中断。
-    pub session_coordinator: Arc<echomind_core::session_coordinator::SessionCoordinator>,
-    /// 后台压缩去重集合（Q03：双阈值压缩）。
-    ///
-    /// 追踪正在进行后台压缩的会话 ID，防止同一会话重复触发。
-    /// Soft 阈值触发时 `try_acquire_background_compaction()` 插入；
-    /// 压缩完成后 `release_background_compaction()` 移除。
-    pub compaction_pending: Arc<tokio::sync::Mutex<HashSet<String>>>,
     /// 安全态势级别（Q05 借鉴 QM SecurityPosture）。
     ///
     /// 三层安全态势（Dangerous / Auto / Strict）控制内容筛查和工具审批。
@@ -96,12 +86,6 @@ pub struct AppState {
     ///
     /// LLM API 费用控制和速率限制，防止过度消耗。
     pub budget_tracker: Arc<echomind_core::budget::BudgetTracker>,
-    /// 按 key 序列化并发操作的队列（Q09 借鉴 QM createKeyedQueue）。
-    ///
-    /// 同 conversation_id 的 persist_exchange 操作串行执行，
-    /// 消除 SQLite 并发写入竞态（消息顺序错乱、标题覆盖等）。
-    /// 不同 conversation_id 的操作并行执行，不影响跨会话性能。
-    pub persist_queue: echomind_core::concurrency::KeyedQueue<String>,
     /// LLM 后端路由器（Q11 借鉴 QM HarnessRouter）。
     ///
     /// 按 conversation_id 追踪上次使用的模式，支持运行时动态切换 LLM 后端
@@ -266,14 +250,9 @@ impl AppState {
             web_search_enabled,
             contextual_retrieval_enabled,
             trace_store: Arc::new(RwLock::new(echomind_core::trace::TraceStore::new(50))),
-            session_coordinator: Arc::new(
-                echomind_core::session_coordinator::SessionCoordinator::new(),
-            ),
-            compaction_pending: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             security_posture,
             shadow_screen_collector: Arc::new(echomind_core::security::ShadowScreenCollector::new()),
             budget_tracker: Arc::new(echomind_core::budget::BudgetTracker::new(0.0)), // Default: no limit
-            persist_queue: echomind_core::concurrency::KeyedQueue::new(),
             llm_router: llm_router_init,
             _log_guard: log_guard,
             mcp_registry: echomind_core::mcp::registry::McpRegistry::new(),

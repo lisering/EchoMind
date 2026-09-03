@@ -70,15 +70,15 @@ mod perf_real_e2e_tests;
 mod perf_suite_tests;
 #[cfg(test)]
 mod storage_tests;
+/// 代码符号引擎 TDD 测试（REQ-RAG-031, Pro feature）。
+#[cfg(all(test, feature = "pro"))]
+mod symbol_engine_tests;
 /// 嵌入模型下载境内加速 TDD 测试（REQ-VEC-017, v2.3）。
 #[cfg(test)]
 mod vec_accel_tests;
 /// 向量缓存正确性修复 + 归一化点积 TDD 测试（REQ-PERF-016/017, v2.2）。
 #[cfg(test)]
 mod vec_cache_tests;
-/// 代码符号引擎 TDD 测试（REQ-RAG-031, Pro feature）。
-#[cfg(all(test, feature = "pro"))]
-mod symbol_engine_tests;
 /// WASM 沙箱执行器 TDD 测试（REQ-RAG-032, Pro feature）。
 #[cfg(all(test, feature = "pro"))]
 mod wasm_executor_tests;

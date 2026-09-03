@@ -387,8 +387,6 @@ promptTemplates: [
   { id: 'pt-test-summary', name: 'test_summary', label: 'Test Summary', description: 'Test summary template', icon: '📋', prompt_template: 'Please summarize: {query}', created_at: 1700000000, updated_at: 1700000000 },
   { id: 'pt-test-translate', name: 'test_translate', label: 'Test Translate', description: 'Test translate template', icon: '🌐', prompt_template: 'Please translate: {query}', created_at: 1700000001, updated_at: 1700000001 },
 ],
-// B09 v1.8：Skill 文件（slash: true 的技能）
-skills: [],
 /** Wiki 双向链接数据（REQ-ING-020） */
 wikiLinks: [],
 /** Trace 记录（S2 复盘接线） */
@@ -2013,12 +2011,6 @@ return state.promptTemplates.slice().sort((a, b) => a.name.localeCompare(b.name)
 case 'delete_prompt_template':
 state.promptTemplates = state.promptTemplates.filter((t) => t.id !== (args.templateId || args.template_id));
 return null;
-
-// ============================================================
-// B09 Skill 系统集成（v1.8：斜杠命令面板 Skill 发现）
-// ============================================================
-case 'discover_skills':
-return state.skills || [];
 
 // ============================================================
 // Wiki 双向链接（REQ-ING-020 Markdown 笔记双向链接）
