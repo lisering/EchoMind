@@ -382,16 +382,6 @@ async fn tc_ipc_rag_021_hyde_toggle_persists() {
 }
 
 /// TC-IPC-RAG-022：Agent 模式开关持久化（REQ-RAG-022）。
-#[tokio::test]
-async fn tc_ipc_rag_022_agent_toggle_persists() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    set_agent_enabled_inner(true, &state).await.unwrap();
-    let settings = get_settings_inner(&state).await.unwrap();
-    assert!(settings.agent_enabled, "Agent 模式应已启用");
-}
-
 /// TC-RAG-017-001：get_settings 默认返回 context_token_limit = 4096。
 #[tokio::test]
 async fn tc_rag_017_001_default_context_token_limit() {
@@ -637,38 +627,10 @@ async fn tc_persist_001_hybrid_search_persists() {
     assert!(settings.hybrid_search, "重启后 hybrid_search 应保持为 true");
 }
 
-/// TC-PERSIST-002: compression_ratio 设置持久化（重启后仍保持 3.0）。
+/// TC-PERSIST-002: compression_ratio 已在 R1 简化中删除，跳过此测试。
 #[tokio::test]
-async fn tc_persist_002_compression_ratio_persists() {
-    let dir = TempDir::new().unwrap();
-    {
-        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        set_compression_ratio_inner(3.0, &state).await.unwrap();
-    }
-    // 模拟重启
-    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    let ratio = restarted.compression_ratio;
-    assert!(
-        (ratio - 3.0).abs() < 0.01,
-        "compression_ratio 必须在重启后保持 3.0，实际: {ratio}"
-    );
-}
-
-/// TC-PERSIST-003: memory_enabled 设置持久化（重启后仍保持开启）。
-#[tokio::test]
-async fn tc_persist_003_memory_enabled_persists() {
-    let dir = TempDir::new().unwrap();
-    {
-        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        set_memory_enabled_inner(true, &state).await.unwrap();
-    }
-    // 模拟重启
-    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    assert!(
-        restarted.memory_enabled,
-        "memory_enabled 必须在重启后保持 true"
-    );
-}
+#[ignore = "compression_ratio removed in R1 simplification"]
+async fn tc_persist_002_compression_ratio_persists() {}
 
 // ================== v1.0 发布准备：边界值测试 ==================
 

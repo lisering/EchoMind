@@ -2,7 +2,7 @@
  * EchoMind 输入区快速 Toggle - DeepSeek 风格输入框旁快速开关。
  *
  * 职责：
- * 1. 创建可点击的 toggle 按钮（混合搜索 / Agent 模式）
+ * 1. 创建可点击的 toggle 按钮（混合搜索）
  * 2. 点击切换 active 状态并调用后端 IPC 命令
  * 3. 暴露 getToggleState() 查询当前状态
  *
@@ -18,7 +18,6 @@ import { get, setState, subscribe } from './state.js';
 
 /** SVG 图标 */
 const ICON_HYBRID = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
-const ICON_AGENT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v1a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4z"/><path d="M5 12h14M12 8v8"/></svg>`;
 
 /**
  * Toggle 配置表 - 每个 toggle 的设置键（S09 update_setting 白名单）+ 图标 + i18n key。
@@ -30,23 +29,16 @@ const TOGGLE_CONFIG = {
     tooltipKey: 'chat.toggle_hybrid_tooltip',
     settingKey: 'rag.hybrid_search',
   },
-  agent: {
-    icon: ICON_AGENT,
-    labelKey: 'chat.toggle_agent',
-    tooltipKey: 'chat.toggle_agent_tooltip',
-    settingKey: 'rag.agent_enabled',
-  },
 };
 
 /**
  * 将 settingKey 转换为 state.js 中的字段名
- * @param {string} settingKey - 'hybrid' | 'agent'
+ * @param {string} settingKey - 'hybrid'
  * @returns {string}
  */
 function settingKeyToStateKey(settingKey) {
   switch (settingKey) {
     case 'hybrid': return 'hybridEnabled';
-    case 'agent': return 'agentEnabled';
     default: return settingKey;
   }
 }
@@ -54,14 +46,14 @@ function settingKeyToStateKey(settingKey) {
 /**
  * 创建输入框旁的快速 toggle 按钮。
  *
- * @param {string} settingKey - 'hybrid' | 'agent'
+ * @param {string} settingKey - 'hybrid'
  * @param {boolean} [initialActive=false] - 初始激活状态
  * @returns {HTMLDivElement} toggle 按钮元素
  */
 export function createInputToggle(settingKey, initialActive = false) {
   const config = TOGGLE_CONFIG[settingKey];
   if (!config) {
-    console.warn(`[input-toggles] 未知 settingKey: ${settingKey}（S94 精简后仅支持 hybrid/agent）`);
+    console.warn(`[input-toggles] 未知 settingKey: ${settingKey}（R2 精简后仅支持 hybrid）`);
     return document.createElement('div');
   }
 
@@ -139,7 +131,7 @@ export function createInputToggle(settingKey, initialActive = false) {
 
 /**
  * 获取指定 toggle 的当前状态。
- * @param {string} settingKey - 'hybrid' | 'agent'
+ * @param {string} settingKey - 'hybrid'
  * @returns {boolean}
  */
 export function getToggleState(settingKey) {
@@ -149,7 +141,7 @@ export function getToggleState(settingKey) {
 
 /**
  * 设置 toggle 状态（外部同步用，不触发 IPC）。
- * @param {string} settingKey - 'hybrid' | 'agent'
+ * @param {string} settingKey - 'hybrid'
  * @param {boolean} value
  */
 export function setToggleState(settingKey, value) {

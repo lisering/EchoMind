@@ -4,7 +4,7 @@
 >
 > 每次 session 结束时**必须更新**此文件，确保反映最新状态。
 >
-> **最后更新**: 2026-08-27 | **更新人**: AI Agent (大简化重构 Phase 0 完成。冻结基线 + 创建重构分支 + 生成 BASELINE.md + DEPENDENCY_AUDIT.md。)
+> **最后更新**: 2026-08-27 | **更新人**: AI Agent (大简化重构 Phase 1 R2 完成。删除 10 个 Agent/Rust 模块 + Durable/Session Todo IPC + 前端 Agent UI，削减 ~13,000 行。测试 1,419 passed, clippy 零警告, tsc 0 errors, esbuild 1,584 行。)
 
 ---
 
@@ -12,10 +12,9 @@
 
 | 指标 | 数值 | 备注 |
 |---|---|---|
-| Rust 单元+集成测试 (Free) | **1700 passed**, 0 failed, 31 ignored | `cargo test` ✅（v3.0.0 发布回归） |
-| Rust 单元+集成测试 (Pro) | **1991 passed**, 0 failed, 49 ignored | `cargo test --features pro` ✅（v3.0.0 发布回归） |
+| Rust 单元+集成测试 (Free) | **1419 passed**, 0 failed, 33 ignored | `cargo test` ✅（Phase 1 R2 后回归） |
+| Rust 单元+集成测试 (Pro) | 待验证 | `cargo test --features pro` (R1 后未单独验证 Pro) |
 | Clippy (Free) | 零警告 | `cargo clippy --all-targets -- -D warnings` ✅ |
-| Clippy (Pro) | 零警告 | `cargo clippy --all-targets --features pro -- -D warnings` ✅（修复 `match_result_ok` lint：`chat.rs:508` `.ok()` → `Ok` 直匹配）|
 | cargo fmt | 通过 | `cargo fmt --check` ✅ |
 | 前端单元测试 (Vitest) | **1821 passed**, 92 files, 0 failed | S97 MCP 面板后全量回归通过（v3.0.0 发布回归） |
 | UI 类型检查 | **0 errors** ✅ | `npx tsc --noEmit`（v2.0 S18 修复 5 个 pre-existing errors → 0） |
@@ -26,7 +25,7 @@
 | 僵尸命令数 | **0**（僵尸率 0%） | Zombie Zero ✅ S2 验证：全部 236 命令有前端调用者 |
 | 幻影调用数 | **0** ✅ | S5 P0-5 修复：4 后端命令实现 + 5 前端委托迁移 + 1 后端命令新增 |
 | 供应链安全 | cargo audit + cargo deny | `deny.toml` 配置 |
-| 前端构建行数 | 1816 (prod) / 1471 (release) | esbuild IIFE 打包（v3.0.0 S97 MCP 面板后） |
+| 前端构建行数 | 1584 (prod) | esbuild IIFE 打包（Phase 1 R2 后） |
 | 前端模块数 | 56 | `ui/src/*.js`（S93+S95 合并后：input-keymap/input-history→input-utils 等）|
 | 前端源码体积 | ~1.02 MB (JS) + 118 KB (CSS) | 56 个 JS 源文件 + 6 个 CSS 文件（S95 精简后） |
 | 前端 Vendor 体积（启动） | **~100 KB** (eager) + 4.5 MB (lazy) | **三层优化**：① Tailwind JIT 441KB → 预构建 36KB ② mermaid UMD 3482KB → esbuild 自定义打包 3371KB（-3.2%） ③ highlight.js 124KB eager → lazy（见 lazy-loader.js）|
@@ -68,9 +67,9 @@
 | **Contextual Retrieval 上下文增强嵌入** | **REQ-RAG-041** | **✅ Implemented** | `crates/core/src/retriever.rs`（`build_contextual_text()`）, `crates/tauri-app/src/commands/import.rs`（`embed_document_chunks()` 条件化上下文前缀）, `crates/tauri-app/src/commands/performance.rs`（`set_contextual_retrieval` + `rebuild_contextual_embeddings` IPC）, `ui/src/perf-settings.js`（开关 toggle） |
 | 流中断 (CancellationToken) | REQ-RAG-005 | ✅ Done | `crates/tauri-app/src/stores/chat_store.rs` |
 | 消息列表懒加载 | REQ-RAG-019 | ✅ Done | `crates/tauri-app/src/commands.rs` |
-| ReAct Agent 多步推理 | REQ-RAG-022 | ✅ Done | `crates/core/src/agent.rs` |
-| 多代理协调引擎 | REQ-RAG-025 | ✅ Done | `crates/core/src/coordinator.rs` |
-| 后台空闲整理引擎 | - | ✅ Done | `crates/core/src/auto_dream.rs` |
+| ReAct Agent 多步推理 | REQ-RAG-022 | ✅ Deprecated (v3.1.0 Phase 1 R2) | — |
+| 多代理协调引擎 | REQ-RAG-025 | ✅ Deprecated (v3.1.0 Phase 1 R2) | — |
+| 后台空闲整理引擎 | - | ✅ Deprecated (v3.1.0 Phase 1 R2) | — |
 | 文件监听增量同步 | REQ-SYNC-001~003 | ✅ Done | `crates/core/src/sync.rs`, `crates/infra/src/file_watcher.rs` |
 | 对话导出为 Markdown | REQ-EXP-001 | ✅ Done | `crates/core/src/export.rs` |
 | **PDF 导出 (window.print)** | **REQ-EXP-005** | **✅ Implemented** | `ui/src/export.js`, `ui/styles/print.css` |
@@ -148,12 +147,12 @@
 
 | 功能 | SRS REQ | 状态 | 关键文件 |
 |---|---|---|---|
-| DAG 工作流可视化面板 | REQ-RAG-030 | ✅ Done | `ui/src/workflow-panel.js` |
-| 持久化记忆管理面板 | REQ-RAG-033 | ✅ Done | `ui/src/memory-panel.js` |
-| AutoDream 知识库整理面板 | REQ-RAG-029 | ✅ Done | `ui/src/dream-panel.js` |
+| DAG 工作流可视化面板 | REQ-RAG-030 | ✅ Deprecated (v3.1.0 Phase 1 R2) | — |
+| 持久化记忆管理面板 | REQ-RAG-033 | ✅ Deprecated (v3.1.0 Phase 1 R2) | — |
+| AutoDream 知识库整理面板 | REQ-RAG-029 | ✅ Deprecated (v3.1.0 Phase 1 R2) | — |
 | 代码符号搜索面板 | REQ-RAG-031 | ✅ Done | `ui/src/symbol-search.js` |
 | 性能优化设置面板 | REQ-PERF-001~012 | ✅ Done | `ui/src/perf-settings.js` |
-| 输入区 Toggle 精简 (5→2, 移除 sub_agent/memory/web_search) | REQ-UI-014 | ✅ S94 Implemented | `ui/src/input-toggles.js` (TOGGLE_CONFIG 2项: hybrid + agent) |
+| 输入区 Toggle 精简 (5→1, 移除 agent toggle) | REQ-UI-014 | ✅ S94+R2 Implemented | `ui/src/input-toggles.js` (TOGGLE_CONFIG 1项: hybrid) |
 | tauri-stub.js 117 IPC mock 全覆盖 | - | ✅ Done | `e2e-tests/tests/bridge/tauri-stub.js` |
 | 5 个新 E2E spec 文件 (26 tests) | - | ✅ Done | `e2e-tests/tests/{workflow-panel,dream-panel,symbol-search,memory-panel,perf-settings}.spec.ts` |
 

@@ -104,13 +104,6 @@ pub async fn get_settings_inner(state: &AppState) -> Result<SettingsPayload, Str
         .await
         .map_err(|e| format!("{e:#}"))?
         .unwrap_or_else(|| "all-MiniLM-L6-v2".to_string());
-    // REQ-RAG-022：读取 Agentic RAG 开关（默认关闭）
-    let agent_enabled = state
-        .storage
-        .get_setting("rag.agent_enabled")
-        .await
-        .map_err(|e| format!("{e:#}"))?
-        .is_some_and(|v| v == "true");
     // REQ-RAG-017：读取上下文 token 限制（默认 4096）
     let context_token_limit = state
         .storage
@@ -203,19 +196,9 @@ pub async fn get_settings_inner(state: &AppState) -> Result<SettingsPayload, Str
         .await
         .map_err(|e| format!("{e:#}"))?
         .is_some_and(|v| v == "true");
-    let sub_agent_enabled = state
-        .storage
-        .get_setting("rag.sub_agent_enabled")
-        .await
-        .map_err(|e| format!("{e:#}"))?
-        .is_some_and(|v| v == "true");
-    let progressive_injection = state
-        .storage
-        .get_setting("rag.progressive_injection")
-        .await
-        .map_err(|e| format!("{e:#}"))?
-        .is_some_and(|v| v == "true");
-    let speculative_enabled = state.speculative_enabled;
+    let sub_agent_enabled = false;
+    let progressive_injection = false;
+    let speculative_enabled = false;
     let graph_retriever_enabled = state.graph_retriever_enabled;
     let contextual_retrieval = state.contextual_retrieval_enabled;
     Ok(match config {
@@ -228,7 +211,7 @@ pub async fn get_settings_inner(state: &AppState) -> Result<SettingsPayload, Str
             hybrid_search,
             rerank_enabled,
             hyde_enabled,
-            agent_enabled,
+            agent_enabled: false,
             embedding_model,
             context_token_limit,
             llm_mode,
@@ -258,7 +241,7 @@ pub async fn get_settings_inner(state: &AppState) -> Result<SettingsPayload, Str
             hybrid_search,
             rerank_enabled,
             hyde_enabled,
-            agent_enabled,
+            agent_enabled: false,
             embedding_model,
             context_token_limit,
             llm_mode,
@@ -506,6 +489,16 @@ pub async fn set_theme_inner(theme: &str, state: &AppState) -> Result<(), String
     state
         .storage
         .set_setting("ui.theme", theme)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// 记忆开关写入逻辑（命令与集成测试复用）。
+/// R2 简化：memory_store 模块已删除，此处仅保留 settings 表持久化。
+pub async fn set_memory_enabled_inner(enabled: bool, state: &AppState) -> Result<(), String> {
+    state
+        .storage
+        .set_setting("memory.enabled", if enabled { "true" } else { "false" })
         .await
         .map_err(|e| format!("{e:#}"))
 }
@@ -1463,9 +1456,6 @@ const UPDATEABLE_KEYS: &[&str] = &[
     "rag.hybrid_search",
     "rag.rerank_enabled",
     "rag.hyde_enabled",
-    "rag.agent_enabled",
-    "rag.coordinator_enabled",
-    "rag.sub_agent_enabled",
     "vec.embedding_model",
     "compression.ratio",
     "rag.context_token_limit",
@@ -1533,29 +1523,16 @@ pub async fn update_setting_inner(
         "rag.hybrid_search" => set_hybrid_search_inner(enabled, state).await,
         "rag.rerank_enabled" => set_rerank_enabled_inner(enabled, state).await,
         "rag.hyde_enabled" => set_hyde_enabled_inner(enabled, state).await,
-        "rag.agent_enabled" => set_agent_enabled_inner(enabled, state).await,
-        "rag.coordinator_enabled" => set_coordinator_mode_inner(enabled, state).await,
-        "rag.sub_agent_enabled" => set_sub_agent_enabled_inner(enabled, state).await,
         "mm.vlm_enabled" => set_vlm_enabled_inner(enabled, state).await,
-        "rag.progressive_injection" => set_progressive_injection_inner(enabled, state).await,
-        "rag.speculative_enabled" => set_speculative_enabled_inner(enabled, state).await,
-        "rag.quality_gate_enabled" => set_quality_gate_enabled_inner(enabled, state).await,
-        "rag.graph_retriever_enabled" => set_graph_retriever_enabled_inner(enabled, state).await,
         "memory.enabled" => set_memory_enabled_inner(enabled, state).await,
         "rag.web_search_enabled" => set_web_search_enabled_inner(enabled, state).await,
         "rag.contextual_retrieval" => set_contextual_retrieval_inner(enabled, state).await,
         "window.close_to_tray" => set_close_to_tray_inner(enabled, state).await,
         "ui.sidebar_collapsed" => set_sidebar_collapsed_inner(enabled, state).await,
-        "rag.retrieval_memory_enabled" => set_retrieval_memory_enabled_inner(enabled, state).await,
         "update.auto_check" => set_update_check_enabled_inner(enabled, state).await,
 
         // ── 数值类（需 parse） ──
-        "compression.ratio" => {
-            let ratio = value
-                .parse::<f32>()
-                .map_err(|_| prefix_error(ERR_VALIDATION, &format!("压缩比必须为数字: {value}")))?;
-            set_compression_ratio_inner(ratio, state).await
-        }
+        // compression.ratio 已删除（大简化重构）
         "rag.context_token_limit" => {
             let limit = value.parse::<usize>().map_err(|_| {
                 prefix_error(ERR_VALIDATION, &format!("token 限制必须为正整数: {value}"))

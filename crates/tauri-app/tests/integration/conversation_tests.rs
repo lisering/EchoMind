@@ -214,55 +214,6 @@ async fn tc_cost_002_cost_reflects_usage() {
     assert_eq!(cost.token_budget, 50000, "预算不变");
 }
 
-// =============================================================
-// 多代理协调模式集成测试（Session 33）
-// =============================================================
-
-/// TC-COORD-001：set_coordinator_mode 持久化到 settings 表。
-#[tokio::test]
-async fn tc_coord_001_coordinator_mode_persists() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 启用协调模式
-    set_coordinator_mode_inner(true, &state).await.unwrap();
-
-    // 验证持久化
-    let value = state
-        .storage
-        .get_setting("rag.coordinator_enabled")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(value, "true", "启用后应为 true");
-
-    // 关闭协调模式
-    set_coordinator_mode_inner(false, &state).await.unwrap();
-
-    let value = state
-        .storage
-        .get_setting("rag.coordinator_enabled")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(value, "false", "关闭后应为 false");
-}
-
-/// TC-COORD-002：协调模式默认关闭（未设置时为 false）。
-#[tokio::test]
-async fn tc_coord_002_coordinator_mode_default_off() {
-    let dir = TempDir::new().unwrap();
-    let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-
-    // 未设置时应默认为 false
-    let value = state
-        .storage
-        .get_setting("rag.coordinator_enabled")
-        .await
-        .unwrap();
-    assert!(value.is_none(), "未设置时应为 None（视为 false）");
-}
-
 // ================== 编辑版本持久化测试（AC-QA-006 DB 持久化） ==================
 
 /// TC-EDIT-DB-001: edit_user_message 创建新版本并持久化到 DB。

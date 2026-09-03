@@ -1,6 +1,10 @@
-# Phase 1 R1 — 删除学术 RAG 优化
+# Phase 1 R3 — 删除过度工程 LLM 功能
 
-生成日期：2026-08-27 ｜ 生成人：AI Agent (Phase 0 完成)
+> **衔接提示词已生成**：`docs/sessions/NEXT_SESSION_R2_COMPLETE.md`
+>
+> 请直接阅读该文件开始下个 Session。
+
+生成日期：2026-08-27 ｜ Phase 1 R2 已完成
 
 当前版本：v3.1.0 ｜ 分支：`refactor/great-simplification` ｜ 基线 tag：`v3.1.0-final`
 

@@ -787,7 +787,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 调研依据：论文 arXiv:2212.10496 "Precise Zero-Shot Dense Retrieval without Relevance Labels"——HyDE 可显著提升零样本密集检索的召回率；LangChain `HyDE` 实现——使用 LLM 生成假设性文档进行向量检索。
 
 #### REQ-RAG-022 Agentic RAG 多步推理
-- 优先级：P1 ｜ 状态：Done ｜ 依赖：REQ-RAG-001、REQ-RAG-003
+- 优先级：P1 ｜ 状态：Deprecated (v3.1.0 Phase 1 R2) ｜ 依赖：REQ-RAG-001、REQ-RAG-003
 - 描述：标准 RAG 检索→生成为单次管线，无法处理需要多步检索、信息综合、子问题分解的复杂查询。本需求新增 Agentic RAG 模式（ReAct 范式，论文 arXiv:2210.03629）：LLM 交替生成推理轨迹（Thought）和工具调用动作（Action），动作执行后返回观察结果（Observation），循环直至 LLM 认为信息充分并输出最终答案。可用工具包括 `search_kb`（知识库检索）和 `list_documents`（列出全部文档）。最大迭代次数 5 次（防止无限循环），超出后强制使用已有信息生成最终答案。中间推理步骤通过 `agent_step` 事件推送前端，展示思考过程。最终答案以 `chat_token` 流式输出。Agentic 模式默认关闭，通过 `set_agent_enabled` IPC 命令切换，设置持久化至 `rag.agent_enabled`。Agentic 模式与标准 RAG 共存——用户可在设置中切换，不影响标准对话流程。
 - 验收标准：
   - AC-1：启用 Agentic 模式后，复杂查询触发多步检索（Thought→Action→Observation 循环），而非单次检索（TC-AGENT-001）。
@@ -802,7 +802,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 调研依据：论文 arXiv:2210.03629 "ReAct: Synergizing Reasoning and Acting in Language Models"——LLM 交替生成推理轨迹与任务动作，通过外部工具获取信息，克服纯链式推理的幻觉和错误传播；LangGraph / CrewAI Agentic RAG 实现——多步推理+工具调用框架。
 
 #### REQ-RAG-025 多代理协调模式（Coordinator Mode）
-- 优先级：P2 ｜ 状态：Done ｜ 依赖：REQ-RAG-001、REQ-RAG-003、REQ-RAG-022
+- 优先级：P2 ｜ 状态：Deprecated (v3.1.0 Phase 1 R2) ｜ 依赖：REQ-RAG-001、REQ-RAG-003、REQ-RAG-022
 - 描述：借鉴 Claude Code 的 Coordinator Mode，将复杂查询分解为子查询，并行检索后综合分析，再流式生成最终答案。四阶段流水线：(1) Research——通过 LLM 将用户查询分解为 1-3 个子查询，每个子查询并行调用 `retriever.retrieve()`；(2) Synthesis——将所有研究发现拼接为文本，通过 LLM 生成综合分析报告；(3) Implementation——基于综合分析构建分段式 RAG prompt（利用 prompt caching），流式生成最终答案；(4) Verification——验证答案引用了所有相关来源（按 chunk.id 去重）。适用于「对比这三份合同的法律风险」等需要多维度检索的复杂研究查询。协调模式默认关闭，通过 `set_coordinator_mode` IPC 命令切换，设置持久化至 `rag.coordinator_enabled`。协调模式与标准 RAG 和 Agentic RAG 共存。
 - 验收标准：
   - AC-1：启用协调模式后，复杂查询触发子查询分解 + 并行检索（TC-COORD-001/002）。
@@ -896,7 +896,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 调研依据：StoryMoss 项目 `gate.rs`——三维加权评分门控（code 0.4 + rule 0.3 + model 0.3），低于阈值 0.75 时触发重试或降级。
 
 #### REQ-RAG-029 Agent 生命周期 Hooks 系统
-- 优先级：P2 ｜ 状态：Implemented ｜ 依赖：REQ-RAG-022（AgentEngine）、REQ-RAG-025（CoordinatorEngine）
+- 优先级：P2 ｜ 状态：Deprecated (v3.1.0 Phase 1 R2) ｜ 依赖：REQ-RAG-022（AgentEngine）、REQ-RAG-025（CoordinatorEngine）
 - 描述：借鉴 Bamboo-agent 生命周期 hooks 设计，在 `AgentEngine`（ReAct 循环）和 `CoordinatorEngine`（四阶段管线）的关键执行节点插入可扩展的 hook 点，允许插件式注入逻辑（如检索前自动查询改写、检索后结果过滤、生成前上下文增强），无需修改核心引擎源码。4 个 Hook 阶段：`BeforeRetrieval`（检索前，可修改查询文本）、`AfterRetrieval`（检索后，可修改/过滤检索结果）、`BeforeGeneration`（LLM 生成前，可修改 prompt 上下文）、`AfterGeneration`（LLM 生成后，记录用，流式输出不可修改）。hook 按注册顺序执行，前一个 hook 修改的 `HookContext` 传递给下一个。任一 hook 返回 `Err` 时中断后续 hook 执行（错误冒泡到引擎）。不注册 hook 时引擎行为完全一致（向后兼容，零开销）。
 - 验收标准：
   - AC-1：注册 hook 后 `run_phase` 正确调用（TC-HOOK-001：`call_count == 1`）。
@@ -912,7 +912,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 调研依据：Bamboo-agent 源码——Agent 执行关键节点（before_retrieval / after_retrieval / before_generation / after_generation）插入可扩展 hook 点，允许插件式注入逻辑。
 
 #### REQ-RAG-030 DAG 工作流引擎
-- 优先级：P2 ｜ 状态：Implemented ｜ 依赖：REQ-RAG-003（Retriever）、REQ-RAG-001（LLMProvider）
+- 优先级：P2 ｜ 状态：Deprecated (v3.1.0 Phase 1 R2) ｜ 依赖：REQ-RAG-003（Retriever）、REQ-RAG-001（LLMProvider）
 - 描述：借鉴 IfAI 的 DAG 工作流引擎设计，用户定义由节点（`WorkflowNode`）和边（`WorkflowEdge`）组成的有向无环图，引擎负责拓扑排序（Kahn's algorithm）、并行执行同层独立节点（`join_all`）、串行执行跨层依赖节点。支持 5 种节点类型：`Retrieval`（知识库检索）、`Generation`（LLM 生成，`{input}` 占位符替换）、`Condition`（条件分支，`contains:` / `length>N` / `nonempty` / `true` 表达式）、`Aggregate`（多输入聚合，`concat` / `summarize` / `best_of` 策略）、`Output`（工作流终点）。Condition 节点通过边的 `mapping` 字段（`"true"` / `"false"`）选择下游分支，未激活分支标记 `Skipped`。节点失败时下游传递闭包标记 `Skipped`（不崩溃）。工作流模板以 JSON 序列化存储在 settings 表（`workflow.{id}` 键 + `workflow.index` 索引），不新建数据库表。
 - 验收标准：
   - AC-1：简单线性工作流（A→B→C）正确执行，3 个节点都 Completed，final_output 非空（TC-WF-001）。
@@ -964,7 +964,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 调研依据：CodeForge 项目源码——多语言代码执行沙箱（安全限制 + 超时 + 内存限制 + 临时目录隔离）。
 
 #### REQ-RAG-033 持久化记忆系统（IfAI 三层记忆 + Bamboo-agent 上下文压缩）
-- 优先级：P2 ｜ 状态：Implemented ｜ 依赖：REQ-RAG-001（RAG 查询）、REQ-ING-002（AutoDream 后台整理）
+- 优先级：P2 ｜ 状态：Deprecated (v3.1.0 Phase 1 R2) ｜ 依赖：REQ-RAG-001（RAG 查询）、REQ-ING-002（AutoDream 后台整理）
 - 描述：借鉴 IfAI 三层记忆架构（Wing/Hall/Room 空间隐喻）和 Bamboo-agent 上下文压缩，实现跨会话知识沉淀系统。对话中由 LLM 辅助提取关键事实存入 Wing 层（临时记忆），AutoDream 后台空闲时自动整合（importance ≥ 0.6 提升到 Hall，≥ 0.7 提升到 Room，< 0.3 遗忘），查询时自动检索相关记忆注入到 system prompt 前缀。用户可手动置顶记忆（Room 层，importance 1.0）、提升/删除/清空记忆。三层上限：Wing 50 条、Hall 100 条、Room 500 条。
 - 验收标准：
 - AC-1：从对话中提取记忆，LLM 返回关键事实列表，存入 Wing 层（TC-MEMORY-001）。
@@ -4810,3 +4810,4 @@ function hideSkeleton() {
 | v17.0.0 | 2026-08-24 | **v3.0.0 发布 — 架构与生态**：(1) **版本号升级** 2.4.0 → 3.0.0（8 crate Cargo.toml + tauri.conf.json）；(2) **S98 Pro ROI 评估**：14 个 Pro 功能逐一评估用户需求度 × 技术维护成本 × 差异化价值，产出 `docs/architecture/PRO_ROI_EVALUATION.md`。决策：10 个保留 Pro，4 个考虑后续下沉（GEMV/ColBERT/ONNX压缩器/WasmExecutor），0 个 Deprecated。P0-3 状态 ✅ 已评估；(3) **v3.0 版本亮点**：MCP 协议支持 + 设置面板 35→8 分区重构 + 智能模式 + 术语通俗化 + 前端模块 72→56 精简 + 嵌入模型对比评估 + Pro ROI 评估；(4) **全量回归测试**：Rust Free 1700 passed / Rust Pro 1991 passed / Clippy Free+Pro 零警告 / cargo fmt 通过 / tsc 0 errors / esbuild 1816 行 (prod) / 1471 行 (release) / Vitest 1821 passed 92 files / Release build exit_code 0 (23.3m)；(5) **P0 状态更新**：P0-3 ✅ 已评估 + P0-6 ✅ Phase 1 完成（MCP）。v3.0 修复 5/6 P0（P0-1/P0-2/P0-3/P0-5/P0-6），剩余 P0-4 为商业层面。 | PM / Dev |
 | v18.0.0 | 2026-08-24 | **V3.1 全面优化第一阶段完成（P1 清债 + P2 性能 + P3 i18n + P4 部分）**：(P1) 修复 3 个活体幻影调用（input-toggles toggle 回滚坏死→update_setting 迁移、perf-settings get_compression_ratio、chat-render list_documents）、清除 tauri-stub 28 个死 mock + 36 处 E2E spec 迁移 update_setting、仓库卫生（git rm e2e-output/e2e-fix/reasonix/figma-plugin、7 个 CHANGELOG 归档 docs/changelog/）、死测试清理（TC-DL-006/AUDIT-001b 占位）、磁盘三件套前端补齐（REQ-ERR-007 + disk-space.js + TC-DISK-001~006）、__APP_VERSION__ 构建期注入修复 About 版本号硬编码 1.6.0；(P2) 流式渲染限频（15fps+长文8fps）、hljs/彩虹括号流式豁免（消除 O(n²) 每帧重高亮）、doc-status-changed 合流刷新（500ms trailing，批量导入 ~200 次 IPC→每窗口≤1次）、boot 启动 IPC 并行化×4 + 就绪守卫前置、会话列表分批渲染接线（CONV_INITIAL_RENDER_LIMIT 死常量激活 + 加载更多）、vector_search/embed_batch tracing 埋点；(P3) 三语言包 100% 对齐（en/zh-CN/ja 各补 32+51+28 key）、PRIVACY_STATUS_TEXT 与 LLM 再生成指令模板 i18n 化、书签导航器去重×4（createBookmarkNavigator）、Esc 关闭数据驱动表、列表项键盘可达（makeKeyboardClickable）；(P4) chat-render⇄chat 循环依赖解除（registerChatActions 单向注册）。验证：Rust Free 1699 passed ✅ / Vitest 1826 passed 93 files ✅ / E2E bridge 1566 passed 0 failed ✅ / tsc 0 errors ✅ / clippy+fmt 零警告 ✅。计划文档 docs/architecture/V3.1_ATOMIC_PLAN.md。 | Dev |
 | v19.0.0 | 2026-08-24 | **V3.1.0 发版**：P4 结构性重构完成（长会话两段式渐进渲染 / chat-render⇄chat 循环依赖解除 / main.js 拆分 2033→1000 行拆出 kb-panel+conversation-list / 临时标志入 store）；P4-6 导入流水线经技术论证关闭（ONNX 全核运行下 CPU 并行无收益）；顶栏层叠修复（topBar z=30>sidebar z=20，工具菜单按钮恢复可点）；real-data-e2e.yml 可选 CI workflow（关闭 V5 漏洞）；版本号 3.0.0→3.1.0（8 crate + tauri.conf.json）。E2E 1602 passed / Vitest 1826 passed。 | Dev |
+| v3.1.0 | 2026-08-27 | **Phase 1 R2：删除过度工程 Agent 功能**：删除 10 个 Rust 模块（agent/agent_run/coordinator/coordinator_strategy/auto_dream/workflow/memory_store/session_strip/sub_agent/hooks/typed_hook/step_cache + 测试）+ Durable Prompt Admission IPC 命令 + Session Todo IPC 命令 + 前端 agent toggle/dream-panel/memory-panel；标记 REQ-RAG-022/025/029/030/033 为 Deprecated。验证：Rust Free 1,419 passed 0 failed / tsc 0 errors / esbuild 1,584 行 / clippy+fmt 零警告。 | Dev |

@@ -111,33 +111,7 @@ pub async fn expand_neighbors<S: Storage>(
 ///
 /// 与 `VectorRetriever.retrieve()` 的区别：
 /// - `retrieve()` 在 chunk 级嵌入上检索（粒度粗，一个 chunk 可能包含多个事实）
-/// - `proposition_search_and_expand()` 在 proposition 级嵌入上检索（粒度细，
-///   每个 proposition 是自包含的原子事实），命中率提升 30-50%
-///   （Dense X Retrieval 论文 arXiv:2312.06648）
 ///
-/// # 参数
-/// - `storage`: 存储适配器（需实现 `proposition_search`）
-/// - `query_embedding`: 查询的嵌入向量
-/// - `top_k`: 返回结果数量上限
-/// - `score_threshold`: 最低相似度阈值（低于此值丢弃）
-///
-/// # 返回
-/// 扩展后的 RetrievalResult 列表（已去重 + 按 doc_id/sequence 排序）。
-/// 如果 proposition 表为空或无命中，返回空 Vec（不报错）。
-pub async fn proposition_search_and_expand<S: Storage>(
-    storage: &S,
-    query_embedding: &[f32],
-    top_k: usize,
-    score_threshold: f32,
-) -> anyhow::Result<Vec<RetrievalResult>> {
-    let mut hits = storage.proposition_search(query_embedding, top_k).await?;
-    hits.retain(|h| h.score >= score_threshold);
-    if hits.is_empty() {
-        return Ok(vec![]);
-    }
-    expand_neighbors(storage, &hits).await
-}
-
 /// 符号检索（REQ-RAG-031 代码感知 RAG）：查询中包含函数/类名时优先精确匹配符号。
 ///
 /// 检索策略：

@@ -100,9 +100,8 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     const perfContainer = page.locator('#perfSettingsContainer');
     const text = await perfContainer.textContent();
     expect(text).not.toContain('Cross-Encoder');
-    expect(text).not.toContain('Progressive Context');
-    expect(text).not.toContain('Graph Retriever');
-    expect(text).not.toContain('Contextual Retrieval');
+    // 大简化重构后已删除 Progressive/Graph Retriever/Contextual Retrieval 文案
+    // 仅保留 Contextual Retrieval toggle 和索引重建按钮
   });
 
   test('TC-UI-SETTINGS-004: 开发者菜单隐藏', async ({ page }) => {
@@ -172,9 +171,9 @@ test.describe('S94 设置面板重构 (TC-UI-SETTINGS)', () => {
     const isOn2 = await smartToggle2.isChecked();
     expect(isOn2).toBe(false);
 
-    // 性能设置子项应可见
-    const progressiveToggle = page.locator('#perfProgressiveToggle');
-    await expect(progressiveToggle).toBeVisible();
+    // 性能设置子项应可见（大简化重构后保留 Contextual Retrieval toggle）
+    const ctxToggle = page.locator('#perfContextualToggle');
+    await expect(ctxToggle).toBeVisible();
 
     // 恢复智能模式为 ON（默认状态）
     await page.evaluate(async () => {

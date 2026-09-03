@@ -365,70 +365,7 @@ async fn tc_full_006_hybrid_search_vector_and_keyword() {
 // TC-FULL-008: 导入 → 压缩 → 压缩后检索 → 结果一致性
 // ============================================================================
 
-/// TC-FULL-008：导入 → 设置压缩比 → 验证压缩比持久化 → 检索结果一致。
-///
-/// 验证设置 compression_ratio 后，检索结果不受压缩设置影响（压缩仅影响 prompt 构建，
-/// 不影响检索本身）。验证设置持久化和重启恢复。
+/// TC-FULL-008: compression_ratio 已在 R1 简化中删除，跳过此测试。
 #[tokio::test]
-async fn tc_full_008_compression_then_search_consistency() {
-    let dir = TempDir::new().unwrap();
-
-    // 1. 初始状态：设置压缩比 = 3.0
-    {
-        let state = AppState::new(dir.path().to_path_buf()).await.unwrap();
-        set_compression_ratio_inner(3.0, &state).await.unwrap();
-
-        // 导入文档
-        let service = ImportService::new(state.storage.clone(), state.data_dir.clone());
-        let md = dir.path().join("compress-test.md");
-        std::fs::write(
-            &md,
-            "# 压缩测试\n\n这是用于测试压缩后检索一致性的文档内容。",
-        )
-        .unwrap();
-        let canon = md.canonicalize().unwrap().to_string_lossy().into_owned();
-        let outcome = service.import_one(&canon, true).await.unwrap();
-        let doc = match outcome {
-            ImportOutcome::Imported(d) => d,
-            _ => panic!("导入应成功"),
-        };
-        service.index_document(&doc).await.unwrap();
-
-        // 写入向量
-        let chunks = state.storage.list_chunks(&doc.id).await.unwrap();
-        for chunk in &chunks {
-            state
-                .storage
-                .add_embedding(&chunk.id, &[0.8_f32, 0.2])
-                .await
-                .unwrap();
-        }
-
-        // 检索
-        let hits = state.storage.vector_search(&[0.8, 0.2], 5).await.unwrap();
-        assert!(!hits.is_empty(), "压缩设置下检索应返回结果");
-        assert!(
-            hits[0].doc_name.contains("compress-test"),
-            "检索应返回压缩测试文档"
-        );
-    }
-
-    // 2. 重启后验证设置持久化
-    let restarted = AppState::new(dir.path().to_path_buf()).await.unwrap();
-    assert!(
-        (restarted.compression_ratio - 3.0).abs() < 0.01,
-        "重启后 compression_ratio 应保持 3.0"
-    );
-
-    // 3. 检索结果应与压缩前一致
-    let hits_after = restarted
-        .storage
-        .vector_search(&[0.8, 0.2], 5)
-        .await
-        .unwrap();
-    assert!(!hits_after.is_empty(), "重启后检索应返回结果");
-    assert!(
-        hits_after[0].doc_name.contains("compress-test"),
-        "重启后检索应返回相同文档"
-    );
-}
+#[ignore = "compression_ratio removed in R1 simplification"]
+async fn tc_full_008_compression_then_search_consistency() {}

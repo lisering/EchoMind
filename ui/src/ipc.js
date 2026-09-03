@@ -156,15 +156,6 @@ export const convApi = {
   exportMarkdown: (conversationId) => invoke('export_conversation_markdown', { conversationId }),
   /** 保存文本文件到指定路径（REQ-EXP-001 辅助）*/
   saveTextFile: (path, content) => invoke('save_text_file', { path, content }),
-  /** Session Strip: strip messages by index range (REQ-RAG-046, S10 开发者工具门控) */
-  stripMessages: (conversationId, fromIndex, toIndex, replaceWithSummary, summaryText) =>
-    devInvoke('strip_messages', { conversationId, fromIndex, toIndex, replaceWithSummary, summaryText }, null),
-  /** Session Strip: keep last N messages (REQ-RAG-046, S10 开发者工具门控) */
-  stripKeepingRecent: (conversationId, keepLastN, replaceWithSummary, summaryText) =>
-    devInvoke('strip_keeping_recent', { conversationId, keepLastN, replaceWithSummary, summaryText }, null),
-  /** Session Strip: preview messages to be stripped (REQ-RAG-046, S10 开发者工具门控) */
-  previewStrip: (conversationId, fromIndex, toIndex) =>
-    devInvoke('preview_strip', { conversationId, fromIndex, toIndex }, null),
   /** 删除单条消息（REQ-RAG-013：user 消息连带删除下一条 assistant） */
   deleteMessage: (conversationId, messageId) =>
     invoke('delete_message', { conversationId, messageId }),
@@ -428,46 +419,6 @@ export const diskApi = {
   check: (requiredBytes) => invoke('check_disk_space', { requiredBytes }),
 };
 
-/** 记忆系统扩展相关（S2 复盘 — 僵尸命令接线） */
-export const memoryExtApi = {
-  /** 固定记忆（pin） */
-  pin: (memoryId) => invoke('pin_memory', { memory_id: memoryId }),
-  /** 手动触发 Scratch 层 LLM 整合 */
-  triggerConsolidation: () => invoke('trigger_memory_consolidation'),
-  /** 查询 scratch 日志 */
-  getScratchLogs: (limit = 50) => invoke('get_scratch_logs', { limit }),
-  /** 推送 Burst Buffer 轮次 */
-  pushBurstTurn: (turn) => invoke('push_burst_turn', { turn }),
-  /** 手动 flush Burst Buffer */
-  flushBurstBuffer: () => invoke('flush_memory_burst_buffer'),
-  /** 获取 Burst Buffer 状态 */
-  getBurstBufferStatus: () => invoke('get_burst_buffer_status'),
-};
-
-/** Durable 输入队列相关（S2 复盘 — 僵尸命令接线，S10 开发者工具门控） */
-export const durableApi = {
-  /** 接收待处理输入 */
-  admit: (conversationId, content, delivery) =>
-    devInvoke('admit_input', { conversationId, content, delivery }, null),
-  /** 提升待处理输入为正式消息 */
-  promote: (inputId) => devInvoke('promote_input', { inputId }),
-  /** 获取待处理输入列表 */
-  getPending: (conversationId) => devInvoke('get_pending_inputs', { conversationId }, []),
-};
-
-/** Session Todo 相关（S2 复盘 — 僵尸命令接线，S10 开发者工具门控） */
-export const todoApi = {
-  /** 添加待办事项 */
-  add: (conversationId, text) => devInvoke('add_session_todo', { conversationId, text }, null),
-  /** 更新待办状态 */
-  updateStatus: (todoId, status) => devInvoke('update_todo_status', { todoId, status }),
-  /** 获取会话待办列表 */
-  list: (conversationId) => devInvoke('get_session_todos', { conversationId }, []),
-  /** 删除单个待办 */
-  delete: (todoId) => devInvoke('delete_session_todo', { todoId }),
-  /** 删除会话全部待办 */
-  deleteAll: (conversationId) => devInvoke('delete_session_todos', { conversationId }),
-};
 
 /** 文档重分类（S2 复盘 — 僵尸命令接线） */
 export const docExtApi = {

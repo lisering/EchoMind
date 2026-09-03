@@ -23,7 +23,6 @@
  * @property {HTMLElement|null} currentAssistantEl - 当前 assistant Block DOM
  * @property {boolean} renderScheduled     - rAF 渲染调度标志
  * @property {boolean} tempWebSearch       - /web 斜杠命令临时启用网页搜索标志（chat_done 后复位）
- * @property {boolean} tempAgent           - /agent 斜杠命令临时启用 Agent 模式标志（chat_done 后复位）
  * @property {boolean} regenForceSearch    - 强制检索重生成临时开混合搜索标志（chat_done 后复位）
  * @property {string|null} currentConversationId - 当前会话 ID
  * @property {boolean} isNewConversation   - 是否处于新建未持久化会话状态（懒创建标志）
@@ -56,9 +55,6 @@
  * @property {boolean} demoMode            - REQ-RAG-051: 演示模式（无 Key 体验）
  * @property {Object<string, string>} drafts - 会话级草稿（conversationId → 未发送文本）
  * @property {boolean} hybridEnabled       - 混合搜索开关
- * @property {boolean} agentEnabled        - Agent 模式开关
- * @property {boolean} subAgentEnabled     - 子代理开关
- * @property {boolean} memoryEnabled       - 记忆开关
  * @property {boolean} webSearchEnabled    - 网页搜索开关
  * @property {Array} docList              - 文档提及列表
  */
@@ -76,8 +72,6 @@ const initialState = {
   currentAssistantEl: null,
   /** V3.1 P4-4：/web 斜杠命令的「单次会话临时启用」标志（chat_done 后复位） */
   tempWebSearch: false,
-  /** V3.1 P4-4：/agent 斜杠命令的「单次会话临时启用」标志（chat_done 后复位） */
-  tempAgent: false,
   /** V3.1 P4-4：强制检索重生成的「临时开混合搜索」标志（chat_done 后复位） */
   regenForceSearch: false,
   renderScheduled: false,
@@ -117,9 +111,6 @@ demoMode: false,                  // REQ-RAG-051: 演示模式（无 Key 体验�
   
   // 功能开关状态（方案4：input-toggles.js 状态补全）
   hybridEnabled: false,            // 混合搜索开关
-  agentEnabled: false,             // Agent 模式开关
-  subAgentEnabled: false,          // 子代理开关
-  memoryEnabled: false,            // 记忆开关
   webSearchEnabled: false,         // 网页搜索开关
   docList: [],                     // 文档提及列表（chat.js doc-mention 需要）
 };

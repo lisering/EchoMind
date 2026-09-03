@@ -495,3 +495,19 @@
 - ✅ 全量测试基线确认：Free 1714 / Pro 2008 passed / Clippy Free+Pro 零警告 / fmt 通过 / tsc 0 errors / esbuild 1826 行 / Vitest 1826 passed
 - ✅ `docs/architecture/GREAT_SIMPLIFICATION_PLAN.md` 生成（~1000 行重构总计划）
 - ✅ `docs/sessions/NEXT.md` 更新为 Phase 1 R1 衔接提示词
+
+## 2026-08-27 (Phase 1 R1：删除学术 RAG 优化)
+
+| 日期 | Session | 功能 | 测试 | 文件 | 关键产出 |
+|---|---|---|---|---|---|
+| 08-27 | Phase 1 R1 | 删除学术 RAG 优化模块 | Free 1,568 | 49 | 削减 12,680 行；删除 SpeculativeRAG/SummaryTree/Proposition/ProgressiveInjector/RetrievalMemory/PromptCompressor/ResponseCache/DomainClassifier/LateChunking/EmbedComparison + SqliteCache/OnnxCompressor/ColbertEmbedder；清理 chat.rs 中 L3 缓存/Speculative/PromptCompressor/QualityGate/RetrievalMemory 死代码块 + `let false` 绑定 + StepCache if false 块；清理 document/import/workspace/settings 中缓存失效残留；简化 state.rs 测试函数 |
+
+**验证结果**：cargo check 零警告 / clippy 零警告 / fmt 通过 / tsc 0 errors / esbuild 1,735 行 / sync-to-github 已提交
+
+## 2026-08-27 (Phase 1 R2：删除过度工程 Agent 功能)
+
+| 日期 | Session | 功能 | 测试 | 文件 | 关键产出 |
+|---|---|---|---|---|---|
+| 08-27 | Phase 1 R2 | 删除过度工程 Agent 功能 | Free 1,419 | 50+ | 削减 ~13,000 行；删除 10 个 Rust 模块（agent/agent_run/coordinator/coordinator_strategy/auto_dream/workflow/memory_store/session_strip/sub_agent/hooks/typed_hook/step_cache + 测试）；删除 IPC 命令（admit_input/promote_input/get_pending_inputs + Session Todo 5 命令）；清理 lib.rs 测试 mod 声明；简化 chat_inner（删除 coordinator_enabled/agent_enabled 分支，仅保留标准 RAG 路径）；前端清理（agent toggle 移除、dream-panel.js/memory-panel.js 删除、state.js 字段清理）；标记 REQ-RAG-022/025/029/030/033 为 Deprecated |
+
+**验证结果**：cargo check 零警告 / clippy 零警告 / fmt 通过 / tsc 0 errors / esbuild 1,584 行

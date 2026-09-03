@@ -14,17 +14,10 @@ use md5::{Digest, Md5};
 use tracing::{debug, info, warn};
 
 use echomind_compact::CompactionEngine;
-use echomind_core::DomainClassifier as _;
 use echomind_core::Embedder as _;
-use echomind_core::ResponseCache as _;
 use echomind_core::Retriever as _;
 use echomind_core::Storage;
-use echomind_core::agent::{AgentEngine, AgentStepInfo};
-use echomind_core::auto_dream::DreamEngine;
-use echomind_core::cache::query_hash;
 use echomind_core::chat::{ChatEngine, ChatOutcome};
-use echomind_core::coordinator::{CoordinatorEngine, CoordinatorPhaseInfo};
-use echomind_core::domain::EmbeddingDomainClassifier;
 use echomind_core::errors::ERR_PRO_REQUIRED;
 use echomind_core::errors::{
     ERR_EMBED, ERR_LLM, ERR_PARSE, ERR_STORAGE, ERR_UNKNOWN, ERR_VALIDATION, MAX_API_KEY_LENGTH,
@@ -33,25 +26,21 @@ use echomind_core::errors::{
 use echomind_core::export::{export_conversation_to_markdown, sanitize_filename};
 use echomind_core::hybrid_retriever::HybridRetriever;
 use echomind_core::import::{ImportOutcome, ImportService};
-use echomind_core::late_chunking::{build_late_chunking_text, extract_doc_prefix};
 use echomind_core::license::verify_license;
 use echomind_core::retriever::build_contextual_text;
-use echomind_core::session_strip::SessionStripper;
 use echomind_core::skill::Skill;
-use echomind_core::step_cache::StepCache as _;
 use echomind_infra::duckduckgo_provider::DuckDuckGoProvider;
 use echomind_infra::hyde_rewriter::HydeRewriter;
 use echomind_infra::openai_provider::OpenAIProvider;
 use echomind_infra::sqlite_storage::SqliteStorage;
 use echomind_models::{
-    AgentStepPayload, BatchResult, CacheSettingsPayload, CacheStats, ChatMessage, ChatPhasePayload,
-    Conversation, ConversationCost, ConversationTree, ConversationTreeNode, DocStatus,
-    DocStatusPayload, Document, DocumentPreview, EmbeddingProgressPayload, EntityRelation,
-    ExecutionResult, GenerationParams, GlobalSearchResults, GraphCommunity, GraphPath, GraphStats,
-    GraphTriple, ImportProgressPayload, LlmConfig, LlmMode, LlmSamplingParams, MemoryEntry,
-    MemoryTier, MessageSearchResult, ModelInfo, PaginatedResult, PendingInput, PromptTemplate,
-    RagParams, RetrievalResult, SearchResult, SessionTodo, SettingsPayload, StripConfig,
-    StripPreview, StripResult, TodoStatus, TokenUsage, TurnActiveVersion, Workflow, WorkflowResult,
+    BatchResult, ChatMessage, ChatPhasePayload, Conversation, ConversationCost, ConversationTree,
+    ConversationTreeNode, DocStatus, DocStatusPayload, Document, DocumentPreview,
+    EmbeddingProgressPayload, EntityRelation, ExecutionResult, GenerationParams,
+    GlobalSearchResults, GraphCommunity, GraphPath, GraphStats, GraphTriple, ImportProgressPayload,
+    LlmConfig, LlmMode, LlmSamplingParams, MessageSearchResult, ModelInfo, PaginatedResult,
+    PromptTemplate, RagParams, RetrievalResult, SearchResult, SettingsPayload, TokenUsage,
+    TurnActiveVersion,
 };
 use futures::FutureExt;
 use futures::StreamExt;
@@ -79,7 +68,6 @@ use crate::state::AppState;
 // ============================================================================
 // 子模块声明（S65 SRP 重构：7706 行 → 12 功能域子模块）
 // ============================================================================
-mod agent;
 mod audit;
 mod chat;
 mod conversation;
@@ -101,7 +89,6 @@ mod workspace;
 // ============================================================================
 // pub use 重导出（保持 lib.rs generate_handler! 不变）
 // ============================================================================
-pub use agent::*;
 pub use audit::*;
 pub use chat::*;
 pub use conversation::*;
@@ -379,54 +366,6 @@ fn emit_chat_done<R: Runtime>(app: &AppHandle<R>, usage: Option<TokenUsage>) {
     }
 }
 
-/// 将缓存答案按字符块切分，模拟流式输出（前端打字效果与正常回答一致）。
-fn split_cached_answer(answer: &str, chunk_size: usize) -> Vec<String> {
-    let chars: Vec<char> = answer.chars().collect();
-    if chunk_size == 0 {
-        return vec![answer.to_string()];
-    }
-    chars
-        .chunks(chunk_size)
-        .map(|c| c.iter().collect())
-        .collect()
-}
-
-/// 正常回答完成后写入查询缓存（REQ-PERF-001）：L0 精确 + L1 语义双写，
-/// 下次相同/语义相似问题直接命中缓存秒回。写入失败仅告警，不影响主流程。
-async fn write_query_cache(
-    state: &AppState,
-    query: &str,
-    answer: &str,
-    sources: &Option<Vec<RetrievalResult>>,
-    conversation_id: &str,
-) {
-    if answer.is_empty() {
-        return;
-    }
-    let sources_json = sources
-        .as_ref()
-        .and_then(|s| serde_json::to_string(s).ok())
-        .unwrap_or_default();
-    let qhash = query_hash(query);
-    if let Err(e) = state
-        .cache
-        .insert_exact(&qhash, query, answer, &sources_json, Some(conversation_id))
-        .await
-    {
-        warn!("写入精确缓存失败: {e:#}");
-    }
-    // 语义缓存需要查询嵌入（embedder 已就绪）
-    if let Ok(emb) = state.embedder().await
-        && let Ok(vec) = emb.embed(query).await
-        && let Err(e) = state
-            .cache
-            .insert_semantic(query, &vec, answer, &sources_json, Some(conversation_id))
-            .await
-    {
-        warn!("写入语义缓存失败: {e:#}");
-    }
-}
-
 /// 发射对话阶段事件（REQ-RAG-001 扩展）：在首个 token 到达前推送进度，消除空白等待。
 fn emit_chat_phase<R: Runtime>(app: &AppHandle<R>, phase: &str, message: &str) {
     let payload = ChatPhasePayload {
@@ -516,12 +455,6 @@ pub struct RetrievalMemoryStatEntry {
     /// 平均相关度分数
     pub avg_score: f32,
 }
-
-/// 工作流存储键前缀。
-const WORKFLOW_KEY_PREFIX: &str = "workflow.";
-
-/// 工作流索引键。
-const WORKFLOW_INDEX_KEY: &str = "workflow.index";
 
 /// 模板存储键前缀。
 const PROMPT_TEMPLATE_KEY_PREFIX: &str = "prompt_template.";

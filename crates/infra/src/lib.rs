@@ -34,14 +34,9 @@ pub mod prompt_cache;
 /// 参考：Ollama download.go + HuggingFace hf_transfer + HuggingFace Hub file_download.py。
 /// 统一 ONNX 嵌入模型和 GGUF 大模型的下载管线。
 pub mod robust_downloader;
-/// 语义缓存 SQLite 适配器（REQ-PERF-001）：L0 精确 + L1 语义 + L3 检索结果三级缓存。
-pub mod sqlite_cache;
 pub mod sqlite_storage;
 
 // ---- Pro 模块（仅在 --features pro 时编译）----
-/// ColBERT 多向量嵌入引擎（REQ-PERF-008, Pro feature）：token 级多向量嵌入 + MaxSim 检索。
-#[cfg(feature = "pro")]
-pub mod colbert_embedder;
 /// 自研 GEMV 内核（Phase 3）：单批次推理优化的量化矩阵-向量乘法。
 #[cfg(feature = "pro")]
 pub mod gemv_kernel;
@@ -81,9 +76,6 @@ pub mod local_llm;
 pub mod memory_budget;
 #[cfg(feature = "pro")]
 pub mod ocrs_engine;
-/// ONNX 模型压缩器（Pro feature，REQ-PERF-002）：使用已有 embedder 做句子级嵌入相似度评分。
-#[cfg(feature = "pro")]
-pub mod onnx_compressor;
 #[cfg(feature = "pro")]
 pub mod openai_vision;
 #[cfg(feature = "pro")]
@@ -114,9 +106,6 @@ pub mod weight_repack;
 /// bge-m3 多语言嵌入模型 TDD 测试（REQ-VEC-015）。
 #[cfg(test)]
 mod bge_m3_tests;
-/// ColBERT 多向量嵌入测试（REQ-PERF-008, Pro feature）。
-#[cfg(all(test, feature = "pro"))]
-mod colbert_embedder_tests;
 #[cfg(test)]
 mod embedder_tests;
 #[cfg(all(test, feature = "pro"))]
