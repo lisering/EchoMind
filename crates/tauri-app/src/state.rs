@@ -13,12 +13,9 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 use anyhow::Context;
 use echomind_core::Storage;
-use echomind_core::auto_dream::DreamResult;
-use echomind_core::hooks::HookRegistry;
 use echomind_infra::file_watcher::FileWatcherHandle;
 use echomind_infra::local_embedder::LocalEmbedder;
 use echomind_infra::local_logger::LocalLogger;
@@ -66,35 +63,21 @@ pub struct AppState {
     pub document_store: DocumentStore,
     /// 会话管理 Store（流中断令牌 + 审计取消）
     pub chat_store: ChatStore,
-    /// Dream Engine 状态（后台空闲整理建议）
-    pub dream_engine: DreamEngineState,
-    /// 步骤级缓存（P2-1 StepCache：Agent/Coordinator 多步推理中间步骤复用）
-    pub step_cache: Arc<echomind_core::step_cache::InMemoryStepCache>,
     /// 知识图谱图遍历检索是否启用（REQ-RAG-027：沿实体关系图边扩展到关联 chunk）
     pub graph_retriever_enabled: bool,
     /// RAG 质量门控是否启用（REQ-RAG-028：检索后评估结果质量，低质量时记录告警）
     pub quality_gate_enabled: bool,
-    /// 持久化记忆系统是否启用（REQ-RAG-032：对话记忆提取 + 跨会话注入 + AutoDream 整合）
-    pub memory_enabled: bool,
     /// 网页搜索集成是否启用（REQ-RAG-036：本地检索不足时搜索互联网补充 context）
     pub web_search_enabled: bool,
     /// Contextual Retrieval 是否启用（REQ-RAG-041：嵌入时拼接文档名上下文前缀，提升检索精度）
     /// 默认 true：嵌入管线已使用 build_contextual_text() 构建上下文文本。
     /// 关闭后新导入文档的嵌入使用纯 chunk 文本（不含文档名前缀）。
     pub contextual_retrieval_enabled: bool,
-    /// Agent 生命周期 Hooks 注册表（REQ-RAG-029：插件式扩展 Agent/Coordinator 行为）
-    /// `None` = 未注册 hook，引擎行为与之前完全一致
-    pub hook_registry: Option<Arc<HookRegistry>>,
     /// RAG 链路追踪存储（S70：Cherry Studio 借鉴 — span 级耗时追踪）
     pub trace_store: Arc<RwLock<echomind_core::trace::TraceStore>>,
     /// Session Run Coordinator（B06 会话运行协调器）：
     /// 同会话串行 / 跨会话并发 / wake 合并 / interrupt 中断。
     pub session_coordinator: Arc<echomind_core::session_coordinator::SessionCoordinator>,
-    /// Burst Buffer — 延迟批量记忆提取（Q02 借鉴 QM createBurstBuffer）。
-    ///
-    /// 聚合多轮对话后批量 LLM 提取记忆，降低 LLM 调用成本。
-    /// 每轮 chat_done 后 push 到 buffer；满足条件（静默窗口 / 最大轮次）时自动 flush。
-    pub memory_burst_buffer: Arc<tokio::sync::Mutex<echomind_core::memory_store::BurstBuffer>>,
     /// 后台压缩去重集合（Q03：双阈值压缩）。
     ///
     /// 追踪正在进行后台压缩的会话 ID，防止同一会话重复触发。
@@ -256,9 +239,6 @@ impl AppState {
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
 
-        // 初始化步骤级缓存（P2-1 StepCache）：内存实现，默认容量 256 条
-        let step_cache = Arc::new(echomind_core::step_cache::InMemoryStepCache::default());
-
         // S7: 从批量读取结果解析各设置项（原逐个 get_setting 串行查询）
         let graph_retriever_enabled = settings_map
             .get("rag.graph_retriever_enabled")
@@ -266,10 +246,6 @@ impl AppState {
 
         let quality_gate_enabled = settings_map
             .get("rag.quality_gate_enabled")
-            .is_some_and(|&v| v == "true");
-
-        let memory_enabled = settings_map
-            .get("memory.enabled")
             .is_some_and(|&v| v == "true");
 
         let web_search_enabled = settings_map
@@ -344,21 +320,14 @@ impl AppState {
             model_store,
             document_store,
             chat_store,
-            dream_engine: DreamEngineState::new(),
-            step_cache,
             graph_retriever_enabled,
             quality_gate_enabled,
-            memory_enabled,
             web_search_enabled,
             contextual_retrieval_enabled,
-            hook_registry: None,
             trace_store: Arc::new(RwLock::new(echomind_core::trace::TraceStore::new(50))),
             session_coordinator: Arc::new(
                 echomind_core::session_coordinator::SessionCoordinator::new(),
             ),
-            memory_burst_buffer: Arc::new(tokio::sync::Mutex::new(
-                echomind_core::memory_store::BurstBuffer::new(),
-            )),
             compaction_pending: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             security_posture,
             shadow_screen_collector: Arc::new(echomind_core::security::ShadowScreenCollector::new()),
@@ -613,91 +582,6 @@ impl AppState {
     pub fn set_security_posture_value(&self, posture: SecurityPosture) {
         self.security_posture
             .store(posture.as_u8(), std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-// ============================================================================
-// DreamEngineState — 后台空闲整理引擎状态
-// ============================================================================
-
-/// Dream Engine 运行态：存储最新分析结果与运行标志。
-///
-/// `trigger_dream` IPC 命令在后台启动分析，结果写入 `results`。
-/// `get_dream_suggestions` IPC 命令从 `results` 读取缓存结果返回前端。
-/// `running` 标志防止并发执行；`cancel` 支持用户中断分析。
-pub struct DreamEngineState {
-    /// 最新 Dream 分析结果（`None` 表示尚未运行过）
-    results: tokio::sync::RwLock<Option<DreamResult>>,
-    /// 是否正在运行分析（防止并发执行）
-    running: Arc<AtomicBool>,
-    /// 取消信号
-    cancel: Arc<AtomicBool>,
-}
-
-impl DreamEngineState {
-    /// 创建新的 Dream Engine 状态（初始为空、非运行）。
-    pub fn new() -> Self {
-        Self {
-            results: tokio::sync::RwLock::new(None),
-            running: Arc::new(AtomicBool::new(false)),
-            cancel: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    /// 获取取消信号（用于 DreamEngine::dream()）。
-    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.cancel)
-    }
-
-    /// 标记为正在运行。返回 `false` 表示已有分析在进行中。
-    pub fn try_start(&self) -> bool {
-        !self
-            .running
-            .compare_exchange(
-                false,
-                true,
-                std::sync::atomic::Ordering::SeqCst,
-                std::sync::atomic::Ordering::SeqCst,
-            )
-            .is_err()
-    }
-
-    /// 标记为已完成（清除 running 标志）。
-    pub fn finish(&self) {
-        self.running
-            .store(false, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    /// 是否正在运行。
-    pub fn is_running(&self) -> bool {
-        self.running.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// 触发取消（设置 cancel 标志）。
-    pub fn cancel(&self) {
-        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    /// 重置取消标志（下次运行前调用）。
-    pub fn reset_cancel(&self) {
-        self.cancel
-            .store(false, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    /// 存储分析结果。
-    pub async fn set_results(&self, result: DreamResult) {
-        *self.results.write().await = Some(result);
-    }
-
-    /// 读取缓存的分析结果（`None` 表示尚未运行过）。
-    pub async fn get_results(&self) -> Option<DreamResult> {
-        self.results.read().await.clone()
-    }
-}
-
-impl Default for DreamEngineState {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

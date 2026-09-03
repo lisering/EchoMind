@@ -49,7 +49,6 @@ import { initDownloadManager } from './download-manager.js';
 import { openGraphViewer, closeGraphViewer, initGraphResize } from './graph-viewer.js';
 import { buildTurnTree, setTurnTree, getTurn, applyActiveVersions, getVersionCount, openConversationTreePanel, closeConversationTreePanel } from './turn-tree.js';
 import { renderBranchPagination } from './message-edit.js';
-import { openDreamPanel, closeDreamPanel, initDreamPanel } from './dream-panel.js';
 import { openSymbolSearch, closeSymbolSearch, initSymbolSearch } from './symbol-search.js';
 import { initVoiceInput, stopAllTTS } from './voice-input.js';
 import { initExportButtons, exportConversationToHtml, exportDocumentToHtml, exportConversationToPdf } from './export.js';
@@ -93,8 +92,7 @@ function closeAllPanels() {
   // 关闭所有动态面板（通过 panel-stack）
   closeSettings();
   closeGraphViewer();
-  closeDreamPanel();
-  closeSymbolSearch();
+    closeSymbolSearch();
   closeSearchPopup();
   closeCommandPalette();
   closeGlobalSearch();
@@ -525,9 +523,6 @@ async function openGraphViewerWithEntity(entityText) {
   }, 800);
 }
 
-if ($('dreamBtn')) {
-  $('dreamBtn').onclick = () => { openDreamPanel(); $('toolsMenu')?.classList.add('hidden'); };
-}
   if ($('symbolBtn')) {
     $('symbolBtn').onclick = () => { openSymbolSearch(); $('toolsMenu')?.classList.add('hidden'); };
   }
@@ -536,8 +531,7 @@ if ($('dreamBtn')) {
   // 延迟初始化面板内部组件（不阻塞首屏）
   _deferInit(() => {
     initGraphResize();
-    initDreamPanel();
-    initSymbolSearch();
+        initSymbolSearch();
   });
 
   // 对话分支树按钮（REQ-RAG-039）
@@ -575,8 +569,6 @@ const inputTogglesContainer = $('inputToggles');
 if (inputTogglesContainer) {
   const hybridToggle = createInputToggle('hybrid', true);
   inputTogglesContainer.appendChild(hybridToggle);
-  const agentToggle = createInputToggle('agent', false);
-  inputTogglesContainer.appendChild(agentToggle);
 }
 
 // ⌘ J / Ctrl J 全局快捷键 → 新对话（DeepSeek 风格）
@@ -791,9 +783,6 @@ setState({
   currentModel: t('wizard.demo_mode'),
   currentLlmMode: 'remote',
   hybridEnabled: settings.hybrid_search || false,
-  agentEnabled: settings.agent_enabled || false,
-  subAgentEnabled: settings.sub_agent_enabled || false,
-  memoryEnabled: settings.memory_enabled || false,
   webSearchEnabled: settings.web_search_enabled || false,
 });
 updateModelPill();
@@ -813,9 +802,6 @@ setState({
   llmConfigured: true,
   // 方案4：初始化功能toggle状态
   hybridEnabled: settings.hybrid_search || false,
-  agentEnabled: settings.agent_enabled || false,
-  subAgentEnabled: settings.sub_agent_enabled || false,
-  memoryEnabled: settings.memory_enabled || false,
   webSearchEnabled: settings.web_search_enabled || false,
 });
 updateModelPill();

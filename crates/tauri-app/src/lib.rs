@@ -293,26 +293,8 @@ pub fn run() {
             commands::get_symbols_for_chunk,
             #[cfg(feature = "pro")]
             commands::rebuild_symbol_index,
-            // DAG 工作流引擎（REQ-RAG-030）
-            commands::save_workflow_template,
-            commands::run_workflow,
-            commands::list_workflows,
-            commands::delete_workflow,
             // 代码执行沙箱（REQ-RAG-032，Pro feature）
             commands::execute_code_snippet,
-            // 持久化记忆系统（REQ-RAG-032：IfAI 三层记忆 Wing/Hall/Room）（S09: set_memory_enabled → update_setting）
-            commands::get_memories,
-            commands::pin_memory,
-            commands::promote_memory,
-            commands::delete_memory,
-            commands::clear_memories,
-            // Scratch-Promote 记忆整合（Q01 借鉴 QM scratch-promote + consolidation）
-            commands::trigger_memory_consolidation,
-            commands::get_scratch_logs,
-            // Burst Buffer 延迟批量记忆提取（Q02 借鉴 QM createBurstBuffer）
-            commands::push_burst_turn,
-            commands::flush_memory_burst_buffer,
-            commands::get_burst_buffer_status,
             // 语音转写（REQ-RAG-034 桌面应用方案：getUserMedia + MediaRecorder + OpenAI Whisper API）
             commands::transcribe_audio,
             commands::get_stt_config,
@@ -340,12 +322,6 @@ pub fn run() {
             commands::global_search,
             // Session Strip 会话条带化（REQ-RAG-046）
             // S10: 开发者工具门控 — Release 构建中不注册
-            #[cfg(debug_assertions)]
-            commands::strip_messages,
-            #[cfg(debug_assertions)]
-            commands::strip_keeping_recent,
-            #[cfg(debug_assertions)]
-            commands::preview_strip,
             // 单条消息删除（REQ-RAG-013）
             commands::delete_message,
             // Contextual Retrieval 上下文增强嵌入（REQ-RAG-041）（S09: set_contextual_retrieval → update_setting）
@@ -388,26 +364,6 @@ pub fn run() {
             commands::load_demo_documents,
             // S5 v1.6: 错误日志导出（REQ-ERR-005）
             commands::export_error_logs,
-            // Durable Prompt Admission（B05 持久化提示接纳）
-            // S10: 开发者工具门控 — Release 构建中不注册
-            #[cfg(debug_assertions)]
-            commands::admit_input,
-            #[cfg(debug_assertions)]
-            commands::promote_input,
-            #[cfg(debug_assertions)]
-            commands::get_pending_inputs,
-            // Session Todo 持久化（B08 会话待办持久化）
-            // S10: 开发者工具门控 — Release 构建中不注册
-            #[cfg(debug_assertions)]
-            commands::add_session_todo,
-            #[cfg(debug_assertions)]
-            commands::update_todo_status,
-            #[cfg(debug_assertions)]
-            commands::get_session_todos,
-            #[cfg(debug_assertions)]
-            commands::delete_session_todo,
-            #[cfg(debug_assertions)]
-            commands::delete_session_todos,
             // Q08: 预算追踪（QM 借鉴 — LLM API 费用控制和速率限制）
             // S10: 开发者工具门控 — Release 构建中不注册
             #[cfg(debug_assertions)]

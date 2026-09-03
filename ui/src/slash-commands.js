@@ -83,13 +83,6 @@ export const SLASH_COMMANDS = [
     icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
     promptTemplate: '请结合网页搜索结果回答以下问题：{query}',
   },
-  {
-    name: 'agent',
-    label: 'chat.slash_agent',
-    desc: 'chat.slash_agent_desc',
-    icon: '<svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4v1a4 4 0 0 0 8 0V6a4 4 0 0 0-4-4z"/><path d="M5 12h14M12 8v8"/></svg>',
-    promptTemplate: '{query}',
-  },
 ];
 
 // ============================================================

@@ -89,7 +89,7 @@ let _chatAborted = false;
 * P1-3: /web 命令临时启用网页搜索标志。
 * 在 chat_done 后恢复为 false 并关闭网页搜索。
 */
-/* P1-3/P1-4 的 /web、/agent 临时标志已并入 state.js（V3.1 P4-4：tempWebSearch/tempAgent） */
+/* P1-3/P1-4 的 /web 临时标志已并入 state.js（V3.1 P4-4：tempWebSearch） */
 
 /**
  * 启动看门狗计时器。
@@ -357,7 +357,7 @@ export async function send() {
     // S56：快捷指令展开 — /command query → promptTemplate.replace('{query}', query)
     // P1-3: /web 命令特殊处理 — 临时启用网页搜索，不展开 prompt
     const slashResult = processSlashCommand(query);
-    setState({ tempWebSearch: false, tempAgent: false });
+    setState({ tempWebSearch: false });
     if (slashResult.matched) {
       if (slashResult.command?.name === 'web') {
         // /web 命令：使用原始查询，临时启用网页搜索
@@ -365,12 +365,6 @@ export async function send() {
         try {
           await invoke('update_setting', { key: 'rag.web_search_enabled', value: 'true' });
         } catch (_e) { /* 网页搜索可能不可用，静默降级 */ }
-      } else if (slashResult.command?.name === 'agent') {
-        // /agent 命令：使用原始查询，临时启用 Agent 模式
-        setState({ tempAgent: true });
-        try {
-          await invoke('update_setting', { key: 'rag.agent_enabled', value: 'true' });
-        } catch (_e) { /* Agent 模式可能不可用，静默降级 */ }
       } else {
         query = slashResult.text;
       }
@@ -789,21 +783,6 @@ export function initChatEventListeners(callbacks) {
     }
   });
 
-  // REQ-RAG-052: Agent 步骤可视化 — 监听 agent_step 事件
-  listen('agent_step', (e) => {
-    const el = get('currentAssistantEl');
-    if (el && el._thinkingPanel) {
-      const step = e.payload;
-      // 展开面板以显示步骤
-      el._thinkingPanel.expand();
-      el._thinkingPanel.appendAgentStep(step);
-      // 更新进度条
-      if (step.iteration) {
-        el._thinkingPanel.setAgentProgress(step.iteration, 5);
-      }
-    }
-  });
-
   listen('chat_token', (e) => {
     const el = get('currentAssistantEl');
     if (el) {
@@ -874,14 +853,10 @@ export function initChatEventListeners(callbacks) {
     // P2-1：清除流状态
     _clearStreamState();
     // P1-3/P1-4/P0-3：斜杠命令与强制检索的临时开关在会话结束后统一恢复（V3.1 P4-4 状态入 store）
-    const { tempWebSearch, tempAgent, regenForceSearch } = getState();
+    const { tempWebSearch, regenForceSearch } = getState();
     if (tempWebSearch) {
       setState({ tempWebSearch: false });
       try { await invoke('update_setting', { key: 'rag.web_search_enabled', value: 'false' }); } catch (_e) { /* 静默 */ }
-    }
-    if (tempAgent) {
-      setState({ tempAgent: false });
-      try { await invoke('update_setting', { key: 'rag.agent_enabled', value: 'false' }); } catch (_e) { /* 静默 */ }
     }
     if (regenForceSearch) {
       setState({ regenForceSearch: false });

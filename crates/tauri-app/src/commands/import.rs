@@ -271,11 +271,6 @@ pub async fn import_files_inner<R: Runtime>(
         }
     }
 
-    // P2-1 StepCache：知识库变更 → 清空步骤级缓存（检索结果可能引用旧文档）
-    if !imported.is_empty() {
-        state.step_cache.clear();
-    }
-
     Ok(imported)
 }
 
@@ -374,7 +369,7 @@ pub async fn replace_document_inner<R: Runtime>(
                     match embed_document_chunks(app, state, &doc.id, &name).await {
                         Ok(count) => {
                             emit_status(app, "done", format!("替换完成：{name}（{count} 向量）"));
-                            state.step_cache.clear();
+
                             Ok(doc.id)
                         }
                         Err(err) => {

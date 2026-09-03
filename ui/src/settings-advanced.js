@@ -508,55 +508,6 @@ function collectSamplingParams() {
 }
 
 // ============================================================
-// 多代理协调模式 toggle（REQ-RAG-025）
-// ============================================================
-
-export async function onCoordinatorToggle() {
-  const toggle = $('coordinatorToggle');
-  const enabled = toggle.getAttribute('aria-checked') === 'true';
-  const newEnabled = !enabled;
-  toggle.setAttribute('aria-checked', String(newEnabled));
-  toggle.classList.toggle('bg-accent', newEnabled);
-  toggle.classList.toggle('bg-slate-600', !newEnabled);
-  toggle.querySelector('span').classList.toggle('translate-x-5', newEnabled);
-  try {
-    await invoke('update_setting', { key: 'rag.coordinator_enabled', value: String(newEnabled) });
-    toast(newEnabled ? t('settings.coordinator_enabled') : t('settings.coordinator_disabled'), 'success');
-  } catch (err) {
-    toastError(err);
-    toggle.setAttribute('aria-checked', String(enabled));
-    toggle.classList.toggle('bg-accent', enabled);
-    toggle.classList.toggle('bg-slate-600', !enabled);
-    toggle.querySelector('span').classList.toggle('translate-x-5', enabled);
-  }
-}
-
-export async function onSubAgentToggle() {
-  const toggle = $('subAgentToggle');
-  if (!toggle) return;
-  const currentEnabled = get('subAgentEnabled');
-  const newEnabled = !currentEnabled;
-
-  setState({ subAgentEnabled: newEnabled });
-
-  toggle.setAttribute('aria-checked', String(newEnabled));
-  toggle.classList.toggle('bg-accent', newEnabled);
-  toggle.classList.toggle('bg-slate-600', !newEnabled);
-  toggle.querySelector('span').classList.toggle('translate-x-5', newEnabled);
-
-  try {
-    await invoke('update_setting', { key: 'rag.sub_agent_enabled', value: String(newEnabled) });
-    toast(newEnabled ? t('settings.sub_agent_enabled') : t('settings.sub_agent_disabled'), 'success');
-  } catch (err) {
-    toastError(err);
-    setState({ subAgentEnabled: currentEnabled });
-    toggle.setAttribute('aria-checked', String(currentEnabled));
-    toggle.classList.toggle('bg-accent', currentEnabled);
-    toggle.classList.toggle('bg-slate-600', !currentEnabled);
-    toggle.querySelector('span').classList.toggle('translate-x-5', currentEnabled);
-  }
-}
-
 // ============================================================
 // 自定义快捷指令模板管理（S56）
 // ============================================================

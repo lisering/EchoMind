@@ -17,10 +17,7 @@ use echomind_compact::CompactionEngine;
 use echomind_core::Embedder as _;
 use echomind_core::Retriever as _;
 use echomind_core::Storage;
-use echomind_core::agent::{AgentEngine, AgentStepInfo};
-use echomind_core::auto_dream::DreamEngine;
 use echomind_core::chat::{ChatEngine, ChatOutcome};
-use echomind_core::coordinator::{CoordinatorEngine, CoordinatorPhaseInfo};
 use echomind_core::errors::ERR_PRO_REQUIRED;
 use echomind_core::errors::{
     ERR_EMBED, ERR_LLM, ERR_PARSE, ERR_STORAGE, ERR_UNKNOWN, ERR_VALIDATION, MAX_API_KEY_LENGTH,
@@ -31,22 +28,19 @@ use echomind_core::hybrid_retriever::HybridRetriever;
 use echomind_core::import::{ImportOutcome, ImportService};
 use echomind_core::license::verify_license;
 use echomind_core::retriever::build_contextual_text;
-use echomind_core::session_strip::SessionStripper;
 use echomind_core::skill::Skill;
-use echomind_core::step_cache::StepCache as _;
 use echomind_infra::duckduckgo_provider::DuckDuckGoProvider;
 use echomind_infra::hyde_rewriter::HydeRewriter;
 use echomind_infra::openai_provider::OpenAIProvider;
 use echomind_infra::sqlite_storage::SqliteStorage;
 use echomind_models::{
-    AgentStepPayload, BatchResult, ChatMessage, ChatPhasePayload, Conversation, ConversationCost,
-    ConversationTree, ConversationTreeNode, DocStatus, DocStatusPayload, Document, DocumentPreview,
+    BatchResult, ChatMessage, ChatPhasePayload, Conversation, ConversationCost, ConversationTree,
+    ConversationTreeNode, DocStatus, DocStatusPayload, Document, DocumentPreview,
     EmbeddingProgressPayload, EntityRelation, ExecutionResult, GenerationParams,
     GlobalSearchResults, GraphCommunity, GraphPath, GraphStats, GraphTriple, ImportProgressPayload,
-    LlmConfig, LlmMode, LlmSamplingParams, MemoryEntry, MemoryTier, MessageSearchResult, ModelInfo,
-    PaginatedResult, PendingInput, PromptTemplate, RagParams, RetrievalResult, SearchResult,
-    SessionTodo, SettingsPayload, StripConfig, StripPreview, StripResult, TodoStatus, TokenUsage,
-    TurnActiveVersion, Workflow, WorkflowResult,
+    LlmConfig, LlmMode, LlmSamplingParams, MessageSearchResult, ModelInfo, PaginatedResult,
+    PromptTemplate, RagParams, RetrievalResult, SearchResult, SettingsPayload, TokenUsage,
+    TurnActiveVersion,
 };
 use futures::FutureExt;
 use futures::StreamExt;
@@ -74,7 +68,6 @@ use crate::state::AppState;
 // ============================================================================
 // 子模块声明（S65 SRP 重构：7706 行 → 12 功能域子模块）
 // ============================================================================
-mod agent;
 mod audit;
 mod chat;
 mod conversation;
@@ -96,7 +89,6 @@ mod workspace;
 // ============================================================================
 // pub use 重导出（保持 lib.rs generate_handler! 不变）
 // ============================================================================
-pub use agent::*;
 pub use audit::*;
 pub use chat::*;
 pub use conversation::*;
@@ -463,12 +455,6 @@ pub struct RetrievalMemoryStatEntry {
     /// 平均相关度分数
     pub avg_score: f32,
 }
-
-/// 工作流存储键前缀。
-const WORKFLOW_KEY_PREFIX: &str = "workflow.";
-
-/// 工作流索引键。
-const WORKFLOW_INDEX_KEY: &str = "workflow.index";
 
 /// 模板存储键前缀。
 const PROMPT_TEMPLATE_KEY_PREFIX: &str = "prompt_template.";

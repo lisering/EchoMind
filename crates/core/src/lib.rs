@@ -8,18 +8,12 @@
 // 属经架构评审的刻意豁免，非疏漏。
 #![allow(async_fn_in_trait)]
 
-/// Agentic RAG 多步推理引擎（REQ-RAG-022）：ReAct 范式 Thought→Action→Observation 循环。
-pub mod agent;
-/// AgentEngine Sans-IO 状态机（B-03 借鉴 Rig `AgentRun`）：决策与 IO 分离，可独立单元测试。
-pub mod agent_run;
 /// 文档一致性审计引擎：全量扫描式矛盾检测（REQ-AUDIT-001~005）。
 #[cfg(feature = "pro")]
 pub mod audit;
 /// 审计对 + Turn-Enclosed 模块（DH-04 借鉴 DeepSeek Harness Turn-Enclosed Audit）：
 /// 每次 turn 生成 start/end 审计对，验证完整性。
 pub mod audit_pair;
-/// 后台空闲整理引擎：重复文档检测、跨文档矛盾发现、整理建议生成。
-pub mod auto_dream;
 /// 预算追踪和速率限制（QM 借鉴）：LLM API 费用控制和请求限流。
 pub mod budget;
 pub mod chat;
@@ -30,11 +24,6 @@ pub mod chat;
 pub mod code_executor;
 /// 并发控制模块（Q09 借鉴 QM createKeyedQueue）：按 key 序列化异步操作，消除 SQLite 并发写入竞态。
 pub mod concurrency;
-/// 多代理协调引擎（REQ-RAG-025）：Research→Synthesis→Implementation→Verification 四阶段。
-pub mod coordinator;
-/// Coordinator 策略注册表（DH-03 借鉴 DeepSeek Harness SubagentRuntime Provider 注册表）：
-/// 多个协调策略共存，按名字查找，能力验证在执行前完成。
-pub mod coordinator_strategy;
 /// 数据库加密模块（Argon2id 密钥派生 + SQLCipher 加密 + 暴力破解防护 + 密码强度检测）。
 pub mod encryption;
 /// NER 实体抽取器（REQ-PERF-006）：纯规则 + 正则，零 LLM/模型依赖。
@@ -53,8 +42,6 @@ pub mod graph_analyzer;
 pub mod graph_export;
 /// 知识图谱图遍历检索器（REQ-RAG-027）：沿实体关系图边扩展到关联 chunk。
 pub mod graph_retriever;
-/// Agent 生命周期 Hooks 系统（REQ-RAG-029）：在 Agent/Coordinator 关键节点插入可扩展的插件式 hook。
-pub mod hooks;
 /// 混合检索器：向量 + 关键词 RRF 融合（REQ-RAG-010）。
 pub mod hybrid_retriever;
 /// 幂等性存储 + 统一周期任务抽象：防重复操作（文件同步/AutoDream）+ 后台任务管理。
@@ -75,16 +62,6 @@ pub mod loader;
 pub mod mcp;
 /// Memory Policy + Compactor + DemotionHook 三层抽象（B-07 借鉴 Rig Memory 体系）。
 pub mod memory_policy;
-/// 持久化记忆系统（REQ-RAG-032）：借鉴 IfAI 三层记忆 Wing/Hall/Room + Bamboo-agent 上下文压缩。
-///
-/// 三层记忆架构：
-/// - Wing（翼层）：临时记忆，当前会话产生，上限 50 条
-/// - Hall（厅层）：工作记忆，近期重要，上限 100 条
-/// - Room（室层）：长期记忆，核心知识，上限 500 条
-///
-/// 自动从对话中提取关键事实（LLM 辅助），查询时注入相关记忆到 RAG prompt，
-/// AutoDream 后台空闲时自动整合（提升/遗忘）。
-pub mod memory_store;
 /// 语义分块器：段落→句子→子句递归分割，保留代码块完整性。
 /// MMR 多样性重排（借鉴 OpenMontage corpus.py）：Maximal Marginal Relevance。
 pub mod mmr_diversifier;
@@ -120,20 +97,11 @@ pub mod semantic_splitter;
 /// Session Run Coordinator（B06 会话运行协调器）：
 /// 同会话串行 / 跨会话并发 / wake 合并 / interrupt 中断。
 pub mod session_coordinator;
-/// Session Strip（会话条带化，REQ-RAG-046）：借鉴 ds4 /strip 命令，移除消息减少上下文消耗。
-pub mod session_strip;
 /// Skill 系统发现（B09 Skill Discovery，REQ-ARCH-010）：
 /// 从 Markdown 文件的 YAML frontmatter 解析技能信息。
 pub mod skill;
 pub mod splitter;
-/// StepCache 步骤级缓存（P2-1）：Agent/Coordinator 多步推理中间步骤结果复用。
-pub mod step_cache;
 pub mod stream_parse;
-/// 子代理舰队管理（REQ-RAG-025 扩展）：独立 AgentEngine 实例 + mailbox 通信。
-///
-/// 借鉴 Bamboo-agent 子代理系统：主代理可动态创建子代理，每个子代理有独立上下文
-/// 和工具集，通过 mailbox 消息传递协调。支持「分工→并行→汇总」模式。
-pub mod sub_agent;
 /// 文件监听增量同步模块（REQ-SYNC-002）：对比文件夹与知识库，增量导入/更新/删除。
 pub mod sync;
 /// 工具输出有界截断（B07 Tool Output Bounding，REQ-RAG-043）：
@@ -141,8 +109,6 @@ pub mod sync;
 pub mod tool_output;
 /// 轻量 RAG 链路追踪系统（S70：Cherry Studio 借鉴 — span 级耗时追踪）。
 pub mod trace;
-/// 类型安全 Hook 系统（B-04 借鉴 Rig AgentHook）：每事件一 Action 类型，编译期拒绝不合法组合。
-pub mod typed_hook;
 /// 应用更新检查（REQ-HELP-004）：GitHub Releases 版本比较。
 pub mod update_check;
 /// VLM 分级图表理解提示词（REQ-MM-005）：4 级精度策略集中定义。
@@ -203,14 +169,6 @@ pub trait WebSearchProvider: Send + Sync {
 /// 在导入时解析 Markdown 文档中的 `[[wiki-link]]` 语法，建立双向链接索引，
 /// 支持正向链接和反向链接查询。
 pub mod wiki_link_parser;
-
-/// DAG 工作流引擎（REQ-RAG-030）：用户自定义多步骤 RAG 管线。
-///
-/// 借鉴 IfAI 的 DAG 工作流引擎：用户定义由节点和边组成的有向无环图，
-/// 引擎负责拓扑排序、并行执行独立节点、串行执行依赖节点。
-/// 支持 5 种节点类型（Retrieval / Generation / Condition / Aggregate / Output）
-/// 和条件分支、聚合策略、容错传播。
-pub mod workflow;
 
 use echomind_models::{
     ChatMessage, Chunk, ChunkPreview, CodeExecutorConfig, CodeSymbol, Conversation, DocStatus,
@@ -2054,12 +2012,8 @@ pub trait CodeExecutor: Send + Sync {
 
 #[cfg(test)]
 mod active_gate_tests;
-#[cfg(test)]
-mod agent_tests;
 #[cfg(all(test, feature = "pro"))]
 mod audit_tests;
-#[cfg(test)]
-mod auto_dream_tests;
 #[cfg(test)]
 pub mod budget_tests;
 #[cfg(test)]
@@ -2068,8 +2022,6 @@ mod chat_tests;
 mod code_executor_tests;
 #[cfg(test)]
 mod concurrency_tests;
-#[cfg(test)]
-mod coordinator_tests;
 #[cfg(test)]
 mod entity_extractor_tests;
 #[cfg(test)]
@@ -2083,8 +2035,6 @@ mod graph_analyzer_tests;
 mod graph_export_tests;
 #[cfg(test)]
 mod graph_retriever_tests;
-#[cfg(test)]
-mod hooks_tests;
 #[cfg(test)]
 mod hybrid_retriever_tests;
 #[cfg(test)]
@@ -2100,8 +2050,6 @@ mod llm_router_tests;
 #[cfg(test)]
 mod loader_tests;
 #[cfg(test)]
-mod memory_store_tests;
-#[cfg(test)]
 mod property_tests;
 #[cfg(test)]
 mod quality_gate_tests;
@@ -2114,20 +2062,12 @@ mod retriever_tests;
 #[cfg(test)]
 mod security_tests;
 #[cfg(test)]
-mod session_strip_tests;
-#[cfg(test)]
 mod splitter_tests;
 #[cfg(test)]
-mod step_cache_tests;
-#[cfg(test)]
 mod stream_parse_tests;
-#[cfg(test)]
-mod sub_agent_tests;
 #[cfg(test)]
 mod sync_tests;
 #[cfg(all(test, feature = "pro"))]
 mod vlm_prompt_tests;
 #[cfg(test)]
 mod web_search_tests;
-#[cfg(test)]
-mod workflow_tests;

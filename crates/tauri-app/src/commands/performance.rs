@@ -107,8 +107,6 @@ pub async fn rebuild_contextual_embeddings_inner<R: Runtime>(
         }
     }
 
-    state.step_cache.clear();
-
     Ok(())
 }
 
@@ -179,8 +177,6 @@ pub async fn rebuild_all_embeddings_inner<R: Runtime>(
             }
         }
     }
-
-    state.step_cache.clear();
 
     if failed > 0 {
         emit_status(

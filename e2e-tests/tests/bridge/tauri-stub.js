@@ -16,16 +16,12 @@
 //            clear_kv_cache / get_kv_cache_status / set_kv_cache_enabled / set_embedder_model
 //   审计: audit_document / abort_audit
 //   嵌入: init_embedder / check_embedder_status / get_model_cache_info / clear_model_cache
-//   RAG:  set_rerank_enabled / set_hyde_enabled / set_agent_enabled / set_embedding_model /
-//         reclassify_document / set_coordinator_mode / set_sub_agent_enabled
+//   RAG:  set_rerank_enabled / set_hyde_enabled / set_embedding_model /
+//         reclassify_document
 //   知识图谱: get_graph_data / get_entity_relations / get_graph_stats / get_entity_types /
 //             get_shortest_path / get_communities / get_graph_layout / set_graph_retriever_enabled / export_graph
-//   DAG 工作流: save_workflow_template / run_workflow / list_workflows / delete_workflow
-//   记忆系统: set_memory_enabled / get_memories / pin_memory / promote_memory /
-//             delete_memory / clear_memories
 //   代码符号: search_symbols / get_symbols_for_chunk / rebuild_symbol_index
 //   代码执行: execute_code_snippet
-//   AutoDream: trigger_dream / get_dream_suggestions / abort_dream
 //   性能优化: rebuild_bm25_index / rebuild_contextual_embeddings / rebuild_all_embeddings
 //   导出: export_conversation_markdown / save_text_file
 //   同步: add_watched_folder / remove_watched_folder / get_watched_folders
@@ -42,14 +38,12 @@
 //   i18n: get_locale / set_locale
 // 覆盖事件：chat_phase / chat_token / chat_sources / chat_error / chat_done / doc-status-changed /
 // audit_phase / import-progress / embedding_progress / model_download_progress /
-// security-state-changed / agent_step / sync_progress / model_load_progress /
-// workflow_progress / dream_progress。
+// security-state-changed / sync_progress / model_load_progress。
 //
 // 增强能力（E2E_COVERAGE.md §3）：
 // - 文件内容哈希去重（REQ-ING-004）
 // - 配额计数器（REQ-LIC-002）
 // - chat_phase 阶段事件（REQ-RAG-001 扩展，含时序修复）
-// - Agentic RAG agent_step 事件（REQ-RAG-022）
 // - 空上下文模式（REQ-RAG-003）
 // - 消息持久化（REQ-RAG-006）
 // - XSS token 注入（REQ-SEC-002）
@@ -376,8 +370,6 @@ demoMode: false,
     rerankEnabled: false,
     /** HyDE 查询改写开关（REQ-RAG-021） */
     hydeEnabled: false,
-    /** Agentic RAG 开关（REQ-RAG-022） */
-    agentEnabled: false,
     /** 当前嵌入模型 */
     embeddingModel: 'all-MiniLM-L6-v2',
     // ============================================================
@@ -390,11 +382,6 @@ demoMode: false,
     // ============================================================
     /** 文档领域分类 */
     docDomains: {},
-    // ============================================================
-    // DAG 工作流状态（REQ-RAG-030）
-    // ============================================================
-    /** 已保存的工作流模板 */
-workflowTemplates: [],
 // S56：自定义快捷指令模板（S88：预填测试模板）
 promptTemplates: [
   { id: 'pt-test-summary', name: 'test_summary', label: 'Test Summary', description: 'Test summary template', icon: '📋', prompt_template: 'Please summarize: {query}', created_at: 1700000000, updated_at: 1700000000 },
@@ -404,9 +391,6 @@ promptTemplates: [
 skills: [],
 /** Wiki 双向链接数据（REQ-ING-020） */
 wikiLinks: [],
-/** Durable Prompt Admission 待处理输入（B05） */
-pendingInputs: [],
-sessionTodos: [],
 /** Trace 记录（S2 复盘接线） */
 traces: [],
 /** Token 预算配置（S2 复盘接线） */
@@ -416,31 +400,11 @@ tokenBudgetKeepRatio: 0.67,
 tokenBudgetMinMsgs: 3,
 /** 对话分支树数据（REQ-RAG-039） */
 conversationTree: null,
-// ============================================================
-// 持久化记忆系统状态（REQ-RAG-033）
-// ============================================================
-    /** 记忆功能开关 */
-    memoryEnabled: false,
-    /** 记忆条目列表 */
-    memories: [],
-// Scratch-Promote 记忆整合（Q01）
-scratchLogs: [],
-// Burst Buffer 延迟批量记忆提取（Q02）
-burstBuffer: [],
-    // ============================================================
-    // AutoDream 状态
-    // ============================================================
-    /** Dream 取消标志 */
-    dreamAborted: false,
-    /** Dream 历史建议 */
-    dreamSuggestions: [],
     // ============================================================
     // 代码符号引擎状态（REQ-RAG-031）
     // ============================================================
     /** 符号索引是否已构建 */
     symbolIndexBuilt: false,
-    /** 子代理开关 */
-    subAgentEnabled: false,
     /** 网页搜索开关（REQ-RAG-036） */
     webSearchEnabled: false,
     /** RAG 检索参数（REQ-RAG-014 v1.10） */
@@ -450,8 +414,6 @@ burstBuffer: [],
     /** 文档排序状态（REQ-ING-008 v1.10） */
     docSortBy: null,
     docSortOrder: null,
-    /** 协调模式开关 */
-    coordinatorEnabled: false,
 contextualRetrieval: true,
     // ============================================================
     // 可观测性状态（REQ-OBS-001）
@@ -684,8 +646,8 @@ contextualRetrieval: true,
     switch (cmd) {
       case 'get_settings':
         return state.configured
-          ? { has_llm_config: true, base_url: 'http://mock.local', model: 'mock-llm', api_key_masked: '****-e2e', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, llm_mode: state.llmMode, local_model: state.localModel, sub_agent_enabled: state.subAgentEnabled || false, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true }
-          : { has_llm_config: false, base_url: '', model: '', api_key_masked: '', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, llm_mode: state.llmMode, local_model: state.localModel, sub_agent_enabled: state.subAgentEnabled || false, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true };
+          ? { has_llm_config: true, base_url: 'http://mock.local', model: 'mock-llm', api_key_masked: '****-e2e', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, llm_mode: state.llmMode, local_model: state.localModel, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true }
+          : { has_llm_config: false, base_url: '', model: '', api_key_masked: '', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, llm_mode: state.llmMode, local_model: state.localModel, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true };
 
       case 'update_llm_config':
         state.configured = true;
@@ -1344,34 +1306,12 @@ conv.title = userQuery.slice(0, 24);
             return;
           }
 
-          // Agentic RAG 模式（REQ-RAG-022）：先推送 agent_step 事件，再进入标准流式输出
-          if (state.agentEnabled) {
-            emit('chat_phase', { phase: 'retrieving', message: 'Agent 多步推理…' });
-
-            // 模拟 ReAct 循环：Thought → Action → Observation（2 轮）
-            const agentSteps = [
-              { step_type: 'thought', content: '用户询问关于知识库内容的问题，需要先检索相关文档。', tool: null, input: null, iteration: 1 },
-              { step_type: 'action', content: '检索知识库', tool: 'vector_search', input: userQuery, iteration: 1 },
-              { step_type: 'observation', content: '找到 3 条相关片段，相似度 > 0.8。', tool: null, input: null, iteration: 1 },
-              { step_type: 'thought', content: '已获取相关上下文，可以生成最终答案。', tool: null, input: null, iteration: 2 },
-            ];
-            for (const step of agentSteps) {
-              if (state.aborted) {
-                emit('chat_error', '⏹ 生成已中断');
-                emit('chat_done', null);
-                return;
-              }
-              emit('agent_step', step);
-              await delay(100);
-            }
-          } else {
-            // 标准 RAG 模式：三阶段 chat_phase 推送（REQ-RAG-001 扩展 / REQ-NFR-006-AC-2）
-            // 时序修复：增加各阶段间隔（100ms / 150ms），确保 UI 有足够时间渲染思考指示器文案
-            emit('chat_phase', { phase: 'preparing', message: '初始化向量化引擎…' });
-            await delay(100);
-            emit('chat_phase', { phase: 'retrieving', message: '检索知识库…' });
-            await delay(150);
-          }
+          // 标准 RAG 模式：三阶段 chat_phase 推送（REQ-RAG-001 扩展 / REQ-NFR-006-AC-2）
+          // 时序修复：增加各阶段间隔（100ms / 150ms），确保 UI 有足够时间渲染思考指示器文案
+          emit('chat_phase', { phase: 'preparing', message: '初始化向量化引擎…' });
+          await delay(100);
+          emit('chat_phase', { phase: 'retrieving', message: '检索知识库…' });
+          await delay(150);
 
           // 动态生成 sources：基于导入文档 + 简单关键词匹配
           const indexedDocs = state.docs.filter((d) => d.status === 'Indexed');
@@ -2031,46 +1971,6 @@ return null;
         return count;
       }
 
-      // ============================================================
-      // DAG 工作流引擎（REQ-RAG-030）
-      // ============================================================
-      case 'save_workflow_template': {
-        const wf = args.workflow || args.template;
-        if (wf) {
-          const template = { ...wf, id: wf.id || 'wf-' + Date.now(), created_at: Math.floor(Date.now() / 1000) };
-          state.workflowTemplates.push(template);
-          return template.id;
-        }
-        throw '工作流定义无效';
-      }
-
-      case 'run_workflow': {
-        const wfId = args.workflow_id || args.workflowId;
-        const wf = state.workflowTemplates.find((w) => w.id === wfId);
-        if (!wf) throw '工作流不存在: ' + wfId;
-        const nodeResults = {};
-        for (const node of (wf.nodes || [])) {
-          nodeResults[node.id] = { Completed: { output: 'Mock output for ' + node.label } };
-        }
-        (async () => {
-          await delay(100);
-          emit('workflow_progress', { workflow_id: wfId, node_id: wf.nodes?.[0]?.id, status: 'Running' });
-          await delay(200);
-          for (const node of (wf.nodes || [])) {
-            emit('workflow_progress', { workflow_id: wfId, node_id: node.id, status: 'Completed' });
-            await delay(100);
-          }
-        })();
-        return { node_results: nodeResults, final_output: 'Mock workflow final output', duration_ms: 500 };
-      }
-
-      case 'list_workflows':
-        return state.workflowTemplates;
-
-case 'delete_workflow':
-state.workflowTemplates = state.workflowTemplates.filter((w) => w.id !== args.workflow_id);
-return null;
-
 // ============================================================
 // 自定义快捷指令模板（S56）
 // ============================================================
@@ -2236,210 +2136,6 @@ const entities = (state.graphRelations || [])
 return { messages, documents, entities };
 }
 
-// ============================================================
-// Session Strip 会话条带化（REQ-RAG-046）
-// ============================================================
-
-case 'strip_messages': {
-const convId = args.conversation_id;
-const fromIdx = args.from_index || 0;
-const toIdx = args.to_index || 0;
-const convMessages = (state.messages || []).filter(m => m.conversation_id === convId);
-const stripped = convMessages.slice(fromIdx, toIdx + 1);
-const strippedIds = stripped.map(m => m.id).filter(Boolean);
-state.messages = (state.messages || []).filter(m => !strippedIds.includes(m.id));
-let summaryInserted = false;
-if (args.replace_with_summary && args.summary_text) {
-state.messages.push({
-id: 'strip-summary-' + Date.now(),
-conversation_id: convId,
-role: 'system',
-content: '[摘要] ' + args.summary_text,
-created_at: Date.now(),
-});
-summaryInserted = true;
-}
-return {
-stripped_count: stripped.length,
-summary_inserted: summaryInserted,
-stripped_message_ids: strippedIds,
-estimated_tokens_saved: stripped.reduce((sum, m) => sum + Math.floor((m.content || '').length / 4), 0),
-};
-}
-
-case 'strip_keeping_recent': {
-const convId = args.conversation_id;
-const keepN = args.keep_last_n || 0;
-const convMessages = (state.messages || []).filter(m => m.conversation_id === convId);
-const stripped = convMessages.slice(0, convMessages.length - keepN);
-const strippedIds = stripped.map(m => m.id).filter(Boolean);
-state.messages = (state.messages || []).filter(m => !strippedIds.includes(m.id));
-let summaryInserted = false;
-if (args.replace_with_summary && args.summary_text) {
-state.messages.push({
-id: 'strip-summary-' + Date.now(),
-conversation_id: convId,
-role: 'system',
-content: '[摘要] ' + args.summary_text,
-created_at: Date.now(),
-});
-summaryInserted = true;
-}
-return {
-stripped_count: stripped.length,
-summary_inserted: summaryInserted,
-stripped_message_ids: strippedIds,
-estimated_tokens_saved: stripped.reduce((sum, m) => sum + Math.floor((m.content || '').length / 4), 0),
-};
-}
-
-case 'preview_strip': {
-const convId = args.conversation_id;
-const fromIdx = args.from_index || 0;
-const toIdx = args.to_index || 0;
-const convMessages = (state.messages || []).filter(m => m.conversation_id === convId);
-const previewMessages = convMessages.slice(fromIdx, toIdx + 1);
-return {
-messages: previewMessages,
-total_messages: convMessages.length,
-estimated_tokens_saved: previewMessages.reduce((sum, m) => sum + Math.floor((m.content || '').length / 4), 0),
-};
-}
-
-// ============================================================
-// 持久化记忆系统（REQ-RAG-033）
-// ============================================================
-
-      case 'get_memories': {
-        let memories = state.memories;
-        if (args.tier) {
-          memories = memories.filter((m) => m.tier === args.tier);
-        }
-        return memories;
-      }
-
-      case 'pin_memory': {
-        const entry = {
-          id: 'mem-' + Date.now(),
-          tier: 'room',
-          content: args.content || '',
-          source: 'user_pinned',
-          conversation_id: args.conversation_id || null,
-          created_at: Math.floor(Date.now() / 1000),
-          last_accessed: Math.floor(Date.now() / 1000),
-          access_count: 0,
-          importance: 1.0,
-        };
-        state.memories.push(entry);
-        return entry;
-      }
-
-      case 'promote_memory': {
-        const mem = state.memories.find((m) => m.id === args.memory_id || m.id === args.memoryId);
-        if (!mem) throw '记忆不存在';
-        if (mem.tier === 'wing') mem.tier = 'hall';
-        else if (mem.tier === 'hall') mem.tier = 'room';
-        return mem;
-      }
-
-      case 'delete_memory': {
-        const id = args.memory_id || args.memoryId;
-        state.memories = state.memories.filter((m) => m.id !== id);
-        return null;
-      }
-
-      case 'clear_memories': {
-        const tier = args.tier;
-        if (tier) {
-          const before = state.memories.length;
-          state.memories = state.memories.filter((m) => m.tier !== tier);
-          return before - state.memories.length;
-        }
-        const count = state.memories.length;
-        state.memories = [];
-        return count;
-      }
-
-      // Scratch-Promote 记忆整合（Q01 借鉴 QM scratch-promote + consolidation）
-      case 'trigger_memory_consolidation': {
-        if (!state.scratchLogs) state.scratchLogs = [];
-        const before = state.scratchLogs.length;
-        state.scratchLogs = [];
-        return {
-          actions_count: 0,
-          expired_cleaned: 0,
-          remaining_scratch: 0,
-        };
-      }
-
-      case 'get_scratch_logs': {
-        if (!state.scratchLogs) state.scratchLogs = [];
-        const limit = args.limit;
-        const logs = state.scratchLogs.slice();
-        return limit ? logs.slice(0, limit) : logs;
-      }
-
-      // Burst Buffer 延迟批量记忆提取（Q02 借鉴 QM createBurstBuffer）
-      case 'push_burst_turn': {
-        if (!state.burstBuffer) state.burstBuffer = [];
-        state.burstBuffer.push({
-          user_msg: args.user_msg || '',
-          assistant_reply: args.assistant_reply || '',
-          conversation_id: args.conversation_id || '',
-          message_seq: args.message_seq || 1,
-        });
-        // Mock: flush when buffer reaches 10 turns (default max_turns)
-        const shouldFlush = state.burstBuffer.length >= 10;
-        let extracted = 0;
-        if (shouldFlush) {
-          // Mock: simulate extraction by writing to scratchLogs
-          for (const turn of state.burstBuffer) {
-            state.scratchLogs.push({
-              id: 'scratch-' + Math.random().toString(36).slice(2),
-              date: new Date().toISOString().slice(0, 10),
-              content: 'extracted fact (said in 对话：' + turn.conversation_id + ')',
-              created_at: Date.now(),
-            });
-            extracted++;
-          }
-          state.burstBuffer = [];
-        }
-        return {
-          pending: shouldFlush ? 0 : state.burstBuffer.length,
-          flushed: shouldFlush,
-          extracted: extracted,
-        };
-      }
-
-      case 'flush_memory_burst_buffer': {
-        if (!state.burstBuffer) state.burstBuffer = [];
-        const pendingBefore = state.burstBuffer.length;
-        let extracted = 0;
-        for (const turn of state.burstBuffer) {
-          if (!state.scratchLogs) state.scratchLogs = [];
-          state.scratchLogs.push({
-            id: 'scratch-' + Math.random().toString(36).slice(2),
-            date: new Date().toISOString().slice(0, 10),
-            content: 'extracted fact (said in 对话：' + turn.conversation_id + ')',
-            created_at: Date.now(),
-          });
-          extracted++;
-        }
-        state.burstBuffer = [];
-        return {
-          extracted: extracted,
-          pending_before: pendingBefore,
-        };
-      }
-
-      case 'get_burst_buffer_status': {
-        if (!state.burstBuffer) state.burstBuffer = [];
-        return {
-          pending: state.burstBuffer.length,
-          should_flush: state.burstBuffer.length >= 10,
-        };
-      }
-
       // ============================================================
       // 语音转写（REQ-RAG-034 桌面方案：getUserMedia + MediaRecorder + Whisper API）
       // ============================================================
@@ -2520,39 +2216,6 @@ return null;
           timed_out: false,
         };
       }
-
-      // ============================================================
-      // AutoDream 引擎
-      // ============================================================
-      case 'trigger_dream': {
-        state.dreamAborted = false;
-        (async () => {
-          await delay(100);
-          emit('dream_progress', { phase: 'scanning', message: '正在扫描文档…', progress: 0.1 });
-          await delay(200);
-          emit('dream_progress', { phase: 'analyzing', message: '正在分析重复与矛盾…', progress: 0.5 });
-          await delay(200);
-          if (state.dreamAborted) {
-            emit('dream_progress', { phase: 'aborted', message: '已中止', progress: 0 });
-            return;
-          }
-          emit('dream_progress', { phase: 'complete', message: '分析完成', progress: 1.0 });
-        })();
-        const suggestions = [
-          { suggestion_id: 'dream-1', suggestion_type: 'duplicate_documents', title: '发现重复文档', description: 'doc-a.md 和 doc-b.md 内容高度相似（92%）', doc_ids: ['doc-a', 'doc-b'], doc_names: ['doc-a.md', 'doc-b.md'], severity: 'medium', similarity: 0.92 },
-          { suggestion_id: 'dream-2', suggestion_type: 'contradiction', title: '检测到矛盾信息', description: '关于 PDF 支持的描述存在矛盾', doc_ids: ['doc-c', 'doc-d'], doc_names: ['guide.md', 'faq.md'], severity: 'high', similarity: null },
-          { suggestion_id: 'dream-3', suggestion_type: 'organization', title: '建议添加标签', description: '3 个文档未分类', doc_ids: ['doc-e', 'doc-f', 'doc-g'], doc_names: ['notes.md', 'draft.md', 'misc.md'], severity: 'low', similarity: null },
-        ];
-        state.dreamSuggestions = suggestions;
-        return { suggestions, total_documents: state.docs.length, total_suggestions: suggestions.length, elapsed_ms: 500 };
-      }
-
-      case 'get_dream_suggestions':
-        return state.dreamSuggestions;
-
-      case 'abort_dream':
-        state.dreamAborted = true;
-        return null;
 
       // ============================================================
       // 性能优化：索引重建
@@ -2653,95 +2316,7 @@ return {
 };
 }
 
-      // ============================================================
-      // Durable Prompt Admission（B05 持久化提示接纳）
-      // ============================================================
-      case 'admit_input': {
-        const input = {
-          id: 'pi-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-          conversation_id: args.conversation_id || '',
-          content: args.content || '',
-          delivery: args.delivery || 'queue',
-          created_at: Math.floor(Date.now() / 1000),
-          promoted_seq: null,
-        };
-        state.pendingInputs.push(input);
-        return input.id;
-      }
-
-      case 'promote_input': {
-        const input = state.pendingInputs.find(p => p.id === args.input_id);
-        if (input) {
-          input.promoted_seq = Date.now();
-        }
-        return null;
-      }
-
-      case 'get_pending_inputs': {
-        const pending = (state.pendingInputs || [])
-          .filter(p => p.conversation_id === args.conversation_id && p.promoted_seq === null)
-          .sort((a, b) => {
-            // steer 优先，然后按 created_at ASC
-            const aPriority = a.delivery === 'steer' ? 0 : 1;
-            const bPriority = b.delivery === 'steer' ? 0 : 1;
-            if (aPriority !== bPriority) return aPriority - bPriority;
-            return a.created_at - b.created_at;
-          });
-        return pending;
-      }
-
-      // ============================================================
-      // Session Todo 持久化（B08 会话待办持久化）
-      // ============================================================
-      case 'add_session_todo': {
-        const todo = {
-          id: 'todo-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-          conversation_id: args.conversation_id || '',
-          content: args.content || '',
-          status: 'pending',
-          priority: 'medium',
-          position: args.position || 0,
-          created_at: Math.floor(Date.now() / 1000),
-        };
-        state.sessionTodos.push(todo);
-        return todo.id;
-      }
-
-      case 'update_todo_status': {
-        const todo = state.sessionTodos.find(t => t.id === args.todo_id);
-        if (todo) {
-          todo.status = args.status;
-        }
-        return null;
-      }
-
-      case 'get_session_todos': {
-        return (state.sessionTodos || [])
-          .filter(t => t.conversation_id === args.conversation_id)
-          .sort((a, b) => a.position - b.position);
-      }
-
-      case 'delete_session_todo': {
-        state.sessionTodos = state.sessionTodos.filter(t => t.id !== args.todo_id);
-        return null;
-      }
-
-      case 'delete_session_todos': {
-        state.sessionTodos = state.sessionTodos.filter(
-          t => t.conversation_id !== args.conversation_id,
-        );
-        return null;
-      }
-
-      // ============================================================
-      // 子代理 + 协调模式
-      // ============================================================
-
-
-
-
-
-      // ============================================================
+            // ============================================================
       // 网页搜索集成（REQ-RAG-036）
       // ============================================================
 
@@ -3180,9 +2755,6 @@ case 'set_rag_eval_settings':
           case 'rag.hybrid_search': state.hybridSearch = enabled; break;
           case 'rag.rerank_enabled': state.rerankEnabled = enabled; break;
           case 'rag.hyde_enabled': state.hydeEnabled = enabled; break;
-          case 'rag.agent_enabled': state.agentEnabled = enabled; break;
-          case 'rag.coordinator_enabled': state.coordinatorEnabled = enabled; break;
-          case 'rag.sub_agent_enabled': state.subAgentEnabled = enabled; break;
           case 'vec.embedding_model': state.embeddingModel = value; break;
           case 'rag.context_token_limit': {
             // 对齐真实契约（settings.rs：范围 2048-32768，越界拒绝）
@@ -3194,7 +2766,6 @@ case 'set_rag_eval_settings':
             break;
           }
           case 'mm.vlm_enabled': state.vlmEnabled = enabled; break;
-          case 'memory.enabled': state.memoryEnabled = enabled; break;
           case 'rag.web_search_enabled': state.webSearchEnabled = enabled; break;
           case 'rag.contextual_retrieval': state.contextualRetrieval = enabled; break;
           case 'window.close_to_tray': state.closeToTray = enabled; break;
@@ -3215,13 +2786,9 @@ case 'set_rag_eval_settings':
           case 'rag.hybrid_search': return String(state.hybridSearch);
           case 'rag.rerank_enabled': return String(state.rerankEnabled);
           case 'rag.hyde_enabled': return String(state.hydeEnabled);
-          case 'rag.agent_enabled': return String(state.agentEnabled);
-          case 'rag.coordinator_enabled': return String(state.coordinatorEnabled);
-          case 'rag.sub_agent_enabled': return String(state.subAgentEnabled);
           case 'vec.embedding_model': return state.embeddingModel || 'all-MiniLM-L6-v2';
           case 'rag.context_token_limit': return String(state.contextTokenLimit || 4096);
           case 'mm.vlm_enabled': return String(state.vlmEnabled);
-          case 'memory.enabled': return String(state.memoryEnabled);
           case 'rag.web_search_enabled': return String(state.webSearchEnabled);
           case 'rag.contextual_retrieval': return String(state.contextualRetrieval);
           case 'window.close_to_tray': return String(state.closeToTray);
@@ -3455,30 +3022,19 @@ case 'set_rag_eval_settings':
       // 高级 RAG 状态重置
       state.rerankEnabled = false;
       state.hydeEnabled = false;
-      state.agentEnabled = false;
       state.embeddingModel = 'all-MiniLM-L6-v2';
       // i18n 状态重置
       state.locale = 'zh-CN';
       // 领域分类重置
       state.docDomains = {};
-      // 工作流重置
-      state.workflowTemplates = [];
-      // 记忆系统重置
-      state.memoryEnabled = false;
-      state.memories = [];
-      // AutoDream 重置
-      state.dreamAborted = false;
-      state.dreamSuggestions = [];
       // 符号引擎重置
       state.symbolIndexBuilt = false;
       // 性能优化重置
-state.subAgentEnabled = false;
 state.webSearchEnabled = false;
 state.ragParams = { top_k: 8, score_threshold: 0.0, chunk_expansion_enabled: true, chunk_expansion_window: 1 };
 state.generationParams = { temperature: 0.7, max_tokens: 4096, top_p: 1.0 };
 state.docSortBy = null;
 state.docSortOrder = null;
-state.coordinatorEnabled = false;
       // 可观测性重置
       state.logLevel = 'info';
       // 下载管理重置
@@ -3585,25 +3141,15 @@ state.coordinatorEnabled = false;
       state.llmMode = 'remote';
       state.localModel = '';
       // S34-S43 新增状态重置
-      state.workflowTemplates = [];
-      state.memoryEnabled = false;
-      state.memories = [];
-      state.dreamAborted = false;
-      state.dreamSuggestions = [];
       state.symbolIndexBuilt = false;
-state.subAgentEnabled = false;
 state.webSearchEnabled = false;
 state.ragParams = { top_k: 8, score_threshold: 0.0, chunk_expansion_enabled: true, chunk_expansion_window: 1 };
 state.generationParams = { temperature: 0.7, max_tokens: 4096, top_p: 1.0 };
 state.docSortBy = null;
 state.docSortOrder = null;
-state.coordinatorEnabled = false;
       state.logLevel = 'info';
       state.downloadStatuses = {};
       state.tokenBudget = 0;
-      state.pendingInputs = [];
-  state.sessionTodos = [];
-  state.burstBuffer = [];
   state.shadowScreenStats = { total: 0, agree: 0, disagree: 0, unavailable: 0 };
     state.mcpServers = [];
     },

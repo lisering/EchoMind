@@ -16,7 +16,6 @@ use echomind_models::{ChatMessage, RetrievalResult, TokenUsage};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 
-use crate::memory_store::MemoryRetriever;
 use crate::quality_gate::{GateConfig, GateScore};
 use crate::splitter::bpe;
 use crate::web_search::{self, DEFAULT_SEARCH_THRESHOLD};
@@ -54,8 +53,6 @@ pub struct ChatEngine<R: Retriever, L: LLMProvider> {
     gate_config: Option<GateConfig>,
     /// 质量门控评分结果（None = 门控未启用或未评估）
     gate_score: Option<GateScore>,
-    /// 对话记忆检索器（None = 记忆注入已禁用，REQ-RAG-032）
-    memory: Option<Arc<dyn MemoryRetriever>>,
     /// 网页搜索 provider（None = 网页搜索已禁用，REQ-RAG-036）
     ///
     /// 当本地检索 top-1 score < threshold 时触发网页搜索，
@@ -70,7 +67,6 @@ impl<R: Retriever, L: LLMProvider> ChatEngine<R, L> {
             llm,
             gate_config: None,
             gate_score: None,
-            memory: None,
             web_search_provider: None,
         }
     }
@@ -82,18 +78,6 @@ impl<R: Retriever, L: LLMProvider> ChatEngine<R, L> {
     /// 降级策略（ExpandTopK）由 `chat_inner` 在外部处理（因为需要重新检索）。
     pub fn with_quality_gate(mut self, config: GateConfig) -> Self {
         self.gate_config = Some(config);
-        self
-    }
-
-    /// 启用对话记忆注入（REQ-RAG-032）。
-    ///
-    /// 启用后，`chat_with_sources()` 在构建 system prompt 前检索相关记忆，
-    /// 将记忆以 `[相关记忆]` 块注入到 system prompt 静态前缀之前。
-    /// 记忆仅作为额外上下文，LLM 自行决定是否引用。
-    ///
-    /// 向后兼容：未调用此方法时 `memory` 为 `None`，行为与之前完全一致。
-    pub fn with_memory(mut self, memory: Arc<dyn MemoryRetriever>) -> Self {
-        self.memory = Some(memory);
         self
     }
 
@@ -188,29 +172,7 @@ impl<R: Retriever, L: LLMProvider> ChatEngine<R, L> {
 
         let segmented = build_rag_prompt_segmented(&sources);
 
-        // REQ-RAG-032：对话记忆注入
-        //
-        // 若启用记忆，检索相关记忆并注入到 system prompt 静态前缀之前。
-        // 记忆以 `[相关记忆]` 块格式注入，LLM 自行决定是否引用。
-        // 记忆仅作为额外上下文，不修改 RAG context 部分（检索结果不受记忆影响）。
-        let static_prefix = if let Some(ref mem) = self.memory {
-            let memories = mem
-                .retrieve_relevant_memories(query, 5)
-                .await
-                .unwrap_or_default();
-            if memories.is_empty() {
-                segmented.static_prefix.clone()
-            } else {
-                let memory_text = memories
-                    .iter()
-                    .map(|m| format!("- {}", m.content))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                format!("[相关记忆]\n{memory_text}\n\n{}", segmented.static_prefix)
-            }
-        } else {
-            segmented.static_prefix.clone()
-        };
+        let static_prefix = segmented.static_prefix.clone();
 
         let stream = self
             .llm

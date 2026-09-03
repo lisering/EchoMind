@@ -23,7 +23,6 @@ import { renderPerfSettings } from './perf-settings.js';
 import { renderRagEvalSettings } from './rag-eval.js';
 import { openEmbedEvalPanel } from './embed-eval.js';
 import { openMcpSettingsPanel } from './mcp-settings.js';
-import { renderMemorySettings } from './memory-panel.js';
 import { renderDiskSpaceCard } from './disk-space.js';
 import { renderTraceBudgetSettings } from './trace-panel.js';
 import { pushPanel, removePanel } from './panel-stack.js';
@@ -58,7 +57,6 @@ import {
   initMirrorSourceSelector,
   loadContextTokenLimit, loadTokenCostSettings,
   loadSamplingParams, saveSamplingParams, resetSamplingParams,
-  onCoordinatorToggle, onSubAgentToggle,
   renderPromptTemplateSettings,
   renderWindowSettings, renderErrorLogsSettings, renderStartupSettings,
   renderRagLlmParams,
@@ -226,19 +224,8 @@ export async function openSettings() {
 
     setState({
       hybridEnabled: settings.hybrid_search || false,
-      agentEnabled: settings.agent_enabled || false,
-      subAgentEnabled: settings.sub_agent_enabled || false,
-      memoryEnabled: settings.memory_enabled || false,
       webSearchEnabled: settings.web_search_enabled || false,
     });
-
-    const subAgentToggleEl = $('subAgentToggle');
-    if (subAgentToggleEl && settings.sub_agent_enabled) {
-      subAgentToggleEl.setAttribute('aria-checked', 'true');
-      subAgentToggleEl.classList.remove('bg-slate-600');
-      subAgentToggleEl.classList.add('bg-accent');
-      subAgentToggleEl.querySelector('span').classList.add('translate-x-5');
-    }
 
     const modelSelect = $('embeddingModelSelect');
     if (modelSelect) {
@@ -298,13 +285,6 @@ export async function openSettings() {
     if (secContainer) {
       secContainer.innerHTML = '';
       renderSecuritySettings(secContainer);
-    }
-
-    // 渲染记忆管理设置区块
-    const memContainer = $('memorySettingsContainer');
-    if (memContainer) {
-      memContainer.innerHTML = '';
-      renderMemorySettings(memContainer);
     }
 
     // 渲染性能优化设置区块（高级区域）
@@ -438,8 +418,6 @@ export function initSettings() {
   if ($('vlmConfirmCloseBtn')) $('vlmConfirmCloseBtn').onclick = cancelVlmEnable;
   if ($('rerankToggle')) $('rerankToggle').onclick = onRerankToggle;
   if ($('hydeToggle')) $('hydeToggle').onclick = onHydeToggle;
-  if ($('coordinatorToggle')) $('coordinatorToggle').onclick = onCoordinatorToggle;
-  if ($('subAgentToggle')) $('subAgentToggle').onclick = onSubAgentToggle;
   if ($('syncAddBtn')) $('syncAddBtn').onclick = onAddWatchedFolder;
 
   // 本地 LLM 模式切换

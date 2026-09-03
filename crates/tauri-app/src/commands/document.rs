@@ -102,7 +102,6 @@ pub async fn delete_document_inner(id: &str, state: &AppState) -> Result<(), Str
     }
 
     // P2-1 StepCache：删除文档 → 清空步骤级缓存（检索结果可能引用被删文档）
-    state.step_cache.clear();
     Ok(())
 }
 
@@ -746,7 +745,6 @@ pub async fn batch_delete_documents_inner(
         }
         let _ = &doc_id; // doc_id 保留以备日志
     }
-    state.step_cache.clear();
 
     Ok(BatchResult::all_success(ids.len()))
 }

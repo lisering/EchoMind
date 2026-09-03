@@ -29,10 +29,9 @@ use echomind_tauri_app::commands::{
     get_sidebar_collapsed_inner, get_watched_folders_inner, import_files_inner,
     list_local_models_inner, open_data_dir_inner, persist_exchange, rebuild_index_inner,
     record_token_usage_inner, remove_watched_folder_inner, retry_index_inner, save_text_file_inner,
-    search_symbols_inner, set_agent_enabled_inner, set_context_token_limit_inner,
-    set_coordinator_mode_inner, set_embedding_model_inner, set_hybrid_search_inner,
-    set_hyde_enabled_inner, set_llm_mode_inner, set_local_model_inner, set_locale_inner,
-    set_memory_enabled_inner, set_rerank_enabled_inner, set_sidebar_collapsed_inner,
+    search_symbols_inner, set_context_token_limit_inner, set_embedding_model_inner,
+    set_hybrid_search_inner, set_hyde_enabled_inner, set_llm_mode_inner, set_local_model_inner,
+    set_locale_inner, set_rerank_enabled_inner, set_sidebar_collapsed_inner,
     set_token_budget_inner, update_llm_config_inner,
 };
 #[cfg(feature = "pro")]
