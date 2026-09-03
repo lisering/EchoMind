@@ -52,10 +52,7 @@ impl LlmChoice {
         Self::new(LlmMode::Remote, model_id)
     }
 
-    /// 创建 Local 模式的选择（便捷构造函数）。
-    pub fn local(model_id: impl Into<String>) -> Self {
-        Self::new(LlmMode::Local, model_id)
-    }
+    // Local 模式已移除（Phase 1 R3 重构）
 }
 
 /// 路由裁决（借鉴 QM harness-router 的 resolve 返回值）。
@@ -91,12 +88,10 @@ impl std::fmt::Display for RouterError {
 
 impl std::error::Error for RouterError {}
 
-/// 连续远程 LLM 失败阈值：达到此值后自动切换到 Local 模式（P2-2 弹性降级）。
+/// 连续远程 LLM 失败阈值。
 ///
-/// 设计考量：
-/// - 3 次是经验值——单次失败可能是瞬时网络抖动，2 次仍可能是短暂故障
-/// - 3 次连续失败大概率是 API Key 失效、端点不可达或限流持续
-/// - 自动切换仅影响 fallback，不改变用户显式选择的模式
+/// 注：Local 模式已移除（Phase 1 R3），此常量保留但不再用于自动切换。
+#[allow(dead_code)]
 const REMOTE_FAILURE_THRESHOLD: usize = 3;
 
 /// LLM 路由器（借鉴 QM `HarnessRouter`）。
@@ -104,18 +99,17 @@ const REMOTE_FAILURE_THRESHOLD: usize = 3;
 /// 管理多个 LLM 后端的路由逻辑，按运行时配置和会话上下文动态选择推理后端。
 /// 切换后端时通过 `RouterVerdict::ModeChanged` 通知调用方重置会话状态。
 ///
-/// **P2-2 弹性降级**：当远程 LLM 连续失败达到 `REMOTE_FAILURE_THRESHOLD` 次时，
-/// 自动将 fallback 切换到 Local 模式（如 Local 在可用模式集合中），
-/// 后续请求自动使用本地推理。成功调用重置计数器。
+/// 注：Local 模式已移除（Phase 1 R3），路由器当前仅支持 Remote 模式。
+/// P2-2 弹性降级到 Local 的功能已废弃。
 ///
 /// # 使用方式
 ///
 /// ```ignore
-/// let router = LlmRouter::new_pro_default();
+/// let router = LlmRouter::new_free_default();
 /// let (choice, verdict) = router.resolve("conv-1", None).await?;
-/// // 基于 choice.mode 创建 LlmProvider::Remote 或 LlmProvider::Local
+/// // 基于 choice.mode 创建 LlmProvider::Remote
 /// if verdict == RouterVerdict::ModeChanged {
-///     // 重置会话状态（KV cache 等）
+///     // 重置会话状态
 /// }
 /// ```
 pub struct LlmRouter {
@@ -123,11 +117,11 @@ pub struct LlmRouter {
     fallback: Arc<RwLock<LlmChoice>>,
     /// 每会话上次使用的模式（借鉴 QM `lastHarness`）
     last_mode: Arc<RwLock<HashMap<String, LlmMode>>>,
-    /// 可用模式集合（Free: `{Remote}`, Pro: `{Remote, Local}`）
+    /// 可用模式集合（当前仅 `{Remote}`）
     available_modes: Arc<RwLock<HashSet<LlmMode>>>,
     /// 每会话上次使用的 Provider 名称（用于 scored_selector continuity 评分）
     last_provider: Arc<RwLock<HashMap<String, String>>>,
-    /// 远程 LLM 连续失败计数（P2-2：达到阈值自动切换 Local）
+    /// 远程 LLM 连续失败计数（保留用于诊断，不再触发自动切换）
     remote_failure_count: Arc<std::sync::atomic::AtomicUsize>,
 }
 
@@ -154,12 +148,9 @@ impl LlmRouter {
         Self::new(LlmChoice::new(LlmMode::Remote, String::new()), modes)
     }
 
-    /// 创建 Pro 版路由器（Remote + Local 均可用）。
+    /// 创建 Pro 版路由器（仅 Remote 可用——Local 模式已移除）。
     pub fn new_pro_default() -> Self {
-        let mut modes = HashSet::new();
-        modes.insert(LlmMode::Remote);
-        modes.insert(LlmMode::Local);
-        Self::new(LlmChoice::new(LlmMode::Remote, String::new()), modes)
+        Self::new_free_default()
     }
 
     /// 更新默认选择（`set_llm_mode` 调用时更新）。
@@ -274,12 +265,8 @@ impl LlmRouter {
         let (idx, score) = select_best(candidates, &config)?;
         let candidate = &candidates[idx];
 
-        // 映射到 LlmChoice
-        let mode = if candidate.is_local {
-            LlmMode::Local
-        } else {
-            LlmMode::Remote
-        };
+        // 映射到 LlmChoice（Local 模式已移除，始终 Remote）
+        let mode = LlmMode::Remote;
 
         // 校验模式可用性
         {
@@ -322,50 +309,20 @@ impl LlmRouter {
             .store(0, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// 记录远程 LLM 失败调用，达到阈值时自动切换 fallback 到 Local。
+    /// 记录远程 LLM 失败调用。
     ///
-    /// 在 `forward_stream` 返回 `Err` 时调用。使用 `fetch_add` 原子操作
-    /// 保证并发安全。
-    ///
-    /// # 返回
-    /// - `true`：连续失败达到阈值，已自动将 fallback 切换到 Local 模式
-    /// - `false`：未达到阈值或 Local 不可用，fallback 未改变
-    ///
-    /// # 自动切换条件
-    /// 1. 连续失败计数 >= `REMOTE_FAILURE_THRESHOLD`（3 次）
-    /// 2. `LlmMode::Local` 在 `available_modes` 集合中（Pro 版本）
-    ///
-    /// 自动切换仅修改 fallback，不改变用户通过 `set_llm_mode` 设置的显式模式。
-    /// 用户可在设置中手动切回 Remote，或重启计数（`record_remote_success`）。
+    /// 注：Local 模式已移除（Phase 1 R3），自动切换功能废弃。
+    /// 保留此方法以维持 API 兼容性，但不再触发任何自动切换。
+    /// 计数器仍维护用于诊断目的。
     pub async fn record_remote_failure(&self) -> bool {
         let count = self
             .remote_failure_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            + 1; // fetch_add 返回旧值，+1 得到新值
+            + 1;
 
-        if count < REMOTE_FAILURE_THRESHOLD {
-            return false;
-        }
-
-        // 检查 Local 是否可用
-        let local_available = {
-            let available = self.available_modes.read().await;
-            available.contains(&LlmMode::Local)
-        };
-
-        if !local_available {
-            return false;
-        }
-
-        // 达到阈值且 Local 可用：切换 fallback
-        let new_fallback = LlmChoice::new(LlmMode::Local, String::new());
-        self.set_fallback(new_fallback).await;
-
-        // 重置计数器，避免切换后继续累积
-        self.remote_failure_count
-            .store(0, std::sync::atomic::Ordering::Relaxed);
-
-        true
+        // Local 模式已移除，不再触发自动切换
+        let _ = count;
+        false
     }
 
     /// 查询当前远程 LLM 连续失败计数（主要用于测试和诊断）。

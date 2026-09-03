@@ -38,7 +38,7 @@ use echomind_models::{
     ConversationTreeNode, DocStatus, DocStatusPayload, Document, DocumentPreview,
     EmbeddingProgressPayload, EntityRelation, ExecutionResult, GenerationParams,
     GlobalSearchResults, GraphCommunity, GraphPath, GraphStats, GraphTriple, ImportProgressPayload,
-    LlmConfig, LlmMode, LlmSamplingParams, MessageSearchResult, ModelInfo, PaginatedResult,
+    LlmConfig, LlmMode, LlmSamplingParams, MessageSearchResult, PaginatedResult,
     PromptTemplate, RagParams, RetrievalResult, SearchResult, SettingsPayload, TokenUsage,
     TurnActiveVersion,
 };
@@ -54,11 +54,7 @@ use echomind_core::NoVlm;
 #[cfg(feature = "pro")]
 use echomind_core::audit::{AuditEngine, AuditOutcome, AuditReport, ContradictionPair, Severity};
 #[cfg(feature = "pro")]
-use echomind_infra::local_llm::LocalLlmEngine;
-#[cfg(feature = "pro")]
 use echomind_infra::symbol_engine::SymbolEngine;
-#[cfg(feature = "pro")]
-use echomind_models::KvCacheStatus;
 // REQ-VEC-014: 自定义 ONNX 嵌入模型上传（Pro 门控）
 #[cfg(feature = "pro")]
 use echomind_infra::local_embedder::CustomModelInfo;
@@ -76,7 +72,6 @@ mod features;
 mod graph;
 mod import;
 mod license;
-mod local_llm;
 mod mcp;
 mod performance;
 mod rag_eval;
@@ -97,7 +92,6 @@ pub use features::*;
 pub use graph::*;
 pub use import::*;
 pub use license::*;
-pub use local_llm::*;
 pub use mcp::*;
 pub use performance::*;
 pub use rag_eval::*;
@@ -120,9 +114,6 @@ pub use workspace::*;
 enum LlmProvider {
     /// 远程 BYOK API（OpenAI 兼容）
     Remote(OpenAIProvider),
-    /// 本地推理（mistral.rs，Pro 功能）
-    #[cfg(feature = "pro")]
-    Local(LocalLlmEngine),
 }
 
 impl echomind_core::LLMProvider for LlmProvider {
@@ -134,8 +125,6 @@ impl echomind_core::LLMProvider for LlmProvider {
     ) -> anyhow::Result<BoxStream<'static, anyhow::Result<String>>> {
         match self {
             LlmProvider::Remote(p) => p.chat_stream(system_prompt, history, query).await,
-            #[cfg(feature = "pro")]
-            LlmProvider::Local(e) => e.chat_stream(system_prompt, history, query).await,
         }
     }
 
@@ -156,11 +145,6 @@ impl echomind_core::LLMProvider for LlmProvider {
                 p.chat_stream_segmented(static_prefix, dynamic_context, history, query)
                     .await
             }
-            #[cfg(feature = "pro")]
-            LlmProvider::Local(e) => {
-                e.chat_stream_segmented(static_prefix, dynamic_context, history, query)
-                    .await
-            }
         }
     }
 
@@ -169,32 +153,24 @@ impl echomind_core::LLMProvider for LlmProvider {
     async fn generate_title(&self, transcript: &str) -> anyhow::Result<Option<String>> {
         match self {
             LlmProvider::Remote(p) => p.generate_title(transcript).await,
-            #[cfg(feature = "pro")]
-            LlmProvider::Local(e) => e.generate_title(transcript).await,
         }
     }
 
     async fn one_shot(&self, system: &str, prompt: &str) -> anyhow::Result<Option<String>> {
         match self {
             LlmProvider::Remote(p) => p.one_shot(system, prompt).await,
-            #[cfg(feature = "pro")]
-            LlmProvider::Local(e) => e.one_shot(system, prompt).await,
         }
     }
 
     async fn judge(&self, system: &str, prompt: &str) -> anyhow::Result<Option<String>> {
         match self {
             LlmProvider::Remote(p) => p.judge(system, prompt).await,
-            #[cfg(feature = "pro")]
-            LlmProvider::Local(e) => e.judge(system, prompt).await,
         }
     }
 
     fn context_token_budget(&self) -> Option<usize> {
         match self {
             LlmProvider::Remote(p) => p.context_token_budget(),
-            #[cfg(feature = "pro")]
-            LlmProvider::Local(e) => e.context_token_budget(),
         }
     }
 }
@@ -208,8 +184,6 @@ impl LlmProvider {
     > {
         match self {
             LlmProvider::Remote(p) => Some(p.reasoning_rx_handle()),
-            #[cfg(feature = "pro")]
-            LlmProvider::Local(_) => None,
         }
     }
 }

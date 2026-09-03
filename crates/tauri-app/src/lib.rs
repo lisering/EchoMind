@@ -155,40 +155,6 @@ pub fn run() {
             commands::get_setting,
             commands::get_chunk_params,
             commands::set_chunk_params,
-            commands::list_local_models,
-            commands::get_recommended_models,
-            commands::download_model,
-            commands::pause_download,
-            commands::abort_download,
-            commands::get_download_status,
-            commands::list_pending_downloads,
-            commands::cleanup_partial_downloads,
-            commands::scan_download_recovery,
-            commands::delete_model,
-            commands::set_llm_mode,
-            commands::get_llm_mode,
-            commands::set_local_model,
-            #[cfg(feature = "pro")]
-            commands::get_local_llm_device_kind,
-            #[cfg(feature = "pro")]
-            commands::set_paged_attn,
-            #[cfg(feature = "pro")]
-            commands::set_sampling_params,
-            #[cfg(feature = "pro")]
-            commands::set_kernel_mode,
-            #[cfg(feature = "pro")]
-            commands::get_kernel_mode,
-            // KV cache 跨会话复用（Phase 4 Session 25，REQ-LLM-009）
-            #[cfg(feature = "pro")]
-            commands::save_kv_cache,
-            #[cfg(feature = "pro")]
-            commands::load_kv_cache,
-            #[cfg(feature = "pro")]
-            commands::clear_kv_cache,
-            #[cfg(feature = "pro")]
-            commands::get_kv_cache_status,
-            #[cfg(feature = "pro")]
-            commands::set_kv_cache_enabled,
             commands::get_documents,
             commands::delete_document,
             commands::retry_index,

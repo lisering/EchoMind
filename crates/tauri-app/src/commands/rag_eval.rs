@@ -113,28 +113,12 @@ async fn get_llm_provider(state: &AppState) -> Result<LlmProvider, String> {
         .clone()
         .ok_or_else(|| prefix_error(ERR_VALIDATION, "未配置 LLM，请完成初始配置向导"))?;
 
-    let llm_mode = state.get_llm_mode().await;
-    if llm_mode == LlmMode::Local {
-        #[cfg(feature = "pro")]
-        {
-            let engine = state
-                .local_llm()
-                .await
-                .map_err(|e| prefix_error(ERR_LLM, &format!("本地推理引擎不可用: {e:#}")))?;
-            Ok(LlmProvider::Local(engine))
-        }
-        #[cfg(not(feature = "pro"))]
-        {
-            let _ = llm_config;
-            Err(prefix_error(ERR_PRO_REQUIRED, "本地推理是 Pro 版功能"))
-        }
-    } else {
-        let p = OpenAIProvider::new(
+    let _ = state.get_llm_mode().await;
+    let p = OpenAIProvider::new(
             llm_config.api_key.clone(),
             llm_config.base_url.clone(),
             llm_config.model.clone(),
         )
         .map_err(|e| prefix_error(ERR_LLM, &format!("{e:#}")))?;
-        Ok(LlmProvider::Remote(p))
-    }
+    Ok(LlmProvider::Remote(p))
 }

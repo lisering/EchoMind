@@ -4,7 +4,7 @@
 //! - `DocumentStore` — 文档管理 + 导入取消 + 文件监听
 //! - `ChatStore` — 会话中断令牌 + 审计取消
 //! - `SecurityStore` — SecurityManager + ClipboardGuard
-//! - `ModelStore` — embedder + reranker + local_llm + model_manager
+//! - `ModelStore` — embedder + reranker
 //! - `ConfigStore` — llm_config + is_pro + llm_mode
 //!
 //! `AppState` 保留所有便捷访问方法（委托到各 Store），确保 `commands.rs` 无需大改。
@@ -29,8 +29,6 @@ use tokio::sync::RwLock;
 use echomind_core::security::SecurityPosture;
 
 // Pro 模块导入
-#[cfg(feature = "pro")]
-use echomind_infra::local_llm::LocalLlmEngine;
 #[cfg(feature = "pro")]
 use echomind_infra::ocrs_engine::OcrsEngine;
 #[cfg(feature = "pro")]
@@ -57,7 +55,7 @@ pub struct AppState {
     pub security_store: SecurityStore,
     /// 配置管理 Store（llm_config + is_pro + llm_mode）
     pub config_store: ConfigStore,
-    /// 模型管理 Store（embedder + reranker + local_llm + model_manager）
+    /// 模型管理 Store（embedder + reranker）
     pub model_store: ModelStore,
     /// 文档管理 Store（导入取消 + 文件监听）
     pub document_store: DocumentStore,
@@ -131,63 +129,6 @@ impl AppState {
             .context("崩溃恢复清理失败")?;
         if cleaned > 0 {
             eprintln!("崩溃恢复：已将 {cleaned} 条中断的索引任务标记为失败");
-        }
-
-        // 健壮下载系统崩溃恢复扫描（REQ-LLM-004 v2）
-        // 检测 .partial + .meta.json 文件，记录需要恢复的下载
-        let models_llm_dir = data_dir.join("models").join("llm");
-        if models_llm_dir.exists() {
-            let recovery_dir = models_llm_dir.clone();
-            let pending =
-                tokio::task::spawn_blocking(move || -> Vec<echomind_models::DownloadManifest> {
-                    let mut items = Vec::new();
-                    let entries = match std::fs::read_dir(&recovery_dir) {
-                        Ok(e) => e,
-                        Err(_) => return items,
-                    };
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        let name = match path.file_name().and_then(|n| n.to_str()) {
-                            Some(n) => n.to_string(),
-                            None => continue,
-                        };
-                        if !name.starts_with('.') || !name.ends_with(".meta.json") {
-                            continue;
-                        }
-                        if let Ok(content) = std::fs::read_to_string(&path)
-                            && let Ok(manifest) =
-                                serde_json::from_str::<echomind_models::DownloadManifest>(&content)
-                        {
-                            let partial =
-                                recovery_dir.join(format!(".{}.partial", manifest.filename));
-                            if partial.exists() {
-                                items.push(manifest);
-                            } else {
-                                let _ = std::fs::remove_file(&path);
-                            }
-                        }
-                    }
-                    items
-                })
-                .await
-                .unwrap_or_default();
-            if !pending.is_empty() {
-                eprintln!("崩溃恢复：检测到 {} 个未完成的模型下载", pending.len());
-                for m in &pending {
-                    let completed: u64 = m.parts.iter().map(|p| p.completed).sum();
-                    eprintln!(
-                        "  - {} ({}/{} bytes, {:.1}%)",
-                        m.filename,
-                        completed,
-                        m.total_size,
-                        if m.total_size > 0 {
-                            completed as f64 / m.total_size as f64 * 100.0
-                        } else {
-                            0.0
-                        }
-                    );
-                }
-            }
         }
 
         // 初始化各 Store
@@ -371,16 +312,6 @@ impl AppState {
         self.config_store.set_llm_mode(mode).await
     }
 
-    /// 获取模型文件管理器引用（REQ-LLM-004）。
-    pub fn model_manager(&self) -> &echomind_infra::model_manager::ModelManager {
-        self.model_store.model_manager()
-    }
-
-    /// 获取健壮下载器引用（REQ-LLM-004 v2：断点续传 + 多源容错 + 崩溃恢复）。
-    pub fn robust_downloader(&self) -> &echomind_infra::robust_downloader::RobustDownloader {
-        self.model_store.robust_downloader()
-    }
-
     // ---- Embedder 委托 ----
 
     /// 懒加载向量化引擎（委托到 ModelStore）。
@@ -416,20 +347,6 @@ impl AppState {
     /// 检查重排序引擎是否已初始化。
     pub fn reranker_initialized(&self) -> bool {
         self.model_store.reranker_initialized()
-    }
-
-    // ---- Pro: 本地 LLM 委托 ----
-
-    /// 懒加载本地 LLM 引擎（Pro 门控，REQ-LLM-003）。
-    #[cfg(feature = "pro")]
-    pub async fn local_llm(&self) -> anyhow::Result<LocalLlmEngine> {
-        self.model_store.local_llm().await
-    }
-
-    /// 卸载本地 LLM 引擎。
-    #[cfg(feature = "pro")]
-    pub async fn unload_local_llm(&self) {
-        self.model_store.unload_local_llm().await;
     }
 
     // ---- Pro: PDF/OCR/VLM 委托 ----
@@ -541,16 +458,6 @@ impl AppState {
     /// 检查指定路径的监听器是否活跃。
     pub async fn is_watcher_active(&self, path: &str) -> bool {
         self.document_store.is_watcher_active(path).await
-    }
-
-    // ---- KV cache 目录管理（Phase 4 Session 25）----
-
-    /// 获取 KV cache 文件存储目录（REQ-LLM-009）。
-    ///
-    /// 返回 `{data_dir}/kv_cache/` 路径。目录可能尚不存在，
-    /// 调用方负责按需创建。
-    pub fn kv_cache_dir(&self) -> PathBuf {
-        self.data_dir.join("kv_cache")
     }
 
     /// 获取日志文件存储目录（REQ-OBS-001）。

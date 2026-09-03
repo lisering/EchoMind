@@ -207,11 +207,10 @@ pub async fn export_diagnostics_inner(state: &AppState) -> Result<String, String
         None => (None, None, None),
     };
 
-    // LLM 模式
+    // LLM 模式（Local 已移除，始终为 Remote）
     let llm_mode = state.get_llm_mode().await;
     let mode_str = match llm_mode {
         LlmMode::Remote => "remote",
-        LlmMode::Local => "local",
     };
 
     let db_path = state.data_dir.join("echomind.db");

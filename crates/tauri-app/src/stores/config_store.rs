@@ -85,11 +85,9 @@ impl ConfigStore {
     }
 
     /// 从 settings 表恢复 LLM 推理模式。
-    async fn load_llm_mode(storage: &SqliteStorage) -> LlmMode {
-        match storage.get_setting("llm.mode").await {
-            Ok(Some(s)) if s == "local" => LlmMode::Local,
-            _ => LlmMode::Remote,
-        }
+    /// Local 模式已移除（Phase 1 R3），始终返回 Remote。
+    async fn load_llm_mode(_storage: &SqliteStorage) -> LlmMode {
+        LlmMode::Remote
     }
 
     /// 获取当前 LLM 推理模式（REQ-LLM-003）。
@@ -97,11 +95,10 @@ impl ConfigStore {
         *self.llm_mode.read().await
     }
 
-    /// 切换 LLM 推理模式并持久化到 settings 表（REQ-LLM-003）。
+    /// 设置 LLM 推理模式（Local 模式已移除，仅 Remote 有效）。
     pub async fn set_llm_mode(&self, mode: LlmMode) -> anyhow::Result<()> {
         let mode_str = match mode {
             LlmMode::Remote => "remote",
-            LlmMode::Local => "local",
         };
         self.storage.set_setting("llm.mode", mode_str).await?;
         *self.llm_mode.write().await = mode;

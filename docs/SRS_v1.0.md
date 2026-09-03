@@ -2181,23 +2181,10 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 关联测试：手测 + 设置界面 E2E（wiremock L2 用例随 CI 阶段补齐）
 
 #### REQ-LLM-003 本地 LLM 推理引擎
-- 优先级：P1 ｜ 状态：Implemented（Phase 2 完成） ｜ 依赖：REQ-LLM-001
-- 描述：集成 mistral.rs v0.9.0 纯 Rust LLM 推理引擎，支持加载本地 GGUF 量化模型，在 CPU/GPU 上执行推理，通过 `LLMProvider` trait 与现有 RAG 管线无缝集成。用户可在设置中切换「远程 API」和「本地推理」两种模式。本地推理模式下零网络请求，查询内容不离开本机，满足高隐私场景（律师、研究人员）需求。mistral.rs 依赖通过 Pro feature 门控（`#[cfg(feature = "pro")]`），Free 版本不含本地推理依赖。
-- Phase 2 增强：mistral.rs v0.8.1→v0.9.0 升级、GPU 加速（Metal/CUDA）、PagedAttention KV cache 管理、采样参数配置（temperature/top_p/top_k/max_tokens/penalty）、模型卸载/切换（OnceCell→RwLock<Option>）、流取消集成（CancellationToken）、模型预热（warm_up 后台加载消除首次对话卡顿）、extract_text 错误处理加固（match 全变体处理）。
-- 验收标准：
-  - AC-1：设置面板提供推理模式切换（远程 API / 本地推理），选择本地推理后 `chat` 命令使用 `LocalLlmEngine` 进行推理。
-  - AC-2：本地推理支持 token 级流式输出，与远程 API 行为一致（`chat_token` 事件）。
-  - AC-3：首次加载模型时显示加载状态，不阻塞 UI。
-  - AC-4：`set_llm_mode` 命令切换 Remote/Local 模式，持久化到 settings 表 `llm.mode`。切换到 Local 模式后后台预热模型（S14）。
-  - AC-5：模型加载失败时返回可读错误信息，不 Panic。`extract_text` 使用 match 全变体处理，防御性返回 None 而非 panic（S14）。
-  - AC-6：Free 用户切换到 Local 模式时被拦截并提示升级 Pro。
-  - AC-7（Phase 2）：`get_local_llm_device_kind` 命令返回当前推理设备类型（cpu/metal/cuda）。
-  - AC-8（Phase 2）：`set_paged_attn` 命令配置 PagedAttention KV cache 管理（block_size/gpu_memory_ctx）。
-  - AC-9（Phase 2）：`set_sampling_params` 命令配置采样参数（temperature/top_p/top_k/max_tokens/frequency_penalty/presence_penalty），运行时即时生效，无需重新加载模型。
-  - AC-10（Phase 2）：`abort()` 方法中断推理流，已生成内容保留（CancellationToken 集成）。
-  - AC-11（Phase 2）：`warm_up()` 方法后台预热模型，模式切换/模型选择后自动触发，消除首次对话卡顿。
-- 契约：`LLMProvider` trait 不变；新增 `LocalLlmEngine` 适配器（`crates/infra/src/local_llm.rs`，Pro 门控）；新增 `LlmMode` 枚举（Remote/Local）、`LlmSamplingParams` 结构体；新增方法 `device_kind()` / `with_paged_attn()` / `sampling_params()` / `set_sampling_params()` / `unload()` / `abort()` / `warm_up()`。
-- 关联测试：TC-LLM-LOCAL-001~008、TC-LLM-UPGRADE-001~003、TC-LLM-GPU-001~003、TC-LLM-PAGED-001~003、TC-LLM-SAMPLE-001~004、TC-LLM-UNLOAD-001~004、TC-LLM-ABORT-001~003、TC-LLM-WARM-001~003、TC-LLM-PERF-001~003
+- 优先级：P1 ｜ 状态：**Deprecated**（Phase 1 R3 重构移除，2026-08） ｜ 依赖：REQ-LLM-001
+- 描述：~~集成 mistral.rs v0.9.0 纯 Rust LLM 推理引擎~~ **已移除**。本地推理功能（mistral.rs 适配层、GGUF 模型加载、PagedAttention KV cache、采样参数配置、模型预热/卸载/abort）因过度工程化被整体删除。当前仅支持远程 API 模式（BYOK）。
+- 移除范围：`LocalLlmEngine` 适配器、`LlmMode::Local` 变体、`set_llm_mode` / `get_llm_mode` IPC 命令、`set_paged_attn` / `set_sampling_params` / `set_kernel_mode` / `get_kernel_mode` IPC 命令、`set_local_model` / `list_local_models` / `delete_model` / `download_model` IPC 命令、`ModelManager`、`RobustDownloader`、KV Cache 跨会话复用、GEMV 内核、GGUF 解析器、量化块结构、Prompt Prefix 磁盘缓存。
+- 关联测试：TC-LLM-LOCAL-001~008 等已删除
 
 #### REQ-LLM-004 本地模型管理
 - 优先级：P1 ｜ 状态：Implemented ｜ 依赖：REQ-LLM-003

@@ -1136,17 +1136,16 @@ pub struct SettingsPayload {
     pub contextual_retrieval: bool,
 }
 
-/// LLM 推理模式（REQ-LLM-003）。
+/// LLM 推理模式。
 ///
-/// - `Remote`：BYOK 远程 API（现有行为，OpenAI 兼容 SSE 流式）
-/// - `Local`：本地推理（mistral.rs，GGUF 模型，零网络请求）
+/// - `Remote`：BYOK 远程 API（OpenAI 兼容 SSE 流式）
+///
+/// 注：`Local` 变体已随本地 LLM 功能移除（Phase 1 R3 重构，REQ-LLM-003 Deprecated）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum LlmMode {
     /// 远程 API（BYOK 模式）
     #[default]
     Remote,
-    /// 本地推理（mistral.rs）
-    Local,
 }
 
 /// 本地模型元信息（REQ-LLM-004）。
@@ -3494,7 +3493,7 @@ mod llm_model_tests {
     /// TC-MODEL-LLM-002：LlmMode 序列化/反序列化往返一致
     #[test]
     fn test_llm_mode_serde() {
-        let mode = LlmMode::Local;
+        let mode = LlmMode::Remote;
         let json = serde_json::to_string(&mode).expect("serialize");
         let deserialized: LlmMode = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(mode, deserialized);

@@ -320,22 +320,7 @@ pub async fn chat_inner<R: Runtime>(
         info!("会话 {conversation_id} LLM 后端切换 → {llm_mode:?}");
     }
     let usage_handle: Option<std::sync::Arc<tokio::sync::Mutex<Option<TokenUsage>>>>;
-    let provider: LlmProvider = if llm_mode == LlmMode::Local {
-        #[cfg(feature = "pro")]
-        {
-            let engine = state
-                .local_llm()
-                .await
-                .map_err(|e| prefix_error(ERR_LLM, &format!("本地推理引擎不可用: {e:#}")))?;
-            usage_handle = None;
-            LlmProvider::Local(engine)
-        }
-        #[cfg(not(feature = "pro"))]
-        {
-            let _ = usage_handle;
-            return Err(prefix_error(ERR_PRO_REQUIRED, "本地推理是 Pro 版功能"));
-        }
-    } else {
+    let provider: LlmProvider = {
         let p = OpenAIProvider::new(
             llm_config.api_key.clone(),
             llm_config.base_url.clone(),
@@ -543,58 +528,9 @@ pub async fn chat_inner<R: Runtime>(
         let bg_max_tokens = context_token_limit;
         let bg_pending = std::sync::Arc::clone(&state.compaction_pending);
         let bg_conv_id = conversation_id.to_string();
-        let bg_mode = llm_mode;
+        let _bg_mode = llm_mode;
 
-        if bg_mode == LlmMode::Local {
-            #[cfg(feature = "pro")]
-            {
-                if let Ok(engine) = state.local_llm().await {
-                    // S68：schedule_background_compaction 处理 try_acquire，
-                    // 返回的 future 包含 run + release（自动管理锁）。
-                    // 由于 LLMProvider async fn in trait 的 future 不保证 Send，
-                    // 无法直接 tokio::spawn 返回的 future。
-                    // 改为：在主流程调用 schedule 做 try_acquire（极速），
-                    // 然后用具体类型 spawn run + release。
-                    if echomind_compact::schedule_background_compaction(
-                        bg_conv_id.clone(),
-                        bg_history.clone(),
-                        bg_max_tokens,
-                        engine,
-                        bg_pending.clone(),
-                    )
-                    .await
-                    .is_some()
-                    {
-                        // try_acquire 成功，spawn run + release
-                        let bg_engine = state.local_llm().await.ok();
-                        tokio::spawn(async move {
-                            if let Some(engine) = bg_engine {
-                                echomind_compact::run_background_compaction(
-                                    &bg_conv_id,
-                                    &bg_history,
-                                    bg_max_tokens,
-                                    &engine,
-                                )
-                                .await;
-                            } else {
-                                warn!("后台压缩：本地 LLM 引擎不可用，跳过");
-                            }
-                            echomind_compact::release_background_compaction(
-                                &bg_conv_id,
-                                bg_pending,
-                            )
-                            .await;
-                        });
-                    }
-                } else {
-                    warn!("后台压缩：本地 LLM 引擎不可用，跳过");
-                }
-            }
-            #[cfg(not(feature = "pro"))]
-            {
-                let _ = (bg_conv_id, bg_history, bg_max_tokens, bg_pending);
-            }
-        } else {
+        {
             // Remote 路径：创建新 OpenAIProvider 后调度
             let bg_config = llm_config.clone();
             if let Ok(bg_provider) = OpenAIProvider::new(

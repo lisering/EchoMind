@@ -4,7 +4,7 @@
 >
 > 每次 session 结束时**必须更新**此文件，确保反映最新状态。
 >
-> **最后更新**: 2026-08-27 | **更新人**: AI Agent (大简化重构 Phase 1 R2 完成。删除 10 个 Agent/Rust 模块 + Durable/Session Todo IPC + 前端 Agent UI，削减 ~13,000 行。测试 1,419 passed, clippy 零警告, tsc 0 errors, esbuild 1,584 行。)
+> **最后更新**: 2026-08-27 | **更新人**: AI Agent (大简化重构 Phase 1 R3 完成。删除 10 个本地 LLM 推理模块 + Mistral.rs 适配层 + LlmMode::Local 变体，削减 ~12,000 行。测试 1,326 passed, clippy 零警告, esbuild 1,584 行。累计削减 ~37,862 行，-28.9%。)
 
 ---
 
@@ -12,7 +12,7 @@
 
 | 指标 | 数值 | 备注 |
 |---|---|---|
-| Rust 单元+集成测试 (Free) | **1419 passed**, 0 failed, 33 ignored | `cargo test` ✅（Phase 1 R2 后回归） |
+| Rust 单元+集成测试 (Free) | **1326 passed**, 0 failed, 33 ignored | `cargo test` ✅（Phase 1 R3 后回归） |
 | Rust 单元+集成测试 (Pro) | 待验证 | `cargo test --features pro` (R1 后未单独验证 Pro) |
 | Clippy (Free) | 零警告 | `cargo clippy --all-targets -- -D warnings` ✅ |
 | cargo fmt | 通过 | `cargo fmt --check` ✅ |
@@ -99,17 +99,17 @@
 | BYOK VLM 图片理解 | REQ-MM-003 | ✅ Done | `crates/infra/src/openai_vision.rs` |
 | 多模态 PDF 导入管线 | REQ-MM-004 | ✅ Done | `crates/core/src/loader.rs`, `crates/core/src/import.rs` |
 
-### 2.4 本地 LLM (Pro)
+### 2.4 本地 LLM (Pro) — Phase 1 R3 已移除
 
 | 功能 | SRS REQ | 状态 | 关键文件 |
 |---|---|---|---|
-| mistral.rs 本地 LLM 推理 | REQ-LLM-003 | ✅ Done (Phase 1-4) | `crates/infra/src/local_llm.rs` |
-| GGUF 模型文件管理 | REQ-LLM-004 | ✅ Done | `crates/infra/src/model_manager.rs` |
-| GPU 加速 (Metal/CUDA) | REQ-LLM-005 | ✅ Done (Phase 2) | `crates/infra/src/local_llm.rs` |
-| 采样参数配置 | REQ-LLM-006 | ✅ Done (Phase 2) | `crates/infra/src/local_llm.rs` |
-| 自研量化推理内核 | REQ-LLM-007 | ✅ Done (Phase 3) | `crates/infra/src/gemv_kernel.rs` 等 6 模块 |
-| 内存层次流式加载 | REQ-LLM-008 | ✅ Done (Phase 3) | `crates/infra/src/layer_prefetch.rs` 等 |
-| KV Cache 跨会话复用 | REQ-LLM-009 | ✅ Done (Phase 4) | `crates/infra/src/kv_cache.rs` |
+| mistral.rs 本地 LLM 推理 | REQ-LLM-003 | ✅ Deprecated (v3.1.0 Phase 1 R3) | — |
+| GGUF 模型文件管理 | REQ-LLM-004 | ✅ Deprecated (v3.1.0 Phase 1 R3) | — |
+| GPU 加速 (Metal/CUDA) | REQ-LLM-005 | ✅ Deprecated (v3.1.0 Phase 1 R3) | — |
+| 采样参数配置 | REQ-LLM-006 | ✅ Deprecated (v3.1.0 Phase 1 R3) | — |
+| 自研量化推理内核 | REQ-LLM-007 | ✅ Deprecated (v3.1.0 Phase 1 R3) | — |
+| 内存层次流式加载 | REQ-LLM-008 | ✅ Deprecated (v3.1.0 Phase 1 R3) | — |
+| KV Cache 跨会话复用 | REQ-LLM-009 | ✅ Deprecated (v3.1.0 Phase 1 R3) | — |
 
 ### 2.5 极致性能优化 (S1-S10)
 
@@ -383,13 +383,17 @@ cd e2e-tests && npm run test:bridge # Playwright E2E
 
 - **分支**: `refactor/great-simplification` (从 main 切出，大简化重构专用分支)
 - **基线 tag**: `v3.1.0-final` (重构前最后快照)
-- **本次变更** (Phase 0 大简化重构启动 2026-08-27):
-  - `docs/architecture/GREAT_SIMPLIFICATION_PLAN.md` — 新建（~1000 行重构总计划，8 Phase 21 Session）
-  - `docs/refactoring/BASELINE.md` — 新建（基线指标快照：Rust 130,862 行 / 前端 30,923 行 / IPC 228 / 依赖 1,765）
-  - `docs/refactoring/DEPENDENCY_AUDIT.md` — 新建（依赖审计报告：119 重复依赖 / 可删除依赖清单）
-  - `docs/sessions/NEXT.md` — 更新为 Phase 1 R1 衔接提示词
-  - `docs/sessions/LOG.md` — 追加 Phase 0 时间线
-- **验证状态**: 全量测试基线确认 — Free 1714 / Pro 2008 / Clippy Free+Pro 零警告 / fmt 通过 / tsc 0 errors / esbuild 1826 行 / Vitest 1826 passed
+- **本次变更** (Phase 1 R3 — 删除过度工程 LLM 功能):
+  - 删除 10 个本地 LLM 推理模块文件 + 测试（gemv_kernel.rs, quant_blocks.rs, gguf_reader.rs, weight_repack.rs, layer_prefetch.rs, memory_budget.rs, kv_cache.rs, prompt_cache.rs, robust_downloader.rs, local_llm.rs, model_manager.rs）
+  - 移除 `LlmMode::Local` 变体（crates/models/src/lib.rs）
+  - 清理 `llm_router.rs`（移除 Local 路由、回退切换逻辑、LlmChoice::local）
+  - 清理 `config_store.rs`（仅处理 Remote 模式）
+  - 清理 `trace.rs`（移除 Local 匹配）
+  - 清理 `integration.rs`（删除所有本地 LLM/KV cache/kernel mode/paged_attn/sampling/model_manager 相关测试）
+  - 更新 SRS（REQ-LLM-003/004/005/006/007/008/009 标记为 Deprecated）
+  - 更新 NEXT.md / LOG.md / CURRENT_STATE.md
+- **验证状态**: Free 1326 passed / Clippy 零警告 / fmt 通过 / esbuild 1,584 行
+- **累计削减** (Phase 1 R1+R2+R3): ~37,862 行 (-28.9%)
 
 ---
 

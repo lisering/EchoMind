@@ -511,3 +511,18 @@
 | 08-27 | Phase 1 R2 | 删除过度工程 Agent 功能 | Free 1,419 | 50+ | 削减 ~13,000 行；删除 10 个 Rust 模块（agent/agent_run/coordinator/coordinator_strategy/auto_dream/workflow/memory_store/session_strip/sub_agent/hooks/typed_hook/step_cache + 测试）；删除 IPC 命令（admit_input/promote_input/get_pending_inputs + Session Todo 5 命令）；清理 lib.rs 测试 mod 声明；简化 chat_inner（删除 coordinator_enabled/agent_enabled 分支，仅保留标准 RAG 路径）；前端清理（agent toggle 移除、dream-panel.js/memory-panel.js 删除、state.js 字段清理）；标记 REQ-RAG-022/025/029/030/033 为 Deprecated |
 
 **验证结果**：cargo check 零警告 / clippy 零警告 / fmt 通过 / tsc 0 errors / esbuild 1,584 行
+
+## 2026-08-27 (Phase 1 R3：删除过度工程 LLM 功能)
+
+| 日期 | Session | 功能 | 测试 | 文件 | 关键产出 |
+|---|---|---|---|---|---|
+| 08-27 | Phase 1 R3 | 删除过度工程 LLM 功能 | Free 1,326 | 30+ | 削减 ~12,000 行；删除 10 个本地 LLM 推理模块（gemv_kernel/quant_blocks/gguf_reader/weight_repack/layer_prefetch/memory_budget/kv_cache/prompt_cache/robust_downloader/local_llm/model_manager + 测试）；移除 LlmMode::Local 变体（models/lib.rs）；清理 llm_router.rs（移除 LlmChoice::local/回退切换逻辑/本地路由）；清理 config_store.rs/trace.rs（仅处理 Remote 模式）；清理 integration.rs 中所有本地 LLM/KV cache/kernel mode/paged_attn/sampling/model_manager 相关测试；标记 REQ-LLM-003/004/005/006/007/008/009 为 Deprecated |
+
+**验证结果**：cargo check 零警告 / clippy 零警告 / fmt 通过 / cargo test 1,326 passed, 0 failed / esbuild 1,584 行
+
+**R3 注意事项**：
+- mistral.rs 适配层已完全删除（不再保留基础调用能力），当前仅支持远程 API 模式（BYOK）
+- LlmMode 枚举仅保留 Remote 变体，所有本地模式相关路由逻辑已移除
+- 自动回退切换功能已废弃（record_remote_failure 保留 API 兼容性但始终返回 false）
+
+

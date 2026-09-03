@@ -8,27 +8,21 @@ use std::path::PathBuf;
 use echomind_core::Storage;
 use echomind_infra::local_embedder::{EmbeddingModel, LocalEmbedder, MirrorSource};
 use echomind_infra::local_reranker::LocalReranker;
-use echomind_infra::model_manager::ModelManager;
-use echomind_infra::robust_downloader::RobustDownloader;
 use echomind_infra::sqlite_storage::SqliteStorage;
 
 // Pro 模块导入
-#[cfg(feature = "pro")]
-use echomind_infra::local_llm::LocalLlmEngine;
 #[cfg(feature = "pro")]
 use echomind_infra::ocrs_engine::OcrsEngine;
 #[cfg(feature = "pro")]
 use echomind_infra::pdfium_renderer::PdfiumRenderer;
 
-/// 模型管理 Store（嵌入/重排序/本地LLM/PDF渲染/OCR/模型文件管理）。
+/// 模型管理 Store（嵌入/重排序/PDF渲染/OCR）。
 ///
 /// # 职责
 /// - 向量化引擎（懒加载，首次使用时初始化）
 /// - Cross-Encoder 重排序引擎（懒加载）
 /// - PDF 页面渲染引擎（Pro，懒加载）
 /// - OCR 引擎（Pro，懒加载）
-/// - 本地 LLM 引擎实例（Pro，懒加载）
-/// - 本地 GGUF 模型文件管理
 ///
 /// # 线程安全
 /// 使用 `tokio::sync::RwLock`/`OnceCell` 实现懒加载和双重检查。
@@ -47,20 +41,11 @@ pub struct ModelStore {
     /// OCR 引擎（首次使用时初始化，REQ-MM-002）
     #[cfg(feature = "pro")]
     ocr_engine: tokio::sync::OnceCell<OcrsEngine>,
-    /// 本地 LLM 模型文件管理器（REQ-LLM-004）
-    model_manager: ModelManager,
-    /// 健壮下载器（REQ-LLM-004 v2：断点续传 + 多源容错 + 并发分块 + 崩溃恢复）
-    robust_downloader: RobustDownloader,
-    /// 本地 LLM 引擎实例（Pro 门控，懒加载）
-    #[cfg(feature = "pro")]
-    local_llm: tokio::sync::RwLock<Option<LocalLlmEngine>>,
 }
 
 impl ModelStore {
     /// 创建新的模型管理 Store。
     pub fn new(storage: SqliteStorage, data_dir: PathBuf) -> anyhow::Result<Self> {
-        let model_manager = ModelManager::new(&data_dir)?;
-        let robust_downloader = RobustDownloader::new(data_dir.join("models").join("llm"))?;
         Ok(Self {
             storage,
             data_dir,
@@ -70,10 +55,6 @@ impl ModelStore {
             page_renderer: tokio::sync::OnceCell::new(),
             #[cfg(feature = "pro")]
             ocr_engine: tokio::sync::OnceCell::new(),
-            model_manager,
-            robust_downloader,
-            #[cfg(feature = "pro")]
-            local_llm: tokio::sync::RwLock::new(None),
         })
     }
 
@@ -85,16 +66,6 @@ impl ModelStore {
     /// 获取数据目录引用。
     pub fn data_dir(&self) -> &PathBuf {
         &self.data_dir
-    }
-
-    /// 获取模型文件管理器引用（REQ-LLM-004）。
-    pub fn model_manager(&self) -> &ModelManager {
-        &self.model_manager
-    }
-
-    /// 获取健壮下载器引用（REQ-LLM-004 v2）。
-    pub fn robust_downloader(&self) -> &RobustDownloader {
-        &self.robust_downloader
     }
 
     // ---- Embedder 懒加载 ----
@@ -244,93 +215,6 @@ impl ModelStore {
     /// 检查重排序引擎是否已初始化。
     pub fn reranker_initialized(&self) -> bool {
         self.reranker.initialized()
-    }
-
-    // ---- Pro: 本地 LLM 引擎 ----
-
-    /// 懒加载本地 LLM 引擎（Pro 门控，REQ-LLM-003）。
-    #[cfg(feature = "pro")]
-    pub async fn local_llm(&self) -> anyhow::Result<LocalLlmEngine> {
-        // 快路径
-        {
-            let read = self.local_llm.read().await;
-            if let Some(engine) = read.as_ref() {
-                return Ok(engine.clone());
-            }
-        }
-        // 慢路径
-        let model_name = self
-            .storage
-            .get_setting("llm.local_model")
-            .await?
-            .unwrap_or_default();
-        if model_name.is_empty() {
-            anyhow::bail!("未选择本地模型，请先在设置中选择一个模型");
-        }
-        let model_path = self.model_manager.model_path(&model_name)?;
-        let quantization = echomind_infra::local_llm::Quantization::from_str(
-            &echomind_infra::model_manager::ModelManager::parse_quantization(&model_name),
-        );
-        let mut engine = LocalLlmEngine::new(model_path, quantization)?;
-
-        // 读取 PagedAttention 配置
-        let paged_attn = self
-            .storage
-            .get_setting("llm.paged_attn")
-            .await?
-            .is_some_and(|v| v == "true");
-        let block_size = self
-            .storage
-            .get_setting("llm.block_size")
-            .await?
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(32);
-        let gpu_memory_ctx = self
-            .storage
-            .get_setting("llm.gpu_memory_ctx")
-            .await?
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(4096);
-
-        if paged_attn {
-            engine = engine.with_paged_attn(block_size, gpu_memory_ctx);
-        }
-
-        // 读取采样参数
-        let sampling_json = self.storage.get_setting("llm.sampling").await?;
-        if let Some(json_str) = sampling_json
-            && let Ok(params) =
-                serde_json::from_str::<echomind_models::LlmSamplingParams>(&json_str)
-        {
-            engine.set_sampling_params(params).await;
-        }
-
-        // Phase 3：读取内核模式（mistral / custom）
-        let kernel_mode_str = self.storage.get_setting("llm.kernel_mode").await?;
-        if let Some(mode_str) = kernel_mode_str
-            && let Ok(mode) = echomind_infra::local_llm::KernelMode::from_str(&mode_str)
-        {
-            engine.set_kernel_mode(mode).await;
-        }
-
-        let mut write = self.local_llm.write().await;
-        if write.is_none() {
-            *write = Some(engine.clone());
-        }
-        match write.as_ref() {
-            Some(e) => Ok(e.clone()),
-            None => anyhow::bail!("本地 LLM 引擎初始化后仍为空（不可达）"),
-        }
-    }
-
-    /// 卸载本地 LLM 引擎（释放模型内存 + 销毁引擎实例）。
-    #[cfg(feature = "pro")]
-    pub async fn unload_local_llm(&self) {
-        let mut write = self.local_llm.write().await;
-        if let Some(engine) = write.as_ref() {
-            engine.unload().await;
-        }
-        *write = None;
     }
 
     // ---- Pro: PDF 渲染 ----

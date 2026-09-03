@@ -316,28 +316,9 @@ pub async fn rename_conversation_inner(
 }
 
 /// 停止生成：触发指定会话的中断令牌，流循环立即 break 并中止网络拉取。
-///
-/// 本地 LLM 模式（Pro）下额外调用 `LocalLlmEngine::abort()`，使 mistral.rs
-/// 推理流内部 `spawn` 任务的 `select!` 循环立即退出（S13 流取消集成）。
 #[tauri::command]
 pub async fn abort_chat(conversation_id: String, state: State<'_, AppState>) -> Result<(), String> {
     state.abort_chat(&conversation_id).await;
-
-    // S13：本地模式下同时取消 LocalLlmEngine 内部推理。
-    // forward_stream 的 abort_token 只中断 channel 消费侧（select! 循环），
-    // 但 mistral.rs 的 spawn 任务仍在生成 token。调用 engine.abort() 触发
-    // 引擎内部 CancellationToken，使 spawn 的 select! 立即 break，停止推理。
-    #[cfg(feature = "pro")]
-    {
-        let llm_mode = state.get_llm_mode().await;
-        if llm_mode == LlmMode::Local {
-            // 引擎可能尚未初始化（用户未配置本地模型），静默忽略
-            if let Ok(engine) = state.local_llm().await {
-                engine.abort().await;
-            }
-        }
-    }
-
     Ok(())
 }
 
