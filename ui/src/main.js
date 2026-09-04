@@ -45,7 +45,6 @@ import { createInputToggle } from './input-toggles.js';
 import { updateInputUI } from './action.js';
 import { navigateHistoryUp, navigateHistoryDown, resetHistoryNav, saveDraft, restoreDraft, clearDraft, updateTokenEstimate } from './input-utils.js';
 import { clearQueue, getQueueSize } from './chat-utils.js';
-import { initDownloadManager } from './download-manager.js';
 import { openGraphViewer, closeGraphViewer, initGraphResize } from './graph-viewer.js';
 import { buildTurnTree, setTurnTree, getTurn, applyActiveVersions, getVersionCount, openConversationTreePanel, closeConversationTreePanel } from './turn-tree.js';
 import { renderBranchPagination } from './message-edit.js';
@@ -460,10 +459,7 @@ if (typeof sendFn === 'function') sendFn();
   // 初始化安全模块（同步加密状态、监听锁屏事件、绑定活动监听）
   initSecurity();
 
-  // 初始化下载管理器（事件监听 + 崩溃恢复检查，REQ-LLM-004 v2）
-  initDownloadManager();
-
-  // 初始化离线检测（REQ-ERR-003 离线模式降级）
+// 初始化离线检测（REQ-ERR-003 离线模式降级）
   initOfflineDetector();
 
   // 初始化面包屑（REQ-NAV-004 面包屑与上下文指示）

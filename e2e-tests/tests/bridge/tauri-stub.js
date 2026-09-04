@@ -7,13 +7,6 @@
 //         abort_import / activate_pro / deactivate_pro / get_pro_status / set_vlm_enabled /
 //         set_hybrid_search / set_context_token_limit / edit_user_message / set_turn_active_version /
 //         get_turn_active_versions
-//   LLM:  list_local_models / get_recommended_models / download_model / delete_model /
-//         set_llm_mode / get_llm_mode / set_local_model / pause_download / abort_download /
-//         get_download_status / list_pending_downloads / cleanup_partial_downloads /
-//         scan_download_recovery
-//   LLM Pro: get_local_llm_device_kind / set_paged_attn / set_sampling_params /
-//            set_kernel_mode / get_kernel_mode / save_kv_cache / load_kv_cache /
-//            clear_kv_cache / get_kv_cache_status / set_kv_cache_enabled / set_embedder_model
 //   审计: audit_document / abort_audit
 //   嵌入: init_embedder / check_embedder_status / get_model_cache_info / clear_model_cache
 //   RAG:  set_rerank_enabled / set_hyde_enabled / set_embedding_model /
@@ -314,14 +307,6 @@ smartModeEnabled: true,
 demoMode: false,
     /** 上下文 token 限制（REQ-RAG-017） */
     contextTokenLimit: 4096,
-    /** LLM 推理模式（REQ-LLM-003）：'remote' / 'local' */
-    llmMode: 'remote',
-    /** 当前选中的本地模型文件名（REQ-LLM-003） */
-    localModel: '',
-    /** 已下载的本地模型列表（REQ-LLM-004） */
-    localModels: [
-      { filename: 'qwen2.5-3b-instruct-q4_k_m.gguf', path: '/mock/models/llm/qwen2.5-3b-instruct-q4_k_m.gguf', size_bytes: 2000000000, architecture: 'qwen2.5', param_size: '3B', quantization: 'Q4_K_M' },
-    ],
     // ============================================================
     // 安全防御域状态（REQ-SEC-013~020）
     // ============================================================
@@ -418,22 +403,6 @@ contextualRetrieval: true,
     // ============================================================
     /** 当前日志级别 */
     logLevel: 'info',
-    // ============================================================
-    // 下载管理状态（REQ-LLM-004 v2）
-    // ============================================================
-    /** 下载状态 Map */
-    downloadStatuses: {},
-    // ============================================================
-    // 本地 LLM Pro 状态
-    // ============================================================
-    /** PagedAttention 开关 */
-    pagedAttn: false,
-    /** 采样参数 */
-    samplingParams: { temperature: null, top_p: null, top_k: null, max_tokens: null, frequency_penalty: null, presence_penalty: null },
-    /** 内核模式 */
-    kernelMode: 'mistral_rs',
-    /** KV cache 开关 */
-    kvCacheEnabled: false,
     // ============================================================
     // Token 用量追踪
     // ============================================================
@@ -643,9 +612,9 @@ contextualRetrieval: true,
   async function invoke(cmd, args = {}) {
     switch (cmd) {
       case 'get_settings':
-        return state.configured
-          ? { has_llm_config: true, base_url: 'http://mock.local', model: 'mock-llm', api_key_masked: '****-e2e', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, llm_mode: state.llmMode, local_model: state.localModel, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true }
-          : { has_llm_config: false, base_url: '', model: '', api_key_masked: '', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, llm_mode: state.llmMode, local_model: state.localModel, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true };
+return state.configured
+? { has_llm_config: true, base_url: 'http://mock.local', model: 'mock-llm', api_key_masked: '****-e2e', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true }
+: { has_llm_config: false, base_url: '', model: '', api_key_masked: '', vlm_enabled: state.vlmEnabled, context_token_limit: state.contextTokenLimit, web_search_enabled: state.webSearchEnabled || false, contextual_retrieval: state.contextualRetrieval ?? true };
 
       case 'update_llm_config':
         state.configured = true;
@@ -1018,63 +987,6 @@ case 'edit_user_message': {
         return null;
 
 
-      // ============================================================
-      // 本地 LLM 推理（REQ-LLM-003/004）
-      // ============================================================
-      case 'list_local_models':
-        return state.localModels;
-
-      case 'get_recommended_models':
-        return [
-          { name: 'Qwen2.5-3B-Instruct', architecture: 'qwen2.5', param_size: '3B', quantization: 'Q4_K_M', size_gb: 2.0, url: 'https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf', description: '低配设备推荐，中文能力优秀' },
-          { name: 'Llama-3.2-3B-Instruct', architecture: 'llama3.2', param_size: '3B', quantization: 'Q4_K_M', size_gb: 2.0, url: 'https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct-GGUF/resolve/main/llama-3.2-3b-instruct-q4_k_m.gguf', description: '英文场景推荐' },
-          { name: 'Phi-3.5-mini-instruct', architecture: 'phi3.5', param_size: '3.8B', quantization: 'Q4_K_M', size_gb: 2.2, url: 'https://huggingface.co/microsoft/Phi-3.5-mini-instruct-gguf/resolve/main/Phi-3.5-mini-instruct-q4_k_m.gguf', description: '推理能力强' },
-          { name: 'Qwen2.5-7B-Instruct', architecture: 'qwen2.5', param_size: '7B', quantization: 'Q4_K_M', size_gb: 4.1, url: 'https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf', description: '平衡质量与速度' },
-        ];
-
-      case 'download_model': {
-        const dlFilename = args.filename;
-        const dlTotal = 2000000000; // 2GB
-        (async () => {
-          // 模拟下载进度事件（REQ-LLM-004 AC-2）
-          const steps = [10, 25, 50, 75, 100];
-          for (const pct of steps) {
-            const downloaded = Math.floor(dlTotal * pct / 100);
-            const speed = 5000000; // 5MB/s
-            emit('model_download_progress', { filename: dlFilename, downloaded, total: dlTotal, speed });
-            await delay(100);
-          }
-          // 下载完成：将模型添加到列表
-          const arch = dlFilename.includes('qwen') ? 'qwen2.5' : dlFilename.includes('llama') ? 'llama3.2' : dlFilename.includes('phi') ? 'phi3.5' : 'unknown';
-          const param = dlFilename.match(/(\d+\.?\d*)b/i) ? dlFilename.match(/(\d+\.?\d*)b/i)[1] + 'B' : '?';
-          const quant = dlFilename.match(/q(\d[_\d]*\w*)/i) ? ('Q' + dlFilename.match(/q(\d[_\d]*\w*)/i)[1].toUpperCase()) : 'Q4_K_M';
-          state.localModels.push({ filename: dlFilename, path: '/mock/models/llm/' + dlFilename, size_bytes: dlTotal, architecture: arch, param_size: param, quantization: quant });
-        })();
-        return null;
-      }
-
-      case 'delete_model': {
-        state.localModels = state.localModels.filter((m) => m.filename !== args.filename);
-        if (state.localModel === args.filename) {
-          state.localModel = '';
-        }
-        return null;
-      }
-
-      case 'set_llm_mode':
-        if (args.mode !== 'remote' && args.mode !== 'local') {
-          throw '无效的 LLM 模式: ' + args.mode + '（可选: remote / local）';
-        }
-        state.llmMode = args.mode;
-        return null;
-
-      case 'get_llm_mode':
-        return state.llmMode;
-
-      case 'set_local_model':
-        state.localModel = args.filename;
-        return null;
-
       case 'audit_document': {
         state.auditAborted = false;
         const auditTokens = state.customTokens || AUDIT_TOKENS;
@@ -1278,15 +1190,6 @@ conv.title = userQuery.slice(0, 24);
           // 时序修复：让出微任务队列，确保 invoke 返回后 DOM 已完成 appendBlock 渲染。
           // 此前 chat_phase 事件在 invoke 调用内同步发射，导致思考指示器尚未挂载就被覆盖。
           await delay(0);
-
-          // 本地 LLM 模式：模拟模型加载进度事件（REQ-LLM-003 AC-4）
-          if (state.llmMode === 'local') {
-            const modelName = state.localModel || 'mock-model.gguf';
-            emit('model_load_progress', { model: modelName, status: 'loading' });
-            await delay(200);
-            emit('model_load_progress', { model: modelName, status: 'ready' });
-            await delay(50);
-          }
 
           if (isEmpty) {
             // 空上下文模式：不调用 LLM，直接返回固定提示
@@ -2502,72 +2405,7 @@ case 'set_rag_eval_settings':
     state.ragEvalSettings = args.settings;
     return null;
 
-// ============================================================
-// 下载管理（REQ-LLM-004 v2）
-// ============================================================
-      case 'pause_download':
-        state.downloadStatuses[args.filename] = { status: 'paused', downloaded: 0, total: 0 };
-        return null;
-
-      case 'abort_download':
-        state.downloadStatuses[args.filename] = { status: 'cancelled', downloaded: 0, total: 0 };
-        return null;
-
-      case 'get_download_status':
-        return state.downloadStatuses[args.filename] || null;
-
-      case 'list_pending_downloads':
-        return Object.entries(state.downloadStatuses).map(([filename, info]) => ({ filename, ...info }));
-
-      case 'cleanup_partial_downloads':
-        state.downloadStatuses = {};
-        return 0;
-
-      case 'scan_download_recovery':
-        return [];
-
-      // ============================================================
-      // 本地 LLM Pro 命令
-      // ============================================================
-      case 'get_local_llm_device_kind':
-        return { kind: 'cpu', name: 'Mock CPU Device', vram_mb: 0 };
-
-      case 'set_paged_attn':
-        state.pagedAttn = args.enabled;
-        return null;
-
-      case 'set_sampling_params':
-        state.samplingParams = { ...state.samplingParams, ...args.params };
-        return null;
-
-      case 'set_kernel_mode':
-        state.kernelMode = args.mode;
-        return null;
-
-      case 'get_kernel_mode':
-        return state.kernelMode;
-
-      case 'save_kv_cache':
-        return null;
-
-      case 'load_kv_cache':
-        return false;
-
-      case 'clear_kv_cache':
-        return null;
-
-      case 'get_kv_cache_status':
-        return { enabled: state.kvCacheEnabled, cache_dir: '/mock/kv_cache', file_count: 0, total_size_bytes: 0 };
-
-      case 'set_kv_cache_enabled':
-        state.kvCacheEnabled = args.enabled;
-        return null;
-
-      case 'set_embedder_model':
-        state.embeddingModel = args.model;
-        return null;
-
-      // S4 v1.6: close-to-tray 设置（REQ-WIN-003）
+// S4 v1.6: close-to-tray 设置（REQ-WIN-003）
       case 'get_close_to_tray':
         return state.closeToTray === true;
 
@@ -2986,13 +2824,8 @@ case 'set_rag_eval_settings':
       state.embedderSlowConnect = false;
       state.embedderMultiFile = false;
       state.modelCacheInfo = { models: [{ name: 'all-MiniLM-L6-v2', size_bytes: 31457280 }], total_size_bytes: 31457280 };
-      state.hybridSearch = false;
-      state.llmMode = 'remote';
-      state.localModel = '';
-      state.localModels = [
-        { filename: 'qwen2.5-3b-instruct-q4_k_m.gguf', path: '/mock/models/llm/qwen2.5-3b-instruct-q4_k_m.gguf', size_bytes: 2000000000, architecture: 'qwen2.5', param_size: '3B', quantization: 'Q4_K_M' },
-      ];
-      // 安全防御状态重置
+state.hybridSearch = false;
+// 安全防御状态重置
       state.securityState = 'Unencrypted';
       state.lockReason = null;
       state.autoLockConfig = { enabled: true, timeout_secs: 180, lock_on_sleep: true };
@@ -3029,13 +2862,6 @@ state.docSortBy = null;
 state.docSortOrder = null;
       // 可观测性重置
       state.logLevel = 'info';
-      // 下载管理重置
-      state.downloadStatuses = {};
-      // 本地 LLM Pro 重置
-      state.pagedAttn = false;
-      state.samplingParams = { temperature: null, top_p: null, top_k: null, max_tokens: null, frequency_penalty: null, presence_penalty: null };
-      state.kernelMode = 'mistral_rs';
-      state.kvCacheEnabled = false;
       // 书签重置
       state._bookmarks = [];
       // Token 用量重置
@@ -3140,7 +2966,6 @@ state.generationParams = { temperature: 0.7, max_tokens: 4096, top_p: 1.0 };
 state.docSortBy = null;
 state.docSortOrder = null;
       state.logLevel = 'info';
-      state.downloadStatuses = {};
       state.tokenBudget = 0;
   state.shadowScreenStats = { total: 0, agree: 0, disagree: 0, unavailable: 0 };
     state.mcpServers = [];

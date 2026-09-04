@@ -67,10 +67,6 @@ describe('state — 状态容器（Observable 模式）', () => {
       expect(get('hybridEnabled')).toBe(false);
     });
 
-    it('agentEnabled 初始为 false', () => {
-      expect(get('agentEnabled')).toBe(false);
-    });
-
     it('docCount 初始为 0', () => {
       expect(get('docCount')).toBe(0);
     });

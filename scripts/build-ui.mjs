@@ -38,7 +38,7 @@ const isReleaseMode = process.argv.includes('--release');
 
 // 开发者工具模块 — Release 模式不打包（与后端 #[cfg(debug_assertions)] 对齐）
 // 通过 onResolve + onLoad 将开发者工具模块替换为空模块，
-// 确保 Release 构建中不包含 trace-panel / rag-eval / embed-eval 代码。
+// 确保 Release 构建中不包含 trace-panel / rag-eval 代码。
 const DEV_TOOL_PLUGINS = [
   {
     name: 'exclude-trace-panel',
@@ -52,13 +52,6 @@ const DEV_TOOL_PLUGINS = [
     setup(build) {
       build.onResolve({ filter: /\/rag-eval\.js$/ }, () => ({ path: 'rag-eval-excluded', namespace: 'dev-tool-excluded' }));
       build.onLoad({ filter: /.*/, namespace: 'dev-tool-excluded' }, () => ({ contents: '// rag-eval excluded in release build', loader: 'js' }));
-    },
-  },
-  {
-    name: 'exclude-embed-eval',
-    setup(build) {
-      build.onResolve({ filter: /\/embed-eval\.js$/ }, () => ({ path: 'embed-eval-excluded', namespace: 'dev-tool-excluded' }));
-      build.onLoad({ filter: /.*/, namespace: 'dev-tool-excluded' }, () => ({ contents: '// embed-eval excluded in release build', loader: 'js' }));
     },
   },
 ];

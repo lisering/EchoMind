@@ -19,7 +19,7 @@
 
 import { setState, get } from './state.js';
 import { $, formatBytes } from './utils.js';
-import { invoke, embedModelApi, syncApi, localLlmApi, windowSettingsApi, errorLogsApi, ragParamsApi, generationParamsApi, chunkParamsApi, autostartApi, updateCheckApi, saveDialog, openDialog } from './ipc.js';
+import { invoke, embedModelApi, syncApi, windowSettingsApi, errorLogsApi, ragParamsApi, generationParamsApi, chunkParamsApi, autostartApi, updateCheckApi, saveDialog, openDialog } from './ipc.js';
 import { toast, toastError, toastSuccess } from './toast.js';
 import { t } from './i18n.js';
 import { showConfirmDialog } from './confirm-dialog.js';
@@ -446,7 +446,7 @@ export async function loadSamplingParams(settings) {
 export async function saveSamplingParams() {
   const params = collectSamplingParams();
   try {
-    await localLlmApi.setSamplingParams(params);
+    await invoke('update_setting', { key: 'llm.sampling', value: JSON.stringify(params) });
     _samplingParams = params;
     toastSuccess(t('settings.llm_sampling_saved'));
   } catch (err) {
@@ -477,7 +477,7 @@ export async function resetSamplingParams() {
     presence_penalty: null,
   };
   try {
-    await localLlmApi.setSamplingParams(params);
+    await invoke('update_setting', { key: 'llm.sampling', value: JSON.stringify(params) });
     _samplingParams = params;
     toastSuccess(t('settings.llm_sampling_reset_done'));
   } catch (err) {

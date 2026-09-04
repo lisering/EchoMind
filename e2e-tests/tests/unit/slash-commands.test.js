@@ -38,8 +38,8 @@ describe('Slash Commands — slash-commands.js', () => {
   });
 
   describe('SLASH_COMMANDS', () => {
-    it('TC-QA-027: 包含 8 个指令定义', () => {
-      expect(SLASH_COMMANDS).toHaveLength(8);
+    it('TC-QA-027: 包含 7 个指令定义', () => {
+      expect(SLASH_COMMANDS).toHaveLength(7);
     });
 
     it('TC-QA-027b: 每个指令含 name/label/icon 属性', () => {
@@ -59,7 +59,6 @@ describe('Slash Commands — slash-commands.js', () => {
       expect(names).toContain('timeline');
       expect(names).toContain('mindmap');
       expect(names).toContain('web');
-      expect(names).toContain('agent');
     });
   });
 
@@ -78,7 +77,7 @@ describe('Slash Commands — slash-commands.js', () => {
 
     it('TC-QA-029: 输入仅 / 时返回全部指令', () => {
       const filtered = filterSlashCommands('/');
-      expect(filtered).toHaveLength(8);
+      expect(filtered).toHaveLength(7);
     });
 
     it('TC-QA-029b: 无匹配时返回空数组', () => {
@@ -97,7 +96,7 @@ describe('Slash Commands — slash-commands.js', () => {
       const filtered = filterSlashCommands('/');
       renderSlashCommandPanel(container, filtered);
       const items = container.querySelectorAll('.slash-command-item');
-      expect(items).toHaveLength(8);
+      expect(items).toHaveLength(7);
     });
 
     it('TC-QA-030b: 首项默认选中', () => {

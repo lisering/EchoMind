@@ -261,71 +261,10 @@ export const syncApi = {
   list: () => invoke('get_watched_folders'),
 };
 
-/** 本地 LLM 推理相关（REQ-LLM-003/004） */
-export const localLlmApi = {
-  /** 列出已下载的本地 GGUF 模型 */
-  listModels: () => invoke('list_local_models'),
-  /** 获取推荐模型列表 */
-  getRecommended: () => invoke('get_recommended_models'),
-  /** 下载模型文件（后台执行，通过 model_download_progress 事件推送进度） */
-  download: (url, filename) => invoke('download_model', { url, filename }),
-  /** 删除本地模型文件 */
-  deleteModel: (filename) => invoke('delete_model', { filename }),
-  /** 切换推理模式（remote / local） */
-  setMode: (mode) => invoke('set_llm_mode', { mode }),
-  /** 获取当前推理模式 */
-  getMode: () => invoke('get_llm_mode'),
-  /** 设置当前选中的本地模型文件名 */
-  setLocalModel: (filename) => invoke('set_local_model', { filename }),
-  /** 设置采样参数（S11，Pro 功能） */
-  setSamplingParams: (params) => invoke('set_sampling_params', { params }),
-  /** 获取当前设备类型（CPU/Metal/CUDA，Pro 功能） */
-  getDeviceKind: () => invoke('get_local_llm_device_kind'),
-  /** 设置嵌入模型（Pro 功能，运行时切换 ONNX 嵌入模型） */
-  setEmbedderModel: (model) => invoke('set_embedder_model', { model }),
-  /** 设置 PagedAttention 参数（Pro 功能） */
-  setPagedAttn: (enabled, blockSize, gpuMemoryCtx) =>
-    invoke('set_paged_attn', { enabled, blockSize, gpuMemoryCtx }),
-  /** 获取 GEMV 内核模式（Pro 功能） */
-  getKernelMode: () => invoke('get_kernel_mode'),
-  /** 设置 GEMV 内核模式（Pro 功能） */
-  setKernelMode: (mode) => invoke('set_kernel_mode', { mode }),
-};
-
 /** 知识图谱布局相关 */
 export const graphApi = {
   /** 获取后端布局算法建议列表（用于持久化用户偏好） */
   getLayout: () => invoke('get_graph_layout'),
-};
-
-/** KV Cache 管理相关（Pro 功能，跨会话 KV Cache 复用） */
-export const kvCacheApi = {
-  /** 保存当前会话的 KV Cache 到磁盘 */
-  save: (conversationId) => invoke('save_kv_cache', { conversationId }),
-  /** 从磁盘恢复指定会话的 KV Cache，返回是否成功 */
-  load: (conversationId) => invoke('load_kv_cache', { conversationId }),
-  /** 清除指定会话的 KV Cache 文件 */
-  clear: (conversationId) => invoke('clear_kv_cache', { conversationId }),
-  /** 获取 KV Cache 状态（enabled/cache_dir/file_count/total_size_bytes） */
-  getStatus: () => invoke('get_kv_cache_status'),
-  /** 启用/禁用 KV Cache 功能 */
-  setEnabled: (enabled) => invoke('set_kv_cache_enabled', { enabled }),
-};
-
-/** 健壮下载管理相关（REQ-LLM-004 v2：断点续传 + 暂停/恢复/取消 + 崩溃恢复） */
-export const downloadApi = {
-  /** 暂停指定文件的下载（保留 .partial + .meta.json，可恢复） */
-  pause: (filename) => invoke('pause_download', { filename }),
-  /** 取消指定文件的下载 + 清理临时文件 */
-  abort: (filename) => invoke('abort_download', { filename }),
-  /** 获取指定文件的下载状态（从 .meta.json 读取） */
-  getStatus: (filename) => invoke('get_download_status', { filename }),
-  /** 列出所有未完成下载（扫描 .meta.json 文件） */
-  listPending: () => invoke('list_pending_downloads'),
-  /** 清理所有 .partial + .meta.json 文件，返回释放的字节数 */
-  cleanupPartials: () => invoke('cleanup_partial_downloads'),
-  /** 启动时扫描崩溃恢复（检测 .partial + .meta.json 文件） */
-  scanRecovery: () => invoke('scan_download_recovery'),
 };
 
 /** 导入取消 + 文档替换（REQ-ING-012） */

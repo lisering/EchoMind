@@ -121,35 +121,17 @@ describe('state.js — 功能开关', () => {
     expect(getState().hybridEnabled).toBe(false);
   });
 
-  it('agentEnabled 初始为 false', () => {
-    expect(getState().agentEnabled).toBe(false);
-  });
-
-  it('subAgentEnabled 初始为 false', () => {
-    expect(getState().subAgentEnabled).toBe(false);
-  });
-
-  it('memoryEnabled 初始为 false', () => {
-    expect(getState().memoryEnabled).toBe(false);
-  });
-
   it('webSearchEnabled 初始为 false', () => {
     expect(getState().webSearchEnabled).toBe(false);
   });
 
-  it('批量设置所有功能开关', () => {
+  it('批量设置功能开关', () => {
     setState({
       hybridEnabled: true,
-      agentEnabled: true,
-      subAgentEnabled: true,
-      memoryEnabled: true,
       webSearchEnabled: true,
     });
     const s = getState();
     expect(s.hybridEnabled).toBe(true);
-    expect(s.agentEnabled).toBe(true);
-    expect(s.subAgentEnabled).toBe(true);
-    expect(s.memoryEnabled).toBe(true);
     expect(s.webSearchEnabled).toBe(true);
   });
 });

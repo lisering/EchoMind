@@ -87,24 +87,7 @@ vi.mock('../../../ui/src/trace-panel.js', () => ({
   renderTraceBudgetSettings: vi.fn(),
 }));
 
-// Mock settings-local-llm
-vi.mock('../../../ui/src/settings-local-llm.js', () => ({
-  loadLlmModeSetting: vi.fn(),
-  loadLocalModels: vi.fn(),
-  loadRecommendedModels: vi.fn(),
-  registerModelLoadListener: vi.fn(),
-  onLlmModeChange: vi.fn(),
-  downloadLocalModel: vi.fn(),
-  deleteLocalModel: vi.fn(),
-  selectLocalModel: vi.fn(),
-  onCancelDownload: vi.fn(),
-  onPauseDownload: vi.fn(),
-  renderKvCacheSettings: vi.fn(),
-  renderDeviceKindSettings: vi.fn(),
-  renderEmbedderModelSettings: vi.fn(),
-  renderPagedAttnSettings: vi.fn(),
-  renderKernelModeSettings: vi.fn(),
-}));
+// settings-local-llm removed in Phase 1 R5
 
 // Mock settings-general
 vi.mock('../../../ui/src/settings-general.js', () => ({
@@ -155,10 +138,7 @@ vi.mock('../../../ui/src/settings-advanced.js', () => ({
   renderRagLlmParams: vi.fn(),
 }));
 
-// Mock download-manager
-vi.mock('../../../ui/src/download-manager.js', () => ({
-  openDownloadManager: vi.fn(),
-}));
+// download-manager removed in Phase 1 R5
 
 describe('S94 设置面板重构 — 单元测试', () => {
   it('TC-UI-SETTINGS-001: SETTINGS_TABS 有 8 个分区', async () => {

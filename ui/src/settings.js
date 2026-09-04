@@ -21,19 +21,10 @@ import { renderSecuritySettings } from './security.js';
 import { createFocusTrap } from './focus-trap.js';
 import { renderPerfSettings } from './perf-settings.js';
 import { renderRagEvalSettings } from './rag-eval.js';
-import { openEmbedEvalPanel } from './embed-eval.js';
 import { openMcpSettingsPanel } from './mcp-settings.js';
 import { renderDiskSpaceCard } from './disk-space.js';
 import { renderTraceBudgetSettings } from './trace-panel.js';
 import { pushPanel, removePanel } from './panel-stack.js';
-import {
-  loadLlmModeSetting, loadLocalModels, loadRecommendedModels,
-  registerModelLoadListener, onLlmModeChange, downloadLocalModel,
-  deleteLocalModel, selectLocalModel, onCancelDownload, onPauseDownload,
-  renderKvCacheSettings, renderDeviceKindSettings, renderEmbedderModelSettings,
-  renderPagedAttnSettings, renderKernelModeSettings,
-} from './settings-local-llm.js';
-import { openDownloadManager } from './download-manager.js';
 
 // 通用设置
 import {
@@ -64,9 +55,6 @@ import {
 
 // 暴露全局函数（内联 onclick 需要）
 window.onRemoveWatchedFolder = onRemoveWatchedFolder;
-window.selectLocalModel = selectLocalModel;
-window.deleteLocalModel = deleteLocalModel;
-window.downloadLocalModel = downloadLocalModel;
 window.saveSamplingParams = saveSamplingParams;
 window.resetSamplingParams = resetSamplingParams;
 window.exportDiagnostics = exportDiagnostics;
@@ -310,12 +298,7 @@ export async function openSettings() {
       if (traceContainer && typeof renderTraceBudgetSettings === 'function') {
         renderTraceBudgetSettings(traceContainer);
       }
-      // 嵌入模型评估按钮绑定（REQ-VEC-018）
-      const embedEvalBtn = $('embedEvalBtn');
-if (embedEvalBtn) {
-embedEvalBtn.addEventListener('click', () => openEmbedEvalPanel());
-}
-// MCP 服务器配置按钮绑定（REQ-ARCH-016）
+      // MCP 服务器配置按钮绑定（REQ-ARCH-016）
 const mcpBtn = $('mcpBtn');
 if (mcpBtn) {
 mcpBtn.addEventListener('click', () => openMcpSettingsPanel());
@@ -334,24 +317,6 @@ mcpBtn.addEventListener('click', () => openMcpSettingsPanel());
       renderPromptTemplateSettings(tmplContainer);
     }
 
-    // 渲染本地 LLM 高级设置区块（高级区域）
-    const kvContainer = $('kvCacheContainer');
-    if (kvContainer) renderKvCacheSettings(kvContainer);
-
-    const deviceContainer = $('deviceKindContainer');
-    if (deviceContainer) renderDeviceKindSettings(deviceContainer);
-
-    const pagedAttnContainer = $('pagedAttnContainer');
-    if (pagedAttnContainer) renderPagedAttnSettings(pagedAttnContainer);
-
-    const kernelModeContainer = $('kernelModeContainer');
-    if (kernelModeContainer) renderKernelModeSettings(kernelModeContainer);
-
-const embedderContainer = $('embedderModelContainer');
-if (embedderContainer) renderEmbedderModelSettings(embedderContainer);
-
-// 嵌入模型对比评估按钮（REQ-VEC-018，开发者工具门控）
-// 注意：绑定放在 _devMode 块中（下方），与 rag-eval/trace-panel 一致
 
     // 渲染窗口管理设置（通用区域）
     const windowSettingsContainer = $('windowSettingsContainer');
@@ -366,10 +331,6 @@ if (embedderContainer) renderEmbedderModelSettings(embedderContainer);
     if (startupContainer) renderStartupSettings(startupContainer);
 
     loadWatchedFolders();
-
-    await loadLlmModeSetting(settings);
-    await loadLocalModels();
-    await loadRecommendedModels();
 
     await loadSamplingParams(settings);
 
@@ -420,14 +381,6 @@ export function initSettings() {
   if ($('hydeToggle')) $('hydeToggle').onclick = onHydeToggle;
   if ($('syncAddBtn')) $('syncAddBtn').onclick = onAddWatchedFolder;
 
-  // 本地 LLM 模式切换
-  const llmModeRadios = document.querySelectorAll('input[name="llmMode"]');
-  llmModeRadios.forEach((radio) => { radio.onchange = () => onLlmModeChange(radio.value); });
-  if ($('llmDownloadCancelBtn')) $('llmDownloadCancelBtn').onclick = onCancelDownload;
-  if ($('llmDownloadPauseBtn')) $('llmDownloadPauseBtn').onclick = onPauseDownload;
-  if ($('openDownloadManagerBtn')) $('openDownloadManagerBtn').onclick = openDownloadManager;
-
-  registerModelLoadListener();
 
   // S5 审计 P0-6：⌘Shift+D 切换开发者模式
   if (!window._devModeHandlerInstalled) {
