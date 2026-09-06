@@ -1,0 +1,127 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  ai-review:
+    name: AI Code Review
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for diff analysis
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build UI
+        run: node scripts/build-ui.mjs
+
+      - name: Run AI Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are a senior software engineer reviewing a pull request for the EchoMind project.
+            
+            ## Project Context
+            EchoMind is a Rust + Tauri v2 desktop application for local AI knowledge base with RAG capabilities.
+            
+            ## Review Focus Areas
+            1. **Security**: Check for SQL injection, XSS, command injection, path traversal, hardcoded secrets
+            2. **Performance**: Identify N+1 queries, unnecessary allocations, blocking I/O in async contexts
+            3. **Architecture**: Verify hexagonal architecture compliance, dependency direction (tauri-app → core → models)
+            4. **Rust Best Practices**: Check for unwrap/expect usage, proper error handling, async safety
+            5. **Code Quality**: Review naming, documentation, test coverage, SOLID principles
+            6. **Frontend**: Check for DOM manipulation best practices, event handling, state management
+            
+            ## Review Guidelines
+            - Focus on critical issues that could cause bugs, security vulnerabilities, or performance problems
+            - Provide specific line references and actionable suggestions
+            - Prioritize issues by severity: CRITICAL > HIGH > MEDIUM > LOW
+            - Don't flag style issues that clippy/fmt already catch
+            - Consider the project's iron rules (铁律) defined in .catpaw/rules/system-constraints.md
+            
+            ## Output Format
+            For each issue found, provide:
+            - Severity level (CRITICAL/HIGH/MEDIUM/LOW)
+            - File path and line number
+            - Description of the issue
+            - Suggested fix
+            
+            Review the diff and provide a comprehensive analysis.
+          claude_args: |
+            --max-turns 10
+            --model claude-4-0-sonnet-20250805
+            --append-system-prompt "You are a security-focused code reviewer for a Rust/Tauri desktop application. Focus on critical security and correctness issues."
+
+      - name: Upload review results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-review-results
+          path: |
+            .ai-review/
+            review-results.json
+          retention-days: 30
+
+  # Optional: Auto-fix critical issues
+  auto-fix:
+    name: Auto-fix Critical Issues
+    needs: ai-review
+    runs-on: ubuntu-latest
+    if: always() && needs.ai-review.result == 'success'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Run Clippy and fix auto-fixable issues
+        run: |
+          cargo clippy --all-targets -- -D warnings --fix --allow-dirty --allow-staged
+          
+      - name: Format code
+        run: cargo fmt
+
+      - name: Commit fixes if any
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          
+          if ! git diff --quiet; then
+            git add -A
+            git commit -m "style: auto-fix clippy warnings and formatting"
+            git push
+          fi

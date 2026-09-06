@@ -1,0 +1,121 @@
+{
+  "name": "EchoMind AI Code Review",
+  "version": "1.0.0",
+  "description": "AI-powered code review configuration for EchoMind project",
+  "review_settings": {
+    "model": "claude-4-0-sonnet-20250805",
+    "max_turns": 10,
+    "timeout_minutes": 15,
+    "language": "en"
+  },
+  "focus_areas": [
+    {
+      "name": "security",
+      "priority": "critical",
+      "description": "Security vulnerabilities and hardcoded secrets",
+      "keywords": ["sql injection", "xss", "command injection", "path traversal", "hardcoded secrets", "api key", "password"],
+      "enabled": true
+    },
+    {
+      "name": "performance",
+      "priority": "high",
+      "description": "Performance issues and bottlenecks",
+      "keywords": ["n+1 query", "unnecessary allocation", "blocking io", "async", "memory leak", "cpu bound"],
+      "enabled": true
+    },
+    {
+      "name": "architecture",
+      "priority": "high",
+      "description": "Architecture compliance and dependency direction",
+      "keywords": ["hexagonal", "dependency direction", "tauri-app", "core", "models", "trait", "adapter"],
+      "enabled": true
+    },
+    {
+      "name": "rust_best_practices",
+      "priority": "medium",
+      "description": "Rust best practices and error handling",
+      "keywords": ["unwrap", "expect", "panic", "error handling", "async safety", "lifetime", "borrow checker"],
+      "enabled": true
+    },
+    {
+      "name": "code_quality",
+      "priority": "medium",
+      "description": "Code quality, naming, and documentation",
+      "keywords": ["naming", "documentation", "test coverage", "solid", "single responsibility"],
+      "enabled": true
+    },
+    {
+      "name": "frontend",
+      "priority": "medium",
+      "description": "Frontend best practices and DOM manipulation",
+      "keywords": ["dom manipulation", "event handling", "state management", "memory leak", "performance"],
+      "enabled": true
+    }
+  ],
+  "severity_levels": {
+    "critical": {
+      "description": "Must fix before merge - security vulnerabilities, data loss, crashes",
+      "fail_ci": true,
+      "auto_fix": false
+    },
+    "high": {
+      "description": "Should fix before merge - performance issues, logic errors, architecture violations",
+      "fail_ci": true,
+      "auto_fix": false
+    },
+    "medium": {
+      "description": "Consider fixing - code quality, maintainability, best practices",
+      "fail_ci": false,
+      "auto_fix": false
+    },
+    "low": {
+      "description": "Optional improvements - style, documentation, minor optimizations",
+      "fail_ci": false,
+      "auto_fix": false
+    }
+  },
+  "auto_fix_rules": {
+    "enabled": true,
+    "allowed_fixes": [
+      "clippy_warnings",
+      "formatting",
+      "unused_imports",
+      "missing_doc_comments"
+    ],
+    "max_files_per_commit": 5,
+    "require_ci_pass": true
+  },
+  "output_settings": {
+    "format": "markdown",
+    "include_line_numbers": true,
+    "include_suggestions": true,
+    "include_diff": true,
+    "store_artifacts": true,
+    "retention_days": 30
+  },
+  "exclusions": {
+    "files": [
+      "*.lock",
+      "*.min.js",
+      "*.min.css",
+      "ui/index.html",
+      "target/**",
+      "node_modules/**",
+      ".git/**"
+    ],
+    "patterns": [
+      "Auto-generated code",
+      "Test fixtures",
+      "Documentation files"
+    ]
+  },
+  "integration": {
+    "trigger_on_pr": true,
+    "trigger_on_comment": true,
+    "comment_trigger": "@claude",
+    "fail_ci_on_critical": true,
+    "fail_ci_on_high": true,
+    "create_fix_pr": false,
+    "notify_on_failure": true
+  }
+}
