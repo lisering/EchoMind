@@ -1,0 +1,51 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalReport::from_samples -> Self with Default::default()
+@@ -2741,47 +2741,17 @@
+             sample_count: 0,
+             aggregate_metrics: Vec::new(),
+             per_sample_metrics: Vec::new(),
+         }
+     }
+ 
+     /// 从多个样本的指标列表构建报告（自动计算平均值）。
+     pub fn from_samples(per_sample: Vec<Vec<RagEvalMetric>>) -> Self {
+-        let sample_count = per_sample.len();
+-        if sample_count == 0 {
+-            return Self::empty();
+-        }
+-
+-        // 收集所有指标类型
+-        let mut type_scores: std::collections::HashMap<String, Vec<f32>> =
+-            std::collections::HashMap::new();
+-        for metrics in &per_sample {
+-            for m in metrics {
+-                let name = m.metric_type.as_str().to_string();
+-                type_scores.entry(name).or_default().push(m.score);
+-            }
+-        }
+-
+-        // 计算平均值
+-        let aggregate: Vec<RagEvalMetric> = type_scores
+-            .iter()
+-            .filter_map(|(name, scores)| {
+-                RagMetricType::parse_str(name).map(|mt| {
+-                    let avg = scores.iter().sum::<f32>() / scores.len() as f32;
+-                    RagEvalMetric::new(mt, avg)
+-                })
+-            })
+-            .collect();
+-
+-        Self {
+-            sample_count,
+-            aggregate_metrics: aggregate,
+-            per_sample_metrics: per_sample,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 获取指定指标的聚合分数。
+     pub fn get_metric(&self, metric_type: &RagMetricType) -> Option<f32> {
+         self.aggregate_metrics
+             .iter()
+             .find(|m| &m.metric_type == metric_type)
+             .map(|m| m.score)

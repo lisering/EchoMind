@@ -1,0 +1,45 @@
+--- crates/models/src/lib.rs
++++ replace McpServerConfig::validate -> Result<(), String> with Ok(())
+@@ -3370,41 +3370,17 @@
+             enabled: true,
+         }
+     }
+ 
+     /// 验证配置完整性。
+     ///
+     /// 返回 `Ok(())` 表示配置有效，`Err(message)` 表示缺失必填字段。
+     pub fn validate(&self) -> Result<(), String> {
+-        if self.name.trim().is_empty() {
+-            return Err("服务器名称不能为空".to_string());
+-        }
+-        if self.id.trim().is_empty() {
+-            return Err("服务器 ID 不能为空".to_string());
+-        }
+-        match self.transport {
+-            McpTransportType::Stdio => {
+-                if self
+-                    .command
+-                    .as_deref()
+-                    .map(str::trim)
+-                    .unwrap_or("")
+-                    .is_empty()
+-                {
+-                    return Err("stdio 传输需要指定 command（可执行文件路径）".to_string());
+-                }
+-            }
+-            McpTransportType::Sse => {
+-                if self.url.as_deref().map(str::trim).unwrap_or("").is_empty() {
+-                    return Err("SSE 传输需要指定 url（服务器地址）".to_string());
+-                }
+-            }
+-        }
+-        Ok(())
++        Ok(()) /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// MCP 工具定义（REQ-ARCH-016 AC-4）。
+ ///
+ /// 描述一个由 MCP 服务器暴露的工具，可被 Agent 调用。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct McpTool {

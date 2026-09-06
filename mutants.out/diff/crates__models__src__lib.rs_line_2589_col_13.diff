@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "keyword_overlap" in RagMetricType::parse_str
+@@ -2581,17 +2581,17 @@
+             "faithfulness" => Some(Self::Faithfulness),
+             "answer_relevance" => Some(Self::AnswerRelevance),
+             "context_precision" => Some(Self::ContextPrecision),
+             "context_recall" => Some(Self::ContextRecall),
+             "hit_rate" => Some(Self::HitRate),
+             "mrr" => Some(Self::MRR),
+             "ndcg" => Some(Self::NDCG),
+             "context_similarity" => Some(Self::ContextSimilarity),
+-            "keyword_overlap" => Some(Self::KeywordOverlap),
++             /* ~ changed by cargo-mutants ~ */
+             _ => None,
+         }
+     }
+ 
+     /// 是否需要 LLM 调用。
+     pub fn needs_llm(&self) -> bool {
+         matches!(
+             self,

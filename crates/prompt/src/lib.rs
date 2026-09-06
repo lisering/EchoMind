@@ -262,3 +262,107 @@ pub fn truncate_text(text: &str, max: usize) -> &str {
     }
     &text[..end]
 }
+
+#[cfg(test)]
+mod truncate_text_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::truncate_text;
+
+    /// TRUNC-001: 空字符串输入 → 原样返回
+    #[test]
+    fn tc_trunc_001_empty_string() {
+        assert_eq!(truncate_text("", 10), "");
+    }
+
+    /// TRUNC-002: 字符串长度等于 max → 原样返回
+    #[test]
+    fn tc_trunc_002_length_equals_max() {
+        let s = "hello";
+        assert_eq!(truncate_text(s, 5), "hello");
+    }
+
+    /// TRUNC-003: 字符串长度小于 max → 原样返回
+    #[test]
+    fn tc_trunc_003_length_less_than_max() {
+        let s = "hi";
+        assert_eq!(truncate_text(s, 10), "hi");
+    }
+
+    /// TRUNC-004: 字符串长度大于 max → 截断到 max（ASCII）
+    #[test]
+    fn tc_trunc_004_length_greater_than_max() {
+        let s = "abcdefghij";
+        assert_eq!(truncate_text(s, 5), "abcde");
+    }
+
+    /// TRUNC-005: UTF-8 多字节字符 — 截断位置在多字节字符前
+    #[test]
+    fn tc_trunc_005_utf8_multibyte_before_boundary() {
+        // "你好世界" 每个中文字符 3 字节，共 12 字节
+        let s = "你好世界";
+        // max=5 → 回退到字符边界 → 只保留 "你"（3 字节）
+        let result = truncate_text(s, 5);
+        assert_eq!(result, "你");
+    }
+
+    /// TRUNC-006: UTF-8 多字节字符 — 截断位置恰好在字符边界
+    #[test]
+    fn tc_trunc_006_utf8_multibyte_at_boundary() {
+        let s = "你好世界"; // 12 bytes
+        // max=6 → 恰好包含 "你好"（6 字节）
+        let result = truncate_text(s, 6);
+        assert_eq!(result, "你好");
+    }
+
+    /// TRUNC-007: UTF-8 多字节字符 — max=0 返回空串
+    #[test]
+    fn tc_trunc_007_utf8_max_zero() {
+        let s = "你好世界";
+        assert_eq!(truncate_text(s, 0), "");
+    }
+
+    /// TRUNC-008: 包含换行符的文本
+    #[test]
+    fn tc_trunc_008_text_with_newlines() {
+        let s = "line1\nline2\nline3";
+        // max=7 → "line1\nl" (5+1+1=7 bytes, 全是 ASCII 单字节)
+        let result = truncate_text(s, 7);
+        assert_eq!(result, "line1\nl");
+    }
+
+    /// TRUNC-009: 包含 emoji 的文本（4 字节 UTF-8）
+    #[test]
+    fn tc_trunc_009_emoji_text() {
+        let s = "Hi🎉🎉🎉"; // "Hi" = 2 bytes, 每个 🎉 = 4 bytes → total 14
+        // max=3 → 回退到字符边界 → "Hi"（2 字节）
+        let result = truncate_text(s, 3);
+        assert_eq!(result, "Hi");
+    }
+
+    /// TRUNC-010: 包含 emoji — max 恰好覆盖一个 emoji
+    #[test]
+    fn tc_trunc_010_emoji_at_boundary() {
+        let s = "Hi🎉🎉"; // 2+4+4 = 10 bytes
+        // max=6 → "Hi🎉"（2+4=6）
+        let result = truncate_text(s, 6);
+        assert_eq!(result, "Hi🎉");
+    }
+
+    /// TRUNC-011: 纯 ASCII 长文本截断
+    #[test]
+    fn tc_trunc_011_long_ascii() {
+        let s = "a".repeat(1000);
+        let result = truncate_text(&s, 100);
+        assert_eq!(result.len(), 100);
+        assert_eq!(result, "a".repeat(100));
+    }
+
+    /// TRUNC-012: 混合 ASCII + UTF-8
+    #[test]
+    fn tc_trunc_012_mixed_ascii_utf8() {
+        let s = "abc你好def"; // 3+3*2+3 = 12 bytes
+        // max=4 → "abc" + 回退 → "abc"（3 字节）
+        let result = truncate_text(s, 4);
+        assert_eq!(result, "abc");
+    }
+}

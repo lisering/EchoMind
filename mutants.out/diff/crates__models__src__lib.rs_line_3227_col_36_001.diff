@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace += with *= in EmbedMetricScores::from_metrics_avg
+@@ -3219,17 +3219,17 @@
+                         hit_count += 1;
+                     }
+                     RagMetricType::MRR => {
+                         mrr_sum += m.score;
+                         mrr_count += 1;
+                     }
+                     RagMetricType::NDCG => {
+                         ndcg_sum += m.score;
+-                        ndcg_count += 1;
++                        ndcg_count *= /* ~ changed by cargo-mutants ~ */ 1;
+                     }
+                     _ => {}
+                 }
+             }
+         }
+ 
+         Self {
+             hit_rate: if hit_count > 0 {

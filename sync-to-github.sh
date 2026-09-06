@@ -95,11 +95,7 @@ echo -e "${BLUE}[3/10] 同步 crates/prompt${NC}"
 sync_dir "$ROOT_DIR/crates/prompt/src"      "$RELEASE_DIR/crates/prompt/src"
 sync_file "$ROOT_DIR/crates/prompt/Cargo.toml" "$RELEASE_DIR/crates/prompt/Cargo.toml"
 
-# ─── [3.5/10] crates/context（V3.0 新增，workspace 成员）───
-echo ""
-echo -e "${BLUE}[3.5/10] 同步 crates/context${NC}"
-sync_dir "$ROOT_DIR/crates/context/src"      "$RELEASE_DIR/crates/context/src"
-sync_file "$ROOT_DIR/crates/context/Cargo.toml" "$RELEASE_DIR/crates/context/Cargo.toml"
+
 
 # ─── [4/10] crates/compact ───
 echo ""

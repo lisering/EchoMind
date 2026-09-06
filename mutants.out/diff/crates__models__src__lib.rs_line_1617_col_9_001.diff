@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace ConversationTreeNode::is_leaf -> bool with false
+@@ -1609,17 +1609,17 @@
+ 
+     /// 判断是否为根节点（无父消息）。
+     pub fn is_root(&self) -> bool {
+         self.parent_message_id.is_none()
+     }
+ 
+     /// 判断是否为叶子节点（无子节点）。
+     pub fn is_leaf(&self) -> bool {
+-        self.child_message_ids.is_empty()
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 对话分支树（REQ-RAG-039）。
+ ///
+ /// 包含整棵分支树的所有节点，以及根节点 ID 列表和当前活跃路径。
+ /// 活跃路径是从根节点到当前查看节点的路径。
+ #[derive(Debug, Clone, Serialize, Deserialize)]

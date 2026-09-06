@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace EmbedMetricScores::zero -> Self with Default::default()
+@@ -3186,21 +3186,17 @@
+     pub mrr: f32,
+     /// 归一化折扣累积增益（NDCG），[0.0, 1.0]
+     pub ndcg: f32,
+ }
+ 
+ impl EmbedMetricScores {
+     /// 创建零分数实例。
+     pub fn zero() -> Self {
+-        Self {
+-            hit_rate: 0.0,
+-            mrr: 0.0,
+-            ndcg: 0.0,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 从指标列表中提取 Hit Rate / MRR / NDCG 三个分数的平均值。
+     pub fn from_metrics_avg(metrics: &[Vec<RagEvalMetric>]) -> Self {
+         if metrics.is_empty() {
+             return Self::zero();
+         }
+ 

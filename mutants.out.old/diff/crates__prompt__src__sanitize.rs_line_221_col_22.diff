@@ -1,0 +1,21 @@
+--- crates/prompt/src/sanitize.rs
++++ replace < with == in redact_pii
+@@ -213,17 +213,17 @@
+     if detections.is_empty() {
+         return text.to_string();
+     }
+ 
+     let mut result = String::with_capacity(text.len());
+     let mut last_end = 0;
+ 
+     for det in &detections {
+-        if det.start < last_end {
++        if det.start == /* ~ changed by cargo-mutants ~ */ last_end {
+             // 跳过重叠匹配
+             continue;
+         }
+         result.push_str(&text[last_end..det.start]);
+         result.push_str(&det.redacted);
+         last_end = det.end;
+     }
+     result.push_str(&text[last_end..]);

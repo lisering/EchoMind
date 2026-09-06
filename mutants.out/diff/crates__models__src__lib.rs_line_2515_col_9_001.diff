@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace PromptTemplate::has_query_placeholder -> bool with false
+@@ -2507,17 +2507,17 @@
+             && char_count <= 32
+             && name
+                 .chars()
+                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+     }
+ 
+     /// 验证模板内容是否包含 `{query}` 占位符。
+     pub fn has_query_placeholder(template: &str) -> bool {
+-        template.contains("{query}")
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ // ============================================================
+ // RAG 评估指标系统（REQ-RAG-045，RAGAS 风格）
+ // ============================================================
+ 
+ /// RAG 评估指标类型（REQ-RAG-045）。

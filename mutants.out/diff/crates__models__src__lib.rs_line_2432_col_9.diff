@@ -1,0 +1,26 @@
+--- crates/models/src/lib.rs
++++ replace ProvenanceTag::with_timestamp -> Self with Default::default()
+@@ -2424,22 +2424,17 @@
+ 
+     /// 创建带指定捕获时间的来源标记（测试用）。
+     pub fn with_timestamp(
+         conversation_id: String,
+         message_seq: usize,
+         captured_at: i64,
+         source_label: String,
+     ) -> Self {
+-        Self {
+-            conversation_id,
+-            message_seq,
+-            captured_at,
+-            source_label,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 生成 `(said in ...)` 后缀字符串（用于 scratch 日志内容追加）。
+     ///
+     /// 借鉴 QM 的 `(said in #channel)` 标记格式。
+     pub fn said_in_suffix(&self) -> String {
+         format!(" (said in {})", self.source_label)
+     }

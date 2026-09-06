@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "hall" in MemoryTier::parse_str
+@@ -2160,17 +2160,17 @@
+     Room,
+ }
+ 
+ impl MemoryTier {
+     /// 从字符串解析记忆层级。
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s {
+             "wing" => Some(Self::Wing),
+-            "hall" => Some(Self::Hall),
++             /* ~ changed by cargo-mutants ~ */
+             "room" => Some(Self::Room),
+             _ => None,
+         }
+     }
+ 
+     /// 返回层级字符串标识（用于数据库存储）。
+     pub fn as_str(&self) -> &'static str {
+         match self {

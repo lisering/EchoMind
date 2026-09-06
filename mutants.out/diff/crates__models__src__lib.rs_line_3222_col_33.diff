@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace += with -= in EmbedMetricScores::from_metrics_avg
+@@ -3214,17 +3214,17 @@
+         for sample_metrics in metrics {
+             for m in sample_metrics {
+                 match m.metric_type {
+                     RagMetricType::HitRate => {
+                         hit_sum += m.score;
+                         hit_count += 1;
+                     }
+                     RagMetricType::MRR => {
+-                        mrr_sum += m.score;
++                        mrr_sum -= /* ~ changed by cargo-mutants ~ */ m.score;
+                         mrr_count += 1;
+                     }
+                     RagMetricType::NDCG => {
+                         ndcg_sum += m.score;
+                         ndcg_count += 1;
+                     }
+                     _ => {}
+                 }

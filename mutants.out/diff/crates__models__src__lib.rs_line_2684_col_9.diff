@@ -1,0 +1,22 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalSample::with_relevant_indices -> Self with Default::default()
+@@ -2676,18 +2676,17 @@
+     /// 设置相关性分数。
+     pub fn with_relevance_scores(mut self, scores: Vec<f32>) -> Self {
+         self.relevance_scores = Some(scores);
+         self
+     }
+ 
+     /// 设置相关文档索引。
+     pub fn with_relevant_indices(mut self, indices: Vec<usize>) -> Self {
+-        self.relevant_indices = Some(indices);
+-        self
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// RAG 评估指标结果（REQ-RAG-045）。
+ ///
+ /// 单个指标的评估结果，包含分数和可选的详细信息。
+ /// 分数范围 [0.0, 1.0]，1.0 表示最优。
+ #[derive(Debug, Clone, Serialize, Deserialize)]

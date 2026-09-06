@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_context_token_limit -> usize with 1
+@@ -1331,17 +1331,17 @@
+ }
+ 
+ fn default_min_messages_to_compact() -> usize {
+     3
+ }
+ 
+ /// 默认上下文 token 限制（REQ-RAG-017）
+ pub fn default_context_token_limit() -> usize {
+-    4096
++    1 /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// serde 默认值辅助：返回 `true`（用于 `#[serde(default = "default_true")]`）。
+ pub fn default_true() -> bool {
+     true
+ }
+ 
+ /// 默认 PagedAttention 块大小（REQ-LLM-003 扩展）

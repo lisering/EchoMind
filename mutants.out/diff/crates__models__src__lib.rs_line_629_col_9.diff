@@ -1,0 +1,27 @@
+--- crates/models/src/lib.rs
++++ replace Conversation::with_id -> Self with Default::default()
+@@ -621,23 +621,17 @@
+             workspace_id,
+             title,
+             created_at: chrono::Utc::now().timestamp(),
+         }
+     }
+ 
+     /// 以指定 ID 构造（chat 兜底幂等创建用，REQ-RAG-006）。
+     pub fn with_id(id: String, workspace_id: String, title: String) -> Self {
+-        Self {
+-            id,
+-            workspace_id,
+-            title,
+-            created_at: chrono::Utc::now().timestamp(),
+-            sort_order: 0,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 知识库/工作空间（REQ-WS-001 多知识库创建与切换）。
+ ///
+ /// 每个工作空间拥有独立的文档集和会话列表，通过 `workspace_id` 字段隔离。
+ /// 默认工作空间 ID 为 `"default"`，用户可创建多个自定义知识库。
+ #[derive(Debug, Clone, Serialize, Deserialize)]

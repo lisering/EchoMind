@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace RagMetricType::needs_ground_truth -> bool with false
+@@ -2599,17 +2599,17 @@
+                 | Self::AnswerRelevance
+                 | Self::ContextPrecision
+                 | Self::ContextRecall
+         )
+     }
+ 
+     /// 是否需要 ground truth 答案。
+     pub fn needs_ground_truth(&self) -> bool {
+-        matches!(self, Self::ContextRecall)
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 是否需要嵌入向量。
+     pub fn needs_embedding(&self) -> bool {
+         matches!(self, Self::ContextSimilarity)
+     }
+ }
+ 

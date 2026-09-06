@@ -1,0 +1,25 @@
+--- crates/prompt/src/sanitize.rs
++++ replace redact_phone -> String with "xyzzy".into()
+@@ -242,21 +242,17 @@
+         }
+     } else {
+         "***".to_string()
+     }
+ }
+ 
+ /// 脱敏手机号：138****1234
+ fn redact_phone(phone: &str) -> String {
+-    if phone.len() >= 7 {
+-        format!("{}****{}", &phone[..3], &phone[phone.len() - 4..])
+-    } else {
+-        "****".to_string()
+-    }
++    "xyzzy".into() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 脱敏身份证号：110***********1234
+ fn redact_id_card(id: &str) -> String {
+     if id.len() >= 6 {
+         let prefix = &id[..3];
+         let suffix = &id[id.len() - 4..];
+         format!("{}{}{}", prefix, "*".repeat(id.len() - 7), suffix)

@@ -1,0 +1,30 @@
+--- crates/models/src/lib.rs
++++ replace SymbolKind::as_str -> &'static str with "xyzzy"
+@@ -489,26 +489,17 @@
+     Constant,
+     /// 模块（mod_item）
+     Module,
+ }
+ 
+ impl SymbolKind {
+     /// 转换为字符串（用于 SQLite 存储）。
+     pub fn as_str(&self) -> &'static str {
+-        match self {
+-            SymbolKind::Function => "function",
+-            SymbolKind::Method => "method",
+-            SymbolKind::Class => "class",
+-            SymbolKind::Struct => "struct",
+-            SymbolKind::Interface => "interface",
+-            SymbolKind::Enum => "enum",
+-            SymbolKind::Constant => "constant",
+-            SymbolKind::Module => "module",
+-        }
++        "xyzzy" /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 从字符串解析（避免与 `FromStr` trait 冲突，clippy `should_implement_trait`）。
+     ///
+     /// 未知字符串回退为 `Function` 并输出 stderr 警告，避免静默吞掉数据损坏。
+     pub fn parse_str(s: &str) -> Self {
+         match s {
+             "function" => SymbolKind::Function,

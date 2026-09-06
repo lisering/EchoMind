@@ -51,6 +51,8 @@ mod chat_tests;
 mod common;
 #[path = "integration/conversation_tests.rs"]
 mod conversation_tests;
+#[path = "integration/cross_module_tests.rs"]
+mod cross_module_tests;
 #[path = "integration/full_pipeline.rs"]
 mod full_pipeline;
 #[path = "integration/import_tests.rs"]

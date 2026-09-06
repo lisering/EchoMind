@@ -13,7 +13,8 @@
 ```
 docs/sessions/
 ├── README.md              ← 本文件（索引 + 使用指南）
-├── CURRENT_STATE.md       ← 当前项目状态快照（每次 session 结束时必须更新）
+├── CURRENT_STATE.md       ← 当前项目状态快照（≤100 行，每次 session 结束时必须更新）
+├── HISTORY.md             ← 历史详情归档（功能矩阵、版本规划、审计报告，从 CURRENT_STATE 拆分）
 ├── HANDOFF_TEMPLATE.md    ← 会话衔接提示词模板（复制使用）
 ├── LOG.md                 ← 会话时间线日志（按日期记录所有 session 摘要）
 └── archive/               ← 历史会话详情归档
@@ -52,7 +53,8 @@ docs/sessions/
 | 文件 | 职责 | 更新频率 |
 |---|---|---|
 | `README.md` | 索引与使用指南 | 结构变更时 |
-| `CURRENT_STATE.md` | 项目状态快照 | **每次 session 结束时必须更新** |
+| `CURRENT_STATE.md` | 项目状态快照（≤100 行核心指标） | **每次 session 结束时必须更新** |
+| `HISTORY.md` | 历史详情（功能矩阵/版本规划/审计报告） | 从 CURRENT_STATE 拆分，大版本时追加 |
 | `HANDOFF_TEMPLATE.md` | 衔接提示词模板 | 模板格式变更时 |
 | `LOG.md` | 会话时间线 | **每次 session 结束时追加** |
 | `archive/*.md` | 历史详情 | 大型功能 session 结束时创建 |

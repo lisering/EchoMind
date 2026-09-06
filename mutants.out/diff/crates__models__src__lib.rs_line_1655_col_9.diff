@@ -1,0 +1,24 @@
+--- crates/models/src/lib.rs
++++ replace ConversationTree::children_of -> Vec<&ConversationTreeNode> with vec![]
+@@ -1647,20 +1647,17 @@
+ 
+     /// 根据 node_id 查找节点。
+     pub fn find(&self, node_id: &str) -> Option<&ConversationTreeNode> {
+         self.nodes.iter().find(|n| n.node_id == node_id)
+     }
+ 
+     /// 获取节点的所有子节点。
+     pub fn children_of(&self, node_id: &str) -> Vec<&ConversationTreeNode> {
+-        self.nodes
+-            .iter()
+-            .filter(|n| n.parent_message_id.as_deref() == Some(node_id))
+-            .collect()
++        vec![] /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 缓存级别（REQ-PERF-001 语义缓存金字塔）。
+ ///
+ /// 三级缓存策略，从最快到最慢：
+ /// - `Exact`：L0 精确匹配（query hash → answer），命中率 5-10%，0 token
+ /// - `Semantic`：L1 语义匹配（embedding similarity → answer），命中率 10-20%，0 token

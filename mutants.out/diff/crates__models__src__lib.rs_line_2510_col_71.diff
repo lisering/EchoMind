@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace || with && in PromptTemplate::is_valid_name
+@@ -2502,17 +2502,17 @@
+ 
+     /// 验证模板名称是否合法（仅小写字母/数字/下划线，1-32 字符）。
+     pub fn is_valid_name(name: &str) -> bool {
+         let char_count = name.chars().count();
+         !name.is_empty()
+             && char_count <= 32
+             && name
+                 .chars()
+-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
++                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() && /* ~ changed by cargo-mutants ~ */ c == '_')
+     }
+ 
+     /// 验证模板内容是否包含 `{query}` 占位符。
+     pub fn has_query_placeholder(template: &str) -> bool {
+         template.contains("{query}")
+     }
+ }
+ 

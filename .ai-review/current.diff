@@ -1,0 +1,1089 @@
+diff --git a/.ai-review-config.json b/.ai-review-config.json
+new file mode 100644
+index 0000000..c6ed336
+--- /dev/null
++++ b/.ai-review-config.json
+@@ -0,0 +1,121 @@
++{
++  "name": "EchoMind AI Code Review",
++  "version": "1.0.0",
++  "description": "AI-powered code review configuration for EchoMind project",
++  "review_settings": {
++    "model": "claude-4-0-sonnet-20250805",
++    "max_turns": 10,
++    "timeout_minutes": 15,
++    "language": "en"
++  },
++  "focus_areas": [
++    {
++      "name": "security",
++      "priority": "critical",
++      "description": "Security vulnerabilities and hardcoded secrets",
++      "keywords": ["sql injection", "xss", "command injection", "path traversal", "hardcoded secrets", "api key", "password"],
++      "enabled": true
++    },
++    {
++      "name": "performance",
++      "priority": "high",
++      "description": "Performance issues and bottlenecks",
++      "keywords": ["n+1 query", "unnecessary allocation", "blocking io", "async", "memory leak", "cpu bound"],
++      "enabled": true
++    },
++    {
++      "name": "architecture",
++      "priority": "high",
++      "description": "Architecture compliance and dependency direction",
++      "keywords": ["hexagonal", "dependency direction", "tauri-app", "core", "models", "trait", "adapter"],
++      "enabled": true
++    },
++    {
++      "name": "rust_best_practices",
++      "priority": "medium",
++      "description": "Rust best practices and error handling",
++      "keywords": ["unwrap", "expect", "panic", "error handling", "async safety", "lifetime", "borrow checker"],
++      "enabled": true
++    },
++    {
++      "name": "code_quality",
++      "priority": "medium",
++      "description": "Code quality, naming, and documentation",
++      "keywords": ["naming", "documentation", "test coverage", "solid", "single responsibility"],
++      "enabled": true
++    },
++    {
++      "name": "frontend",
++      "priority": "medium",
++      "description": "Frontend best practices and DOM manipulation",
++      "keywords": ["dom manipulation", "event handling", "state management", "memory leak", "performance"],
++      "enabled": true
++    }
++  ],
++  "severity_levels": {
++    "critical": {
++      "description": "Must fix before merge - security vulnerabilities, data loss, crashes",
++      "fail_ci": true,
++      "auto_fix": false
++    },
++    "high": {
++      "description": "Should fix before merge - performance issues, logic errors, architecture violations",
++      "fail_ci": true,
++      "auto_fix": false
++    },
++    "medium": {
++      "description": "Consider fixing - code quality, maintainability, best practices",
++      "fail_ci": false,
++      "auto_fix": false
++    },
++    "low": {
++      "description": "Optional improvements - style, documentation, minor optimizations",
++      "fail_ci": false,
++      "auto_fix": false
++    }
++  },
++  "auto_fix_rules": {
++    "enabled": true,
++    "allowed_fixes": [
++      "clippy_warnings",
++      "formatting",
++      "unused_imports",
++      "missing_doc_comments"
++    ],
++    "max_files_per_commit": 5,
++    "require_ci_pass": true
++  },
++  "output_settings": {
++    "format": "markdown",
++    "include_line_numbers": true,
++    "include_suggestions": true,
++    "include_diff": true,
++    "store_artifacts": true,
++    "retention_days": 30
++  },
++  "exclusions": {
++    "files": [
++      "*.lock",
++      "*.min.js",
++      "*.min.css",
++      "ui/index.html",
++      "target/**",
++      "node_modules/**",
++      ".git/**"
++    ],
++    "patterns": [
++      "Auto-generated code",
++      "Test fixtures",
++      "Documentation files"
++    ]
++  },
++  "integration": {
++    "trigger_on_pr": true,
++    "trigger_on_comment": true,
++    "comment_trigger": "@claude",
++    "fail_ci_on_critical": true,
++    "fail_ci_on_high": true,
++    "create_fix_pr": false,
++    "notify_on_failure": true
++  }
++}
+\ No newline at end of file
+diff --git a/.ai-review-rules.md b/.ai-review-rules.md
+new file mode 100644
+index 0000000..0b5fb5a
+--- /dev/null
++++ b/.ai-review-rules.md
+@@ -0,0 +1,395 @@
++# EchoMind AI Code Review Rules
++
++This document defines the AI code review rules for the EchoMind project.
++The AI reviewer should follow these rules when analyzing pull requests.
++
++## Security Rules
++
++### S1: SQL Injection Prevention
++- **Rule**: All database queries must use parameterized queries or prepared statements
++- **Severity**: CRITICAL
++- **Check**: Look for string concatenation in SQL queries, `format!()` in SQL, or raw SQL strings
++- **Example**:
++  ```rust
++  // ❌ Bad
++  let query = format!("SELECT * FROM users WHERE id = {}", user_id);
++  
++  // ✅ Good
++  let query = "SELECT * FROM users WHERE id = ?1";
++  conn.execute(query, params![user_id])?;
++  ```
++
++### S2: XSS Prevention
++- **Rule**: User input must be sanitized before rendering in HTML
++- **Severity**: CRITICAL
++- **Check**: Look for unescaped user input in HTML templates or JavaScript string concatenation
++- **Example**:
++  ```javascript
++  // ❌ Bad
++  element.innerHTML = userInput;
++  
++  // ✅ Good
++  element.textContent = userInput;
++  // Or use DOMPurify for rich content
++  element.innerHTML = DOMPurify.sanitize(userInput);
++  ```
++
++### S3: Command Injection Prevention
++- **Rule**: Never execute shell commands with user-controlled input
++- **Severity**: CRITICAL
++- **Check**: Look for `Command::new()` with user input, `exec()`, `eval()` with strings
++- **Example**:
++  ```rust
++  // ❌ Bad
++  Command::new("sh").arg("-c").arg(user_input).output()?;
++  
++  // ✅ Good
++  Command::new("specific_command").arg(safe_arg).output()?;
++  ```
++
++### S4: Path Traversal Prevention
++- **Rule**: Validate file paths to prevent directory traversal attacks
++- **Severity**: CRITICAL
++- **Check**: Look for file operations with user-controlled paths without validation
++- **Example**:
++  ```rust
++  // ❌ Bad
++  let path = Path::new(user_input);
++  
++  // ✅ Good
++  let base_dir = Path::new("/safe/directory");
++  let path = base_dir.join(user_input);
++  if !path.starts_with(base_dir) {
++      return Err("Path traversal detected");
++  }
++  ```
++
++### S5: Hardcoded Secrets
++- **Rule**: Never hardcode API keys, passwords, or secrets in source code
++- **Severity**: CRITICAL
++- **Check**: Look for patterns like `api_key = "..."`, `password = "..."`, `secret = "..."`
++- **Example**:
++  ```rust
++  // ❌ Bad
++  const API_KEY: &str = "sk-1234567890";
++  
++  // ✅ Good
++  let api_key = std::env::var("API_KEY").context("API_KEY not set")?;
++  ```
++
++## Performance Rules
++
++### P1: N+1 Query Prevention
++- **Rule**: Avoid querying inside loops; use batch operations instead
++- **Severity**: HIGH
++- **Check**: Look for database queries inside `for`, `while`, or `iter()` loops
++- **Example**:
++  ```rust
++  // ❌ Bad
++  for user_id in user_ids {
++      let user = db.get_user(user_id)?;  // N queries
++  }
++  
++  // ✅ Good
++  let users = db.get_users_by_ids(&user_ids)?;  // 1 query
++  ```
++
++### P2: Blocking I/O in Async Context
++- **Rule**: Never use blocking I/O in async functions; use `spawn_blocking` or async alternatives
++- **Severity**: HIGH
++- **Check**: Look for `std::fs::read`, `std::io::Read`, blocking network calls in async functions
++- **Example**:
++  ```rust
++  // ❌ Bad
++  async fn read_file(path: &str) -> Result<String> {
++      std::fs::read_to_string(path)?  // Blocks the executor
++  }
++  
++  // ✅ Good
++  async fn read_file(path: &str) -> Result<String> {
++      tokio::fs::read_to_string(path).await?
++  }
++  ```
++
++### P3: Unnecessary Allocations
++- **Rule**: Avoid unnecessary heap allocations in hot paths
++- **Severity**: MEDIUM
++- **Check**: Look for `Vec::new()` in loops, `String::from()` when `&str` suffices, unnecessary `.clone()`
++- **Example**:
++  ```rust
++  // ❌ Bad
++  for item in items {
++      let s = String::from(item.name);  // Allocation per iteration
++  }
++  
++  // ✅ Good
++  for item in items {
++      let s = &item.name;  // Borrow, no allocation
++  }
++  ```
++
++## Architecture Rules
++
++### A1: Hexagonal Architecture Compliance
++- **Rule**: Core business logic must not depend on infrastructure or UI layers
++- **Severity**: HIGH
++- **Check**: Look for imports from `tauri`, `reqwest`, `rusqlite` in `crates/core`
++- **Example**:
++  ```rust
++  // ❌ Bad (in crates/core)
++  use tauri::State;
++  use reqwest::Client;
++  
++  // ✅ Good (in crates/core)
++  use crate::ports::{Storage, LLMProvider};
++  ```
++
++### A2: Dependency Direction
++- **Rule**: Dependencies must flow inward: tauri-app → core → models
++- **Severity**: HIGH
++- **Check**: Look for reverse dependencies or circular imports
++- **Example**:
++  ```rust
++  // ❌ Bad (in crates/core)
++  use crate::tauri_app::AppState;
++  
++  // ✅ Good (in crates/tauri-app)
++  use crate::core::AppState;
++  ```
++
++### A3: Trait-Based Abstractions
++- **Rule**: Use traits for port definitions; never depend on concrete implementations
++- **Severity**: MEDIUM
++- **Check**: Look for concrete types in function signatures where traits would be appropriate
++- **Example**:
++  ```rust
++  // ❌ Bad
++  fn process(storage: &SqliteStorage) -> Result<()> { ... }
++  
++  // ✅ Good
++  fn process(storage: &dyn Storage) -> Result<()> { ... }
++  ```
++
++## Rust Best Practices Rules
++
++### R1: No unwrap/expect in Production Code
++- **Rule**: Never use `.unwrap()` or `.expect()` in production code
++- **Severity**: HIGH
++- **Check**: Look for `.unwrap()`, `.expect()` outside of test modules
++- **Example**:
++  ```rust
++  // ❌ Bad
++  let value = some_option.unwrap();
++  let value = some_result.expect("Failed");
++  
++  // ✅ Good
++  let value = some_option.context("Missing value")?;
++  let value = some_result.context("Operation failed")?;
++  ```
++
++### R2: Proper Error Handling
++- **Rule**: Use `?` operator for error propagation; provide meaningful context
++- **Severity**: HIGH
++- **Check**: Look for `unwrap_or_else`, `match` with verbose error handling, silent failures
++- **Example**:
++  ```rust
++  // ❌ Bad
++  let value = match some_result {
++      Ok(v) => v,
++      Err(_) => return Ok(()),  // Silent failure
++  };
++  
++  // ✅ Good
++  let value = some_result.context("Failed to process")?;
++  ```
++
++### R3: Async Safety
++- **Rule**: Never hold `std::sync::Mutex` across `.await` points
++- **Severity**: HIGH
++- **Check**: Look for `std::sync::Mutex` in async functions, especially with `.await` after lock
++- **Example**:
++  ```rust
++  // ❌ Bad
++  async fn process() {
++      let lock = mutex.lock().unwrap();
++      some_async_operation().await;  // Holds lock across await
++  }
++  
++  // ✅ Good
++  async fn process() {
++      let value = {
++          let lock = mutex.lock().unwrap();
++          lock.clone()  // Copy data, release lock
++      };
++      some_async_operation(value).await;
++  }
++  ```
++
++## Code Quality Rules
++
++### Q1: Single Responsibility Principle
++- **Rule**: Functions should do one thing; split complex functions
++- **Severity**: MEDIUM
++- **Check**: Look for functions longer than 50 lines, multiple responsibilities in one function
++- **Example**:
++  ```rust
++  // ❌ Bad
++  fn process_user_data() {
++      // Validate input (10 lines)
++      // Transform data (20 lines)
++      // Save to database (15 lines)
++      // Send notification (10 lines)
++  }
++  
++  // ✅ Good
++  fn validate_input() -> Result<()> { ... }
++  fn transform_data() -> Result<()> { ... }
++  fn save_to_database() -> Result<()> { ... }
++  fn send_notification() -> Result<()> { ... }
++  ```
++
++### Q2: Documentation Requirements
++- **Rule**: All public items must have documentation comments
++- **Severity**: MEDIUM
++- **Check**: Look for `pub` functions, structs, traits without `///` comments
++- **Example**:
++  ```rust
++  // ❌ Bad
++  pub fn calculate_similarity(a: &[f32], b: &[f32]) -> f32 { ... }
++  
++  // ✅ Good
++  /// Calculate cosine similarity between two vectors.
++  /// 
++  /// # Arguments
++  /// * `a` - First vector
++  /// * `b` - Second vector (must be same length as `a`)
++  /// 
++  /// # Returns
++  /// Similarity score between 0.0 and 1.0
++  /// 
++  /// # Panics
++  /// Panics if vectors have different lengths.
++  pub fn calculate_similarity(a: &[f32], b: &[f32]) -> f32 { ... }
++  ```
++
++### Q3: Test Coverage Requirements
++- **Rule**: All public functions must have corresponding unit tests
++- **Severity**: MEDIUM
++- **Check**: Look for public functions without tests in `#[cfg(test)]` modules
++- **Example**:
++  ```rust
++  // ❌ Bad
++  pub fn process_data(input: &str) -> Result<String> { ... }
++  // No tests
++  
++  // ✅ Good
++  pub fn process_data(input: &str) -> Result<String> { ... }
++  
++  #[cfg(test)]
++  mod tests {
++      #[test]
++      fn test_process_data_valid_input() { ... }
++      
++      #[test]
++      fn test_process_data_empty_input() { ... }
++  }
++  ```
++
++## Frontend Rules
++
++### F1: DOM Manipulation Safety
++- **Rule**: Sanitize user input before DOM insertion
++- **Severity**: HIGH
++- **Check**: Look for `innerHTML` with user input, `document.write()`, `eval()`
++- **Example**:
++  ```javascript
++  // ❌ Bad
++  element.innerHTML = userInput;
++  eval(userCode);
++  
++  // ✅ Good
++  element.textContent = userInput;
++  // Use safe alternatives
++  ```
++
++### F2: Event Handler Memory Leaks
++- **Rule**: Remove event listeners when components are destroyed
++- **Severity**: MEDIUM
++- **Check**: Look for `addEventListener` without corresponding `removeEventListener`
++- **Example**:
++  ```javascript
++  // ❌ Bad
++  function setup() {
++      element.addEventListener('click', handler);
++      // Never removed
++  }
++  
++  // ✅ Good
++  function setup() {
++      element.addEventListener('click', handler);
++      return () => element.removeEventListener('click', handler);
++  }
++  ```
++
++### F3: State Management
++- **Rule**: Avoid global mutable state; use unidirectional data flow
++- **Severity**: MEDIUM
++- **Check**: Look for global variables, direct DOM state manipulation
++- **Example**:
++  ```javascript
++  // ❌ Bad
++  let globalState = {};
++  function updateState(key, value) {
++      globalState[key] = value;
++  }
++  
++  // ✅ Good
++  const state = { /* initial state */ };
++  function dispatch(action) {
++      state = reducer(state, action);
++      render(state);
++  }
++  ```
++
++## Review Process
++
++### When to Review
++1. **Always review**: Security-related changes, authentication, encryption, database operations
++2. **Always review**: Core business logic changes, architecture modifications
++3. **Review on request**: Complex algorithms, performance-critical code
++4. **Skip review**: Documentation-only changes, dependency updates (unless breaking)
++
++### Review Output Format
++```markdown
++## AI Code Review Summary
++
++### Critical Issues (Must Fix)
++- [CRITICAL] **File:line** - Description
++  ```suggestion
++  // Suggested fix
++  ```
++
++### High Priority Issues (Should Fix)
++- [HIGH] **File:line** - Description
++  ```suggestion
++  // Suggested fix
++  ```
++
++### Medium Priority Issues (Consider)
++- [MEDIUM] **File:line** - Description
++
++### Low Priority Issues (Optional)
++- [LOW] **File:line** - Description
++
++### Positive Notes
++- Good practice: **File:line** - Description
++```
++
++### Review Checklist
++- [ ] Security vulnerabilities checked
++- [ ] Performance issues identified
++- [ ] Architecture compliance verified
++- [ ] Error handling reviewed
++- [ ] Documentation completeness checked
++- [ ] Test coverage assessed
++- [ ] Frontend best practices followed
+\ No newline at end of file
+diff --git a/.github/workflows/ai-review.yml b/.github/workflows/ai-review.yml
+new file mode 100644
+index 0000000..ee7f255
+--- /dev/null
++++ b/.github/workflows/ai-review.yml
+@@ -0,0 +1,127 @@
++name: AI Code Review
++
++on:
++  pull_request:
++    types: [opened, synchronize, reopened]
++  issue_comment:
++    types: [created]
++
++permissions:
++  contents: read
++  pull-requests: write
++  issues: write
++
++jobs:
++  ai-review:
++    name: AI Code Review
++    runs-on: ubuntu-latest
++    if: |
++      (github.event_name == 'pull_request') ||
++      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
++    
++    steps:
++      - name: Checkout repository
++        uses: actions/checkout@v4
++        with:
++          fetch-depth: 0  # Full history needed for diff analysis
++
++      - name: Setup Node.js
++        uses: actions/setup-node@v4
++        with:
++          node-version: 22
++
++      - name: Install dependencies
++        run: npm ci
++
++      - name: Build UI
++        run: node scripts/build-ui.mjs
++
++      - name: Run AI Code Review
++        uses: anthropics/claude-code-action@v1
++        with:
++          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
++          prompt: |
++            You are a senior software engineer reviewing a pull request for the EchoMind project.
++            
++            ## Project Context
++            EchoMind is a Rust + Tauri v2 desktop application for local AI knowledge base with RAG capabilities.
++            
++            ## Review Focus Areas
++            1. **Security**: Check for SQL injection, XSS, command injection, path traversal, hardcoded secrets
++            2. **Performance**: Identify N+1 queries, unnecessary allocations, blocking I/O in async contexts
++            3. **Architecture**: Verify hexagonal architecture compliance, dependency direction (tauri-app → core → models)
++            4. **Rust Best Practices**: Check for unwrap/expect usage, proper error handling, async safety
++            5. **Code Quality**: Review naming, documentation, test coverage, SOLID principles
++            6. **Frontend**: Check for DOM manipulation best practices, event handling, state management
++            
++            ## Review Guidelines
++            - Focus on critical issues that could cause bugs, security vulnerabilities, or performance problems
++            - Provide specific line references and actionable suggestions
++            - Prioritize issues by severity: CRITICAL > HIGH > MEDIUM > LOW
++            - Don't flag style issues that clippy/fmt already catch
++            - Consider the project's iron rules (铁律) defined in .catpaw/rules/system-constraints.md
++            
++            ## Output Format
++            For each issue found, provide:
++            - Severity level (CRITICAL/HIGH/MEDIUM/LOW)
++            - File path and line number
++            - Description of the issue
++            - Suggested fix
++            
++            Review the diff and provide a comprehensive analysis.
++          claude_args: |
++            --max-turns 10
++            --model claude-4-0-sonnet-20250805
++            --append-system-prompt "You are a security-focused code reviewer for a Rust/Tauri desktop application. Focus on critical security and correctness issues."
++
++      - name: Upload review results
++        if: always()
++        uses: actions/upload-artifact@v4
++        with:
++          name: ai-review-results
++          path: |
++            .ai-review/
++            review-results.json
++          retention-days: 30
++
++  # Optional: Auto-fix critical issues
++  auto-fix:
++    name: Auto-fix Critical Issues
++    needs: ai-review
++    runs-on: ubuntu-latest
++    if: always() && needs.ai-review.result == 'success'
++    
++    steps:
++      - name: Checkout repository
++        uses: actions/checkout@v4
++        with:
++          ref: ${{ github.event.pull_request.head.ref }}
++          fetch-depth: 0
++
++      - name: Setup Rust
++        uses: dtolnay/rust-toolchain@stable
++        with:
++          components: clippy, rustfmt
++
++      - name: Install Linux system dependencies
++        run: |
++          sudo apt-get update
++          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
++
++      - name: Run Clippy and fix auto-fixable issues
++        run: |
++          cargo clippy --all-targets -- -D warnings --fix --allow-dirty --allow-staged
++          
++      - name: Format code
++        run: cargo fmt
++
++      - name: Commit fixes if any
++        run: |
++          git config --local user.name "github-actions[bot]"
++          git config --local user.email "github-actions[bot]@users.noreply.github.com"
++          
++          if ! git diff --quiet; then
++            git add -A
++            git commit -m "style: auto-fix clippy warnings and formatting"
++            git push
++          fi
+\ No newline at end of file
+diff --git a/docs/ai-review-guide.md b/docs/ai-review-guide.md
+new file mode 100644
+index 0000000..41a2b26
+--- /dev/null
++++ b/docs/ai-review-guide.md
+@@ -0,0 +1,292 @@
++# EchoMind AI Code Review Integration
++
++This document describes the AI-powered code review integration for the EchoMind project.
++
++## Overview
++
++EchoMind uses Claude Code Action for automated AI code review in GitHub Actions. This integration provides:
++
++- **Automated Security Review**: Detects SQL injection, XSS, command injection, path traversal, and hardcoded secrets
++- **Performance Analysis**: Identifies N+1 queries, blocking I/O, and unnecessary allocations
++- **Architecture Compliance**: Verifies hexagonal architecture and dependency direction
++- **Code Quality**: Reviews Rust best practices, error handling, and documentation
++- **Frontend Review**: Checks DOM manipulation, event handling, and state management
++
++## Setup
++
++### 1. GitHub Secrets Required
++
++Add the following secrets to your GitHub repository:
++
++- `ANTHROPIC_API_KEY`: Your Anthropic API key for Claude Code
++
++### 2. Installation
++
++The AI review integration is automatically configured when you push to the repository. The workflow files are located in:
++
++- `.github/workflows/ci.yml` - Main CI pipeline with AI review step
++- `.github/workflows/ai-review.yml` - Dedicated AI review workflow
++
++### 3. Configuration Files
++
++- `.ai-review-config.json` - Review configuration and settings
++- `.ai-review-rules.md` - Detailed review rules and guidelines
++
++## Usage
++
++### Automatic Review
++
++AI review runs automatically on:
++
++1. **Pull Requests**: Every PR gets an automated review
++2. **Comments**: Mention `@claude` in a PR comment to trigger a review
++3. **Push to Main**: Additional review on main branch updates
++
++### Manual Review
++
++Run the local review script:
++
++```bash
++# Review staged changes
++git add .
++./scripts/ai-review.sh
++
++# Review last commit
++git commit -m "feature: add new functionality"
++./scripts/ai-review.sh
++```
++
++### Triggering Review via Comment
++
++In a PR comment, mention:
++
++```
++@claude Please review this PR for security issues
++```
++
++or
++
++```
++@claude Review the performance implications of these changes
++```
++
++## Review Process
++
++### 1. Automated Analysis
++
++The AI reviewer analyzes:
++
++- **Security**: SQL injection, XSS, command injection, path traversal, hardcoded secrets
++- **Performance**: N+1 queries, blocking I/O, unnecessary allocations
++- **Architecture**: Hexagonal architecture compliance, dependency direction
++- **Rust**: unwrap/expect usage, error handling, async safety
++- **Code Quality**: Naming, documentation, test coverage, SOLID principles
++- **Frontend**: DOM manipulation, event handling, state management
++
++### 2. Issue Classification
++
++Issues are classified by severity:
++
++- **CRITICAL**: Must fix before merge (security vulnerabilities, data loss, crashes)
++- **HIGH**: Should fix before merge (performance issues, logic errors, architecture violations)
++- **MEDIUM**: Consider fixing (code quality, maintainability, best practices)
++- **LOW**: Optional improvements (style, documentation, minor optimizations)
++
++### 3. Output Format
++
++Review results are provided in Markdown format:
++
++```markdown
++## AI Code Review Summary
++
++### Critical Issues (Must Fix)
++- [CRITICAL] **File:line** - Description
++  ```suggestion
++  // Suggested fix
++  ```
++
++### High Priority Issues (Should Fix)
++- [HIGH] **File:line** - Description
++
++### Medium Priority Issues (Consider)
++- [MEDIUM] **File:line** - Description
++
++### Low Priority Issues (Optional)
++- [LOW] **File:line** - Description
++```
++
++## Configuration
++
++### Review Settings
++
++Edit `.ai-review-config.json` to customize:
++
++```json
++{
++  "review_settings": {
++    "model": "claude-4-0-sonnet-20250805",
++    "max_turns": 10,
++    "timeout_minutes": 15,
++    "language": "en"
++  },
++  "severity_levels": {
++    "critical": {
++      "fail_ci": true,
++      "auto_fix": false
++    }
++  }
++}
++```
++
++### Review Rules
++
++Edit `.ai-review-rules.md` to add or modify review rules:
++
++```markdown
++### New Rule: Rule Name
++- **Rule**: Description of the rule
++- **Severity**: CRITICAL/HIGH/MEDIUM/LOW
++- **Check**: What to look for
++- **Example**: Code examples
++```
++
++## Integration with CI
++
++### CI Pipeline
++
++The AI review is integrated into the CI pipeline:
++
++1. **Lint Step**: Runs clippy and fmt checks
++2. **AI Review Step**: Runs after lint passes
++3. **Test Step**: Runs after AI review
++4. **Build Step**: Runs after tests pass
++
++### Failure Handling
++
++- **Critical Issues**: CI fails immediately
++- **High Issues**: CI fails
++- **Medium Issues**: CI passes with warnings
++- **Low Issues**: CI passes
++
++### Auto-Fix
++
++The AI review can automatically fix:
++
++- Clippy warnings
++- Formatting issues
++- Unused imports
++- Missing documentation
++
++## Best Practices
++
++### For Developers
++
++1. **Review AI Suggestions**: Always review AI suggestions before applying
++2. **Test Changes**: Run tests after applying AI fixes
++3. **Understand Changes**: Don't blindly apply suggestions; understand why they're needed
++4. **Provide Context**: Give clear PR descriptions to help AI understand context
++
++### For Reviewers
++
++1. **Focus on Critical Issues**: Prioritize security and correctness
++2. **Verify AI Findings**: AI may have false positives; verify issues
++3. **Suggest Alternatives**: Provide better solutions when AI suggestions are suboptimal
++4. **Update Rules**: Add new rules based on common issues found
++
++## Troubleshooting
++
++### Common Issues
++
++1. **AI Review Not Running**
++   - Check if `ANTHROPIC_API_KEY` secret is set
++   - Verify GitHub Actions permissions
++   - Check workflow file syntax
++
++2. **False Positives**
++   - Update review rules to exclude patterns
++   - Add exclusions in `.ai-review-config.json`
++   - Provide more context in PR descriptions
++
++3. **Performance Issues**
++   - Reduce `max_turns` in configuration
++   - Exclude large files from review
++   - Use path filters in workflow
++
++### Debugging
++
++Enable debug logging:
++
++```bash
++# Run with verbose output
++ANTHROPIC_LOG=debug ./scripts/ai-review.sh
++```
++
++Check review artifacts:
++
++```bash
++# View review results
++cat .ai-review/review-report.md
++```
++
++## Cost Management
++
++### API Usage
++
++- Each review uses approximately 10-20 API calls
++- Typical cost: $0.10-0.50 per review
++- Cost depends on PR size and complexity
++
++### Optimization
++
++1. **Path Filters**: Only review changed files
++2. **Size Limits**: Skip reviews for very large PRs
++3. **Caching**: Cache review results for unchanged code
++4. **Batching**: Review multiple related PRs together
++
++## Security Considerations
++
++### Data Privacy
++
++- Code is sent to Anthropic's API for review
++- No code is stored permanently
++- Review results are stored in GitHub artifacts
++
++### Access Control
++
++- Only repository admins can configure AI review
++- Review results are visible to all contributors
++- API keys are stored securely in GitHub Secrets
++
++### Best Practices
++
++1. **Never commit API keys** to source code
++2. **Use environment variables** for sensitive data
++3. **Regularly rotate API keys**
++4. **Monitor API usage** for unusual activity
++
++## Future Enhancements
++
++### Planned Features
++
++1. **Custom Rules Engine**: Allow teams to define custom review rules
++2. **Integration with Issue Trackers**: Automatically create issues for critical findings
++3. **Learning from Feedback**: Improve suggestions based on developer feedback
++4. **Multi-Language Support**: Extend beyond Rust and JavaScript
++
++### Contributing
++
++To contribute to the AI review system:
++
++1. Review the existing rules in `.ai-review-rules.md`
++2. Add new rules for common issues
++3. Test rules with sample code
++4. Submit a PR with your improvements
++
++## Support
++
++For issues or questions:
++
++1. Check the [Claude Code documentation](https://claude.ai/code)
++2. Review the [AI review rules](.ai-review-rules.md)
++3. Open an issue in the repository
++4. Contact the maintainers
+\ No newline at end of file
+diff --git a/scripts/ai-review.sh b/scripts/ai-review.sh
+new file mode 100755
+index 0000000..a68bdff
+--- /dev/null
++++ b/scripts/ai-review.sh
+@@ -0,0 +1,119 @@
++#!/bin/bash
++
++# EchoMind AI Code Review Script
++# This script runs AI code review locally for testing and validation
++
++set -e
++
++# Colors for output
++RED='\033[0;31m'
++GREEN='\033[0;32m'
++YELLOW='\033[1;33m'
++BLUE='\033[0;34m'
++NC='\033[0m' # No Color
++
++# Configuration
++AI_REVIEW_CONFIG=".ai-review-config.json"
++AI_REVIEW_RULES=".ai-review-rules.md"
++REVIEW_OUTPUT_DIR=".ai-review"
++REVIEW_REPORT="$REVIEW_OUTPUT_DIR/review-report.md"
++
++echo -e "${BLUE}=== EchoMind AI Code Review ===${NC}"
++echo -e "${BLUE}Starting AI code review process...${NC}"
++
++# Check if Claude CLI is available
++if ! command -v claude &> /dev/null; then
++    echo -e "${RED}Error: Claude CLI not found. Please install Claude Code first.${NC}"
++    echo "Visit https://claude.ai/code for installation instructions."
++    exit 1
++fi
++
++# Check if config file exists
++if [ ! -f "$AI_REVIEW_CONFIG" ]; then
++    echo -e "${RED}Error: AI review config file not found: $AI_REVIEW_CONFIG${NC}"
++    exit 1
++fi
++
++# Check if rules file exists
++if [ ! -f "$AI_REVIEW_RULES" ]; then
++    echo -e "${RED}Error: AI review rules file not found: $AI_REVIEW_RULES${NC}"
++    exit 1
++fi
++
++# Create output directory
++mkdir -p "$REVIEW_OUTPUT_DIR"
++
++# Get the diff for review
++echo -e "${YELLOW}Getting diff for review...${NC}"
++DIFF=$(git diff --cached 2>/dev/null || git diff HEAD~1 2>/dev/null || git diff)
++
++if [ -z "$DIFF" ]; then
++    echo -e "${YELLOW}No changes detected for review.${NC}"
++    exit 0
++fi
++
++# Save diff to file
++echo "$DIFF" > "$REVIEW_OUTPUT_DIR/current.diff"
++
++# Read review rules
++echo -e "${YELLOW}Reading review rules...${NC}"
++REVIEW_RULES=$(cat "$AI_REVIEW_RULES")
++
++# Prepare the review prompt
++REVIEW_PROMPT="You are reviewing code changes for the EchoMind project.
++
++## Project Context
++EchoMind is a Rust + Tauri v2 desktop application for local AI knowledge base with RAG capabilities.
++
++## Review Rules
++$REVIEW_RULES
++
++## Changes to Review
++\`\`\`diff
++$DIFF
++\`\`\`
++
++## Instructions
++1. Analyze the changes according to the review rules
++2. Identify issues by severity (CRITICAL > HIGH > MEDIUM > LOW)
++3. Provide specific file paths and line numbers
++4. Suggest fixes for critical and high issues
++5. Follow the output format specified in the rules
++
++Please provide a comprehensive review."
++
++# Run the AI review
++echo -e "${BLUE}Running AI code review...${NC}"
++REVIEW_RESULT=$(claude -p "$REVIEW_PROMPT" 2>&1) || {
++    echo -e "${RED}Error: AI review failed.${NC}"
++    echo "$REVIEW_RESULT"
++    exit 1
++}
++
++# Save the review result
++echo "$REVIEW_RESULT" > "$REVIEW_REPORT"
++
++# Parse and display results
++echo -e "${GREEN}=== AI Review Complete ===${NC}"
++echo -e "${BLUE}Review report saved to: $REVIEW_REPORT${NC}"
++
++# Count issues by severity
++CRITICAL_COUNT=$(echo "$REVIEW_RESULT" | grep -c "\[CRITICAL\]" || true)
++HIGH_COUNT=$(echo "$REVIEW_RESULT" | grep -c "\[HIGH\]" || true)
++MEDIUM_COUNT=$(echo "$REVIEW_RESULT" | grep -c "\[MEDIUM\]" || true)
++LOW_COUNT=$(echo "$REVIEW_RESULT" | grep -c "\[LOW\]" || true)
++
++echo -e "${BLUE}Issue Summary:${NC}"
++echo -e "  ${RED}Critical: $CRITICAL_COUNT${NC}"
++echo -e "  ${YELLOW}High: $HIGH_COUNT${NC}"
++echo -e "  ${BLUE}Medium: $MEDIUM_COUNT${NC}"
++echo -e "  ${GREEN}Low: $LOW_COUNT${NC}"
++
++# Exit with error if critical or high issues found
++if [ "$CRITICAL_COUNT" -gt 0 ] || [ "$HIGH_COUNT" -gt 0 ]; then
++    echo -e "${RED}Critical or high issues found. Please fix before merging.${NC}"
++    exit 1
++fi
++
++echo -e "${GREEN}No critical or high issues found. Review passed.${NC}"
++exit 0
+\ No newline at end of file

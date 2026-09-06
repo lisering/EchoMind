@@ -127,26 +127,6 @@ pub async fn get_settings_inner(state: &AppState) -> Result<SettingsPayload, Str
         .map_err(|e| format!("{e:#}"))?
         .unwrap_or_default();
     // REQ-LLM-003 扩展：读取 PagedAttention 配置（默认关闭）
-    let llm_paged_attn = state
-        .storage
-        .get_setting("llm.paged_attn")
-        .await
-        .map_err(|e| format!("{e:#}"))?
-        .is_some_and(|v| v == "true");
-    let llm_block_size = state
-        .storage
-        .get_setting("llm.block_size")
-        .await
-        .map_err(|e| format!("{e:#}"))?
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(32);
-    let llm_gpu_memory_ctx = state
-        .storage
-        .get_setting("llm.gpu_memory_ctx")
-        .await
-        .map_err(|e| format!("{e:#}"))?
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(4096);
     // S11：读取采样参数（JSON 序列化存储在 settings 表 llm.sampling 键）
     let llm_sampling = state
         .storage
@@ -216,9 +196,6 @@ pub async fn get_settings_inner(state: &AppState) -> Result<SettingsPayload, Str
             context_token_limit,
             llm_mode,
             local_model,
-            llm_paged_attn,
-            llm_block_size,
-            llm_gpu_memory_ctx,
             llm_sampling,
             token_budget,
             cache_enabled,
@@ -246,9 +223,6 @@ pub async fn get_settings_inner(state: &AppState) -> Result<SettingsPayload, Str
             context_token_limit,
             llm_mode,
             local_model,
-            llm_paged_attn,
-            llm_block_size,
-            llm_gpu_memory_ctx,
             llm_sampling,
             token_budget,
             cache_enabled,

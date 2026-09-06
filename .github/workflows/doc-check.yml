@@ -1,0 +1,28 @@
+name: Doc Quality Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - 'crates/tauri-app/tauri.conf.json'
+      - 'scripts/doc-check.sh'
+      - '.github/workflows/doc-check.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - 'crates/tauri-app/tauri.conf.json'
+      - 'scripts/doc-check.sh'
+  workflow_dispatch:
+
+jobs:
+  doc-check:
+    name: Documentation Quality Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run doc-check
+        run: bash scripts/doc-check.sh

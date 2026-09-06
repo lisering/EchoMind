@@ -1,0 +1,34 @@
+--- crates/prompt/src/sanitize.rs
++++ replace sanitize_dynamic_context -> String with String::new()
+@@ -424,30 +424,17 @@
+ /// 此函数替代 `build_rag_prompt_segmented()` 中的原始动态上下文拼接逻辑。
+ ///
+ /// # 参数
+ /// - `sources`: 检索结果列表
+ ///
+ /// # 返回
+ /// 带防护的动态上下文字符串
+ pub fn sanitize_dynamic_context(sources: &[RetrievalResult]) -> String {
+-    let mut ctx = String::from(DEFENSE_DECLARATION);
+-    ctx.push_str("以下是检索到的知识库片段：\n\n");
+-
+-    for (i, src) in sources.iter().enumerate() {
+-        let sanitized = sanitize_chunk_content(&src.chunk.content);
+-        ctx.push_str(&format!(
+-            "[{}] 来源《{}》：\n{}\n\n",
+-            i + 1,
+-            src.doc_name,
+-            sanitized
+-        ));
+-    }
+-
+-    ctx
++    String::new() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ // ============================================================
+ // TDD 测试
+ // ============================================================
+ 
+ #[cfg(test)]
+ mod tests {

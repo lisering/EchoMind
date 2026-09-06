@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace McpConnectionStatus::as_str -> &'static str with "xyzzy"
+@@ -3449,21 +3449,17 @@
+     Disconnected,
+     /// 连接错误
+     Error,
+ }
+ 
+ impl McpConnectionStatus {
+     /// 转为字符串表示。
+     pub fn as_str(&self) -> &'static str {
+-        match self {
+-            Self::Connected => "connected",
+-            Self::Disconnected => "disconnected",
+-            Self::Error => "error",
+-        }
++        "xyzzy" /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// MCP 服务器状态信息（REQ-ARCH-016 AC-6）。
+ ///
+ /// 包含服务器配置与当前连接状态，用于前端状态显示。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct McpServerStatus {

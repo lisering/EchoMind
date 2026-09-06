@@ -1,0 +1,11 @@
+crates/prompt/src/sanitize.rs:238:24: replace > with == in redact_email
+crates/prompt/src/sanitize.rs:238:24: replace > with < in redact_email
+crates/prompt/src/sanitize.rs:238:24: replace > with >= in redact_email
+crates/prompt/src/sanitize.rs:261:35: replace - with / in redact_id_card
+crates/prompt/src/sanitize.rs:280:20: replace > with >= in redact_intl_phone
+crates/prompt/src/sanitize.rs:289:5: replace redact_ssn -> String with String::new()
+crates/prompt/src/sanitize.rs:289:5: replace redact_ssn -> String with "xyzzy".into()
+crates/prompt/src/sanitize.rs:289:18: replace >= with < in redact_ssn
+crates/prompt/src/sanitize.rs:298:5: replace redact_passport -> String with String::new()
+crates/prompt/src/sanitize.rs:298:5: replace redact_passport -> String with "xyzzy".into()
+crates/prompt/src/sanitize.rs:298:23: replace >= with < in redact_passport

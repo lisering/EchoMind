@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "ndcg" in RagMetricType::parse_str
+@@ -2579,17 +2579,17 @@
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s {
+             "faithfulness" => Some(Self::Faithfulness),
+             "answer_relevance" => Some(Self::AnswerRelevance),
+             "context_precision" => Some(Self::ContextPrecision),
+             "context_recall" => Some(Self::ContextRecall),
+             "hit_rate" => Some(Self::HitRate),
+             "mrr" => Some(Self::MRR),
+-            "ndcg" => Some(Self::NDCG),
++             /* ~ changed by cargo-mutants ~ */
+             "context_similarity" => Some(Self::ContextSimilarity),
+             "keyword_overlap" => Some(Self::KeywordOverlap),
+             _ => None,
+         }
+     }
+ 
+     /// 是否需要 LLM 调用。
+     pub fn needs_llm(&self) -> bool {

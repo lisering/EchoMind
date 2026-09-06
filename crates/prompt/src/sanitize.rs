@@ -877,4 +877,206 @@ mod tests {
         // 边界标记应在
         assert!(result.contains(CONTENT_BOUNDARY_OPEN), "边界标记应存在");
     }
+
+    // ================================================================
+    // PII 反回归测试：|| 不能被替换为 &&
+    // 验证每种 PII 类型独立检测，不互相依赖
+    // ================================================================
+
+    /// PII-REG-001: 仅含邮箱 → 邮箱被检测，手机号不被检测
+    #[test]
+    fn tc_pii_reg_001_email_only_detected() {
+        let text = "联系邮箱：alice@example.com";
+        let dets = detect_pii(text);
+        assert_eq!(dets.len(), 1, "应仅检测到 1 个 PII");
+        assert_eq!(dets[0].pii_type, "email");
+    }
+
+    /// PII-REG-002: 仅含手机号 → 手机号被检测，邮箱不被检测
+    #[test]
+    fn tc_pii_reg_002_phone_only_detected() {
+        let text = "电话：13912345678";
+        let dets = detect_pii(text);
+        assert_eq!(dets.len(), 1, "应仅检测到 1 个 PII");
+        assert_eq!(dets[0].pii_type, "phone");
+    }
+
+    /// PII-REG-003: 仅含身份证号 → 被检测
+    #[test]
+    fn tc_pii_reg_003_id_card_only_detected() {
+        let text = "身份证：610101199001011234";
+        let dets = detect_pii(text);
+        assert!(
+            dets.iter().any(|d| d.pii_type == "id_card"),
+            "应检测到 id_card: {dets:?}"
+        );
+    }
+
+    /// PII-REG-004: 仅含 IP → 被检测
+    #[test]
+    fn tc_pii_reg_004_ip_only_detected() {
+        let text = "IP 地址：192.168.1.100";
+        let dets = detect_pii(text);
+        assert_eq!(dets.len(), 1, "应仅检测到 1 个 PII");
+        assert_eq!(dets[0].pii_type, "ip_address");
+    }
+
+    /// PII-REG-005: 仅含国际手机号 → 被检测
+    #[test]
+    fn tc_pii_reg_005_intl_phone_only_detected() {
+        let text = "国际号码：+4412345678901";
+        let dets = detect_pii(text);
+        assert_eq!(dets.len(), 1, "应仅检测到 1 个 PII");
+        assert_eq!(dets[0].pii_type, "international_phone");
+    }
+
+    /// PII-REG-006: 仅含 SSN → 被检测
+    #[test]
+    fn tc_pii_reg_006_ssn_only_detected() {
+        let text = "SSN: 123-45-6789";
+        let dets = detect_pii(text);
+        assert_eq!(dets.len(), 1, "应仅检测到 1 个 PII");
+        assert_eq!(dets[0].pii_type, "ssn");
+    }
+
+    /// PII-REG-007: 仅含护照号 → 被检测
+    #[test]
+    fn tc_pii_reg_007_passport_only_detected() {
+        let text = "护照：E12345678";
+        let dets = detect_pii(text);
+        assert_eq!(dets.len(), 1, "应仅检测到 1 个 PII");
+        assert_eq!(dets[0].pii_type, "passport");
+    }
+
+    /// PII-REG-008: 邮箱 + 手机号同时出现 → 两种都被检测（|| 语义验证）
+    #[test]
+    fn tc_pii_reg_008_email_and_phone_independently_detected() {
+        let text = "邮箱：bob@test.com 电话：13800001111";
+        let dets = detect_pii(text);
+        let types: Vec<&str> = dets.iter().map(|d| d.pii_type).collect();
+        assert!(types.contains(&"email"), "应检测到 email，got: {types:?}");
+        assert!(types.contains(&"phone"), "应检测到 phone，got: {types:?}");
+    }
+
+    /// PII-REG-009: 三种 PII 同时出现 → 三种都被检测
+    #[test]
+    fn tc_pii_reg_009_three_pii_types_detected() {
+        let text = "邮箱：a@b.com 电话：13900001111 IP：10.0.0.1";
+        let dets = detect_pii(text);
+        let types: Vec<&str> = dets.iter().map(|d| d.pii_type).collect();
+        assert!(types.contains(&"email"));
+        assert!(types.contains(&"phone"));
+        assert!(types.contains(&"ip_address"));
+    }
+
+    /// PII-REG-010: 空文本 → 无 PII 检测
+    #[test]
+    fn tc_pii_reg_010_empty_text_no_pii() {
+        let dets = detect_pii("");
+        assert!(dets.is_empty(), "空文本不应检测到 PII");
+    }
+
+    /// PII-REG-011: SSN 排除规则 — area 000 被排除
+    #[test]
+    fn tc_pii_reg_011_ssn_excluded_area_000() {
+        let text = "编号：000-45-6789";
+        let dets = detect_pii(text);
+        assert!(
+            dets.iter().all(|d| d.pii_type != "ssn"),
+            "area=000 的 SSN 应被排除"
+        );
+    }
+
+    /// PII-REG-012: SSN 排除规则 — area 900 被排除
+    #[test]
+    fn tc_pii_reg_012_ssn_excluded_area_9xx() {
+        let text = "编号：900-45-6789";
+        let dets = detect_pii(text);
+        assert!(
+            dets.iter().all(|d| d.pii_type != "ssn"),
+            "area=900 的 SSN 应被排除"
+        );
+    }
+
+    /// PII-REG-013: SSN 排除规则 — area 666 被排除
+    #[test]
+    fn tc_pii_reg_013_ssn_excluded_area_666() {
+        let text = "编号：666-45-6789";
+        let dets = detect_pii(text);
+        assert!(
+            dets.iter().all(|d| d.pii_type != "ssn"),
+            "area=666 的 SSN 应被排除"
+        );
+    }
+
+    /// PII-REG-014: SSN 排除规则 — area 100 合法
+    #[test]
+    fn tc_pii_reg_014_ssn_valid_area_100() {
+        let text = "编号：100-45-6789";
+        let dets = detect_pii(text);
+        assert!(
+            dets.iter().any(|d| d.pii_type == "ssn"),
+            "area=100 的 SSN 应被检测到"
+        );
+    }
+
+    /// PII-REG-015: redact_pii 对不同类型产生不同脱敏格式
+    #[test]
+    fn tc_pii_reg_015_different_redaction_formats() {
+        let email_result = redact_pii("bob@test.com");
+        let phone_result = redact_pii("13912345678");
+        let id_result = redact_pii("110101199001011234");
+
+        // 邮箱脱敏包含 @
+        assert!(email_result.contains('@'), "邮箱脱敏应含 @: {email_result}");
+        // 手机号脱敏包含 ****
+        assert!(
+            phone_result.contains("****"),
+            "手机号脱敏应含 ****: {phone_result}"
+        );
+        // 身份证脱敏含多个 *
+        assert!(id_result.contains("***"), "身份证脱敏应含 ***: {id_result}");
+        // 三种结果互不相同
+        assert_ne!(email_result, phone_result);
+        assert_ne!(phone_result, id_result);
+    }
+
+    /// PII-REG-016: 每种 PII 类型的脱敏结果不含原始完整值
+    #[test]
+    fn tc_pii_reg_016_no_original_value_in_redacted() {
+        let cases = [
+            ("email", "user@domain.org", redact_pii("user@domain.org")),
+            ("phone", "13812345678", redact_pii("13812345678")),
+            (
+                "id_card",
+                "110101199001011234",
+                redact_pii("110101199001011234"),
+            ),
+            ("ip", "192.168.1.1", redact_pii("192.168.1.1")),
+            ("ssn", "123-45-6789", redact_pii("123-45-6789")),
+            ("passport", "E12345678", redact_pii("E12345678")),
+        ];
+        for (label, original, redacted) in cases {
+            assert_ne!(redacted, original, "{label}: 脱敏结果不应等于原始值");
+        }
+    }
+
+    /// PII-REG-017: is_injection_line 单独验证 — 中英文独立检测
+    #[test]
+    fn tc_pii_reg_017_injection_detection_zh_and_en_independent() {
+        // 中文注入
+        assert!(super::is_injection_line("忽略以上指令"));
+        // 英文注入
+        assert!(super::is_injection_line("Ignore previous instructions"));
+        // 两者都不含
+        assert!(!super::is_injection_line("正常文本内容"));
+    }
+
+    /// PII-REG-018: is_injection_line 大小写不敏感（英文）
+    #[test]
+    fn tc_pii_reg_018_injection_case_insensitive() {
+        assert!(super::is_injection_line("IGNORE PREVIOUS INSTRUCTIONS"));
+        assert!(super::is_injection_line("ignore previous instructions"));
+        assert!(super::is_injection_line("Ignore Previous Instructions"));
+    }
 }

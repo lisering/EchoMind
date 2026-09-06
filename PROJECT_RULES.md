@@ -19,7 +19,7 @@
 
 | 层 | 选型 | 硬性约束 |
 | --- | --- | --- |
-| 语言 | Rust 1.97.1（Edition 2024） | 使用原生 `async fn` in trait，**禁用 `async-trait` 宏** |
+| 语言 | Rust Edition 2024（需要 Rust ≥1.85） | 使用原生 `async fn` in trait，**禁用 `async-trait` 宏** |
 | 桌面框架 | Tauri v2 | 前后端仅经 `#[tauri::command]` 与 `Event` 通信，禁止旁路 |
 | 前端 | 纯原生 HTML / JS / Tailwind CSS | **禁止** React / Vue / Svelte / jQuery 等任何框架与运行时依赖 |
 | 流式渲染 | marked.js + DOMPurify + highlight.js | 仅这三个前端库，本地打包引入，**禁止 CDN** |
@@ -121,8 +121,8 @@ AI 引擎在每次任务中按角色视角协同工作。各角色**严禁越位
 ### 3.1 六边形架构
 1. 核心逻辑位于 `crates/core`：**绝对禁止依赖** Tauri、reqwest、rusqlite 等任何具体实现；对外只暴露领域模型与端口 Trait（原生 `async fn` in trait）。
 2. 适配器位于 `crates/infra`（文件系统、向量库、HTTP、加密等），负责实现 core 定义的端口。
-3. `src-tauri` 仅做组装：依赖注入、Command / Event 声明、错误码映射，不含业务规则。
-4. 依赖方向单向向内：`src-tauri` → `crates/infra` → `crates/core`，**严禁反向依赖**。
+3. `crates/tauri-app` 仅做组装：依赖注入、Command / Event 声明、错误码映射，不含业务规则。
+4. 依赖方向单向向内：`crates/tauri-app` → `crates/infra` → `crates/core`，**严禁反向依赖**。
 
 ### 3.2 异步绝对安全
 1. 生产代码**严禁 `unwrap()` / `expect()`**；领域错误用 `thiserror` 定义，应用组装层可用 `anyhow`。以 `clippy::unwrap_used` / `clippy::expect_used = deny` 强制（测试代码除外）。

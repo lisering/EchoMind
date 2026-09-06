@@ -1,0 +1,32 @@
+--- crates/models/src/lib.rs
++++ replace RagMetricType::parse_str -> Option<Self> with Some(Default::default())
+@@ -2572,28 +2572,17 @@
+             Self::NDCG => "ndcg",
+             Self::ContextSimilarity => "context_similarity",
+             Self::KeywordOverlap => "keyword_overlap",
+         }
+     }
+ 
+     /// 从字符串解析。
+     pub fn parse_str(s: &str) -> Option<Self> {
+-        match s {
+-            "faithfulness" => Some(Self::Faithfulness),
+-            "answer_relevance" => Some(Self::AnswerRelevance),
+-            "context_precision" => Some(Self::ContextPrecision),
+-            "context_recall" => Some(Self::ContextRecall),
+-            "hit_rate" => Some(Self::HitRate),
+-            "mrr" => Some(Self::MRR),
+-            "ndcg" => Some(Self::NDCG),
+-            "context_similarity" => Some(Self::ContextSimilarity),
+-            "keyword_overlap" => Some(Self::KeywordOverlap),
+-            _ => None,
+-        }
++        Some(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 是否需要 LLM 调用。
+     pub fn needs_llm(&self) -> bool {
+         matches!(
+             self,
+             Self::Faithfulness
+                 | Self::AnswerRelevance

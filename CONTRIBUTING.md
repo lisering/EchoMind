@@ -42,6 +42,7 @@
    cargo clippy --all-targets -- -D warnings  # Lint（含铁律五 deny lint）
    cargo fmt --check                    # 格式检查
    cd e2e-tests && ECHOMIND_E2E_TEST=1 npx playwright test  # E2E 测试
+   bash scripts/doc-check.sh            # 文档质量检查（版本一致/死链/过时/格式）
    ```
 
 更多细节见 [开发者入门指南](docs/dev-guide/getting-started.md)。
@@ -145,6 +146,28 @@ chore: 升级 tauri 至 2.x.y
 | 新增/修改数据库表 | `docs/api/database-schema.md` | 同一 PR |
 | 新增/修改 Trait 或数据模型 | `docs/api/code-contracts.md` | 同一 PR |
 | 功能状态变化 | `docs/SRS_v1.0.md` 对应 REQ 状态 | 同一 PR |
+
+### 文档质量自动化检查
+
+本地运行：
+
+```bash
+bash scripts/doc-check.sh
+```
+
+CI 会在以下条件自动触发检查：
+- Push 到 `main` 且修改了 `*.md` 或 `tauri.conf.json`
+- PR 目标为 `main` 且涉及文档或配置文件变更
+- 手动触发 (`workflow_dispatch`)
+
+检查项：
+
+| 检查项 | 说明 |
+|---|---|
+| 版本号一致性 | `tauri.conf.json` 版本与 AGENTS.md、CHANGELOG.md、SOFTWARE_ASSET.md、CURRENT_STATE.md 一致 |
+| 内部死链 | Markdown 文件中 `](path)` 引用的本地文件必须存在 |
+| 文档过时 | 关键文档超过 90 天未更新产生警告 |
+| Markdown 格式 | 行尾空格、连续空行等格式问题 |
 
 ---
 

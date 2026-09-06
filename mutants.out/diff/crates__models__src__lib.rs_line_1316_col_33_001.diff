@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace * with / in TokenBudgetConfig::recent_budget
+@@ -1308,17 +1308,17 @@
+ impl TokenBudgetConfig {
+     /// 计算压缩触发点（max_tokens * compaction_threshold）
+     pub fn compaction_trigger(&self) -> usize {
+         (self.max_tokens as f32 * self.compaction_threshold) as usize
+     }
+ 
+     /// 计算最近消息保留预算（max_tokens * recent_keep_ratio）
+     pub fn recent_budget(&self) -> usize {
+-        (self.max_tokens as f32 * self.recent_keep_ratio) as usize
++        (self.max_tokens as f32 / /* ~ changed by cargo-mutants ~ */ self.recent_keep_ratio) as usize
+     }
+ 
+     /// 判断是否需要压缩
+     pub fn should_compact(&self, total_tokens: usize, message_count: usize) -> bool {
+         message_count >= self.min_messages_to_compact && total_tokens >= self.compaction_trigger()
+     }
+ }
+ 

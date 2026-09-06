@@ -1,32 +1,6 @@
 //! graph 域 IPC 命令子模块（从 commands.rs 拆分，纯重构）。
 use super::*;
 
-/// 设置知识图谱图遍历检索开关（REQ-RAG-027）。
-///
-/// 持久化到 settings 表 `rag.graph_retriever_enabled` 键，下次 chat 命令调用时即时生效。
-/// 启用后，检索时沿实体关系图边扩展到关联 chunk，作为 RRF 融合的第四路检索通道。
-#[tauri::command]
-pub async fn set_graph_retriever_enabled(
-    enabled: bool,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    set_graph_retriever_enabled_inner(enabled, state.inner()).await
-}
-
-/// 图遍历检索开关写入逻辑（命令与集成测试复用）。
-pub async fn set_graph_retriever_enabled_inner(
-    enabled: bool,
-    state: &AppState,
-) -> Result<(), String> {
-    let value = if enabled { "true" } else { "false" };
-    state
-        .storage
-        .set_setting("rag.graph_retriever_enabled", value)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    Ok(())
-}
-
 /// 获取图谱数据（全量三元组，limit 控制返回数量）。
 ///
 /// 返回 `GraphTriple` 列表，前端 D3 force-directed graph 直接消费。

@@ -1,0 +1,34 @@
+--- crates/models/src/lib.rs
++++ replace SymbolKind::parse_str -> Self with Default::default()
+@@ -505,30 +505,17 @@
+             SymbolKind::Module => "module",
+         }
+     }
+ 
+     /// 从字符串解析（避免与 `FromStr` trait 冲突，clippy `should_implement_trait`）。
+     ///
+     /// 未知字符串回退为 `Function` 并输出 stderr 警告，避免静默吞掉数据损坏。
+     pub fn parse_str(s: &str) -> Self {
+-        match s {
+-            "function" => SymbolKind::Function,
+-            "method" => SymbolKind::Method,
+-            "class" => SymbolKind::Class,
+-            "struct" => SymbolKind::Struct,
+-            "interface" => SymbolKind::Interface,
+-            "enum" => SymbolKind::Enum,
+-            "constant" => SymbolKind::Constant,
+-            "module" => SymbolKind::Module,
+-            _ => {
+-                eprintln!("[WARN] SymbolKind::parse_str: 未知符号类型 '{s}'，回退为 Function");
+-                SymbolKind::Function
+-            }
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// RAPTOR 摘要树节点（REQ-PERF-009 多级摘要树索引）。
+ ///
+ /// 基于 RAPTOR 论文（Recursive Abstrative Tree for Retrieval-Ordered Access），
+ /// 将原始 chunks 组织为多级摘要树：
+ /// - Level 0: 原始 chunks（不在 summary_nodes 表中，直接引用 chunks 表）

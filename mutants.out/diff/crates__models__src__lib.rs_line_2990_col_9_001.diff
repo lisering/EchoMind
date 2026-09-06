@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace ConversationBookmark::is_message_bookmark -> bool with false
+@@ -2982,17 +2982,17 @@
+     /// 设置备注。
+     pub fn with_note(mut self, note: String) -> Self {
+         self.note = Some(note);
+         self
+     }
+ 
+     /// 是否为消息级书签。
+     pub fn is_message_bookmark(&self) -> bool {
+-        self.message_id.is_some()
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 批量操作结果（REQ-ING-024 文档批量操作）。
+ ///
+ /// 记录批量删除/移动/标签操作的成功与失败统计。
+ /// 失败的文档 ID 收集到 `failed_ids` 中，便于前端针对性提示。
+ #[derive(Debug, Clone, Serialize, Deserialize)]

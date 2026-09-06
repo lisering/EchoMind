@@ -1,0 +1,21 @@
+--- crates/prompt/src/sanitize.rs
++++ replace >= with < in redact_ssn
+@@ -281,17 +281,17 @@
+         format!("{}{}", &phone[..3], "*".repeat(phone.len() - 3))
+     } else {
+         "****".to_string()
+     }
+ }
+ 
+ /// 脱敏 SSN：***-**-1234
+ fn redact_ssn(ssn: &str) -> String {
+-    if ssn.len() >= 4 {
++    if ssn.len() < /* ~ changed by cargo-mutants ~ */ 4 {
+         format!("***-**-{}", &ssn[ssn.len() - 4..])
+     } else {
+         "****".to_string()
+     }
+ }
+ 
+ /// 脱敏护照号：E********
+ fn redact_passport(passport: &str) -> String {

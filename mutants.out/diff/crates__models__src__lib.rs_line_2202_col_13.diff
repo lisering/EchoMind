@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "user_statement" in MemorySource::parse_str
+@@ -2194,17 +2194,17 @@
+     /// 用户手动置顶
+     UserPinned,
+ }
+ 
+ impl MemorySource {
+     /// 从字符串解析记忆来源。
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s {
+-            "user_statement" => Some(Self::UserStatement),
++             /* ~ changed by cargo-mutants ~ */
+             "assistant_answer" => Some(Self::AssistantAnswer),
+             "auto_extracted" => Some(Self::AutoExtracted),
+             "user_pinned" => Some(Self::UserPinned),
+             _ => None,
+         }
+     }
+ 
+     /// 返回来源字符串标识（用于数据库存储）。

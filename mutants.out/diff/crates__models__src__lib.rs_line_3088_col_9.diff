@@ -1,0 +1,22 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalDatasetSample::with_chunk_ids -> Self with Default::default()
+@@ -3080,18 +3080,17 @@
+     /// 设置相关文档 ID 列表。
+     pub fn with_doc_ids(mut self, doc_ids: Vec<String>) -> Self {
+         self.relevant_doc_ids = doc_ids;
+         self
+     }
+ 
+     /// 设置相关 chunk ID 列表。
+     pub fn with_chunk_ids(mut self, chunk_ids: Vec<String>) -> Self {
+-        self.relevant_chunk_ids = chunk_ids;
+-        self
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// RAG 评估数据集（REQ-RAG-048）。
+ ///
+ /// 包含多个评估样本，用于端到端检索质量评估。
+ /// JSON 格式，可序列化/反序列化，可扩展、可复现。
+ ///

@@ -266,6 +266,8 @@ connectionFail: false,
 fileContents: {},
 /** VLM 图片理解增强开关（REQ-MM-003） */
 vlmEnabled: false,
+/** Agent RAG 智能体开关 */
+agentEnabled: false,
 /** 审计取消标志（REQ-AUDIT-005） */
 auditAborted: false,
 /** 导入取消标志（REQ-ING-006） */
@@ -2598,6 +2600,7 @@ case 'set_rag_eval_settings':
           case 'mm.vlm_enabled': state.vlmEnabled = enabled; break;
           case 'rag.web_search_enabled': state.webSearchEnabled = enabled; break;
           case 'rag.contextual_retrieval': state.contextualRetrieval = enabled; break;
+          case 'rag.agent_enabled': state.agentEnabled = enabled; break;
           case 'window.close_to_tray': state.closeToTray = enabled; break;
           case 'ui.sidebar_collapsed': state.sidebarCollapsed = enabled; break;
           case 'app.autostart': state.autostart = enabled; break;
@@ -2621,6 +2624,7 @@ case 'set_rag_eval_settings':
           case 'mm.vlm_enabled': return String(state.vlmEnabled);
           case 'rag.web_search_enabled': return String(state.webSearchEnabled);
           case 'rag.contextual_retrieval': return String(state.contextualRetrieval);
+          case 'rag.agent_enabled': return String(state.agentEnabled);
           case 'window.close_to_tray': return String(state.closeToTray);
           case 'ui.sidebar_collapsed': return String(state.sidebarCollapsed);
           case 'app.autostart': return String(state.autostart);
@@ -2813,6 +2817,7 @@ case 'set_rag_eval_settings':
       state.connectionFail = false;
       state.fileContents = {};
       state.vlmEnabled = false;
+      state.agentEnabled = false;
       state.auditAborted = false;
       state.importCancelled = false;
       state.chatError = null;
@@ -2955,6 +2960,7 @@ state.docSortOrder = null;
       state.auditAborted = false;
       state.isPro = false;
       state.vlmEnabled = false;
+      state.agentEnabled = false;
       state.hybridSearch = false;
       state.llmMode = 'remote';
       state.localModel = '';

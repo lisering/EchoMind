@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace == with != in RagEvalReport::get_metric
+@@ -2778,17 +2778,17 @@
+             per_sample_metrics: per_sample,
+         }
+     }
+ 
+     /// 获取指定指标的聚合分数。
+     pub fn get_metric(&self, metric_type: &RagMetricType) -> Option<f32> {
+         self.aggregate_metrics
+             .iter()
+-            .find(|m| &m.metric_type == metric_type)
++            .find(|m| &m.metric_type != /* ~ changed by cargo-mutants ~ */ metric_type)
+             .map(|m| m.score)
+     }
+ }
+ 
+ /// RAG 评估设置（REQ-RAG-045）。
+ ///
+ /// 控制哪些指标启用，以及 LLM 评估的参数。
+ #[derive(Debug, Clone, Serialize, Deserialize)]

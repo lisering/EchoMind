@@ -1,0 +1,23 @@
+--- crates/models/src/lib.rs
++++ replace StripConfig::with_summary -> Self with Default::default()
+@@ -2857,19 +2857,17 @@
+             to_index,
+             replace_with_summary: false,
+             summary_text: None,
+         }
+     }
+ 
+     /// 启用摘要替代。
+     pub fn with_summary(mut self, summary: String) -> Self {
+-        self.replace_with_summary = true;
+-        self.summary_text = Some(summary);
+-        self
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// Strip 操作结果（REQ-RAG-046 + DS-03 Session Strip）。
+ ///
+ /// 记录 strip 操作的执行结果。
+ #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+ pub struct StripResult {

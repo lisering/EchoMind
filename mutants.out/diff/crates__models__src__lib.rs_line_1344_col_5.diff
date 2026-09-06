@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_true -> bool with false
+@@ -1336,17 +1336,17 @@
+ 
+ /// 默认上下文 token 限制（REQ-RAG-017）
+ pub fn default_context_token_limit() -> usize {
+     4096
+ }
+ 
+ /// serde 默认值辅助：返回 `true`（用于 `#[serde(default = "default_true")]`）。
+ pub fn default_true() -> bool {
+-    true
++    false /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 默认 PagedAttention 块大小（REQ-LLM-003 扩展）
+ pub fn default_paged_attn_block_size() -> usize {
+     32
+ }
+ 
+ /// 默认 PagedAttention GPU 上下文 token 数（REQ-LLM-003 扩展）

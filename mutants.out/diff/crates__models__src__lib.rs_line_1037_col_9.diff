@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace GenerationParams::clamped -> Self with Default::default()
+@@ -1029,21 +1029,17 @@
+         }
+     }
+ }
+ 
+ impl GenerationParams {
+     /// 将参数钳制到合法范围。
+     #[must_use]
+     pub fn clamped(self) -> Self {
+-        Self {
+-            temperature: self.temperature.clamp(0.0, 2.0),
+-            max_tokens: self.max_tokens.clamp(256, 8192),
+-            top_p: self.top_p.clamp(0.0, 1.0),
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// get_settings 返回载荷（REQ-UI-008；api_key 仅以脱敏形式返回，安全官要求）。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct SettingsPayload {
+     /// 是否已完成 LLM 配置
+     pub has_llm_config: bool,

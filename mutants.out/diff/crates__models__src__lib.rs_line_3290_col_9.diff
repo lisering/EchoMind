@@ -1,0 +1,24 @@
+--- crates/models/src/lib.rs
++++ replace McpTransportType::as_str -> &'static str with "xyzzy"
+@@ -3282,20 +3282,17 @@
+     Stdio,
+     /// SSE 传输（HTTP + Server-Sent Events JSON-RPC 通信）
+     Sse,
+ }
+ 
+ impl McpTransportType {
+     /// 转为字符串表示。
+     pub fn as_str(&self) -> &'static str {
+-        match self {
+-            Self::Stdio => "stdio",
+-            Self::Sse => "sse",
+-        }
++        "xyzzy" /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 从字符串解析传输类型。
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s.to_lowercase().as_str() {
+             "stdio" => Some(Self::Stdio),
+             "sse" => Some(Self::Sse),
+             _ => None,

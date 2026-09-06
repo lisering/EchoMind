@@ -950,7 +950,7 @@ fn try_command(cmd: &str, args: &[&str]) -> bool {
 ///
 /// 使用 `which` crate 的轻量级替代——通过 `Command::new(cmd)` 尝试执行
 /// `--version` 或 `--help` 来判断命令是否存在。
-#[allow(dead_code)] // 平台条件编译：某些函数仅在特定平台使用
+#[allow(dead_code)] // 仅在 Linux 平台使用，macOS/Windows 下编译器误报未使用
 fn is_command_available(cmd: &str) -> bool {
     use std::process::{Command, Stdio};
 

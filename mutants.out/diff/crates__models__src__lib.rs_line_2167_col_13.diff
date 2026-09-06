@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "wing" in MemoryTier::parse_str
+@@ -2159,17 +2159,17 @@
+     /// 室层：长期记忆（核心知识），永久保留
+     Room,
+ }
+ 
+ impl MemoryTier {
+     /// 从字符串解析记忆层级。
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s {
+-            "wing" => Some(Self::Wing),
++             /* ~ changed by cargo-mutants ~ */
+             "hall" => Some(Self::Hall),
+             "room" => Some(Self::Room),
+             _ => None,
+         }
+     }
+ 
+     /// 返回层级字符串标识（用于数据库存储）。
+     pub fn as_str(&self) -> &'static str {

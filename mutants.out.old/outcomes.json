@@ -1,0 +1,3161 @@
+{
+  "outcomes": [
+    {
+      "scenario": "Baseline",
+      "summary": "Success",
+      "log_path": "log/baseline.log",
+      "diff_path": null,
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 14.047716375,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.655765833,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:103:5: replace detect_pii -> Vec<PiiRedaction> with vec![]",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "detect_pii",
+            "return_type": "-> Vec<PiiRedaction>",
+            "span": {
+              "start": {
+                "line": 98,
+                "column": 1
+              },
+              "end": {
+                "line": 204,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 103,
+              "column": 5
+            },
+            "end": {
+              "line": 203,
+              "column": 15
+            }
+          },
+          "replacement": "vec![]",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_103_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_103_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.600390542,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.4930665,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:103:5: replace detect_pii -> Vec<PiiRedaction> with vec![Default::default()]",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "detect_pii",
+            "return_type": "-> Vec<PiiRedaction>",
+            "span": {
+              "start": {
+                "line": 98,
+                "column": 1
+              },
+              "end": {
+                "line": 204,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 103,
+              "column": 5
+            },
+            "end": {
+              "line": 203,
+              "column": 15
+            }
+          },
+          "replacement": "vec![Default::default()]",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_103_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_103_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.380928125,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:175:43: replace || with && in detect_pii",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "detect_pii",
+            "return_type": "-> Vec<PiiRedaction>",
+            "span": {
+              "start": {
+                "line": 98,
+                "column": 1
+              },
+              "end": {
+                "line": 204,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 175,
+              "column": 43
+            },
+            "end": {
+              "line": 175,
+              "column": 45
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_175_col_43.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_175_col_43.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.654285708,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.540253958,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:175:26: replace || with && in detect_pii",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "detect_pii",
+            "return_type": "-> Vec<PiiRedaction>",
+            "span": {
+              "start": {
+                "line": 98,
+                "column": 1
+              },
+              "end": {
+                "line": 204,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 175,
+              "column": 26
+            },
+            "end": {
+              "line": 175,
+              "column": 28
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_175_col_26.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_175_col_26.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.545055709,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.539790417,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:175:17: replace == with != in detect_pii",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "detect_pii",
+            "return_type": "-> Vec<PiiRedaction>",
+            "span": {
+              "start": {
+                "line": 98,
+                "column": 1
+              },
+              "end": {
+                "line": 204,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 175,
+              "column": 17
+            },
+            "end": {
+              "line": 175,
+              "column": 19
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_175_col_17.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_175_col_17.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.538956042,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.540574375,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:175:34: replace == with != in detect_pii",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "detect_pii",
+            "return_type": "-> Vec<PiiRedaction>",
+            "span": {
+              "start": {
+                "line": 98,
+                "column": 1
+              },
+              "end": {
+                "line": 204,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 175,
+              "column": 34
+            },
+            "end": {
+              "line": 175,
+              "column": 36
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_175_col_34.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_175_col_34.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.53928425,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.544919042,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:212:5: replace redact_pii -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_pii",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 206,
+                "column": 1
+              },
+              "end": {
+                "line": 232,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 212,
+              "column": 5
+            },
+            "end": {
+              "line": 231,
+              "column": 11
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_212_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_212_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.596061916,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.551960208,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:212:5: replace redact_pii -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_pii",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 206,
+                "column": 1
+              },
+              "end": {
+                "line": 232,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 212,
+              "column": 5
+            },
+            "end": {
+              "line": 231,
+              "column": 11
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_212_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_212_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.539967917,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.552397,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:221:22: replace < with == in redact_pii",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_pii",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 206,
+                "column": 1
+              },
+              "end": {
+                "line": 232,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 221,
+              "column": 22
+            },
+            "end": {
+              "line": 221,
+              "column": 23
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_221_col_22.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_221_col_22.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.59678075,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.539349667,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:221:22: replace < with > in redact_pii",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_pii",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 206,
+                "column": 1
+              },
+              "end": {
+                "line": 232,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 221,
+              "column": 22
+            },
+            "end": {
+              "line": 221,
+              "column": 23
+            }
+          },
+          "replacement": ">",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_221_col_22_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_221_col_22_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.542530708,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.544005125,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:221:22: replace < with <= in redact_pii",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_pii",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 206,
+                "column": 1
+              },
+              "end": {
+                "line": 232,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 221,
+              "column": 22
+            },
+            "end": {
+              "line": 221,
+              "column": 23
+            }
+          },
+          "replacement": "<=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_221_col_22_002.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_221_col_22_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.545831458,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.544745875,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:236:5: replace redact_email -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_email",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 234,
+                "column": 1
+              },
+              "end": {
+                "line": 246,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 236,
+              "column": 5
+            },
+            "end": {
+              "line": 245,
+              "column": 6
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_236_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_236_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.601019416,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.545512625,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:236:5: replace redact_email -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_email",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 234,
+                "column": 1
+              },
+              "end": {
+                "line": 246,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 236,
+              "column": 5
+            },
+            "end": {
+              "line": 245,
+              "column": 6
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_236_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_236_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.544692792,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.5463095,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:238:24: replace > with == in redact_email",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_email",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 234,
+                "column": 1
+              },
+              "end": {
+                "line": 246,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 238,
+              "column": 24
+            },
+            "end": {
+              "line": 238,
+              "column": 25
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_238_col_24.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_238_col_24.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.592203417,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.59915725,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:238:24: replace > with < in redact_email",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_email",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 234,
+                "column": 1
+              },
+              "end": {
+                "line": 246,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 238,
+              "column": 24
+            },
+            "end": {
+              "line": 238,
+              "column": 25
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_238_col_24_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_238_col_24_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.545148375,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.60136275,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:238:24: replace > with >= in redact_email",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_email",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 234,
+                "column": 1
+              },
+              "end": {
+                "line": 246,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 238,
+              "column": 24
+            },
+            "end": {
+              "line": 238,
+              "column": 25
+            }
+          },
+          "replacement": ">=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_238_col_24_002.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_238_col_24_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.545690791,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.600970625,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:250:5: replace redact_phone -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_phone",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 248,
+                "column": 1
+              },
+              "end": {
+                "line": 255,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 250,
+              "column": 5
+            },
+            "end": {
+              "line": 254,
+              "column": 6
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_250_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_250_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.599371625,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.547331833,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:250:5: replace redact_phone -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_phone",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 248,
+                "column": 1
+              },
+              "end": {
+                "line": 255,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 250,
+              "column": 5
+            },
+            "end": {
+              "line": 254,
+              "column": 6
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_250_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_250_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.541023875,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.540597666,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:250:20: replace >= with < in redact_phone",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_phone",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 248,
+                "column": 1
+              },
+              "end": {
+                "line": 255,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 250,
+              "column": 20
+            },
+            "end": {
+              "line": 250,
+              "column": 22
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_250_col_20.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_250_col_20.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.592790083,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.539783,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:259:5: replace redact_id_card -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_id_card",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 257,
+                "column": 1
+              },
+              "end": {
+                "line": 266,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 259,
+              "column": 5
+            },
+            "end": {
+              "line": 265,
+              "column": 6
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_259_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_259_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.600018875,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.542054958,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:259:5: replace redact_id_card -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_id_card",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 257,
+                "column": 1
+              },
+              "end": {
+                "line": 266,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 259,
+              "column": 5
+            },
+            "end": {
+              "line": 265,
+              "column": 6
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_259_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_259_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.541459667,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.543287833,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:259:17: replace >= with < in redact_id_card",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_id_card",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 257,
+                "column": 1
+              },
+              "end": {
+                "line": 266,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 259,
+              "column": 17
+            },
+            "end": {
+              "line": 259,
+              "column": 19
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_259_col_17.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_259_col_17.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.5919475,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.543918,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:261:35: replace - with + in redact_id_card",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_id_card",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 257,
+                "column": 1
+              },
+              "end": {
+                "line": 266,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 261,
+              "column": 35
+            },
+            "end": {
+              "line": 261,
+              "column": 36
+            }
+          },
+          "replacement": "+",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_261_col_35.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_261_col_35.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.543884958,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.542920959,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:261:35: replace - with / in redact_id_card",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_id_card",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 257,
+                "column": 1
+              },
+              "end": {
+                "line": 266,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 261,
+              "column": 35
+            },
+            "end": {
+              "line": 261,
+              "column": 36
+            }
+          },
+          "replacement": "/",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_261_col_35_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_261_col_35_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.549499958,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.593515375,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:270:5: replace redact_ip -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_ip",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 268,
+                "column": 1
+              },
+              "end": {
+                "line": 276,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 270,
+              "column": 5
+            },
+            "end": {
+              "line": 275,
+              "column": 6
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_270_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_270_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.5966305,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.546297584,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:270:5: replace redact_ip -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_ip",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 268,
+                "column": 1
+              },
+              "end": {
+                "line": 276,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 270,
+              "column": 5
+            },
+            "end": {
+              "line": 275,
+              "column": 6
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_270_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_270_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.543320125,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.546423958,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:271:20: replace == with != in redact_ip",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_ip",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 268,
+                "column": 1
+              },
+              "end": {
+                "line": 276,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 271,
+              "column": 20
+            },
+            "end": {
+              "line": 271,
+              "column": 22
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_271_col_20.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_271_col_20.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.595093709,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.545803833,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:280:5: replace redact_intl_phone -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_intl_phone",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 278,
+                "column": 1
+              },
+              "end": {
+                "line": 285,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 280,
+              "column": 5
+            },
+            "end": {
+              "line": 284,
+              "column": 6
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_280_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_280_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.592257042,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.545687209,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:280:5: replace redact_intl_phone -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_intl_phone",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 278,
+                "column": 1
+              },
+              "end": {
+                "line": 285,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 280,
+              "column": 5
+            },
+            "end": {
+              "line": 284,
+              "column": 6
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_280_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_280_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.541632083,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.547969458,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:280:20: replace > with == in redact_intl_phone",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_intl_phone",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 278,
+                "column": 1
+              },
+              "end": {
+                "line": 285,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 280,
+              "column": 20
+            },
+            "end": {
+              "line": 280,
+              "column": 21
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_280_col_20.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_280_col_20.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.589206167,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.541451959,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:280:20: replace > with < in redact_intl_phone",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_intl_phone",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 278,
+                "column": 1
+              },
+              "end": {
+                "line": 285,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 280,
+              "column": 20
+            },
+            "end": {
+              "line": 280,
+              "column": 21
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_280_col_20_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_280_col_20_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.538703834,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.548024667,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:280:20: replace > with >= in redact_intl_phone",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_intl_phone",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 278,
+                "column": 1
+              },
+              "end": {
+                "line": 285,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 280,
+              "column": 20
+            },
+            "end": {
+              "line": 280,
+              "column": 21
+            }
+          },
+          "replacement": ">=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_280_col_20_002.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_280_col_20_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.53442175,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.597187708,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:289:5: replace redact_ssn -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_ssn",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 287,
+                "column": 1
+              },
+              "end": {
+                "line": 294,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 289,
+              "column": 5
+            },
+            "end": {
+              "line": 293,
+              "column": 6
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_289_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_289_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.5873795,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.60022125,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:289:5: replace redact_ssn -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_ssn",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 287,
+                "column": 1
+              },
+              "end": {
+                "line": 294,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 289,
+              "column": 5
+            },
+            "end": {
+              "line": 293,
+              "column": 6
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_289_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_289_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.545894333,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.652315416,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:289:18: replace >= with < in redact_ssn",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_ssn",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 287,
+                "column": 1
+              },
+              "end": {
+                "line": 294,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 289,
+              "column": 18
+            },
+            "end": {
+              "line": 289,
+              "column": 20
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_289_col_18.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_289_col_18.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.604319833,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.654555041,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:298:5: replace redact_passport -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_passport",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 296,
+                "column": 1
+              },
+              "end": {
+                "line": 303,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 298,
+              "column": 5
+            },
+            "end": {
+              "line": 302,
+              "column": 6
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_298_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_298_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.597091458,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.606993916,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:298:5: replace redact_passport -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_passport",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 296,
+                "column": 1
+              },
+              "end": {
+                "line": 303,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 298,
+              "column": 5
+            },
+            "end": {
+              "line": 302,
+              "column": 6
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_298_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_298_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.546088625,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.653280083,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:298:23: replace >= with < in redact_passport",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "redact_passport",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 296,
+                "column": 1
+              },
+              "end": {
+                "line": 303,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 298,
+              "column": 23
+            },
+            "end": {
+              "line": 298,
+              "column": 25
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_298_col_23.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_298_col_23.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.594534,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.59462125,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:363:5: replace is_injection_line -> bool with true",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "is_injection_line",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 358,
+                "column": 1
+              },
+              "end": {
+                "line": 366,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 363,
+              "column": 5
+            },
+            "end": {
+              "line": 365,
+              "column": 67
+            }
+          },
+          "replacement": "true",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_363_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_363_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.60329875,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.604346625,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:363:5: replace is_injection_line -> bool with false",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "is_injection_line",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 358,
+                "column": 1
+              },
+              "end": {
+                "line": 366,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 363,
+              "column": 5
+            },
+            "end": {
+              "line": 365,
+              "column": 67
+            }
+          },
+          "replacement": "false",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_363_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_363_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.542051291,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.598298208,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:365:9: replace || with && in is_injection_line",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "is_injection_line",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 358,
+                "column": 1
+              },
+              "end": {
+                "line": 366,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 365,
+              "column": 9
+            },
+            "end": {
+              "line": 365,
+              "column": 11
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_365_col_9.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_365_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.590387417,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.547936584,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:373:5: replace mark_injection_patterns -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "mark_injection_patterns",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 368,
+                "column": 1
+              },
+              "end": {
+                "line": 392,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 373,
+              "column": 5
+            },
+            "end": {
+              "line": 391,
+              "column": 11
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_373_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_373_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.592782708,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.539192042,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:373:5: replace mark_injection_patterns -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "mark_injection_patterns",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 368,
+                "column": 1
+              },
+              "end": {
+                "line": 392,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 373,
+              "column": 5
+            },
+            "end": {
+              "line": 391,
+              "column": 11
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_373_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_373_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.540520375,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.535610541,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:409:5: replace sanitize_chunk_content -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "sanitize_chunk_content",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 394,
+                "column": 1
+              },
+              "end": {
+                "line": 416,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 409,
+              "column": 5
+            },
+            "end": {
+              "line": 415,
+              "column": 75
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_409_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_409_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.605671166,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.540351375,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:409:5: replace sanitize_chunk_content -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "sanitize_chunk_content",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 394,
+                "column": 1
+              },
+              "end": {
+                "line": 416,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 409,
+              "column": 5
+            },
+            "end": {
+              "line": 415,
+              "column": 75
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_409_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_409_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.552411583,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.545244,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:432:5: replace sanitize_dynamic_context -> String with String::new()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "sanitize_dynamic_context",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 418,
+                "column": 1
+              },
+              "end": {
+                "line": 446,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 432,
+              "column": 5
+            },
+            "end": {
+              "line": 445,
+              "column": 8
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_432_col_5.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_432_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.606677583,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.586747667,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/prompt/src/sanitize.rs:432:5: replace sanitize_dynamic_context -> String with \"xyzzy\".into()",
+          "package": "echomind-prompt",
+          "file": "crates/prompt/src/sanitize.rs",
+          "function": {
+            "function_name": "sanitize_dynamic_context",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 418,
+                "column": 1
+              },
+              "end": {
+                "line": 446,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 432,
+              "column": 5
+            },
+            "end": {
+              "line": 445,
+              "column": 8
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__prompt__src__sanitize.rs_line_432_col_5_001.log",
+      "diff_path": "diff/crates__prompt__src__sanitize.rs_line_432_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.546833834,
+          "process_status": "Success",
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.545061292,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/Users/john/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=echomind-prompt@3.1.0",
+            "--all-features"
+          ]
+        }
+      ]
+    }
+  ],
+  "total_mutants": 47,
+  "missed": 11,
+  "caught": 35,
+  "timeout": 0,
+  "unviable": 1,
+  "success": 0,
+  "start_time": "2026-09-05T13:37:58.703538Z",
+  "end_time": "2026-09-05T13:39:18.424723Z",
+  "cargo_mutants_version": "27.1.0"
+}

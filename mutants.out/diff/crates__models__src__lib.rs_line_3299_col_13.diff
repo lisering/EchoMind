@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "stdio" in McpTransportType::parse_str
+@@ -3291,17 +3291,17 @@
+             Self::Stdio => "stdio",
+             Self::Sse => "sse",
+         }
+     }
+ 
+     /// 从字符串解析传输类型。
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s.to_lowercase().as_str() {
+-            "stdio" => Some(Self::Stdio),
++             /* ~ changed by cargo-mutants ~ */
+             "sse" => Some(Self::Sse),
+             _ => None,
+         }
+     }
+ }
+ 
+ /// MCP 服务器配置（REQ-ARCH-016 AC-1）。
+ ///

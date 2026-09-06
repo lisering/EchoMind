@@ -275,7 +275,7 @@ async fn tc_hnsw_free_007_recall_rate() {
 /// 用相同查询向量分别通过 HNSW 和全量扫描查询，验证 top-1 结果一致。
 #[tokio::test]
 async fn tc_hnsw_free_008_hnsw_vs_full_scan_consistency() {
-    use crate::sqlite_storage::cosine_similarity;
+    use crate::sqlite_storage::storage::core::cosine_similarity;
 
     let n = 550;
     let dim = 64;

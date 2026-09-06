@@ -6,7 +6,6 @@ members = [
     "crates/models",
     "crates/prompt",
     "crates/compact",
-    "crates/context",
     "crates/core",
     "crates/infra",
     "crates/tauri-app",

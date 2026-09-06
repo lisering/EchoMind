@@ -9,22 +9,6 @@ use super::*;
 // Contextual Retrieval（REQ-RAG-041：上下文增强嵌入）
 // ============================================================================
 
-/// 切换 Contextual Retrieval 开关（REQ-RAG-041）。
-///
-/// 写入 settings 表 `rag.contextual_retrieval`，控制嵌入时是否拼接文档名上下文前缀。
-/// 开启时嵌入文本 = `build_contextual_text(doc_name, chunk_content)`（含文档名前缀）；
-/// 关闭时嵌入文本 = 纯 chunk content（不含前缀）。
-///
-/// 默认 true（嵌入管线已使用上下文文本）。变更后需重启或调用
-/// `rebuild_contextual_embeddings` 重建已有嵌入向量。
-#[tauri::command]
-pub async fn set_contextual_retrieval(
-    enabled: bool,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    set_contextual_retrieval_inner(enabled, state.inner()).await
-}
-
 /// Contextual Retrieval 开关写入逻辑（命令与集成测试复用）。
 pub async fn set_contextual_retrieval_inner(enabled: bool, state: &AppState) -> Result<(), String> {
     let value = if enabled { "true" } else { "false" };

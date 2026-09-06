@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace == with != in ConversationTree::children_of
+@@ -1649,17 +1649,17 @@
+     pub fn find(&self, node_id: &str) -> Option<&ConversationTreeNode> {
+         self.nodes.iter().find(|n| n.node_id == node_id)
+     }
+ 
+     /// 获取节点的所有子节点。
+     pub fn children_of(&self, node_id: &str) -> Vec<&ConversationTreeNode> {
+         self.nodes
+             .iter()
+-            .filter(|n| n.parent_message_id.as_deref() == Some(node_id))
++            .filter(|n| n.parent_message_id.as_deref() != /* ~ changed by cargo-mutants ~ */ Some(node_id))
+             .collect()
+     }
+ }
+ 
+ /// 缓存级别（REQ-PERF-001 语义缓存金字塔）。
+ ///
+ /// 三级缓存策略，从最快到最慢：
+ /// - `Exact`：L0 精确匹配（query hash → answer），命中率 5-10%，0 token

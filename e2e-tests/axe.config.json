@@ -1,0 +1,22 @@
+{
+  "tags": ["wcag2a", "wcag2aa", "wcag22aa", "best-practice"],
+  "rules": {
+    "color-contrast": { "enabled": true },
+    "valid-lang": { "enabled": true },
+    "label": { "enabled": true },
+    "aria-roles": { "enabled": true },
+    "region": { "enabled": true },
+    "heading-order": { "enabled": false },
+    "frame-title": { "enabled": false },
+    "html-has-lang": { "enabled": true },
+    "image-alt": { "enabled": true },
+    "link-name": { "enabled": true },
+    "button-name": { "enabled": true }
+  },
+  "thresholds": {
+    "critical": 0,
+    "serious": 0,
+    "moderate": 2,
+    "minor": 5
+  }
+}

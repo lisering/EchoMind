@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_status_str -> String with "xyzzy".into()
+@@ -1907,17 +1907,17 @@
+     #[serde(default = "default_status_str")]
+     pub status: String,
+     /// 错误信息（仅 status == "failed" 时有值）
+     #[serde(skip_serializing_if = "Option::is_none", default)]
+     pub error: Option<String>,
+ }
+ 
+ fn default_status_str() -> String {
+-    "downloading".to_string()
++    "xyzzy".into() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 下载状态摘要（用于 `list_pending_downloads` IPC 命令）。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct DownloadStatusSummary {
+     /// 文件名
+     pub filename: String,
+     /// 当前状态

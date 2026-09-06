@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "high" in TodoPriority::from_db_str
+@@ -840,17 +840,17 @@
+         }
+     }
+ 
+     /// 从数据库字符串解析。
+     pub fn from_db_str(s: &str) -> Option<Self> {
+         match s {
+             "low" => Some(Self::Low),
+             "medium" => Some(Self::Medium),
+-            "high" => Some(Self::High),
++             /* ~ changed by cargo-mutants ~ */
+             _ => None,
+         }
+     }
+ }
+ 
+ /// 会话待办项（REQ-RAG-044 Session Todo 持久化）。
+ ///
+ /// 借鉴 OpenCode `session/todo.ts`，将 Agent 的 Todo 列表持久化到 SQLite，

@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace TodoPriority::as_str -> &'static str with "xyzzy"
+@@ -828,21 +828,17 @@
+     Medium,
+     /// 高
+     High,
+ }
+ 
+ impl TodoPriority {
+     /// 转为数据库存储字符串。
+     pub fn as_str(&self) -> &'static str {
+-        match self {
+-            Self::Low => "low",
+-            Self::Medium => "medium",
+-            Self::High => "high",
+-        }
++        "xyzzy" /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 从数据库字符串解析。
+     pub fn from_db_str(s: &str) -> Option<Self> {
+         match s {
+             "low" => Some(Self::Low),
+             "medium" => Some(Self::Medium),
+             "high" => Some(Self::High),

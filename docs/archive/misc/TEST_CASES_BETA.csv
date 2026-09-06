@@ -1,0 +1,67 @@
+ID,Category,Scenario,Precondition,Steps,Expected Result,Priority,Automated,Estimated Time (min)
+TC-001,Core,First-time Configuration Wizard,Clean install,1. Launch app 2. Enter API Key 3. Select model 4. Complete,Enter main interface showing "Configuration completed",P0,Yes,5
+TC-002,Core,Single File Import,Configured,Drag PDF -> Wait for indexing,Document appears in list with Indexed status,P0,Yes,3
+TC-003,Core,Batch Import,Configured,Select folder -> Import,All documents indexed, progress bar accurate,P0,Yes,5
+TC-004,Core,Basic Chat,Documents imported,New session -> Ask question -> Wait,Returns cited sources, relevant answer,P0,Yes,3
+TC-005,Core,Hybrid Search Enabled,Configured,Enable hybrid search -> Ask,Returns combined vector+keyword results,P1,Yes,3
+TC-006,Core,Rerank Enabled,Configured,Enable rerank -> Ask,Results re-ranked by relevance, latency < 500ms,P1,Yes,3
+TC-007,Core,Demo Mode,No API Key,Launch -> Ask,Returns template response, no LLM call,P0,Yes,2
+TC-008,Core,Export Markdown,Chat history exists,Click Export -> Choose path,Generates .md file with correct format,P1,Yes,2
+TC-009,Core,Budget Limit,Configured,Set $10 budget -> Chat,Blocks when exceeded with prompt,P1,Yes,3
+TC-010,Core,Disk Space Warning,Disk < 1GB,Try import large file,Shows warning with cleanup options,P2,Yes,2
+TC-011,Core,LLM Config Update,Configured,Update API Key -> Save,Immediate effect, no restart needed,P1,No,2
+TC-012,Core,Model Switch,Configured,Change model -> Chat,Uses new model for subsequent queries,P1,No,2
+TC-013,Core,Workspace Switch,Multiple workspaces,Switch workspace,Isolated data per workspace,P1,No,3
+TC-014,Core,Conversation Management,Multiple conversations,Create/Delete/Rename/Switch,All operations work correctly,P1,No,3
+TC-015,Core,Settings Persistence,Changed settings,Restart app,All settings retained,P0,Yes,2
+TC-B01,Boundary,Empty Knowledge Base Query,No documents,Ask question,Prompt "Knowledge base empty, please import",P0,Yes,1
+TC-B02,Boundary,Over-length Query (>4000 chars),Configured,Ask very long question,Prompt "Question too long, please shorten",P0,Yes,1
+TC-B03,Boundary,Network Disconnect During Chat,Configured,Disconnect network -> Ask,Shows network error, no crash,P0,No,2
+TC-B03,Boundary,Invalid API Key,Configured,Enter invalid key -> Save,Prompt "Invalid API Key",P0,Yes,1
+TC-B04,Boundary,Non-existent Model,Configured,Enter non-existent model,Prompt "Model not found",P0,Yes,1
+TC-B05,Boundary,Large File Import (100MB+),Configured,Import 100MB+ PDF,Progress bar works, no freeze, memory < 500MB,P1,No,10
+TC-B06,Boundary,Concurrent Import (10 files),Configured,Import 10 files simultaneously,All succeed, no race conditions,P1,No,5
+TC-B07,Boundary,Long Conversation History (1000+ turns),1000+ turns loaded,Load history < 2s, memory < 200MB,P2,No,5
+TC-B08,Boundary,Disk Write Failure (Read-only),Read-only disk,Try import,Graceful error, no crash,P2,No,2
+TC-B09,Boundary,Multiple Conversation Windows,Multiple windows open,Switch between,Independent, no interference,P2,No,3
+TC-B10,Boundary,Special Characters in Filename,Filename with Unicode/Emoji,Import succeeds, displays correctly,P2,No,2
+TC-B11,Boundary,Empty File Import,Empty file,Import,Handled gracefully (skipped or error),P2,No,1
+TC-B12,Boundary,Very Long Document (1000+ pages),1000+ page PDF,Import completes, searchable,P2,No,15
+TC-B13,Boundary,Rapid Fire Questions,Configured,Ask 20 questions rapidly,All answered, no queue buildup,P1,No,5
+TC-B14,Boundary,Abort During Generation,Configured,Click abort mid-stream,Stops immediately, partial saved,P1,Yes,3
+TC-B15,Boundary,Theme Switch During Chat,Dark/Light mode,Switch theme mid-chat,UI updates instantly, no glitch,P2,No,1
+TC-P01,Performance,Cold Start (First Launch),Clean install,Launch app,< 3s to interactive,P0,Yes,3
+TC-P02,Performance,First Chat (Model Cached),Model downloaded,First question,< 3s to first token,P0,Yes,3
+TC-P03,Performance,First Chat (Model Download),No model,First question,< 60s incl. download, show progress,P0,Yes,60
+TC-P04,Performance,Vector Retrieval (1k chunks),1k chunks indexed,Query,< 200ms end-to-end,P0,Yes,1
+TC-P05,Performance,Hybrid Retrieval,1k chunks,Query,< 500ms (vector+BM25+rerank),P0,Yes,1
+TC-P06,Performance,Document Import (10MB PDF),10MB PDF,Import,< 10s (parse+chunk+embed+index),P0,Yes,2
+TC-P07,Performance,Large Import (100MB PDF),100MB PDF,Import,< 30s (incl. OCR if enabled),P0,Yes,5
+TC-P08,Performance,Idle Memory Baseline,App idle 1min,Measure RSS,< 200MB,P0,Yes,2
+TC-P09,Performance,Memory Growth (1h Chat),1h continuous chat,Measure RSS growth,< 100MB growth,P0,Yes,60
+TC-P10,Performance,Concurrent Users (Simulated),10 concurrent chats,All respond,No deadlock/timeout,P1,No,10
+TC-C01,Compatibility,macOS 13+ Intel,macOS 13+ Intel,All core functions work,P0,No,10
+TC-C02,Compatibility,macOS 13+ Apple Silicon,macOS 13+ ARM,All core functions work,P0,No,10
+TC-C03,Compatibility,Windows 10/11 x64,Win 10/11,All core functions work,P0,No,10
+TC-C04,Compatibility,Ubuntu 22.04+,Ubuntu 22.04+,All core functions work,P1,No,10
+TC-C05,Compatibility,Fedora 38+,Fedora 38+,All core functions work,P2,No,10
+TC-C06,Compatibility,OpenAI API,OpenAI compatible,All LLM features work,P0,No,5
+TC-C06,Compatibility,Azure OpenAI,Azure endpoint,All LLM features work,P1,No,5
+TC-C07,Compatibility,Local LLM (Ollama),Local endpoint,Chat works (if enabled),P2,No,10
+TC-C07,Compatibility,Custom OpenAI-compatible,Custom base_url,All LLM features work,P2,No,5
+TC-D01,Demo Mode,No API Key Entry,First launch,Skip config -> Demo mode,Enter demo mode directly,P0,Yes,2
+TC-D02,Demo Mode,Keyword Search,Demo mode,Ask question,Keyword search results shown,P0,Yes,2
+TC-D03,Demo Mode,Template Responses,Demo mode,Ask various questions,Template responses match keywords,P0,Yes,2
+TC-D03,Demo Mode,Exit Demo,Demo mode,Click Exit Demo,Returns to config wizard,P0,Yes,1
+TC-D04,Demo Mode,Load Demo Docs,Demo mode,Click Load Demo Docs,3 demo docs imported,P0,Yes,3
+TC-D04,Demo Mode,Demo Mode Persistence,Restart in demo mode,Restart app,Still in demo mode,P0,Yes,1
+TC-S01,Security,API Key Storage,Configured,Check storage,Encrypted with AES-256, key derived from Argon2id,P0,No,5
+TC-S02,Security,No Data Leakage,Configured,Network monitor,No unauthorized outbound connections,P0,No,10
+TC-S03,Security,SQLCipher Encryption,Encrypted DB,Check DB file,AES-256-CBC encrypted,P0,No,5
+TC-S04,Security,PII Redaction,Configured,Input PII,Redacted in logs/telemetry,P0,No,5
+TC-S05,Security,Auto-lock,Configured,Wait for timeout,App locks, requires auth,P1,No,5
+TC-U01,Usability,First-time User Onboarding,New user,Complete wizard,No external help needed,P0,No,10
+TC-U02,Usability,Error Message Clarity,Various errors,Trigger errors,Actionable, non-technical language,P0,No,5
+TC-U03,Usability,Keyboard Navigation,Any screen,Tab/Enter/Esc,Full keyboard access,P1,No,5
+TC-U04,Usability,Screen Reader Support,macOS VoiceOver/Win Narrator,Navigate app,All elements announced,P1,No,10
+TC-U05,Usability,Responsive Layout,Resize window,Resize window,No horizontal scroll, content reflows,P1,No,5

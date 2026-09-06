@@ -1,0 +1,40 @@
+# cargo-mutants configuration for EchoMind
+# Docs: https://mutants.rs/configuration.html
+
+# Build timeout: ML 依赖编译较慢，设置 4x 倍数
+build_timeout_multiplier = 4.0
+
+# Test timeout: 嵌入模型首次加载慢，设置 6x 倍数
+timeout_multiplier = 6.0
+
+# 排除不值得变异的文件/目录
+exclude_globs = [
+    # 测试代码 - 变异测试的目标是生产代码
+    "crates/**/tests/**",
+    "e2e-tests/**",
+    # 构建产物 / 脚本 / 配置
+    "scripts/**",
+    "ui/**",
+    "*.toml",
+    "*.json",
+    "*.md",
+    "*.yml",
+    "*.yaml",
+    # 宏展开生成的代码不值得变异
+    "crates/tauri-app/src/commands/mod.rs",
+    # License issuer 是独立工具 crate，非核心逻辑
+    "crates/license-issuer/**",
+]
+
+# 排除特定变异模式（匹配 mutant 名称）
+exclude_re = [
+    # 简单的字符串常量变异（通常是角色声明/引导文本，测试不敏感）
+    "replace .+ with \"\"",
+    "replace .+ with \"mutated\"",
+]
+
+# 启用所有 features（Pro 模式）
+all_features = true
+
+# cap_lints: 关闭 clippy deny lint，避免变异体编译失败
+cap_lints = true

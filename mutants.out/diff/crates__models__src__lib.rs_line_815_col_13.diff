@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "in_progress" in TodoStatus::from_db_str
+@@ -807,17 +807,17 @@
+             Self::Completed => "completed",
+         }
+     }
+ 
+     /// 从数据库字符串解析。
+     pub fn from_db_str(s: &str) -> Option<Self> {
+         match s {
+             "pending" => Some(Self::Pending),
+-            "in_progress" => Some(Self::InProgress),
++             /* ~ changed by cargo-mutants ~ */
+             "completed" => Some(Self::Completed),
+             _ => None,
+         }
+     }
+ }
+ 
+ /// Todo 优先级枚举（REQ-RAG-044 Session Todo 持久化）。
+ #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

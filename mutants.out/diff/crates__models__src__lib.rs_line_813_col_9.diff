@@ -1,0 +1,26 @@
+--- crates/models/src/lib.rs
++++ replace TodoStatus::from_db_str -> Option<Self> with None
+@@ -805,22 +805,17 @@
+             Self::Pending => "pending",
+             Self::InProgress => "in_progress",
+             Self::Completed => "completed",
+         }
+     }
+ 
+     /// 从数据库字符串解析。
+     pub fn from_db_str(s: &str) -> Option<Self> {
+-        match s {
+-            "pending" => Some(Self::Pending),
+-            "in_progress" => Some(Self::InProgress),
+-            "completed" => Some(Self::Completed),
+-            _ => None,
+-        }
++        None /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// Todo 优先级枚举（REQ-RAG-044 Session Todo 持久化）。
+ #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+ pub enum TodoPriority {
+     /// 低
+     Low,

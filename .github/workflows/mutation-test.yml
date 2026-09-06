@@ -1,0 +1,113 @@
+# EchoMind Mutation Testing — 测试质量验证
+#
+# 使用 cargo-mutants 验证测试套件能否检测到代码变更（变异体）。
+# 每个变异体是一处微小的逻辑修改，如果测试未能捕获则说明测试覆盖薄弱。
+#
+# 运行策略：
+# - 仅在 push to main 和每周日定时运行（mutation 测试较慢）
+# - 支持手动触发，可指定目标 crate
+# - 使用 sharding 并行加速
+name: Mutation Testing
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * 0'  # 每周日 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      package:
+        description: '目标 crate（留空则测试全部）'
+        required: false
+        default: ''
+
+jobs:
+  mutation-test:
+    name: Mutation Test (${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '.'
+          key: mutation-${{ matrix.shard }}
+
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Run mutation testing (shard ${{ matrix.shard }}/4)
+        run: |
+          EXTRA_ARGS=""
+          if [ -n "${{ github.event.inputs.package }}" ]; then
+            EXTRA_ARGS="--package ${{ github.event.inputs.package }}"
+          fi
+          cargo mutants --shard ${{ matrix.shard }}/4 --timeout 600 $EXTRA_ARGS 2>&1 | tee mutation-results-${{ matrix.shard }}.log
+
+      - name: Upload mutation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-results-${{ matrix.shard }}
+          path: mutation-results-${{ matrix.shard }}.log
+          retention-days: 30
+
+  mutation-report:
+    name: Mutation Report
+    needs: mutation-test
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all shard results
+        uses: actions/download-artifact@v4
+        with:
+          path: results/
+
+      - name: Generate summary
+        run: |
+          echo "## Mutation Testing Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Shard | Missed | Caught | Unviable |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+          for f in results/mutation-results-*.log; do
+            shard=$(basename "$f" | sed 's/mutation-results-//' | sed 's/.log//')
+            missed=$(grep -c "^MISSED" "$f" 2>/dev/null || echo "0")
+            caught=$(grep -c "^caught" "$f" 2>/dev/null || echo "0")
+            unviable=$(grep -c "^unviable" "$f" 2>/dev/null || echo "0")
+            echo "| $shard | $missed | $caught | $unviable |" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Review missed mutants to identify weak test areas." >> $GITHUB_STEP_SUMMARY
+
+      - name: Check mutation score
+        run: |
+          TOTAL_MISSED=0
+          TOTAL_CAUGHT=0
+          for f in results/mutation-results-*.log; do
+            missed=$(grep -c "^MISSED" "$f" 2>/dev/null || echo "0")
+            caught=$(grep -c "^caught" "$f" 2>/dev/null || echo "0")
+            TOTAL_MISSED=$((TOTAL_MISSED + missed))
+            TOTAL_CAUGHT=$((TOTAL_CAUGHT + caught))
+          done
+          TOTAL=$((TOTAL_MISSED + TOTAL_CAUGHT))
+          if [ $TOTAL -gt 0 ]; then
+            SCORE=$((TOTAL_CAUGHT * 100 / TOTAL))
+            echo "Mutation score: ${SCORE}% (${TOTAL_CAUGHT}/${TOTAL})"
+            if [ $SCORE -lt 50 ]; then
+              echo "::warning::Mutation score ${SCORE}% is below 50% threshold"
+            fi
+          fi

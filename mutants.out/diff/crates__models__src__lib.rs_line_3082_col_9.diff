@@ -1,0 +1,22 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalDatasetSample::with_doc_ids -> Self with Default::default()
+@@ -3074,18 +3074,17 @@
+             ground_truth,
+             relevant_doc_ids: Vec::new(),
+             relevant_chunk_ids: Vec::new(),
+         }
+     }
+ 
+     /// 设置相关文档 ID 列表。
+     pub fn with_doc_ids(mut self, doc_ids: Vec<String>) -> Self {
+-        self.relevant_doc_ids = doc_ids;
+-        self
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 设置相关 chunk ID 列表。
+     pub fn with_chunk_ids(mut self, chunk_ids: Vec<String>) -> Self {
+         self.relevant_chunk_ids = chunk_ids;
+         self
+     }
+ }

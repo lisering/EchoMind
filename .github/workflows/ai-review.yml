@@ -5,25 +5,143 @@ on:
     types: [opened, synchronize, reopened]
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review'
+        required: true
+        type: string
 
 permissions:
   contents: read
   pull-requests: write
   issues: write
+  checks: write
+  security-events: write
+
+env:
+  RUSTFLAGS: "-Dwarnings"
+  RUSTDOCTOR_VERSION: "latest"
 
 jobs:
-  ai-review:
-    name: AI Code Review
+  # ─────────────────────────────────────────────────────────────────────
+  # 1. rust-doctor — Rust 健康评分 + 静态分析（快速、确定性、可作门禁）
+  #    注意：此 job 在 ci.yml 中已运行，这里仅在 workflow_dispatch 时运行
+  # ─────────────────────────────────────────────────────────────────────
+  rust-doctor:
+    name: Rust Doctor (Health Score + Static Analysis)
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
-    
+    timeout-minutes: 15
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history needed for diff analysis
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: '.'
+          key: rust-doctor
+
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: target/fastembed-cache
+          key: fastembed-model-v1-rust-doctor
+
+      - name: Install rust-doctor
+        run: |
+          curl -L -o rust-doctor https://github.com/ArthurDEV44/rust-doctor/releases/latest/download/rust-doctor-x86_64-unknown-linux-gnu
+          chmod +x rust-doctor
+          sudo mv rust-doctor /usr/local/bin/
+
+      - name: Install external tools (cargo-audit, cargo-deny, cargo-geiger, cargo-machete)
+        run: rust-doctor --install-deps
+
+      - name: Run rust-doctor (diff mode for PR)
+        id: rust-doctor
+        run: |
+          rust-doctor \
+            --diff main \
+            --fail-on error \
+            --fail-below 85 \
+            --sarif target/rust-doctor.sarif \
+            --json target/rust-doctor.json \
+            --verbose
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: target/rust-doctor.sarif
+          category: rust-doctor
+
+      - name: Upload JSON report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-doctor-report
+          path: target/rust-doctor.json
+          retention-days: 30
+
+      - name: Comment PR on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('target/rust-doctor.json', 'utf8'));
+            const score = report.score;
+            const summary = report.summary;
+            
+            const body = '## 🏥 rust-doctor Health Check Failed\n\n' +
+              '**Score: ' + score + '/100** (minimum: 85)\n\n' +
+              '### Summary\n' +
+              '- Security: ' + summary.security + '/100\n' +
+              '- Reliability: ' + summary.reliability + '/100\n' +
+              '- Maintainability: ' + summary.maintainability + '/100\n' +
+              '- Performance: ' + summary.performance + '/100\n' +
+              '- Dependencies: ' + summary.dependencies + '/100\n\n' +
+              '### Top Issues\n' +
+              report.diagnostics.slice(0, 10).map(d => '- **' + d.severity.toUpperCase() + '** ' + d.file + ':' + d.line + ' - ' + d.message).join('\n') +
+              '\n\nSee workflow artifacts for full report.';
+
+            github.rest.issues.createComment({
+              issue_number: ${{ github.event.inputs.pr_number }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 2. claude-code-review — 深度语义审查（架构、安全、业务逻辑）
+  # ─────────────────────────────────────────────────────────────────────
+  claude-code-review:
+    name: Claude Code Review (Semantic Analysis)
+    needs: [rust-doctor]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: |
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'workflow_dispatch')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -36,7 +154,8 @@ jobs:
       - name: Build UI
         run: node scripts/build-ui.mjs
 
-      - name: Run AI Code Review
+      - name: Run AI Code Review (Claude)
+        id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -45,83 +164,170 @@ jobs:
             
             ## Project Context
             EchoMind is a Rust + Tauri v2 desktop application for local AI knowledge base with RAG capabilities.
+            Architecture: Hexagonal (Ports & Adapters), 8 crates.
+            Key constraints: Zero unwrap/panic, Edition 2024, async fn in trait, SOLID, DIP.
             
-            ## Review Focus Areas
-            1. **Security**: Check for SQL injection, XSS, command injection, path traversal, hardcoded secrets
-            2. **Performance**: Identify N+1 queries, unnecessary allocations, blocking I/O in async contexts
-            3. **Architecture**: Verify hexagonal architecture compliance, dependency direction (tauri-app → core → models)
-            4. **Rust Best Practices**: Check for unwrap/expect usage, proper error handling, async safety
-            5. **Code Quality**: Review naming, documentation, test coverage, SOLID principles
-            6. **Frontend**: Check for DOM manipulation best practices, event handling, state management
+            ## Review Focus Areas (Priority Order)
+            1. **CRITICAL - Security**: SQL injection, XSS, command injection, path traversal, hardcoded secrets, API key handling
+            2. **CRITICAL - Correctness**: unwrap/expect usage, panic, unreachable, todo, unimplemented, integer overflow
+            3. **HIGH - Architecture**: Hexagonal compliance, dependency direction (tauri-app → infra → core → models), trait definitions in core
+            4. **HIGH - Async Safety**: No std::sync::Mutex across .await, no blocking I/O in async, proper spawn_blocking
+            5. **MEDIUM - Performance**: N+1 queries, unnecessary allocations, clone in hot paths, large types by value
+            6. **MEDIUM - Code Quality**: Naming, documentation, test coverage, SOLID principles, error handling with thiserror/anyhow
+            7. **LOW - Frontend**: DOM manipulation, event handling, state management, Tailwind usage
             
-            ## Review Guidelines
-            - Focus on critical issues that could cause bugs, security vulnerabilities, or performance problems
-            - Provide specific line references and actionable suggestions
-            - Prioritize issues by severity: CRITICAL > HIGH > MEDIUM > LOW
-            - Don't flag style issues that clippy/fmt already catch
-            - Consider the project's iron rules (铁律) defined in .catpaw/rules/system-constraints.md
+            ## Iron Rules (铁律) - MUST CHECK
+            - Zero unwrap/expect/panic in production code (clippy deny lint enforced)
+            - Dependency direction: tauri-app → core → models (NO reverse)
+            - All external input validated (length/format/range/type)
+            - API keys never logged, only stored in OS Keychain
+            - Structured logging with tracing (JSON Lines)
+            - PII redaction before LLM calls
+            - LLM output validated via schema before use
             
-            ## Output Format
-            For each issue found, provide:
-            - Severity level (CRITICAL/HIGH/MEDIUM/LOW)
-            - File path and line number
-            - Description of the issue
-            - Suggested fix
+            ## Output Format (JSON)
+            For each issue found, provide a JSON object in this format:
+            {
+              "severity": "CRITICAL|HIGH|MEDIUM|LOW",
+              "file": "path/to/file.rs",
+              "line": 123,
+              "title": "Brief title",
+              "description": "Detailed description",
+              "suggestion": "Specific fix suggestion",
+              "rule": "Reference to iron rule or best practice"
+            }
             
-            Review the diff and provide a comprehensive analysis.
+            Return an array of issues. If no issues, return empty array.
+            
+            Review the diff and provide comprehensive analysis.
           claude_args: |
-            --max-turns 10
-            --model claude-4-0-sonnet-20250805
-            --append-system-prompt "You are a security-focused code reviewer for a Rust/Tauri desktop application. Focus on critical security and correctness issues."
+            --max-turns 15
+            --model claude-3-5-sonnet-20241022
+            --append-system-prompt "You are a security-focused code reviewer for a Rust/Tauri desktop application. Focus on critical security, correctness, and architecture issues. Be precise with line numbers. Output ONLY valid JSON array."
+
+      - name: Parse and post review comments
+        if: always()
+        run: |
+          # The claude-code-action posts comments automatically
+          # This step ensures we capture the output
+          echo "Claude review completed"
 
       - name: Upload review results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ai-review-results
+          name: claude-review-results
           path: |
             .ai-review/
             review-results.json
           retention-days: 30
 
-  # Optional: Auto-fix critical issues
-  auto-fix:
-    name: Auto-fix Critical Issues
-    needs: ai-review
+  # ─────────────────────────────────────────────────────────────────────
+  # 3. rs-guard — 可选：轻量级 Rust 原生 AI 审查（多 LLM 提供商）
+  #    当需要额外审查视角时启用（通过 label 触发）
+  # ─────────────────────────────────────────────────────────────────────
+  rs-guard:
+    name: rs-guard (Lightweight AI Review)
+    needs: [rust-doctor]
     runs-on: ubuntu-latest
-    if: always() && needs.ai-review.result == 'success'
-    
+    timeout-minutes: 10
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ai-review-deep')
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install rs-guard
+        run: |
+          curl -L -o rs-guard https://github.com/nebulaideas/rs-guard/releases/latest/download/rs-guard
+          chmod +x rs-guard
+          sudo mv rs-guard /usr/local/bin/
+
+      - name: Run rs-guard
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          rs-guard \
+            --provider deepseek \
+            --model deepseek-coder \
+            --inline-comments \
+            --check-run \
+            --findings \
+            --fail-on REQUEST_CHANGES
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          components: clippy, rustfmt
+          name: rs-guard-results
+          path: |
+            rs-guard-findings.json
+          retention-days: 30
 
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+  # ─────────────────────────────────────────────────────────────────────
+  # 4. 汇总报告
+  # ─────────────────────────────────────────────────────────────────────
+  summary:
+    name: AI Review Summary
+    needs: [rust-doctor, claude-code-review]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download rust-doctor report
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-doctor-report
+          path: artifacts/rust-doctor
 
-      - name: Run Clippy and fix auto-fixable issues
+      - name: Download claude review results
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-review-results
+          path: artifacts/claude
+
+      - name: Generate summary
+        id: summary
         run: |
-          cargo clippy --all-targets -- -D warnings --fix --allow-dirty --allow-staged
+          cat > summary.md << 'EOF'
+          # 🤖 AI Code Review Summary
           
-      - name: Format code
-        run: cargo fmt
-
-      - name: Commit fixes if any
-        run: |
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          ## rust-doctor Health Score
+          EOF
           
-          if ! git diff --quiet; then
-            git add -A
-            git commit -m "style: auto-fix clippy warnings and formatting"
-            git push
+          if [ -f artifacts/rust-doctor/rust-doctor.json ]; then
+            score=$(jq -r '.score' artifacts/rust-doctor/rust-doctor.json)
+            echo "**Score: ${score}/100**" >> summary.md
+            echo "" >> summary.md
+            echo "| Dimension | Score |" >> summary.md
+            echo "|-----------|-------|" >> summary.md
+            jq -r '.summary | to_entries[] | "| \(.key) | \(.value) |"' artifacts/rust-doctor/rust-doctor.json >> summary.md
+          else
+            echo "Report not available" >> summary.md
           fi
+          
+          echo "" >> summary.md
+          echo "## Claude Code Review" >> summary.md
+          echo "" >> summary.md
+          if [ -f artifacts/claude/review-results.json ]; then
+            echo "Review completed. Check PR comments for details." >> summary.md
+          else
+            echo "Review pending or not available." >> summary.md
+          fi
+          
+          cat summary.md
+
+      - name: Post summary comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('summary.md', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: ${{ github.event.inputs.pr_number || github.event.pull_request.number }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });

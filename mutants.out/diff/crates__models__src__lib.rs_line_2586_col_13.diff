@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "mrr" in RagMetricType::parse_str
+@@ -2578,17 +2578,17 @@
+     /// 从字符串解析。
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s {
+             "faithfulness" => Some(Self::Faithfulness),
+             "answer_relevance" => Some(Self::AnswerRelevance),
+             "context_precision" => Some(Self::ContextPrecision),
+             "context_recall" => Some(Self::ContextRecall),
+             "hit_rate" => Some(Self::HitRate),
+-            "mrr" => Some(Self::MRR),
++             /* ~ changed by cargo-mutants ~ */
+             "ndcg" => Some(Self::NDCG),
+             "context_similarity" => Some(Self::ContextSimilarity),
+             "keyword_overlap" => Some(Self::KeywordOverlap),
+             _ => None,
+         }
+     }
+ 
+     /// 是否需要 LLM 调用。

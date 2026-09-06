@@ -18,6 +18,9 @@ libfuzzer-sys = "0.4"
 [dependencies.echomind-core]
 path = "../crates/core"
 
+[dependencies.echomind-models]
+path = "../crates/models"
+
 [dependencies.tokio]
 version = "1"
 features = ["rt", "time"]
@@ -30,8 +33,22 @@ doc = false
 bench = false
 
 [[bin]]
-name = "normalize_query_fuzz"
-path = "fuzz_targets/normalize_query_fuzz.rs"
+name = "entity_extractor_fuzz"
+path = "fuzz_targets/entity_extractor_fuzz.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wiki_link_parser_fuzz"
+path = "fuzz_targets/wiki_link_parser_fuzz.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sse_parser_fuzz"
+path = "fuzz_targets/sse_parser_fuzz.rs"
 test = false
 doc = false
 bench = false

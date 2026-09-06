@@ -1,20 +1,6 @@
 //! 网页搜索集成（REQ-RAG-036，DuckDuckGo Instant Answer API）。
 use super::super::*;
 
-/// 切换网页搜索开关（REQ-RAG-036）。
-///
-/// 持久化到 settings 表 `rag.web_search_enabled` 键，下次 chat 命令调用时即时生效。
-/// 启用后，当本地检索 top-1 score < 阈值（0.3）时，自动调用 DuckDuckGo API 搜索互联网，
-/// 将搜索结果通过 RRF 融合到本地检索结果中，在 prompt 中标注来源（🌐 Web）。
-/// 搜索失败时优雅降级为仅使用本地结果。默认关闭（opt-in）。
-#[tauri::command]
-pub async fn set_web_search_enabled(
-    enabled: bool,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    set_web_search_enabled_inner(enabled, state.inner()).await
-}
-
 /// 网页搜索开关写入逻辑（命令与集成测试复用）。
 pub async fn set_web_search_enabled_inner(enabled: bool, state: &AppState) -> Result<(), String> {
     let value = if enabled { "true" } else { "false" };

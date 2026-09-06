@@ -1,0 +1,26 @@
+--- crates/models/src/lib.rs
++++ replace ScratchLogEntry::with_date -> Self with Default::default()
+@@ -2357,22 +2357,17 @@
+ 
+     /// 创建带指定日期的 scratch 日志条目（测试用）。
+     ///
+     /// # 参数
+     /// - `content`: 日志内容文本
+     /// - `date`: 日期字符串（YYYY-MM-DD 格式）
+     /// - `created_at`: 创建时间戳
+     pub fn with_date(content: String, date: String, created_at: i64) -> Self {
+-        Self {
+-            id: uuid::Uuid::new_v4().to_string(),
+-            date,
+-            content,
+-            created_at,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// Scratch 层整合结果（由 `consolidate_scratch()` 返回）。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct ScratchConsolidationResult {
+     /// 解析出的动作列表
+     pub actions: Vec<MemoryConsolidationAction>,

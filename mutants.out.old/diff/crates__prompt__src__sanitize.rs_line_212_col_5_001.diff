@@ -1,0 +1,40 @@
+--- crates/prompt/src/sanitize.rs
++++ replace redact_pii -> String with "xyzzy".into()
+@@ -204,36 +204,17 @@
+ }
+ 
+ /// 脱敏文本中的所有 PII，返回脱敏后的文本。
+ ///
+ /// 将检测到的 PII 替换为脱敏形式（如 `j***@example.com`），
+ /// 非重叠匹配按位置先后顺序处理。
+ #[must_use]
+ pub fn redact_pii(text: &str) -> String {
+-    let detections = detect_pii(text);
+-    if detections.is_empty() {
+-        return text.to_string();
+-    }
+-
+-    let mut result = String::with_capacity(text.len());
+-    let mut last_end = 0;
+-
+-    for det in &detections {
+-        if det.start < last_end {
+-            // 跳过重叠匹配
+-            continue;
+-        }
+-        result.push_str(&text[last_end..det.start]);
+-        result.push_str(&det.redacted);
+-        last_end = det.end;
+-    }
+-    result.push_str(&text[last_end..]);
+-
+-    result
++    "xyzzy".into() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 脱敏邮箱：j***@example.com
+ fn redact_email(email: &str) -> String {
+     if let Some(at_pos) = email.find('@') {
+         let (local, domain) = email.split_at(at_pos);
+         if local.len() > 1 {
+             format!("{}***{}", &local[..1], domain)

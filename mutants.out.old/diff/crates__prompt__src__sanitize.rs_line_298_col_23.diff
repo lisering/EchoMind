@@ -1,0 +1,21 @@
+--- crates/prompt/src/sanitize.rs
++++ replace >= with < in redact_passport
+@@ -290,17 +290,17 @@
+         format!("***-**-{}", &ssn[ssn.len() - 4..])
+     } else {
+         "****".to_string()
+     }
+ }
+ 
+ /// 脱敏护照号：E********
+ fn redact_passport(passport: &str) -> String {
+-    if passport.len() >= 2 {
++    if passport.len() < /* ~ changed by cargo-mutants ~ */ 2 {
+         format!("{}{}", &passport[..1], "*".repeat(passport.len() - 1))
+     } else {
+         "****".to_string()
+     }
+ }
+ 
+ /// 内容边界标记（开标签）。
+ pub const CONTENT_BOUNDARY_OPEN: &str = "<retrieved_content>";

@@ -12,7 +12,7 @@
 
 ## What this is
 
-Rust + Tauri v2 desktop app: local RAG knowledge base. fastembed ONNX embeddings (5 models, 384~1024-dim, runtime switchable), SQLite vector store + HNSW index, any OpenAI-compatible LLM (BYOK) or local GGUF inference (Pro). SQLCipher AES-256 encryption, PII redaction, hash-chain audit log, auto-lock. Current version: **v3.0.0**.
+Rust + Tauri v2 desktop app: local RAG knowledge base. fastembed ONNX embeddings (5 models, 384~1024-dim, runtime switchable), SQLite vector store + HNSW index, any OpenAI-compatible LLM (BYOK). SQLCipher AES-256 encryption, PII redaction, hash-chain audit log, auto-lock. Current version: **v3.0.0**.
 
 ## Architecture
 
@@ -21,15 +21,15 @@ Hexagonal (ports & adapters), **eight crates**:
 | Crate | Role |
 |---|---|
 | `crates/models` | Domain contracts only (Document, Chunk, ChatMessage, event payloads…) |
-| `crates/prompt` | Prompt building (SegmentedPrompt, RAG/agent prompts, Prompt Caching layout, PII sanitize) |
+| `crates/prompt` | Prompt building (SegmentedPrompt, RAG prompts, Prompt Caching layout, PII sanitize) |
 | `crates/compact` | LLM-based context compaction engine |
-| `crates/context` | System Context Registry + Context Epoch (增量上下文管理) |
-| `crates/core` | Business logic & port traits (Loader/Splitter/Embedder/Storage/LLMProvider/Retriever/Reranker) + impls: chat engine, import service, agent/coordinator, security, license |
-| `crates/infra` | Adapters: SqliteStorage, LocalEmbedder (fastembed/ONNX), OpenAIProvider (SSE), ModelManager + LocalLlmEngine (Pro, mistral.rs), pdfium/OCR/VLM, HNSW |
-| `crates/tauri-app` | Tauri shell: ~270 command fns in `src/commands/*` (~233 registered in Debug, ~212 Release — 21 dev-tool commands are `#[cfg(debug_assertions)]`-gated), holds AppState |
+| `crates/context` | System context management |
+| `crates/core` | Business logic & port traits (Loader/Splitter/Embedder/Storage/LLMProvider/Retriever/Reranker/WebSearchProvider/SymbolExtractor/CodeExecutor) + impls: chat engine, import service, security, license |
+| `crates/infra` | Adapters: SqliteStorage, LocalEmbedder (fastembed/ONNX), OpenAIProvider (SSE), pdfium/OCR/VLM, HNSW, MCP transport, symbol engine, WASM executor |
+| `crates/tauri-app` | Tauri shell: ~179 unique commands in `src/commands/*` (~181 Debug, ~171 Release — 10 dev-tool commands are `#[cfg(debug_assertions)]`-gated), holds AppState |
 | `crates/license-issuer` | Pro 许可证签发 CLI (`genkey`/`issue`) |
 
-Frontend: vanilla JS ES modules in `ui/src/*.js` (~58 files), built by esbuild into the single-file `ui/index.html`. No framework, no CDN. i18n via `ui/locales/{en,zh-CN,ja}.json`.
+Frontend: vanilla JS ES modules in `ui/src/*.js` (~56 files), built by esbuild into the single-file `ui/index.html`. No framework, no CDN. i18n via `ui/locales/{en,zh-CN,ja}.json`.
 
 ## Commands
 
@@ -77,7 +77,7 @@ CI (`.github/workflows/ci.yml`): `lint` + `frontend-checks` + `supply-chain` run
 
 ## Command module map (`crates/tauri-app/src/commands/`)
 
-SRP-split into domain submodules: `chat` `import` `document` `conversation` `settings` `local_llm` `security` `audit` `license` `agent` `performance` `graph` `sync` `mcp` `rag_eval` `trace` `workspace` `features` (+ `features/` dir). Shared helpers/types live in `mod.rs`; everything is registered in one `generate_handler!` in `lib.rs::run()`. AppState in `src/state.rs`; per-domain state split into `src/stores/{chat,config,document,model,security}_store.rs`.
+SRP-split into domain submodules: `chat` `import` `document` `conversation` `settings` `security` `audit` `license` `performance` `graph` `sync` `mcp` `rag_eval` `trace` `workspace` `features` (+ `features/` dir). Shared helpers/types live in `mod.rs`; everything is registered in one `generate_handler!` in `lib.rs::run()`. AppState in `src/state.rs`; per-domain state split into `src/stores/{chat,config,document,model,security}_store.rs`.
 
 ## Core data flows
 
@@ -92,7 +92,7 @@ Import:  import_files → ImportService.import_one()
 RAG:     chat → chat_inner()
          → empty-KB check → load LLM config → chat_phase "preparing"
          → ChatEngine.chat(): retrieve (vector, or hybrid vector+BM25→RRF; optional rerank/HyDE/graph-expansion/MMR)
-         → threshold filter → segmented RAG prompt (Prompt Caching) → LLMProvider.chat_stream(SSE or local mistral.rs)
+         → threshold filter → segmented RAG prompt (Prompt Caching) → LLMProvider.chat_stream(SSE)
          → chat_sources/chat_phase/chat_token events → abort_token checked per chunk → chat_done
          → persist_exchange() + auto-title on first exchange
 ```

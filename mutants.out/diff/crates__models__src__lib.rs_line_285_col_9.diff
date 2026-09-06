@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace EntityRelation::to_triple -> GraphTriple with Default::default()
+@@ -277,21 +277,17 @@
+             object,
+             chunk_id,
+             confidence,
+         }
+     }
+ 
+     /// 转换为三元组（用于检索结果展示）。
+     pub fn to_triple(&self) -> GraphTriple {
+-        GraphTriple {
+-            subject: self.subject.clone(),
+-            relation: self.relation_type.clone(),
+-            object: self.object.clone(),
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 图谱三元组（用于检索结果展示，REQ-RAG-026）。
+ ///
+ /// 表示 `(subject, relation, object)` 三元组，
+ /// 由 `EntityRelation::to_triple()` 生成，用于前端图谱可视化展示。
+ #[derive(Debug, Clone, Serialize, Deserialize)]

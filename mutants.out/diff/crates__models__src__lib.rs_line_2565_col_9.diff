@@ -1,0 +1,31 @@
+--- crates/models/src/lib.rs
++++ replace RagMetricType::as_str -> &'static str with "xyzzy"
+@@ -2557,27 +2557,17 @@
+     ContextSimilarity,
+     /// 关键词重叠率（纯 Rust）：查询与上下文的 token 重叠比例
+     KeywordOverlap,
+ }
+ 
+ impl RagMetricType {
+     /// 转换为字符串（用于序列化和显示）。
+     pub fn as_str(&self) -> &'static str {
+-        match self {
+-            Self::Faithfulness => "faithfulness",
+-            Self::AnswerRelevance => "answer_relevance",
+-            Self::ContextPrecision => "context_precision",
+-            Self::ContextRecall => "context_recall",
+-            Self::HitRate => "hit_rate",
+-            Self::MRR => "mrr",
+-            Self::NDCG => "ndcg",
+-            Self::ContextSimilarity => "context_similarity",
+-            Self::KeywordOverlap => "keyword_overlap",
+-        }
++        "xyzzy" /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 从字符串解析。
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s {
+             "faithfulness" => Some(Self::Faithfulness),
+             "answer_relevance" => Some(Self::AnswerRelevance),
+             "context_precision" => Some(Self::ContextPrecision),

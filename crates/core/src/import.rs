@@ -561,7 +561,6 @@ impl<S: Storage> ImportService<S> {
         self.index_entities(&chunks).await?;
         // 实体关系抽取 + 索引（REQ-RAG-026 知识图谱实体关系检索）
         self.index_relations(&chunks).await?;
-        // Proposition 分割 + 索引（REQ-PERF-007 Proposition 级原子分割）
         // Wiki-link 解析 + 索引（REQ-ING-020 Markdown 笔记双向链接）
         self.index_wiki_links(doc, &chunks).await?;
         Ok(())

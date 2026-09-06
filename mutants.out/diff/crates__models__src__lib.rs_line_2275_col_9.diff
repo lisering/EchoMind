@@ -1,0 +1,23 @@
+--- crates/models/src/lib.rs
++++ replace MemoryEntry::new_with_conversation -> Self with Default::default()
+@@ -2267,19 +2267,17 @@
+ 
+     /// 创建新记忆条目（含会话 ID）。
+     pub fn new_with_conversation(
+         content: String,
+         source: MemorySource,
+         tier: MemoryTier,
+         conversation_id: String,
+     ) -> Self {
+-        let mut entry = Self::new(content, source, tier);
+-        entry.conversation_id = Some(conversation_id);
+-        entry
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 记忆整合结果（由 AutoDream 后台调用 consolidate() 返回）。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct ConsolidationResult {
+     /// 提升到更高层级的记忆数量
+     pub promoted: usize,

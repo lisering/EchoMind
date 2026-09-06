@@ -1,0 +1,194 @@
+# rust-doctor 配置 — EchoMind 项目专用
+# =====================================================================
+# 运行命令: rust-doctor [选项]
+# CI 集成: .github/workflows/ci.yml 的 ai-review job
+# 文档: https://github.com/ArthurDEV44/rust-doctor
+# =====================================================================
+
+# ─────────────────────────────────────────────────────────────────────
+# 通用设置
+# ─────────────────────────────────────────────────────────────────────
+[general]
+# 工作空间根目录（相对或绝对路径）
+workspace = "."
+# 要扫描的 crate 成员（逗号分隔，空 = 全部）
+# project = "core,infra,tauri-app,models,prompt,compact,context,license-issuer"
+# 扫描模式: full | diff | changed
+# diff 模式仅扫描变更文件，适合 PR 快速反馈
+mode = "diff"
+# 基准分支（用于 diff 模式）
+base = "main"
+# 最小通过分数（0-100），低于此分数退出码 3
+fail-below = 85
+# 失败阈值级别: error | warning | info
+fail-on = "error"
+# 输出格式: terminal | json | sarif | score
+output = "terminal"
+# 详细输出
+verbose = true
+# 显示 ASCII 医生动画
+show-doctor = true
+
+# ─────────────────────────────────────────────────────────────────────
+# Clippy 配置（700+ 内置 lints）
+# ─────────────────────────────────────────────────────────────────────
+[clippy]
+enabled = true
+# 覆盖严重性映射
+severity-overrides = [
+    # 安全关键 - 提升为 error
+    { lint = "unwrap_used", severity = "error" },
+    { lint = "expect_used", severity = "error" },
+    { lint = "panic", severity = "error" },
+    { lint = "unreachable", severity = "error" },
+    { lint = "todo", severity = "error" },
+    { lint = "unimplemented", severity = "error" },
+    { lint = "indexing_slicing", severity = "error" },
+    # 性能关键
+    { lint = "clone_on_ref_ptr", severity = "warning" },
+    { lint = "large_types_passed_by_value", severity = "warning" },
+    { lint = "inefficient_to_string", severity = "warning" },
+    { lint = "format_push_string", severity = "warning" },
+    # 正确性
+    { lint = "as_conversions", severity = "warning" },
+    { lint = "cast_possible_truncation", severity = "warning" },
+    { lint = "cast_possible_wrap", severity = "warning" },
+    { lint = "cast_precision_loss", severity = "warning" },
+    { lint = "cast_sign_loss", severity = "warning" },
+    # 异步安全
+    { lint = "await_holding_lock", severity = "error" },
+    { lint = "blocking_call_in_async", severity = "warning" },
+    # 架构
+    { lint = "wildcard_imports", severity = "warning" },
+    { lint = "module_name_repetitions", severity = "allow" },
+]
+# 启用 pedantic 级别（更严格）
+pedantic = true
+# 启用 nursery 级别（新 lints）
+nursery = true
+# 启用 cargo 级别
+cargo = true
+
+# ─────────────────────────────────────────────────────────────────────
+# 自定义 AST 规则（19 个规则，覆盖安全/性能/架构/异步/框架）
+# ─────────────────────────────────────────────────────────────────────
+[custom-rules]
+enabled = true
+
+# 错误处理规则
+[custom-rules.error-handling]
+# 禁止 unwrap/expect 在生产代码中（已由 clippy 覆盖，但双重保险）
+no-unwrap-in-production = { enabled = true, severity = "error" }
+# Result/Option 必须显式处理
+must-handle-result = { enabled = true, severity = "error" }
+# 禁止空 catch 块
+no-empty-catch = { enabled = true, severity = "error" }
+
+# 性能规则
+[custom-rules.performance]
+# 避免在循环中分配
+no-alloc-in-loop = { enabled = true, severity = "warning" }
+# 避免不必要的 clone
+no-unnecessary-clone = { enabled = true, severity = "warning" }
+# 大类型按引用传递
+pass-large-types-by-ref = { enabled = true, severity = "warning" }
+
+# 安全规则
+[custom-rules.security]
+# 检测硬编码密钥模式
+no-hardcoded-secrets = { enabled = true, severity = "error" }
+# 检测 SQL 注入风险
+no-sql-injection = { enabled = true, severity = "error" }
+# 检测路径遍历
+no-path-traversal = { enabled = true, severity = "error" }
+# 检测命令注入
+no-command-injection = { enabled = true, severity = "error" }
+
+# 异步规则
+[custom-rules.async]
+# 禁止跨 await 持有 std::sync::Mutex
+no-std-mutex-across-await = { enabled = true, severity = "error" }
+# 禁止在 async 中阻塞调用
+no-blocking-in-async = { enabled = true, severity = "warning" }
+# tokio::spawn 必须处理 JoinHandle
+must-handle-join-handle = { enabled = true, severity = "warning" }
+
+# 架构规则
+[custom-rules.architecture]
+# 依赖方向检查：tauri-app -> infra -> core -> models
+dependency-direction = { enabled = true, severity = "error" }
+# 禁止 core 依赖 infra/tauri-app
+no-core-deps-on-adapters = { enabled = true, severity = "error" }
+# Trait 定义必须在 core 中
+traits-in-core = { enabled = true, severity = "warning" }
+
+# 框架感知规则（仅当依赖存在时运行）
+[custom-rules.framework]
+# Tauri 命令必须有错误处理
+tauri-command-error-handling = { enabled = true, severity = "error" }
+# 禁止在命令中直接 unwrap
+tauri-no-unwrap-in-commands = { enabled = true, severity = "error" }
+
+# ─────────────────────────────────────────────────────────────────────
+# 外部工具集成
+# ─────────────────────────────────────────────────────────────────────
+[external-tools]
+# cargo-audit: CVE 漏洞扫描
+cargo-audit = { enabled = true, install-if-missing = true }
+# cargo-deny: 供应链检查（许可证/禁用/来源）
+cargo-deny = { enabled = true, install-if-missing = true, config = "deny.toml" }
+# cargo-geiger: unsafe 代码审计
+cargo-geiger = { enabled = true, install-if-missing = true }
+# cargo-machete: 未使用依赖检测
+cargo-machete = { enabled = true, install-if-missing = true }
+
+# ─────────────────────────────────────────────────────────────────────
+# 评分权重（五大维度，总和 100）
+# ─────────────────────────────────────────────────────────────────────
+[scoring]
+security = 30      # 安全：漏洞、硬编码密钥、unsafe、注入风险
+reliability = 25   # 可靠性：错误处理、panic、unwrap、Result 处理
+maintainability = 20 # 可维护性：架构、命名、文档、复杂度
+performance = 15   # 性能：分配、clone、异步阻塞、大类型传递
+dependencies = 10  # 依赖：CVE、许可证、未使用依赖、重复版本
+
+# ─────────────────────────────────────────────────────────────────────
+# 输出配置
+# ─────────────────────────────────────────────────────────────────────
+[output]
+# SARIF 输出路径（用于 GitHub Code Scanning）
+sarif-path = "target/rust-doctor.sarif"
+# JSON 输出路径
+json-path = "target/rust-doctor.json"
+# 仅输出评分（用于 CI 门禁）
+score-only = false
+# 包含通过的检查
+include-passed = false
+
+# ─────────────────────────────────────────────────────────────────────
+# 抑制规则（inline suppression: // rust-doctor-disable-next-line <rule>）
+# ─────────────────────────────────────────────────────────────────────
+[suppressions]
+# 允许的抑制规则列表
+allowed = [
+    "no-unwrap-in-production",
+    "must-handle-result",
+    "dependency-direction",
+]
+# 抑制注释前缀
+comment-prefix = "rust-doctor-disable"
+
+# ─────────────────────────────────────────────────────────────────────
+# CI 特定配置
+# ─────────────────────────────────────────────────────────────────────
+[ci]
+# GitHub Actions 集成
+github-actions = true
+# 作为 Check Run 发布（需要权限）
+check-run = true
+# Check Run 名称
+check-run-name = "rust-doctor"
+# PR 注释模式: never | on-failure | always
+pr-comment = "on-failure"
+# 失败时退出码
+exit-code-on-failure = 3

@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_min_messages_to_compact -> usize with 0
+@@ -1326,17 +1326,17 @@
+     0.8
+ }
+ 
+ fn default_recent_keep_ratio() -> f32 {
+     0.67
+ }
+ 
+ fn default_min_messages_to_compact() -> usize {
+-    3
++    0 /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 默认上下文 token 限制（REQ-RAG-017）
+ pub fn default_context_token_limit() -> usize {
+     4096
+ }
+ 
+ /// serde 默认值辅助：返回 `true`（用于 `#[serde(default = "default_true")]`）。

@@ -1,0 +1,32 @@
+--- crates/models/src/lib.rs
++++ replace Document::new_with_original_path -> Self with Default::default()
+@@ -96,28 +96,17 @@
+     /// - `file_path`: 入库后的本地路径（数据目录中的副本）
+     /// - `file_hash`: 内容指纹（MD5）
+     /// - `original_path`: 源文件的 canonical 路径（监听文件夹中的原始文件）
+     pub fn new_with_original_path(
+         file_path: String,
+         file_hash: String,
+         original_path: String,
+     ) -> Self {
+-        Self {
+-            id: uuid::Uuid::new_v4().to_string(),
+-            file_path,
+-            file_hash,
+-            status: DocStatus::Pending,
+-            created_at: chrono::Utc::now().timestamp(),
+-            original_path: Some(original_path),
+-            domain: None,
+-            summary: None,
+-            tags: Vec::new(),
+-            workspace_id: default_workspace_id(),
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 文档分块（对应 REQ-VEC-001 的元数据要求）。
+ #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+ pub struct Chunk {
+     /// 分块唯一标识（UUID v4）
+     pub id: String,

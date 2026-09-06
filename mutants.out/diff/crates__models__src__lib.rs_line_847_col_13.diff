@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "medium" in TodoPriority::from_db_str
+@@ -839,17 +839,17 @@
+             Self::High => "high",
+         }
+     }
+ 
+     /// 从数据库字符串解析。
+     pub fn from_db_str(s: &str) -> Option<Self> {
+         match s {
+             "low" => Some(Self::Low),
+-            "medium" => Some(Self::Medium),
++             /* ~ changed by cargo-mutants ~ */
+             "high" => Some(Self::High),
+             _ => None,
+         }
+     }
+ }
+ 
+ /// 会话待办项（REQ-RAG-044 Session Todo 持久化）。
+ ///

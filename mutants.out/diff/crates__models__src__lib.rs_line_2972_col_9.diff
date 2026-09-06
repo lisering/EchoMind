@@ -1,0 +1,28 @@
+--- crates/models/src/lib.rs
++++ replace ConversationBookmark::new_message -> Self with Default::default()
+@@ -2964,24 +2964,17 @@
+             summary: None,
+         }
+     }
+ 
+     /// 创建新消息级书签（REQ-RAG-053）。
+     ///
+     /// `summary` 自动截取前 50 字符。
+     pub fn new_message(conversation_id: String, message_id: String, content: &str) -> Self {
+-        let summary: String = content.chars().take(50).collect();
+-        Self {
+-            conversation_id,
+-            note: None,
+-            created_at: chrono::Utc::now().timestamp(),
+-            message_id: Some(message_id),
+-            summary: Some(summary),
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 设置备注。
+     pub fn with_note(mut self, note: String) -> Self {
+         self.note = Some(note);
+         self
+     }
+ 

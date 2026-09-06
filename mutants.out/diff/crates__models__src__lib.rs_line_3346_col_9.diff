@@ -1,0 +1,31 @@
+--- crates/models/src/lib.rs
++++ replace McpServerConfig::new_stdio -> Self with Default::default()
+@@ -3338,27 +3338,17 @@
+ /// 复用已有的 pub fn default_true()（line 1344）。
+ impl McpServerConfig {
+     /// 创建新的 stdio 传输 MCP 服务器配置。
+     pub fn new_stdio(
+         id: impl Into<String>,
+         name: impl Into<String>,
+         command: impl Into<String>,
+     ) -> Self {
+-        Self {
+-            id: id.into(),
+-            name: name.into(),
+-            transport: McpTransportType::Stdio,
+-            command: Some(command.into()),
+-            args: Vec::new(),
+-            env: Vec::new(),
+-            url: None,
+-            headers: Vec::new(),
+-            enabled: true,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 创建新的 SSE 传输 MCP 服务器配置。
+     pub fn new_sse(id: impl Into<String>, name: impl Into<String>, url: impl Into<String>) -> Self {
+         Self {
+             id: id.into(),
+             name: name.into(),
+             transport: McpTransportType::Sse,

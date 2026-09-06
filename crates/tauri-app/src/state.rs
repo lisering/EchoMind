@@ -137,12 +137,10 @@ impl AppState {
             "compression.ratio",
             "rag.graph_retriever_enabled",
             "rag.quality_gate_enabled",
-            "memory.enabled",
             "rag.web_search_enabled",
             "rag.contextual_retrieval",
             "log.level",
             "security.posture",
-            "llm.local_model",
         ];
 
         let (config_store, settings_result) = tokio::join!(
@@ -192,11 +190,6 @@ impl AppState {
             .and_then(|v| SecurityPosture::parse_str(v))
             .unwrap_or_default();
 
-        let local_model_val = settings_map
-            .get("llm.local_model")
-            .map(|v| v.to_string())
-            .unwrap_or_default();
-
         // 初始化本地日志系统（REQ-OBS-001）
         let log_dir = data_dir.join("logs");
         let log_guard = match LocalLogger::init(log_dir, &log_level) {
@@ -220,15 +213,27 @@ impl AppState {
         // 根据是否 Pro 选择可用模式集合，并根据当前 llm_mode 设置 fallback
         let is_pro_val = *config_store.is_pro.read().await;
         let llm_mode_val = *config_store.llm_mode.read().await;
+        // P0-2: LlmMode 序列化兼容 — 读取 settings 中的 llm.mode 值，
+        // 如果值不是 "Remote"，自动回退为 "Remote" 并记录警告日志
+        let llm_mode_val = if llm_mode_val != LlmMode::Remote {
+            tracing::warn!(
+                "llm.mode 值 {:?} 已废弃（Local 模式已移除），自动回退为 Remote",
+                llm_mode_val
+            );
+            LlmMode::Remote
+        } else {
+            llm_mode_val
+        };
         let llm_router_init = if is_pro_val {
             echomind_core::llm_router::LlmRouter::new_pro_default()
         } else {
             echomind_core::llm_router::LlmRouter::new_free_default()
         };
+        // Local 模式已废弃，model_id 传空字符串
         llm_router_init
             .set_fallback(echomind_core::llm_router::LlmChoice::new(
                 llm_mode_val,
-                local_model_val,
+                String::new(),
             ))
             .await;
 

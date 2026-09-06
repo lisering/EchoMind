@@ -1,0 +1,27 @@
+--- crates/models/src/lib.rs
++++ replace RagMetricType::needs_llm -> bool with true
+@@ -2588,23 +2588,17 @@
+             "context_similarity" => Some(Self::ContextSimilarity),
+             "keyword_overlap" => Some(Self::KeywordOverlap),
+             _ => None,
+         }
+     }
+ 
+     /// 是否需要 LLM 调用。
+     pub fn needs_llm(&self) -> bool {
+-        matches!(
+-            self,
+-            Self::Faithfulness
+-                | Self::AnswerRelevance
+-                | Self::ContextPrecision
+-                | Self::ContextRecall
+-        )
++        true /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 是否需要 ground truth 答案。
+     pub fn needs_ground_truth(&self) -> bool {
+         matches!(self, Self::ContextRecall)
+     }
+ 
+     /// 是否需要嵌入向量。

@@ -1,0 +1,21 @@
+--- crates/prompt/src/sanitize.rs
++++ replace > with >= in redact_email
+@@ -230,17 +230,17 @@
+ 
+     result
+ }
+ 
+ /// 脱敏邮箱：j***@example.com
+ fn redact_email(email: &str) -> String {
+     if let Some(at_pos) = email.find('@') {
+         let (local, domain) = email.split_at(at_pos);
+-        if local.len() > 1 {
++        if local.len() >= /* ~ changed by cargo-mutants ~ */ 1 {
+             format!("{}***{}", &local[..1], domain)
+         } else {
+             format!("***{domain}")
+         }
+     } else {
+         "***".to_string()
+     }
+ }

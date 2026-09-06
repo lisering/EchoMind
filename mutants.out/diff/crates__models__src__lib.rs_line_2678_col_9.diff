@@ -1,0 +1,22 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalSample::with_relevance_scores -> Self with Default::default()
+@@ -2670,18 +2670,17 @@
+     /// 设置参考答案。
+     pub fn with_ground_truth(mut self, truth: String) -> Self {
+         self.ground_truth = Some(truth);
+         self
+     }
+ 
+     /// 设置相关性分数。
+     pub fn with_relevance_scores(mut self, scores: Vec<f32>) -> Self {
+-        self.relevance_scores = Some(scores);
+-        self
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 设置相关文档索引。
+     pub fn with_relevant_indices(mut self, indices: Vec<usize>) -> Self {
+         self.relevant_indices = Some(indices);
+         self
+     }
+ }

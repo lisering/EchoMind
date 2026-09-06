@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_recent_keep_ratio -> f32 with 1.0
+@@ -1322,17 +1322,17 @@
+     }
+ }
+ 
+ fn default_compaction_threshold() -> f32 {
+     0.8
+ }
+ 
+ fn default_recent_keep_ratio() -> f32 {
+-    0.67
++    1.0 /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ fn default_min_messages_to_compact() -> usize {
+     3
+ }
+ 
+ /// 默认上下文 token 限制（REQ-RAG-017）
+ pub fn default_context_token_limit() -> usize {

@@ -1,0 +1,21 @@
+--- crates/prompt/src/sanitize.rs
++++ replace > with == in redact_intl_phone
+@@ -272,17 +272,17 @@
+         format!("{}.{}.***.***", parts[0], parts[1])
+     } else {
+         "***.***.***.***".to_string()
+     }
+ }
+ 
+ /// 脱敏国际手机号：+86***********
+ fn redact_intl_phone(phone: &str) -> String {
+-    if phone.len() > 4 {
++    if phone.len() == /* ~ changed by cargo-mutants ~ */ 4 {
+         format!("{}{}", &phone[..3], "*".repeat(phone.len() - 3))
+     } else {
+         "****".to_string()
+     }
+ }
+ 
+ /// 脱敏 SSN：***-**-1234
+ fn redact_ssn(ssn: &str) -> String {

@@ -1,0 +1,28 @@
+--- crates/models/src/lib.rs
++++ replace StripResult::empty -> Self with Default::default()
+@@ -2887,24 +2887,17 @@
+     /// 保留的消息数量（DS-03 扩展）
+     #[serde(default)]
+     pub kept_count: usize,
+ }
+ 
+ impl StripResult {
+     /// 创建空结果（无消息被 strip）。
+     pub fn empty() -> Self {
+-        Self {
+-            stripped_count: 0,
+-            summary_inserted: false,
+-            stripped_message_ids: Vec::new(),
+-            estimated_tokens_saved: 0,
+-            summary: String::new(),
+-            kept_count: 0,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// Strip 预览（REQ-RAG-046）。
+ ///
+ /// 预览 strip 操作将影响哪些消息，不执行实际删除。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct StripPreview {

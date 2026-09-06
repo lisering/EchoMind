@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "constant" in SymbolKind::parse_str
+@@ -512,17 +512,17 @@
+     pub fn parse_str(s: &str) -> Self {
+         match s {
+             "function" => SymbolKind::Function,
+             "method" => SymbolKind::Method,
+             "class" => SymbolKind::Class,
+             "struct" => SymbolKind::Struct,
+             "interface" => SymbolKind::Interface,
+             "enum" => SymbolKind::Enum,
+-            "constant" => SymbolKind::Constant,
++             /* ~ changed by cargo-mutants ~ */
+             "module" => SymbolKind::Module,
+             _ => {
+                 eprintln!("[WARN] SymbolKind::parse_str: 未知符号类型 '{s}'，回退为 Function");
+                 SymbolKind::Function
+             }
+         }
+     }
+ }

@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace ConversationTreeNode::is_root -> bool with true
+@@ -1604,17 +1604,17 @@
+             turn_group: turn_group.to_string(),
+             version,
+             preview,
+         }
+     }
+ 
+     /// 判断是否为根节点（无父消息）。
+     pub fn is_root(&self) -> bool {
+-        self.parent_message_id.is_none()
++        true /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 判断是否为叶子节点（无子节点）。
+     pub fn is_leaf(&self) -> bool {
+         self.child_message_ids.is_empty()
+     }
+ }
+ 

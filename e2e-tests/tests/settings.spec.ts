@@ -148,8 +148,8 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
     const vlmState = await page.evaluate(() => window.__mock.state.vlmEnabled);
     expect(vlmState).toBe(true);
 
-    // Toast 提示「VLM 增强已开启」
-    await expect(page.locator('#toasts')).toContainText('VLM 增强已开启', { timeout: 5000 });
+    // Toast 提示「图片理解增强已开启」
+    await expect(page.locator('#toasts')).toContainText('图片理解增强已开启', { timeout: 5000 });
   });
 
   // ─── VLM 关闭流程 ───
@@ -183,8 +183,8 @@ test.describe('E2E-MM-001~009 设置面板 + VLM 开关 + 隐私弹窗（REQ-MM-
     const vlmState = await page.evaluate(() => window.__mock.state.vlmEnabled);
     expect(vlmState).toBe(false);
 
-    // Toast 提示「VLM 增强已关闭」
-    await expect(page.locator('#toasts')).toContainText('VLM 增强已关闭', { timeout: 5000 });
+    // Toast 提示「图片理解增强已关闭」
+    await expect(page.locator('#toasts')).toContainText('图片理解增强已关闭', { timeout: 5000 });
   });
 
   // ─── VLM 状态持久化与恢复 ───

@@ -1,0 +1,21 @@
+--- crates/prompt/src/sanitize.rs
++++ replace - with + in redact_id_card
+@@ -253,17 +253,17 @@
+         "****".to_string()
+     }
+ }
+ 
+ /// 脱敏身份证号：110***********1234
+ fn redact_id_card(id: &str) -> String {
+     if id.len() >= 6 {
+         let prefix = &id[..3];
+-        let suffix = &id[id.len() - 4..];
++        let suffix = &id[id.len() + /* ~ changed by cargo-mutants ~ */ 4..];
+         format!("{}{}{}", prefix, "*".repeat(id.len() - 7), suffix)
+     } else {
+         "****".to_string()
+     }
+ }
+ 
+ /// 脱敏 IP 地址：192.168.***.***
+ fn redact_ip(ip: &str) -> String {

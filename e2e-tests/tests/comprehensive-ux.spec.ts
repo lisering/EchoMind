@@ -803,9 +803,9 @@ test.describe('6. 设置面板全场景', () => {
     await page.locator('[data-tab-id="model"]').click();
     await expect(page.locator('#settingsLlmInfo')).toBeVisible();
     const text = await page.textContent('#settingsLlmInfo');
-    expect(text).toContain('端点');
+    expect(text).toContain('服务器地址');
     expect(text).toContain('模型');
-    expect(text).toContain('Key');
+    expect(text).toContain('密钥');
   });
 
   test('6.5 "修改 LLM 配置"按钮存在', async ({ page }) => {
@@ -836,12 +836,12 @@ await page.locator('[data-tab-id="model"]').click();
     await expect(page.locator('#vlmConfirm')).toBeVisible({ timeout: 3000 });
   });
 
-  test('6.9 隐私确认弹窗标题"VLM 图片理解增强"', async ({ page }) => {
+  test('6.9 隐私确认弹窗标题"PDF 图片理解增强"', async ({ page }) => {
     await page.locator('#settingsBtn').click();
     await page.locator('[data-tab-id="model"]').click();
     await page.locator('#vlmToggle').click();
     const title = await page.textContent('#vlmConfirm h3');
-    expect(title).toContain('VLM');
+    expect(title).toContain('PDF 图片理解增强');
   });
 
   test('6.10 隐私弹窗包含 BYOK 文案', async ({ page }) => {

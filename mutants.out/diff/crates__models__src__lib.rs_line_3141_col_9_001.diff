@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalDataset::to_json -> Result<String, serde_json::Error> with Ok("xyzzy".into())
+@@ -3133,17 +3133,17 @@
+ 
+     /// 是否为空数据集。
+     pub fn is_empty(&self) -> bool {
+         self.samples.is_empty()
+     }
+ 
+     /// 序列化为 JSON 字符串。
+     pub fn to_json(&self) -> Result<String, serde_json::Error> {
+-        serde_json::to_string_pretty(self)
++        Ok("xyzzy".into()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 从 JSON 字符串反序列化。
+     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+         serde_json::from_str(json)
+     }
+ }
+ 

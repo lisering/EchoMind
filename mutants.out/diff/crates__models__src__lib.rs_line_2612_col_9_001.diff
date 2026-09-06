@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace RagMetricType::needs_embedding -> bool with false
+@@ -2604,17 +2604,17 @@
+ 
+     /// 是否需要 ground truth 答案。
+     pub fn needs_ground_truth(&self) -> bool {
+         matches!(self, Self::ContextRecall)
+     }
+ 
+     /// 是否需要嵌入向量。
+     pub fn needs_embedding(&self) -> bool {
+-        matches!(self, Self::ContextSimilarity)
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// RAG 评估样本（单次问答评估输入，REQ-RAG-045）。
+ ///
+ /// 一个样本代表一次完整的 RAG 问答交互：
+ /// 用户提问 → 检索上下文 → LLM 生成答案。
+ ///

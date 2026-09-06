@@ -1,0 +1,21 @@
+--- crates/prompt/src/sanitize.rs
++++ replace || with && in is_injection_line
+@@ -357,17 +357,17 @@
+ 
+ /// 检测文本行中是否包含 prompt injection 模式。
+ ///
+ /// 对每行文本做大小写不敏感的子串匹配，检查是否包含已知的注入模式。
+ /// 返回 `true` 表示该行包含疑似注入指令。
+ fn is_injection_line(line: &str) -> bool {
+     let lower = line.to_lowercase();
+     INJECTION_PATTERNS_ZH.iter().any(|p| line.contains(p))
+-        || INJECTION_PATTERNS_EN.iter().any(|p| lower.contains(p))
++        && /* ~ changed by cargo-mutants ~ */ INJECTION_PATTERNS_EN.iter().any(|p| lower.contains(p))
+ }
+ 
+ /// 在文本中标记疑似注入行。
+ ///
+ /// 遍历每一行，如果检测到注入模式，在该行前添加 `INJECTION_MARKER`。
+ /// 不删除任何内容，仅添加标记。
+ fn mark_injection_patterns(text: &str) -> String {
+     let mut result = String::with_capacity(text.len() + 128);

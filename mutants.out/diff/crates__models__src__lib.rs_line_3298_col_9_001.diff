@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace McpTransportType::parse_str -> Option<Self> with Some(Default::default())
+@@ -3290,21 +3290,17 @@
+         match self {
+             Self::Stdio => "stdio",
+             Self::Sse => "sse",
+         }
+     }
+ 
+     /// 从字符串解析传输类型。
+     pub fn parse_str(s: &str) -> Option<Self> {
+-        match s.to_lowercase().as_str() {
+-            "stdio" => Some(Self::Stdio),
+-            "sse" => Some(Self::Sse),
+-            _ => None,
+-        }
++        Some(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// MCP 服务器配置（REQ-ARCH-016 AC-1）。
+ ///
+ /// 描述一个外部 MCP 服务器的连接配置。存储在 settings 表 `mcp.servers` 键中（JSON 数组）。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct McpServerConfig {

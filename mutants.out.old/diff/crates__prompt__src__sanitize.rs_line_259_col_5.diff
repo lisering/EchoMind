@@ -1,0 +1,27 @@
+--- crates/prompt/src/sanitize.rs
++++ replace redact_id_card -> String with String::new()
+@@ -251,23 +251,17 @@
+         format!("{}****{}", &phone[..3], &phone[phone.len() - 4..])
+     } else {
+         "****".to_string()
+     }
+ }
+ 
+ /// 脱敏身份证号：110***********1234
+ fn redact_id_card(id: &str) -> String {
+-    if id.len() >= 6 {
+-        let prefix = &id[..3];
+-        let suffix = &id[id.len() - 4..];
+-        format!("{}{}{}", prefix, "*".repeat(id.len() - 7), suffix)
+-    } else {
+-        "****".to_string()
+-    }
++    String::new() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 脱敏 IP 地址：192.168.***.***
+ fn redact_ip(ip: &str) -> String {
+     let parts: Vec<&str> = ip.split('.').collect();
+     if parts.len() == 4 {
+         format!("{}.{}.***.***", parts[0], parts[1])
+     } else {

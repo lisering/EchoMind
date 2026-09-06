@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace Workspace::with_id -> Self with Default::default()
+@@ -657,21 +657,17 @@
+             id: uuid::Uuid::new_v4().to_string(),
+             name,
+             created_at: chrono::Utc::now().timestamp(),
+         }
+     }
+ 
+     /// 以指定 ID 构造（用于默认工作空间 `"default"`）。
+     pub fn with_id(id: String, name: String) -> Self {
+-        Self {
+-            id,
+-            name,
+-            created_at: chrono::Utc::now().timestamp(),
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 工作空间数据量预览（REQ-WS-003 删除前确认对话框）。
+ ///
+ /// 删除工作空间前查询将级联清理的数据量，前端展示给用户确认。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct WorkspaceStats {

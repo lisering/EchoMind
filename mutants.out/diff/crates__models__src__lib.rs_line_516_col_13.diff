@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "class" in SymbolKind::parse_str
+@@ -508,17 +508,17 @@
+ 
+     /// 从字符串解析（避免与 `FromStr` trait 冲突，clippy `should_implement_trait`）。
+     ///
+     /// 未知字符串回退为 `Function` 并输出 stderr 警告，避免静默吞掉数据损坏。
+     pub fn parse_str(s: &str) -> Self {
+         match s {
+             "function" => SymbolKind::Function,
+             "method" => SymbolKind::Method,
+-            "class" => SymbolKind::Class,
++             /* ~ changed by cargo-mutants ~ */
+             "struct" => SymbolKind::Struct,
+             "interface" => SymbolKind::Interface,
+             "enum" => SymbolKind::Enum,
+             "constant" => SymbolKind::Constant,
+             "module" => SymbolKind::Module,
+             _ => {
+                 eprintln!("[WARN] SymbolKind::parse_str: 未知符号类型 '{s}'，回退为 Function");
+                 SymbolKind::Function

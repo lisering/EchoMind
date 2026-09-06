@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace ProvenanceTag::said_in_suffix -> String with String::new()
+@@ -2436,17 +2436,17 @@
+             source_label,
+         }
+     }
+ 
+     /// 生成 `(said in ...)` 后缀字符串（用于 scratch 日志内容追加）。
+     ///
+     /// 借鉴 QM 的 `(said in #channel)` 标记格式。
+     pub fn said_in_suffix(&self) -> String {
+-        format!(" (said in {})", self.source_label)
++        String::new() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ // ============================================================
+ // 对话模板/快捷指令系统（S56 自定义快捷指令模板）
+ // ============================================================
+ 
+ /// 自定义快捷指令模板（S56）。

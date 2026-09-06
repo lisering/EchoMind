@@ -69,75 +69,97 @@ jobs:
 
   # ==================================================================
   # 1.5. ai-review — AI 代码审查（依赖 lint 通过）
+  # 包含：rust-doctor（快速静态分析+健康评分，作门禁）+
+  #       触发独立 ai-review.yml 工作流（深度语义审查）
   # ==================================================================
   ai-review:
-    name: AI Code Review
+    name: AI Code Review (rust-doctor)
     needs: [lint]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      security-events: write
+      checks: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          node-version: 22
+          components: clippy, rustfmt
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - name: Build UI
-        run: node scripts/build-ui.mjs
-
-      - name: Run AI Code Review
-        uses: anthropics/claude-code-action@v1
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            You are a senior software engineer reviewing a pull request for the EchoMind project.
-            
-            ## Project Context
-            EchoMind is a Rust + Tauri v2 desktop application for local AI knowledge base with RAG capabilities.
-            
-            ## Review Focus Areas
-            1. **Security**: Check for SQL injection, XSS, command injection, path traversal, hardcoded secrets
-            2. **Performance**: Identify N+1 queries, unnecessary allocations, blocking I/O in async contexts
-            3. **Architecture**: Verify hexagonal architecture compliance, dependency direction (tauri-app → core → models)
-            4. **Rust Best Practices**: Check for unwrap/expect usage, proper error handling, async safety
-            5. **Code Quality**: Review naming, documentation, test coverage, SOLID principles
-            6. **Frontend**: Check for DOM manipulation best practices, event handling, state management
-            
-            ## Review Guidelines
-            - Focus on critical issues that could cause bugs, security vulnerabilities, or performance problems
-            - Provide specific line references and actionable suggestions
-            - Prioritize issues by severity: CRITICAL > HIGH > MEDIUM > LOW
-            - Don't flag style issues that clippy/fmt already catch
-            - Consider the project's iron rules (铁律) defined in .catpaw/rules/system-constraints.md
-            
-            ## Output Format
-            For each issue found, provide:
-            - Severity level (CRITICAL/HIGH/MEDIUM/LOW)
-            - File path and line number
-            - Description of the issue
-            - Suggested fix
-            
-            Review the diff and provide a comprehensive analysis.
-          claude_args: |
-            --max-turns 10
-            --model claude-4-0-sonnet-20250805
-            --append-system-prompt "You are a security-focused code reviewer for a Rust/Tauri desktop application. Focus on critical security and correctness issues."
+          workspaces: '.'
+          key: ai-review
 
-      - name: Upload review results
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: target/fastembed-cache
+          key: fastembed-model-v1-ai-review
+
+      - name: Install rust-doctor
+        run: |
+          curl -L -o rust-doctor https://github.com/ArthurDEV44/rust-doctor/releases/latest/download/rust-doctor-x86_64-unknown-linux-gnu
+          chmod +x rust-doctor
+          sudo mv rust-doctor /usr/local/bin/
+
+      - name: Install external tools (cargo-audit, cargo-deny, cargo-geiger, cargo-machete)
+        run: rust-doctor --install-deps
+
+      - name: Run rust-doctor (diff mode, quality gate)
+        id: rust-doctor
+        run: |
+          rust-doctor \
+            --diff main \
+            --fail-on error \
+            --fail-below 85 \
+            --sarif target/rust-doctor.sarif \
+            --json target/rust-doctor.json \
+            --verbose
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: target/rust-doctor.sarif
+          category: rust-doctor
+
+      - name: Upload JSON report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ai-review-results
-          path: |
-            .ai-review/
-            review-results.json
+          name: rust-doctor-report
+          path: target/rust-doctor.json
           retention-days: 30
+
+      - name: Trigger deep AI review (claude-code-action)
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Trigger the separate ai-review.yml workflow for deep semantic review
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ai-review.yml',
+              ref: context.sha,
+              inputs: {
+                pr_number: context.payload.pull_request.number.toString()
+              }
+            });
+            console.log('Triggered deep AI review workflow');
 
   # ==================================================================
   # 2. frontend-checks — tsc + esbuild + Vitest（独立并行，快速失败）

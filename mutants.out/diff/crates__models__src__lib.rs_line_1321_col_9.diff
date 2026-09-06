@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace TokenBudgetConfig::should_compact -> bool with true
+@@ -1313,17 +1313,17 @@
+ 
+     /// 计算最近消息保留预算（max_tokens * recent_keep_ratio）
+     pub fn recent_budget(&self) -> usize {
+         (self.max_tokens as f32 * self.recent_keep_ratio) as usize
+     }
+ 
+     /// 判断是否需要压缩
+     pub fn should_compact(&self, total_tokens: usize, message_count: usize) -> bool {
+-        message_count >= self.min_messages_to_compact && total_tokens >= self.compaction_trigger()
++        true /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ fn default_compaction_threshold() -> f32 {
+     0.8
+ }
+ 
+ fn default_recent_keep_ratio() -> f32 {

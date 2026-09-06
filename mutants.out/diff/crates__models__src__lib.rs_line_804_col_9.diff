@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace TodoStatus::as_str -> &'static str with "xyzzy"
+@@ -796,21 +796,17 @@
+     InProgress,
+     /// 已完成
+     Completed,
+ }
+ 
+ impl TodoStatus {
+     /// 转为数据库存储字符串。
+     pub fn as_str(&self) -> &'static str {
+-        match self {
+-            Self::Pending => "pending",
+-            Self::InProgress => "in_progress",
+-            Self::Completed => "completed",
+-        }
++        "xyzzy" /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 从数据库字符串解析。
+     pub fn from_db_str(s: &str) -> Option<Self> {
+         match s {
+             "pending" => Some(Self::Pending),
+             "in_progress" => Some(Self::InProgress),
+             "completed" => Some(Self::Completed),

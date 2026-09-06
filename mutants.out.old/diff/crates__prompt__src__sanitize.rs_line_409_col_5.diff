@@ -1,0 +1,27 @@
+--- crates/prompt/src/sanitize.rs
++++ replace sanitize_chunk_content -> String with String::new()
+@@ -401,23 +401,17 @@
+ ///
+ /// # 参数
+ /// - `content`: chunk 原始文本内容
+ ///
+ /// # 返回
+ /// 经过防护处理后的文本（含注入标记 + 边界标签包裹）
+ pub fn sanitize_chunk_content(content: &str) -> String {
+     // 步骤 1：PII 脱敏（REQ-SEC-022，在注入标记之前执行）
+-    let redacted = redact_pii(content);
+-
+-    // 步骤 2：标记注入模式
+-    let marked = mark_injection_patterns(&redacted);
+-
+-    // 步骤 3：用边界标签包裹
+-    format!("{CONTENT_BOUNDARY_OPEN}\n{marked}\n{CONTENT_BOUNDARY_CLOSE}")
++    String::new() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 批量处理检索结果，构建带防护的动态上下文段。
+ ///
+ /// 将多个 `RetrievalResult` 组装为动态上下文字符串，包含：
+ /// 1. 防御性声明（开头）
+ /// 2. 每个 chunk 经 `sanitize_chunk_content()` 处理后，带编号和来源文档名
+ ///

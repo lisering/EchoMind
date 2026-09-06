@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "faithfulness" in RagMetricType::parse_str
+@@ -2573,17 +2573,17 @@
+             Self::ContextSimilarity => "context_similarity",
+             Self::KeywordOverlap => "keyword_overlap",
+         }
+     }
+ 
+     /// 从字符串解析。
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s {
+-            "faithfulness" => Some(Self::Faithfulness),
++             /* ~ changed by cargo-mutants ~ */
+             "answer_relevance" => Some(Self::AnswerRelevance),
+             "context_precision" => Some(Self::ContextPrecision),
+             "context_recall" => Some(Self::ContextRecall),
+             "hit_rate" => Some(Self::HitRate),
+             "mrr" => Some(Self::MRR),
+             "ndcg" => Some(Self::NDCG),
+             "context_similarity" => Some(Self::ContextSimilarity),
+             "keyword_overlap" => Some(Self::KeywordOverlap),

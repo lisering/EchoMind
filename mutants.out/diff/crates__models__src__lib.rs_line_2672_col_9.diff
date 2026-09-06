@@ -1,0 +1,22 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalSample::with_ground_truth -> Self with Default::default()
+@@ -2664,18 +2664,17 @@
+             relevant_indices: None,
+             query_embedding: None,
+             context_embeddings: None,
+         }
+     }
+ 
+     /// 设置参考答案。
+     pub fn with_ground_truth(mut self, truth: String) -> Self {
+-        self.ground_truth = Some(truth);
+-        self
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 设置相关性分数。
+     pub fn with_relevance_scores(mut self, scores: Vec<f32>) -> Self {
+         self.relevance_scores = Some(scores);
+         self
+     }
+ 

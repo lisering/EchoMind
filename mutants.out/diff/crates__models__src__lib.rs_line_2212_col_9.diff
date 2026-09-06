@@ -1,0 +1,26 @@
+--- crates/models/src/lib.rs
++++ replace MemorySource::as_str -> &'static str with "xyzzy"
+@@ -2204,22 +2204,17 @@
+             "auto_extracted" => Some(Self::AutoExtracted),
+             "user_pinned" => Some(Self::UserPinned),
+             _ => None,
+         }
+     }
+ 
+     /// 返回来源字符串标识（用于数据库存储）。
+     pub fn as_str(&self) -> &'static str {
+-        match self {
+-            Self::UserStatement => "user_statement",
+-            Self::AssistantAnswer => "assistant_answer",
+-            Self::AutoExtracted => "auto_extracted",
+-            Self::UserPinned => "user_pinned",
+-        }
++        "xyzzy" /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 对话记忆条目（跨会话知识沉淀，REQ-RAG-032）。
+ ///
+ /// 与 `MemoryRecord`（检索策略记忆）区分：
+ /// - `MemoryRecord`：记录检索方法效果统计（QueryType × RetrievalMethod → hit_rate）
+ /// - `MemoryEntry`：记录对话内容中的关键事实（用户偏好、重要决定、事实陈述）

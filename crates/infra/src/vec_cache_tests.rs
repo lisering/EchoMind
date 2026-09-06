@@ -17,6 +17,7 @@
 //! 向量编码约定：8 维空间中仅前 2 维非零，向量 = [cos(a), sin(a), 0..0]。
 //! 余弦相似度 = cos(a_i - a_query)，随 |a_i - a_query| 单调递减，排序确定无并列。
 
+use crate::sqlite_storage::storage::core::{cosine_similarity, dot_product, normalize_in_place};
 use echomind_core::Storage;
 use echomind_models::{Chunk, DocStatus, Document};
 use tempfile::TempDir;
@@ -181,10 +182,10 @@ fn tc_cos_001_normalized_dot_equals_cosine() {
     for (a, b) in pairs {
         let mut na = a.clone();
         let mut nb = b.clone();
-        crate::sqlite_storage::normalize_in_place(&mut na);
-        crate::sqlite_storage::normalize_in_place(&mut nb);
-        let dot = crate::sqlite_storage::dot_product(&na, &nb);
-        let cos = crate::sqlite_storage::cosine_similarity(&a, &b);
+        normalize_in_place(&mut na);
+        normalize_in_place(&mut nb);
+        let dot = dot_product(&na, &nb);
+        let cos = cosine_similarity(&a, &b);
         assert!(
             (dot - cos).abs() < 1e-4,
             "归一化点积 {dot} 应等于余弦 {cos}"
@@ -196,10 +197,10 @@ fn tc_cos_001_normalized_dot_equals_cosine() {
 #[test]
 fn tc_cos_002_zero_vector_no_nan() {
     let mut zero = vec![0.0; 8];
-    crate::sqlite_storage::normalize_in_place(&mut zero);
+    normalize_in_place(&mut zero);
     let mut q = angle_vec(0.9);
-    crate::sqlite_storage::normalize_in_place(&mut q);
-    let score = crate::sqlite_storage::dot_product(&q, &zero);
+    normalize_in_place(&mut q);
+    let score = dot_product(&q, &zero);
     assert!(score.is_finite(), "零向量不得产生 NaN");
     assert_eq!(score, 0.0, "零向量得分应为 0.0");
 }
@@ -215,13 +216,13 @@ fn tc_cos_003_non_unit_query_equivalence() {
     let mut nq1 = q_raw.clone();
     let mut nq2 = q_scaled.clone();
     let mut nc = cand.clone();
-    crate::sqlite_storage::normalize_in_place(&mut nq1);
-    crate::sqlite_storage::normalize_in_place(&mut nq2);
-    crate::sqlite_storage::normalize_in_place(&mut nc);
+    normalize_in_place(&mut nq1);
+    normalize_in_place(&mut nq2);
+    normalize_in_place(&mut nc);
 
-    let d1 = crate::sqlite_storage::dot_product(&nq1, &nc);
-    let d2 = crate::sqlite_storage::dot_product(&nq2, &nc);
-    let cos = crate::sqlite_storage::cosine_similarity(&q_raw, &cand);
+    let d1 = dot_product(&nq1, &nc);
+    let d2 = dot_product(&nq2, &nc);
+    let cos = cosine_similarity(&q_raw, &cand);
     assert!((d1 - cos).abs() < 1e-4, "归一化点积等于余弦: {d1} vs {cos}");
     assert!((d2 - cos).abs() < 1e-4, "查询缩放不影响余弦: {d2} vs {cos}");
 }

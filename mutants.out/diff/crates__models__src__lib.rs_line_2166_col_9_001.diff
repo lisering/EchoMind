@@ -1,0 +1,26 @@
+--- crates/models/src/lib.rs
++++ replace MemoryTier::parse_str -> Option<Self> with Some(Default::default())
+@@ -2158,22 +2158,17 @@
+     Hall,
+     /// 室层：长期记忆（核心知识），永久保留
+     Room,
+ }
+ 
+ impl MemoryTier {
+     /// 从字符串解析记忆层级。
+     pub fn parse_str(s: &str) -> Option<Self> {
+-        match s {
+-            "wing" => Some(Self::Wing),
+-            "hall" => Some(Self::Hall),
+-            "room" => Some(Self::Room),
+-            _ => None,
+-        }
++        Some(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 返回层级字符串标识（用于数据库存储）。
+     pub fn as_str(&self) -> &'static str {
+         match self {
+             Self::Wing => "wing",
+             Self::Hall => "hall",
+             Self::Room => "room",

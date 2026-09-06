@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalDataset::from_json -> Result<Self, serde_json::Error> with Ok(Default::default())
+@@ -3138,17 +3138,17 @@
+ 
+     /// 序列化为 JSON 字符串。
+     pub fn to_json(&self) -> Result<String, serde_json::Error> {
+         serde_json::to_string_pretty(self)
+     }
+ 
+     /// 从 JSON 字符串反序列化。
+     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+-        serde_json::from_str(json)
++        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ // ============================================================
+ // 嵌入模型对比评估（REQ-VEC-018）
+ // ============================================================
+ 
+ /// 嵌入模型对比评估请求（REQ-VEC-018）。

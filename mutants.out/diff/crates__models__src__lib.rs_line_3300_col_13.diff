@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "sse" in McpTransportType::parse_str
+@@ -3292,17 +3292,17 @@
+             Self::Sse => "sse",
+         }
+     }
+ 
+     /// 从字符串解析传输类型。
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s.to_lowercase().as_str() {
+             "stdio" => Some(Self::Stdio),
+-            "sse" => Some(Self::Sse),
++             /* ~ changed by cargo-mutants ~ */
+             _ => None,
+         }
+     }
+ }
+ 
+ /// MCP 服务器配置（REQ-ARCH-016 AC-1）。
+ ///
+ /// 描述一个外部 MCP 服务器的连接配置。存储在 settings 表 `mcp.servers` 键中（JSON 数组）。

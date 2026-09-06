@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_paged_attn_gpu_memory -> usize with 1
+@@ -1346,17 +1346,17 @@
+ 
+ /// 默认 PagedAttention 块大小（REQ-LLM-003 扩展）
+ pub fn default_paged_attn_block_size() -> usize {
+     32
+ }
+ 
+ /// 默认 PagedAttention GPU 上下文 token 数（REQ-LLM-003 扩展）
+ pub fn default_paged_attn_gpu_memory() -> usize {
+-    4096
++    1 /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 默认缓存启用开关（REQ-PERF-001）
+ pub fn default_cache_enabled() -> bool {
+     true
+ }
+ 
+ /// 默认缓存存活时间（秒，REQ-PERF-001）

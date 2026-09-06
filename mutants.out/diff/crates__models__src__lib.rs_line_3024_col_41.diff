@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace += with -= in BatchResult::from_results
+@@ -3016,17 +3016,17 @@
+     }
+ 
+     /// 从结果列表构建 BatchResult。
+     pub fn from_results(results: Vec<(String, Result<(), String>)>) -> Self {
+         let mut success_count = 0;
+         let mut failed_ids = Vec::new();
+         for (id, result) in results {
+             match result {
+-                Ok(()) => success_count += 1,
++                Ok(()) => success_count -= /* ~ changed by cargo-mutants ~ */ 1,
+                 Err(_) => failed_ids.push(id),
+             }
+         }
+         let failed_count = failed_ids.len();
+         Self {
+             success_count,
+             failed_count,
+             failed_ids,

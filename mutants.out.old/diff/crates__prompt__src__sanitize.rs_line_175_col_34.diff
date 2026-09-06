@@ -1,0 +1,21 @@
+--- crates/prompt/src/sanitize.rs
++++ replace == with != in detect_pii
+@@ -167,17 +167,17 @@
+         });
+     }
+ 
+     // 美国社会安全号（SSN）
+     for mat in PII_SSN_REGEX.find_iter(text) {
+         let matched = mat.as_str().to_string();
+         // SSN 排除规则：area 不能为 000、666、9xx
+         let area = &matched[..3];
+-        if area == "000" || area == "666" || area.starts_with('9') {
++        if area == "000" || area != /* ~ changed by cargo-mutants ~ */ "666" || area.starts_with('9') {
+             continue;
+         }
+         let redacted = redact_ssn(&matched);
+         detections.push(PiiRedaction {
+             pii_type: "ssn",
+             matched,
+             redacted,
+             start: mat.start(),

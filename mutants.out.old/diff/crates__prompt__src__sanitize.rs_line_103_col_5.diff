@@ -1,0 +1,121 @@
+--- crates/prompt/src/sanitize.rs
++++ replace detect_pii -> Vec<PiiRedaction> with vec![]
+@@ -95,117 +95,17 @@
+     pub end: usize,
+ }
+ 
+ /// 检测文本中的所有 PII 并返回检测结果。
+ ///
+ /// 支持检测 7 类 PII（银行卡号因误报率高，在 RAG 管线中暂不启用）。
+ #[must_use]
+ pub fn detect_pii(text: &str) -> Vec<PiiRedaction> {
+-    let mut detections = Vec::new();
+-
+-    // 邮箱
+-    for mat in PII_EMAIL_REGEX.find_iter(text) {
+-        let matched = mat.as_str().to_string();
+-        let redacted = redact_email(&matched);
+-        detections.push(PiiRedaction {
+-            pii_type: "email",
+-            matched,
+-            redacted,
+-            start: mat.start(),
+-            end: mat.end(),
+-        });
+-    }
+-
+-    // 中国手机号
+-    for mat in PII_PHONE_REGEX.find_iter(text) {
+-        let matched = mat.as_str().to_string();
+-        let redacted = redact_phone(&matched);
+-        detections.push(PiiRedaction {
+-            pii_type: "phone",
+-            matched,
+-            redacted,
+-            start: mat.start(),
+-            end: mat.end(),
+-        });
+-    }
+-
+-    // 身份证号（18位）
+-    for mat in PII_ID_CARD_REGEX.find_iter(text) {
+-        let matched = mat.as_str().to_string();
+-        let redacted = redact_id_card(&matched);
+-        detections.push(PiiRedaction {
+-            pii_type: "id_card",
+-            matched,
+-            redacted,
+-            start: mat.start(),
+-            end: mat.end(),
+-        });
+-    }
+-
+-    // IP 地址
+-    for mat in PII_IP_REGEX.find_iter(text) {
+-        let matched = mat.as_str().to_string();
+-        let redacted = redact_ip(&matched);
+-        detections.push(PiiRedaction {
+-            pii_type: "ip_address",
+-            matched,
+-            redacted,
+-            start: mat.start(),
+-            end: mat.end(),
+-        });
+-    }
+-
+-    // 国际手机号（E.164 格式）
+-    for mat in PII_INTL_PHONE_REGEX.find_iter(text) {
+-        let matched = mat.as_str().to_string();
+-        let redacted = redact_intl_phone(&matched);
+-        detections.push(PiiRedaction {
+-            pii_type: "international_phone",
+-            matched,
+-            redacted,
+-            start: mat.start(),
+-            end: mat.end(),
+-        });
+-    }
+-
+-    // 美国社会安全号（SSN）
+-    for mat in PII_SSN_REGEX.find_iter(text) {
+-        let matched = mat.as_str().to_string();
+-        // SSN 排除规则：area 不能为 000、666、9xx
+-        let area = &matched[..3];
+-        if area == "000" || area == "666" || area.starts_with('9') {
+-            continue;
+-        }
+-        let redacted = redact_ssn(&matched);
+-        detections.push(PiiRedaction {
+-            pii_type: "ssn",
+-            matched,
+-            redacted,
+-            start: mat.start(),
+-            end: mat.end(),
+-        });
+-    }
+-
+-    // 中国护照号
+-    for mat in PII_PASSPORT_REGEX.find_iter(text) {
+-        let matched = mat.as_str().to_string();
+-        let redacted = redact_passport(&matched);
+-        detections.push(PiiRedaction {
+-            pii_type: "passport",
+-            matched,
+-            redacted,
+-            start: mat.start(),
+-            end: mat.end(),
+-        });
+-    }
+-
+-    // 按位置排序
+-    detections.sort_by_key(|d| d.start);
+-    detections
++    vec![] /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 脱敏文本中的所有 PII，返回脱敏后的文本。
+ ///
+ /// 将检测到的 PII 替换为脱敏形式（如 `j***@example.com`），
+ /// 非重叠匹配按位置先后顺序处理。
+ #[must_use]
+ pub fn redact_pii(text: &str) -> String {

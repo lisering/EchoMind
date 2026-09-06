@@ -17,9 +17,6 @@ use echomind_infra::sqlite_storage::SqliteStorage;
 /// # 线程安全
 /// 内部使用 `Arc` 共享，无额外锁需求。
 pub struct SecurityStore {
-    /// 共享存储引用
-    #[allow(dead_code)]
-    storage: Arc<SqliteStorage>,
     /// 安全管理器（自动锁屏、暴力破解防护、紧急销毁）
     pub security: Arc<SecurityManager>,
     /// 剪贴板清除管理器
@@ -28,9 +25,8 @@ pub struct SecurityStore {
 
 impl SecurityStore {
     /// 创建新的安全管理 Store。
-    pub fn new(storage: Arc<SqliteStorage>) -> Self {
+    pub fn new(_storage: Arc<SqliteStorage>) -> Self {
         Self {
-            storage,
             security: Arc::new(SecurityManager::new()),
             clipboard_guard: Arc::new(ClipboardGuard::new(ClipboardConfig::default())),
         }

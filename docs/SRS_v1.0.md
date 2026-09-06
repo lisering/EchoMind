@@ -2187,7 +2187,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 关联测试：TC-LLM-LOCAL-001~008 等已删除
 
 #### REQ-LLM-004 本地模型管理
-- 优先级：P1 ｜ 状态：Implemented ｜ 依赖：REQ-LLM-003
+- 优先级：P1 ｜ 状态：Deprecated (v3.1.0 Phase 1 R3) ｜ 依赖：REQ-LLM-003
 - 描述：提供本地 GGUF 模型文件的管理功能：下载（从 HuggingFace）、列表、删除、选择。模型文件存储在 `{data_dir}/models/llm/` 目录下。下载时通过 `model_download_progress` 事件推送实时进度（已下载字节、总字节、速度），前端渲染进度条。支持从推荐模型列表一键下载（Qwen2.5 / Llama / Phi 系列）。
 - 验收标准：
   - AC-1：`list_local_models` 命令返回已下载模型列表（文件名、大小、推断架构、参数量、量化格式）。
@@ -2200,7 +2200,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 关联测试：TC-MGR-001~020
 
 #### REQ-LLM-005 GPU 加速推理（Phase 2）
-- 优先级：P2 ｜ 状态：Implemented ｜ 依赖：REQ-LLM-003
+- 优先级：P2 ｜ 状态：Deprecated ｜ 依赖：REQ-LLM-003
 - 描述：通过 mistral.rs v0.9.0 的 `best_device()` API 自动选择最优推理设备（CUDA → Metal → CPU），在支持的 GPU 上执行推理，显著提升 tokens/sec 并降低首 token 延迟。GPU 加速通过 Cargo feature flags（`metal` / `cuda` / `accelerate`）控制，编译时决定，无需运行时切换。`LocalLlmEngine::detect_device_kind()` 在 `new()` 时探测设备类型，前端通过 `get_local_llm_device_kind` 命令显示当前设备。
 - 验收标准：
   - AC-1：`metal` feature 启用时（macOS），`best_device(false)` 返回 Metal 设备，`device_kind()` 返回 `"metal"`。
@@ -2212,7 +2212,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 关联测试：TC-LLM-GPU-001~003、TC-LLM-UPGRADE-003
 
 #### REQ-LLM-006 采样参数配置（Phase 2）
-- 优先级：P2 ｜ 状态：Implemented ｜ 依赖：REQ-LLM-003
+- 优先级：P2 ｜ 状态：Deprecated ｜ 依赖：REQ-LLM-003
 - 描述：提供本地推理的采样参数运行时配置能力，包括 temperature、top_p、top_k、max_tokens、frequency_penalty、presence_penalty。参数通过 `set_sampling_params` IPC 命令持久化到 settings 表 `llm.sampling` 键（JSON 序列化），引擎加载时自动读取并应用。运行时修改参数即时生效，无需重新加载模型。各字段为 `Option`，`None` 表示使用引擎默认值（不向 RequestBuilder 注入该参数）。
 - 验收标准：
   - AC-1：`set_sampling_params` 命令接受 `LlmSamplingParams` 结构体，参数范围校验（temperature 0.0~2.0、top_p 0.0~1.0、top_k 1~100、max_tokens >0、frequency_penalty -2.0~2.0、presence_penalty -2.0~2.0）。
@@ -2225,7 +2225,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 关联测试：TC-LLM-SAMPLE-001~004、TC-MODEL-LLM-005~008
 
 #### REQ-LLM-007 自研量化推理内核（Phase 3）
-- 优先级：P2 ｜ 状态：Implemented ｜ 依赖：REQ-LLM-003
+- 优先级：P2 ｜ 状态：Deprecated ｜ 依赖：REQ-LLM-003
 - 描述：自研 GEMV（量化矩阵-向量乘法）内核，支持 Q4_0/Q4_K/Q8_0/Q8_K 四种 GGML 量化格式。包含 GGUF 文件解析器（mmap 零拷贝）、量化块结构、GEMV 内核（标量 + AVX2 预留）、CPU cache 友好权重重排（Row-Major → Tile-Major）和内核模式运行时切换。通过 `set_kernel_mode` / `get_kernel_mode` IPC 命令在 mistral.rs 内核与自研内核间切换，持久化到 settings 表 `llm.kernel_mode` 键。
 - 验收标准：
   - AC-1：`GgufFile::open()` 通过 mmap 解析 GGUF v3 文件，提取元数据和张量信息（零拷贝）。
@@ -2237,7 +2237,7 @@ P0 = v1.0 必须交付；P1 = v1.0 力争交付；P2 = 后续版本候选。
 - 关联测试：TC-GGUF-001~014、TC-QUANT-001~014、TC-GEMV-001~014、TC-REPACK-001~006、TC-INTEG-001~006、TC-PHASE3-PERF-001~004
 
 #### REQ-LLM-008 内存层次流式加载（Phase 3）
-- 优先级：P2 ｜ 状态：Implemented ｜ 依赖：REQ-LLM-003
+- 优先级：P2 ｜ 状态：Deprecated ｜ 依赖：REQ-LLM-003
 - 描述：在模型超过可用 RAM 时自动管理内存，通过 mmap 按需分页 + `madvise(MADV_WILLNEED)` 预取 + LRU 驱逐实现流式加载。Layer 级预取器在推理进行时后台预取下一层权重到 page cache，RAM 预算管理器跟踪内存使用量并在空间不足时 LRU 驱逐旧层。
 - 验收标准：
   - AC-1：`LayerPrefetcher` 通过 `madvise(MADV_WILLNEED)` 预取指定层权重到 page cache（非阻塞）。

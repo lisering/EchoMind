@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "module" in SymbolKind::parse_str
+@@ -513,17 +513,17 @@
+         match s {
+             "function" => SymbolKind::Function,
+             "method" => SymbolKind::Method,
+             "class" => SymbolKind::Class,
+             "struct" => SymbolKind::Struct,
+             "interface" => SymbolKind::Interface,
+             "enum" => SymbolKind::Enum,
+             "constant" => SymbolKind::Constant,
+-            "module" => SymbolKind::Module,
++             /* ~ changed by cargo-mutants ~ */
+             _ => {
+                 eprintln!("[WARN] SymbolKind::parse_str: 未知符号类型 '{s}'，回退为 Function");
+                 SymbolKind::Function
+             }
+         }
+     }
+ }
+ 

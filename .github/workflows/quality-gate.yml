@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [semantic_splitter_fuzz, normalize_query_fuzz]
+        target: [semantic_splitter_fuzz, entity_extractor_fuzz, wiki_link_parser_fuzz, sse_parser_fuzz]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly

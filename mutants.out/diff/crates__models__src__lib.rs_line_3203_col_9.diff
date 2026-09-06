@@ -1,0 +1,68 @@
+--- crates/models/src/lib.rs
++++ replace EmbedMetricScores::from_metrics_avg -> Self with Default::default()
+@@ -3195,64 +3195,17 @@
+             hit_rate: 0.0,
+             mrr: 0.0,
+             ndcg: 0.0,
+         }
+     }
+ 
+     /// 从指标列表中提取 Hit Rate / MRR / NDCG 三个分数的平均值。
+     pub fn from_metrics_avg(metrics: &[Vec<RagEvalMetric>]) -> Self {
+-        if metrics.is_empty() {
+-            return Self::zero();
+-        }
+-
+-        let mut hit_sum = 0.0f32;
+-        let mut mrr_sum = 0.0f32;
+-        let mut ndcg_sum = 0.0f32;
+-        let mut hit_count = 0usize;
+-        let mut mrr_count = 0usize;
+-        let mut ndcg_count = 0usize;
+-
+-        for sample_metrics in metrics {
+-            for m in sample_metrics {
+-                match m.metric_type {
+-                    RagMetricType::HitRate => {
+-                        hit_sum += m.score;
+-                        hit_count += 1;
+-                    }
+-                    RagMetricType::MRR => {
+-                        mrr_sum += m.score;
+-                        mrr_count += 1;
+-                    }
+-                    RagMetricType::NDCG => {
+-                        ndcg_sum += m.score;
+-                        ndcg_count += 1;
+-                    }
+-                    _ => {}
+-                }
+-            }
+-        }
+-
+-        Self {
+-            hit_rate: if hit_count > 0 {
+-                hit_sum / hit_count as f32
+-            } else {
+-                0.0
+-            },
+-            mrr: if mrr_count > 0 {
+-                mrr_sum / mrr_count as f32
+-            } else {
+-                0.0
+-            },
+-            ndcg: if ndcg_count > 0 {
+-                ndcg_sum / ndcg_count as f32
+-            } else {
+-                0.0
+-            },
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 单个嵌入模型的对比评估结果（REQ-VEC-018）。
+ ///
+ /// 包含模型名称、向量维度、三指标分数和评估样本数。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct EmbedComparisonResult {

@@ -17,6 +17,7 @@
 //! | [`vectors`] | 分块/向量/嵌入缓存/FTS5 关键词检索/BM25 重建/路径查找 | S03 新增 |
 //! | [`entities`] | 实体/关系/摘要/命题/wiki 链接/代码符号 CRUD | S03 新增 |
 //! | [`misc`] | 待处理输入/scratch/幂等性/todo/budget/检索记忆 CRUD | S03 新增 |
+//! | [`core`] | 核心工具：run_db/事务/状态转换/向量序列化/相似度计算 | S04 新增 |
 //!
 //! ## 可见性策略
 //!
@@ -24,22 +25,37 @@
 //! `SqliteStorage` 通过 `use storage::*` 引入后，在自身 `impl` 块中调用。
 
 #[cfg(test)]
+pub(crate) mod audit;
+#[cfg(test)]
 pub(crate) mod bookmark_tests;
 pub(crate) mod conversations;
+pub(crate) mod core;
 pub(crate) mod crypto;
 pub(crate) mod documents;
 pub(crate) mod entities;
+#[cfg(test)]
+pub(crate) mod hnsw;
 pub(crate) mod messages;
 pub(crate) mod migration;
 #[cfg(test)]
 pub(crate) mod migration_tests;
 pub(crate) mod misc;
 pub(crate) mod schema;
+#[cfg(test)]
+pub(crate) mod settings;
 pub(crate) mod vectors;
 
 // 重导出：SqliteStorage 主文件通过 `use storage::*` 访问。
+#[allow(unused_imports)]
+pub(crate) use core::{
+    bytes_to_vec, cosine_similarity, dot_product, normalize_in_place, row_to_document,
+    row_to_memory_entry, row_to_status, run_db, status_to_row, vec_to_bytes, with_transaction,
+};
+#[allow(unused_imports)]
 pub(crate) use crypto::{
     decrypt, decrypt_bytes, encrypt, encrypt_bytes, ensure_dir_0700, load_or_create_cipher,
 };
+#[allow(unused_imports)]
 pub(crate) use migration::{Pool, init_schema};
+#[allow(unused_imports)]
 pub(crate) use schema::PRAGMAS;

@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace ConversationTree::find -> Option<&ConversationTreeNode> with Some(Box::leak(Box::new(Default::default())))
+@@ -1642,17 +1642,17 @@
+             nodes: Vec::new(),
+             root_ids: Vec::new(),
+             active_path: Vec::new(),
+         }
+     }
+ 
+     /// 根据 node_id 查找节点。
+     pub fn find(&self, node_id: &str) -> Option<&ConversationTreeNode> {
+-        self.nodes.iter().find(|n| n.node_id == node_id)
++        Some(Box::leak(Box::new(Default::default()))) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 获取节点的所有子节点。
+     pub fn children_of(&self, node_id: &str) -> Vec<&ConversationTreeNode> {
+         self.nodes
+             .iter()
+             .filter(|n| n.parent_message_id.as_deref() == Some(node_id))
+             .collect()

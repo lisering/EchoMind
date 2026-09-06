@@ -1,0 +1,31 @@
+--- crates/models/src/lib.rs
++++ replace McpServerConfig::new_sse -> Self with Default::default()
+@@ -3353,27 +3353,17 @@
+             url: None,
+             headers: Vec::new(),
+             enabled: true,
+         }
+     }
+ 
+     /// 创建新的 SSE 传输 MCP 服务器配置。
+     pub fn new_sse(id: impl Into<String>, name: impl Into<String>, url: impl Into<String>) -> Self {
+-        Self {
+-            id: id.into(),
+-            name: name.into(),
+-            transport: McpTransportType::Sse,
+-            command: None,
+-            args: Vec::new(),
+-            env: Vec::new(),
+-            url: Some(url.into()),
+-            headers: Vec::new(),
+-            enabled: true,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 验证配置完整性。
+     ///
+     /// 返回 `Ok(())` 表示配置有效，`Err(message)` 表示缺失必填字段。
+     pub fn validate(&self) -> Result<(), String> {
+         if self.name.trim().is_empty() {
+             return Err("服务器名称不能为空".to_string());

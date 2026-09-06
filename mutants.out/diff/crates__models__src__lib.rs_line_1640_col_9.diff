@@ -1,0 +1,26 @@
+--- crates/models/src/lib.rs
++++ replace ConversationTree::empty -> Self with Default::default()
+@@ -1632,22 +1632,17 @@
+     pub root_ids: Vec<String>,
+     /// 当前活跃路径（从根到当前查看节点的 node_id 序列）
+     pub active_path: Vec<String>,
+ }
+ 
+ impl ConversationTree {
+     /// 创建空的对话分支树。
+     pub fn empty(conversation_id: &str) -> Self {
+-        Self {
+-            conversation_id: conversation_id.to_string(),
+-            nodes: Vec::new(),
+-            root_ids: Vec::new(),
+-            active_path: Vec::new(),
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 根据 node_id 查找节点。
+     pub fn find(&self, node_id: &str) -> Option<&ConversationTreeNode> {
+         self.nodes.iter().find(|n| n.node_id == node_id)
+     }
+ 
+     /// 获取节点的所有子节点。

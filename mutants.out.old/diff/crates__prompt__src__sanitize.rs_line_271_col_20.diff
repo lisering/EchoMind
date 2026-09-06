@@ -1,0 +1,21 @@
+--- crates/prompt/src/sanitize.rs
++++ replace == with != in redact_ip
+@@ -263,17 +263,17 @@
+     } else {
+         "****".to_string()
+     }
+ }
+ 
+ /// 脱敏 IP 地址：192.168.***.***
+ fn redact_ip(ip: &str) -> String {
+     let parts: Vec<&str> = ip.split('.').collect();
+-    if parts.len() == 4 {
++    if parts.len() != /* ~ changed by cargo-mutants ~ */ 4 {
+         format!("{}.{}.***.***", parts[0], parts[1])
+     } else {
+         "***.***.***.***".to_string()
+     }
+ }
+ 
+ /// 脱敏国际手机号：+86***********
+ fn redact_intl_phone(phone: &str) -> String {

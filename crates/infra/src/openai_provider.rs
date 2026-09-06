@@ -598,9 +598,9 @@ fn compute_server_error_backoff_delay(attempt: u32) -> Duration {
     Duration::from_secs(base_secs) + Duration::from_millis(jitter_ms)
 }
 
+#[cfg(test)]
 /// 截断错误响应体（保持字符边界，防超长错误刷屏）。
-/// Deprecated: unused function retained for potential future use.
-#[allow(dead_code)]
+/// 仅用于测试。
 fn truncate(text: &str, max: usize) -> &str {
     if text.len() <= max {
         return text;

@@ -120,39 +120,6 @@ pub(crate) async fn classify_and_update_domain(
     Ok(())
 }
 
-/// 重新分类指定文档的领域（REQ-VEC-013 AC-7）。
-#[tauri::command]
-pub async fn reclassify_document(
-    doc_id: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    reclassify_document_inner(&doc_id, state.inner()).await
-}
-
-/// `reclassify_document` 的逻辑实现（命令与集成测试复用）。
-///
-/// 获取文档 chunks → 初始化分类器 → 分类 → 持久化 → 返回领域标识。
-pub async fn reclassify_document_inner(doc_id: &str, state: &AppState) -> Result<String, String> {
-    let embedder = state
-        .embedder()
-        .await
-        .map_err(|e| format!("向量化引擎不可用: {e:#}"))?;
-    classify_and_update_domain(&state.storage, &embedder, doc_id)
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    // 重新读取分类结果
-    let docs = state
-        .storage
-        .list_documents()
-        .await
-        .map_err(|e| format!("{e:#}"))?;
-    let doc = docs
-        .into_iter()
-        .find(|d| d.id == doc_id)
-        .ok_or_else(|| format!("文档不存在: {doc_id}"))?;
-    Ok(doc.domain.unwrap_or_else(|| "general".to_string()))
-}
-
 /// 异步生成文档摘要的辅助函数（导入管线后台调用）。
 ///
 /// 使用 `ImportService::generate_summary()` 生成摘要并持久化。

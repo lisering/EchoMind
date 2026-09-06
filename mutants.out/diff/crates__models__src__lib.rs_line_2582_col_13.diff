@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ delete match arm "answer_relevance" in RagMetricType::parse_str
+@@ -2574,17 +2574,17 @@
+             Self::KeywordOverlap => "keyword_overlap",
+         }
+     }
+ 
+     /// 从字符串解析。
+     pub fn parse_str(s: &str) -> Option<Self> {
+         match s {
+             "faithfulness" => Some(Self::Faithfulness),
+-            "answer_relevance" => Some(Self::AnswerRelevance),
++             /* ~ changed by cargo-mutants ~ */
+             "context_precision" => Some(Self::ContextPrecision),
+             "context_recall" => Some(Self::ContextRecall),
+             "hit_rate" => Some(Self::HitRate),
+             "mrr" => Some(Self::MRR),
+             "ndcg" => Some(Self::NDCG),
+             "context_similarity" => Some(Self::ContextSimilarity),
+             "keyword_overlap" => Some(Self::KeywordOverlap),
+             _ => None,

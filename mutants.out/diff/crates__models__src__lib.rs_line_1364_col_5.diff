@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_cache_ttl -> u64 with 0
+@@ -1356,17 +1356,17 @@
+ 
+ /// 默认缓存启用开关（REQ-PERF-001）
+ pub fn default_cache_enabled() -> bool {
+     true
+ }
+ 
+ /// 默认缓存存活时间（秒，REQ-PERF-001）
+ pub fn default_cache_ttl() -> u64 {
+-    86400
++    0 /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 默认语义匹配阈值（REQ-PERF-001）
+ pub fn default_cache_semantic_threshold() -> f32 {
+     0.92
+ }
+ 
+ /// 对话成本统计（累计 token 用量追踪）。

@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace > with >= in EmbedMetricScores::from_metrics_avg
+@@ -3237,17 +3237,17 @@
+             } else {
+                 0.0
+             },
+             mrr: if mrr_count > 0 {
+                 mrr_sum / mrr_count as f32
+             } else {
+                 0.0
+             },
+-            ndcg: if ndcg_count > 0 {
++            ndcg: if ndcg_count >= /* ~ changed by cargo-mutants ~ */ 0 {
+                 ndcg_sum / ndcg_count as f32
+             } else {
+                 0.0
+             },
+         }
+     }
+ }
+ 

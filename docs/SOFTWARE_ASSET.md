@@ -2,7 +2,7 @@
 
 > **本文档是 EchoMind 项目的权威软件资产清单，覆盖全部源代码、架构、数据流、依赖、测试、构建与部署细节。后续迭代开发必须同步更新此文档。**
 >
-> **版本**: v2.0.0（深耕阶段） | **更新日期**: 2026-08-16 | **维护者**: EchoMind 团队
+> **版本**: v3.1.0 | **更新日期**: 2026-08-27 | **维护者**: EchoMind 团队
 
 ---
 
@@ -43,28 +43,29 @@ EchoMind（灵犀）是一个 **本地 RAG 知识库桌面应用**，基于 Rust
 | 能力 | 技术方案 |
 |---|---|
 | 文档导入 | Markdown / 纯文本 / PDF（含多模态 OCR + VLM） |
-| 文本分块 | Token 窗口 / 语义分块 / 章节感知分块 / Proposition 原子分割 |
+| 文本分块 | Token 窗口 / 语义分块 / 章节感知分块 |
 | 嵌入向量 | fastembed ONNX (5 模型可选: AllMiniLML6V2/BgeSmallEnV1_5/BgeSmallZhV1_5/E5SmallV2/BgeM3, 384~1024-dim)，多模型运行时切换 |
 | 向量检索 | 归一化点积（内存快照）/ HNSW 近似最近邻（Free，磁盘加密持久化 + 懒加载） |
 | 混合检索 | 向量 + BM25 关键词 → RRF 融合 |
 | 重排序 | bge-reranker-base Cross-Encoder（Pro 可选） |
 | 查询改写 | HyDE 假设性文档嵌入（Pro） |
-| LLM 推理 | OpenAI 兼容 SSE 流式 / 本地 mistral.rs GGUF（Pro） |
+| LLM 推理 | OpenAI 兼容 SSE 流式 |
 | 数据库加密 | SQLCipher AES-256 + Argon2id KDF |
 | 隐私保护 | 8 类 PII 检测/脱敏 + 审计哈希链 |
 | 安全状态机 | 自动锁屏 / 暴力破解防护 / 紧急销毁 / 剪贴板清除 |
-| 多代理 RAG | ReAct 循环 / Coordinator 多步协调 |
-| 性能优化 | 三级缓存 / Prompt 压缩 / 渐进注入 / Speculative RAG / 检索记忆 / Prompt Prefix 磁盘缓存 / 上下文压缩增强（原文尾部保留） |
+| 知识图谱 | 实体关系抽取 + 图遍历检索 + D3.js 可视化 |
+| 网页搜索 | DuckDuckGo Instant Answer API 集成（REQ-RAG-036） |
+| 代码感知 RAG | tree-sitter AST 符号提取 + WASM 沙箱执行（REQ-RAG-031/032） |
 | 多知识库 | 工作空间创建/切换/重命名/删除（REQ-WS-001） |
-| 智能模式 | 一键开启最佳实践配置（混合搜索 + Rerank + HyDE + 知识图谱 + 质量门控 + 压缩） |
+| 智能模式 | 一键开启最佳实践配置（混合搜索 + Rerank + HyDE + 知识图谱 + 质量门控 + 压缩 2x）|
+| 设置通俗化 | 35 分区 → 8 分区，20 个术语化设置项通俗化（如 Speculative RAG → 快速预生成） |
 
 ### 1.3 技术栈
 
 - **后端**: Rust Edition 2024 (≥1.85), Tauri v2
-- **前端**: Vanilla JS ES Modules (76 个模块), esbuild 打包 IIFE, TypeScript checkJs 类型检查 (tsconfig.json + types/*.d.ts), Tailwind CSS (预构建), 无框架无 CDN
+- **前端**: Vanilla JS ES Modules (56 个模块), esbuild 打包 IIFE, TypeScript checkJs 类型检查 (tsconfig.json + types/*.d.ts), Tailwind CSS (预构建), 无框架无 CDN
 - **数据库**: SQLite (rusqlite + r2d2 连接池, WAL 模式, FTS5, SQLCipher)
 - **嵌入模型**: fastembed (ONNX Runtime, 5 模型可选: AllMiniLML6V2 384-dim / BgeSmallEnV1_5 384-dim / BgeSmallZhV1_5 512-dim / E5SmallV2 384-dim / BgeM3 1024-dim)
-- **本地 LLM**: mistral.rs v0.9.0 (GGUF 格式, GPU Metal/CUDA 可选)
 - **许可证**: Ed25519 签名验证
 
 ---
@@ -79,8 +80,6 @@ crates/models  →  crates/prompt  →  crates/core  →  crates/infra  →  cra
                                      ↑
                               crates/compact
                               (compaction)
-                              crates/context
-                              (system context)
 ```
 
 **依赖方向铁律**: `tauri-app → core → models`，严禁反向依赖。`crates/infra` 实现 `crates/core` 定义的端口 Trait。
@@ -134,7 +133,7 @@ opt-level = 3  # ML 依赖在 dev 模式以 opt-level 3 编译，避免调试时
 | `echomind-prompt` | Prompt 构建 | echomind-core (bpe) |
 | `echomind-compact` | 上下文压缩 | echomind-core (LLMProvider) |
 | `echomind-core` | 端口 Trait + 业务逻辑 | tokio, pulldown-cmark, tiktoken-rs, argon2, zeroize, ed25519-dalek |
-| `echomind-infra` | 适配器实现 | rusqlite, r2d2, fastembed, reqwest, mistral.rs (pro) |
+| `echomind-infra` | 适配器实现 | rusqlite, r2d2, fastembed, reqwest |
 | `echomind-tauri-app` | Tauri 组装层 | tauri, 所有内部 crate |
 | `license-issuer` | License 签发 CLI | ed25519-dalek, clap |
 
@@ -153,28 +152,18 @@ opt-level = 3  # ML 依赖在 dev 模式以 opt-level 3 编译，避免调试时
 | `ChatMessage` | 对话消息 | id, conversation_id, role, content, sources, created_at, reasoning |
 | `Conversation` | 会话 | id, workspace_id, title, created_at |
 | `LlmConfig` | LLM 配置 | api_key, base_url, model, proxy_url |
-| `LlmMode` | 推理模式 | Remote, Local |
 | `RetrievalResult` | 检索结果 | chunk, doc_id, doc_name, score, sequence |
 | `DocStatus` | 文档状态枚举 | Ready, Processing, Failed, Duplicate |
-| `SettingsPayload` | 设置载荷 | api_key, base_url, model, hybrid_search, rerank_enabled, hyde_enabled, agent_enabled, vlm_enabled, embedding_model, context_token_limit |
+| `SettingsPayload` | 设置载荷 | api_key, base_url, model, hybrid_search, rerank_enabled, hyde_enabled, vlm_enabled, embedding_model, context_token_limit |
 | `CacheStats` | 缓存统计 | exact_hits, semantic_hits, misses, total_queries, hit_rate |
 | `CacheSettingsPayload` | 缓存设置 | cache_enabled, cache_ttl_secs, cache_semantic_threshold, cache_privacy_mode |
-| `Proposition` | 原子命题 | id, chunk_id, content, sequence |
-| `SummaryNode` | RAPTOR 摘要树节点 | id, doc_id, level, content, children_ids |
 | `Entity` | 实体 | id, chunk_id, entity_text, entity_type |
 | `EntityRelation` | 实体关系（知识图谱边） | subject, relation_type, object, chunk_id, confidence |
 | `GraphTriple` | 关系三元组（批量导入用） | subject, relation_type, object, chunk_id, confidence |
 | `GraphStats` | 图统计 | entity_count, relation_count, relation_types |
 | `GraphPath` | 最短路径 | path (Vec<String>), hops (usize) |
 | `GraphCommunity` | 社区检测结果 | communities (HashMap<String, usize>), community_count |
-| `MemoryRecord` | 检索记忆记录 | query_type, method, hit_rate, avg_score, count |
-| `ModelInfo` | 本地模型信息 | filename, size_bytes, architecture, quantization |
-| `ModelDownloadProgressPayload` | 模型下载进度 | Downloading{current,total}, Done, Error |
-| `ModelLoadStatusPayload` | 模型加载状态 | loading, ready, error |
-| `AgentStepPayload` | Agent 步骤 | iteration, thought, action, observation, is_final |
 | `TokenUsage` | Token 用量 | prompt_tokens, completion_tokens, total_tokens |
-| `LlmSamplingParams` | 采样参数 | temperature, top_p, top_k, max_tokens, penalty |
-| `KvCacheStatus` | KV cache 状态 | enabled, cache_dir, file_count, total_size_bytes |
 | `SyncProgressPayload` | 同步进度 | Started, Syncing, Completed |
 | `SyncResult` | 同步结果 | added, updated, deleted, skipped, errors |
 
@@ -183,7 +172,6 @@ opt-level = 3  # ML 依赖在 dev 模式以 opt-level 3 编译，避免调试时
 | 枚举 | 变体 | 用途 |
 |---|---|---|
 | `DocStatus` | Ready, Processing, Failed, Duplicate | 文档状态 |
-| `LlmMode` | Remote, Local | LLM 推理模式 |
 | `CacheLevel` | Exact, Semantic, Retrieval | 三级缓存层级 |
 | `QueryType` | Factual, Analytical, Code, Conversational | 查询类型分类 |
 | `RetrievalMethod` | VectorOnly, Hybrid, HybridRerank, Proposition, Colbert | 检索方法 |
@@ -253,27 +241,24 @@ pub struct SegmentedPrompt {
 | `MultiVectorEmbedder` | `async fn embed_multi(&self, text: &str) -> Result<Vec<Vec<f32>>>` | ColBERT 多向量（Pro） |
 | `Storage` | CRUD for documents, chunks, embeddings, conversations, messages, settings; vector_search, keyword_search, pagination, zombie cleanup | 持久化 |
 | `LLMProvider` | `async fn chat_stream(...) -> Result<BoxStream<Result<String>>>` + `chat_stream_segmented` + `complete` | 流式 LLM |
-| `PromptCompressor` | `async fn compress(&self, text: &str, ratio: f32) -> Result<String>` + `compress_batch` | 上下文压缩 |
-| `ResponseCache` | 7 个方法：exact_get/semantic_get/retrieval_get/put/list/clear/stats | 语义缓存 |
 | `Retriever` | `async fn retrieve(&self, query: &str, top_k: usize) -> Result<Vec<RetrievalResult>>` | 检索 |
 | `Reranker` | `async fn rerank(&self, query, results) -> Result<Vec<RetrievalResult>>` | 重排序 |
 | `QueryRewriter` | `async fn rewrite(&self, query: &str) -> Result<String>` | 查询改写（HyDE） |
 | `PageRenderer` | `async fn render_page(&self, file_path, page_num, dpi) -> Result<Vec<u8>>` | PDF 页面渲染（Pro） |
 | `OcrEngine` | `async fn recognize(&self, image_bytes: &[u8]) -> Result<String>` | OCR（Pro） |
 | `VisionLanguageModel` | `async fn describe_image(&self, image_bytes, prompt) -> Result<String>` | VLM 图片理解（Pro） |
-| `DomainClassifier` | `async fn classify(&self, text: &str) -> Result<String>` | 领域分类 |
+| `WebSearchProvider` | `async fn search(&self, query: &str, num_results: usize) -> Result<Vec<WebSearchResult>>` | 网页搜索（REQ-RAG-036） |
+| `SymbolExtractor` | `async fn extract_symbols(&self, content: &str, language: &str) -> Result<Vec<CodeSymbol>>` | 代码符号提取（REQ-RAG-031） |
+| `CodeExecutor` | `async fn execute(&self, language: &str, code: &str, stdin: &str) -> Result<CodeExecutionResult>` | 代码执行沙箱（REQ-RAG-032） |
 
 **辅助类型**:
 - `NoVlm` — 零大小 `VisionLanguageModel` 实现，返回空字符串（VLM 禁用时使用）
-- `NoCompressor` — 空操作 `PromptCompressor` 实现
 
 ### 7.2 模块清单
 
 | 模块 | 文件 | 核心类型/函数 | 用途 |
 |---|---|---|---|
 | `chat` | `chat.rs` | `ChatEngine`, `ChatOutcome` | RAG 查询编排（检索→压缩→Prompt→流式） |
-| `agent` | `agent.rs` | `AgentEngine<R, L>`, `AgentStepInfo` | ReAct 代理 RAG 多步推理 |
-| `coordinator` | `coordinator.rs` | `CoordinatorEngine<R, L>`, `CoordinatorOutcome` | 多代理协调（Research→Synthesis→Implementation→Verification） |
 | `import` | `import.rs` | `ImportService<S>`, `ImportOutcome` | 文件导入 + 索引 + 嵌入管线 |
 | `sync` | `sync.rs` | `SyncService<S>` | 文件监听增量同步 |
 | `retriever` | `retriever.rs` | `VectorRetriever`, `build_contextual_text`, `expand_neighbors` | 向量检索 + 相邻扩展 |
@@ -287,23 +272,32 @@ pub struct SegmentedPrompt {
 | `encryption` | `encryption.rs` | `KeyDerivation`, `SecureString`, `PasswordStrengthChecker`, `BruteForceProtection` | Argon2id KDF + 密码强度 + 暴力破解防护 |
 | `privacy` | `privacy.rs` | `PiiRedactor`, `PrivacyManager`, `AuditLogger`, `InMemoryAuditLogger` | PII 检测/脱敏 + 审计日志 |
 | `security` | `security.rs` | `SecurityManager`, `ClipboardGuard`, `SecurityState`, `LockReason` | 安全状态机 + 自动锁屏 + 剪贴板清除 |
-| `auto_dream` | `auto_dream.rs` | `DreamEngine`, `DreamResult`, `DreamSuggestion` | 后台空闲整理引擎 |
-| `domain` | `domain.rs` | `EmbeddingDomainClassifier`, `DOMAINS`, `DOMAIN_KEYWORDS` | 16 领域质心分类 |
 | `export` | `export.rs` | `export_conversation_to_markdown()` | 对话导出 |
 | `errors` | `errors.rs` | `ERR_*` 常量, `prefix_error()`, `classify_llm_error()` | 统一错误前缀 |
-| `cache` | `cache.rs` | `normalize_query`, `query_hash`, `cosine_similarity`, `is_expired` | 缓存逻辑 |
-| `prompt_compressor` | `prompt_compressor.rs` | `RuleBasedCompressor`, `NoCompressor` | 规则压缩（停用词 + 信息密度评分） |
-| `progressive_injector` | `progressive_injector.rs` | `ProgressiveInjector`, `detect_insufficient_info` | 渐进式上下文注入 |
-| `speculative_rag` | `speculative_rag.rs` | `SpeculativeRagEngine<D, L>`, `text_similarity` | Speculative RAG（小模型草稿→大模型验证） |
-| `retrieval_memory` | `retrieval_memory.rs` | `RetrievalMemoryEngine`, `QueryType`, `RetrievalMethod`, `classify_query_type` | 自进化检索记忆 |
-| `proposition_splitter` | `proposition_splitter.rs` | `PropositionSplitter` | 原子命题分割 + 代词消解 |
-| `summary_tree` | `summary_tree.rs` | `SummaryTreeBuilder` | RAPTOR 多级摘要树 |
 | `entity_extractor` | `entity_extractor.rs` | `EntityExtractor`, `extract_relations()` | NER 纯规则抽取 + 实体关系抽取（8 种关系类型，零 LLM） |
 | `graph_retriever` | `graph_retriever.rs` | `GraphRetriever<S>`, `rrf_fuse_four_way()` | 知识图谱图遍历检索（BFS 最大 2 跳 + 四路 RRF 融合，REQ-RAG-027） |
 | `graph_analyzer` | `graph_analyzer.rs` | `GraphAnalyzer` | 图分析引擎（最短路径 BFS + 社区检测 Label Propagation + 度中心性，REQ-RAG-027 AC-32~40） |
-| `step_cache` | `step_cache.rs` | `StepCache` trait, `InMemoryStepCache`, `step_cache_key` | Agent/Coordinator 步骤缓存 |
+| `graph_export` | `graph_export.rs` | `export_graph_graphml()`, `export_graph_json_ld()` | 知识图谱导出（GraphML/JSON-LD，REQ-EXP-006） |
 | `audit` | `audit.rs` | `AuditEngine`, `AuditReport`, `ContradictionPair` | 文档一致性审计（Pro） |
 | `vlm_prompt` | `vlm_prompt.rs` | `VLM_TIERED_PROMPT` | VLM 分级图表理解提示词（Pro） |
+| `budget` | `budget.rs` | `BudgetTracker`, `BudgetRecord` | LLM API 预算追踪与速率限制（Q08） |
+| `code_executor` | `code_executor.rs` | `CodeExecutor` trait, `SandboxedExecutor` | 代码执行沙箱（REQ-RAG-032） |
+| `finish_reason` | `finish_reason.rs` | `FinishReason`, `classify_finish_reason` | LLM 停止原因分类 |
+| `idempotency` | `idempotency.rs` | `IdempotencyGuard` | 幂等性保护（Q03） |
+| `llm_api_error` | `llm_api_error.rs` | `LlmApiError`, `classify_llm_error` | LLM API 错误分类与重试策略 |
+| `llm_router` | `llm_router.rs` | `LlmRouter`, `RouteDecision` | LLM 路由（多模型 fallback） |
+| `memory_policy` | `memory_policy.rs` | `MemoryPolicy`, `MemoryTier` | 持久化记忆策略（REQ-RAG-033） |
+| `perf_metrics` | `perf_metrics.rs` | `PerfMetrics`, `LatencyBucket` | 性能指标收集 |
+| `portable_tool` | `portable_tool.rs` | `PortableTool`, `ToolRegistry` | 可移植工具注册 |
+| `quality_gate` | `quality_gate.rs` | `QualityGate`, `GateResult` | RAG 质量门控 |
+| `rag_eval` | `rag_eval.rs` | `RagEvaluator`, `RagEvalResult` | RAG 评估指标（REQ-RAG-045，RAGAS 风格） |
+| `rag_eval_dataset` | `rag_eval_dataset.rs` | `RagEvalDataset`, `EvalCase` | RAG 评估数据集 |
+| `tool_output` | `tool_output.rs` | `ToolOutput`, `ToolResult` | 工具执行输出标准化 |
+| `trace` | `trace.rs` | `TraceSpan`, `TraceCollector` | RAG 链路追踪（Cherry Studio 借鉴） |
+| `update_check` | `update_check.rs` | `UpdateChecker`, `UpdateInfo` | 应用更新检查（REQ-HELP-004） |
+| `web_search` | `web_search.rs` | `WebSearchAggregator` | 网页搜索聚合（REQ-RAG-036） |
+| `wiki_link_parser` | `wiki_link_parser.rs` | `WikiLinkParser`, `WikiLink` | Wiki 双向链接解析（REQ-ING-020） |
+| `mcp` | `mcp/` | `McpClient`, `McpRegistry`, `McpTransport` | MCP 协议适配器（REQ-ARCH-016） |
 
 ### 7.3 关键设计
 
@@ -313,24 +307,17 @@ pub struct SegmentedPrompt {
 pub struct ChatEngine<R: Retriever, L: LLMProvider> {
     retriever: R,
     llm: L,
-    top_k: usize,
-    compressor: Option<Arc<dyn PromptCompressor>>,  // 上下文压缩
-    compression_ratio: f32,
-    progressive_initial_count: Option<usize>,        // 渐进注入
+    gate_config: Option<GateConfig>,      // 质量门控配置（REQ-RAG-028）
+    gate_score: Option<GateScore>,        // 质量门控评分结果
+    web_search_provider: Option<Arc<dyn WebSearchProvider>>,  // 网页搜索（REQ-RAG-036）
 }
 ```
 
 `ChatEngine.chat()` 流程：
 1. 检索 top-k 片段
-2. （可选）压缩每个 chunk 内容
-3. （可选）渐进式注入初始子集
-4. 构建分段式 RAG prompt
-5. LLM 流式生成
-6. 返回 `ChatOutcome::Answered { answer_stream, sources, progressive_info }` 或 `NoContext`
-
-#### AgentEngine (`agent.rs`)
-
-ReAct 循环：LLM 生成 Thought + Action(s) → 并行工具执行 → Observation → 最多 5 轮 → 降级到标准 RAG。
+2. 构建分段式 RAG prompt
+3. LLM 流式生成
+4. 返回 `ChatOutcome::Answered { answer_stream, sources }` 或 `NoContext`
 
 #### SecurityManager (`security.rs`)
 
@@ -376,30 +363,22 @@ Unencrypted → EncryptedUnlocked →(超时/手动)→ Locked →(密码)→ En
 | 模块 | 文件 | 核心类型 | 用途 |
 |---|---|---|---|
 | `sqlite_storage` | `sqlite_storage.rs` | `SqliteStorage`, `IntegrityCheckResult` | SQLite 持久化（WAL + r2d2 池 + FTS5 + SQLCipher） |
-| `sqlite_cache` | `sqlite_cache.rs` | `SqliteCache` | 三级语义缓存 SQLite 实现 |
 | `local_embedder` | `local_embedder.rs` | `LocalEmbedder`, `DownloadEvent` | fastembed ONNX 嵌入（多模型 + 并行推理池） |
 | `local_reranker` | `local_reranker.rs` | `LocalReranker` | bge-reranker-base Cross-Encoder |
 | `openai_provider` | `openai_provider.rs` | `OpenAIProvider` | OpenAI 兼容 SSE 流式 LLM |
 | `hyde_rewriter` | `hyde_rewriter.rs` | `HydeRewriter` | HyDE 查询改写 |
 | `duckduckgo_provider` | `duckduckgo_provider.rs` | `DuckDuckGoProvider` | DuckDuckGo Instant Answer API 网页搜索（REQ-RAG-036） |
-| `model_manager` | `model_manager.rs` | `ModelManager`, `RecommendedModel` | GGUF 模型文件管理 |
 | `file_watcher` | `file_watcher.rs` | `FileWatcher`, `FileWatcherHandle` | 文件监听（notify + debouncer） |
 | `local_logger` | `local_logger.rs` | `LocalLogger` | tracing 结构化日志 + JSON Lines + 轮转 |
 | `perf` | `perf.rs` | `PerfReport`, `PerfRunner` | 性能基准框架 |
-| `local_llm` (Pro) | `local_llm.rs` | `LocalLlmEngine`, `Quantization`, `KernelMode` | mistral.rs 本地 LLM 推理 |
 | `hnsw_index` | `hnsw_index.rs` | `HnswIndex` | HNSW 近似最近邻索引（Free，二进制加密持久化 REQ-PERF-015） |
 | `ocrs_engine` (Pro) | `ocrs_engine.rs` | `OcrsEngine` | ocrs + rten 本地 OCR |
 | `pdfium_renderer` (Pro) | `pdfium_renderer.rs` | `PdfiumRenderer` | pdfium PDF 页面渲染 |
 | `openai_vision` (Pro) | `openai_vision.rs` | `OpenAIVisionProvider` | OpenAI 兼容 VLM API |
-| `colbert_embedder` (Pro) | `colbert_embedder.rs` | `ColbertEmbedder` | ColBERT 多向量嵌入 |
-| `onnx_compressor` (Pro) | `onnx_compressor.rs` | `OnnxCompressor` | ONNX 嵌入相似度压缩 |
-| `gguf_reader` (Pro) | `gguf_reader.rs` | `GgufFile` | GGUF 文件解析（mmap 零拷贝） |
-| `quant_blocks` (Pro) | `quant_blocks.rs` | `BlockQ4_0`, `BlockQ4K`, `BlockQ8_0`, `BlockQ8K` | 量化块结构 + 反量化 |
-| `gemv_kernel` (Pro) | `gemv_kernel.rs` | `gemv_dispatch`, `quantize_row_q8_0` | 自研 GEMV 内核 |
-| `weight_repack` (Pro) | `weight_repack.rs` | `repack_for_gemv`, `RepackedWeights` | CPU cache 友好权重重排 |
-| `layer_prefetch` (Pro) | `layer_prefetch.rs` | `LayerPrefetcher`, `SendPtr` | Layer 级流式预取（madvise） |
-| `memory_budget` (Pro) | `memory_budget.rs` | `MemoryBudget`, `get_system_memory` | RAM 预算管理（LRU 驱逐） |
-| `kv_cache` (Pro) | `kv_cache.rs` | `KvCacheSnapshot` | KV cache 序列化/反序列化 |
+| `disk_space` | `disk_space.rs` | `DiskSpaceInfo`, `check_disk_space` | 磁盘空间检查与清理（REQ-ERR-004） |
+| `mcp_transport` | `mcp_transport.rs` | `McpTransport`, `McpMessage` | MCP 协议传输层（REQ-ARCH-016） |
+| `symbol_engine` | `symbol_engine.rs` | `SymbolEngine`, `SymbolIndex` | 代码符号搜索引擎（REQ-RAG-031） |
+| `wasm_executor` | `wasm_executor.rs` | `WasmExecutor`, `WasmSandbox` | WASM 代码执行沙箱（REQ-RAG-032） |
 
 ### 8.2 SqliteStorage 关键设计
 
@@ -434,19 +413,7 @@ Unencrypted → EncryptedUnlocked →(超时/手动)→ Locked →(密码)→ En
 - **并行推理池**: N 个独立 ONNX 会话，`embed_batch` 分片并行
 - **池大小**: `available_parallelism().min(8)`
 - **懒加载**: `OnceCell` 首次调用触发模型下载
-
-### 8.5 LocalLlmEngine (Pro) 关键设计
-
-- **引擎**: mistral.rs v0.9.0 (纯 Rust)
-- **模型格式**: GGUF (Q4_K_M / Q5_K_M / Q8_0)
-- **内核模式**: `KernelMode::MistralRs` (默认) / `KernelMode::CustomGemv` (Phase 3 自研)
-- **GPU 加速**: `best_device()` (Metal/CUDA feature flags)
-- **PagedAttention**: `MemoryGpuConfig` + `PagedAttentionMetaBuilder`
-- **采样参数**: `LlmSamplingParams` (temperature, top_p, top_k, max_tokens, penalty)
-- **模型卸载**: `RwLock<Option<Arc<Model>>>`，支持运行时切换
-- **流取消**: `CancellationToken`
-- **预热**: `warm_up()` 后台加载
-- **KV Cache**: `save_kv_cache` / `restore_kv_cache` 跨会话复用
+- **ONNX 预热**: 首次 embed 调用时自动执行预热推理，消除冷启动延迟（`perf.rs` 的 `PerfRunner.with_warmup()`）
 
 ---
 
@@ -456,8 +423,24 @@ Unencrypted → EncryptedUnlocked →(超时/手动)→ Locked →(密码)→ En
 
 | 模块 | 文件 | 用途 |
 |---|---|---|
-| `lib.rs` | `lib.rs` | `run()` 入口 + 99 IPC 命令注册 + 菜单 + 窗口状态 |
-| `commands.rs` | `commands.rs` | 所有 IPC 命令实现 + `*_inner` 函数 + `LlmProvider` 枚举 |
+| `lib.rs` | `lib.rs` | `run()` 入口 + IPC 命令注册 + 菜单 + 窗口状态 |
+| `commands/` | `commands/mod.rs` | IPC 命令模块入口 + `LlmProvider` 枚举 |
+| `commands/chat` | `commands/chat.rs` | 对话相关 IPC 命令 |
+| `commands/conversation` | `commands/conversation.rs` | 会话管理 IPC 命令 |
+| `commands/document` | `commands/document.rs` | 文档管理 IPC 命令 |
+| `commands/import` | `commands/import.rs` | 导入相关 IPC 命令 |
+| `commands/settings` | `commands/settings.rs` | 设置相关 IPC 命令 |
+| `commands/security` | `commands/security.rs` | 安全相关 IPC 命令 |
+| `commands/graph` | `commands/graph.rs` | 知识图谱 IPC 命令 |
+| `commands/license` | `commands/license.rs` | 许可证 IPC 命令 |
+| `commands/audit` | `commands/audit.rs` | 审计 IPC 命令 |
+| `commands/performance` | `commands/performance.rs` | 性能优化 IPC 命令 |
+| `commands/sync` | `commands/sync.rs` | 文件同步 IPC 命令 |
+| `commands/mcp` | `commands/mcp.rs` | MCP 协议 IPC 命令 |
+| `commands/rag_eval` | `commands/rag_eval.rs` | RAG 评估 IPC 命令 |
+| `commands/trace` | `commands/trace.rs` | 链路追踪 IPC 命令 |
+| `commands/workspace` | `commands/workspace.rs` | 多知识库 IPC 命令 |
+| `commands/features/` | `commands/features/` | Pro 功能门控命令（code_exec/custom_model/stt/symbol/template/trace/web_search/wiki） |
 | `state.rs` | `state.rs` | `AppState` (Store 模式) + `DreamEngineState` |
 | `stores/` | `stores/mod.rs` | 5 个 Store 模块 |
 | `settings_registry.rs` | `settings_registry.rs` | 类型安全 Settings (21 枚举变体) |
@@ -473,13 +456,17 @@ pub struct AppState {
     pub model_store: ModelStore,
     pub document_store: DocumentStore,
     pub chat_store: ChatStore,
-    pub dream_engine: DreamEngineState,
-    pub cache: SqliteCache,
-    pub step_cache: Arc<InMemoryStepCache>,
-    pub compression_ratio: f32,
-    pub speculative_enabled: bool,
-    pub retrieval_memory_enabled: bool,
+    pub graph_retriever_enabled: bool,
+    pub quality_gate_enabled: bool,
+    pub web_search_enabled: bool,
+    pub contextual_retrieval_enabled: bool,
+    pub trace_store: Arc<RwLock<TraceStore>>,
+    pub security_posture: Arc<AtomicU8>,
+    pub shadow_screen_collector: Arc<ShadowScreenCollector>,
+    pub budget_tracker: Arc<BudgetTracker>,
+    pub llm_router: LlmRouter,
     pub _log_guard: Option<LocalLogger>,
+    pub mcp_registry: McpRegistry,
 }
 ```
 
@@ -489,7 +476,7 @@ pub struct AppState {
 |---|---|
 | `SecurityStore` | SecurityManager + ClipboardGuard |
 | `ConfigStore` | llm_config + is_pro + llm_mode |
-| `ModelStore` | embedder + reranker + local_llm + model_manager + page_renderer + ocr_engine |
+| `ModelStore` | embedder + reranker |
 | `DocumentStore` | 导入取消 + 文件监听 |
 | `ChatStore` | 会话中断令牌 + 审计取消 |
 
@@ -497,13 +484,12 @@ pub struct AppState {
 
 ```rust
 enum LlmProvider {
+    /// 远程 BYOK API（OpenAI 兼容）
     Remote(OpenAIProvider),
-    #[cfg(feature = "pro")]
-    Local(LocalLlmEngine),
 }
 ```
 
-实现 `LLMProvider` trait，根据 `llm_mode` 运行时切换。`chat_stream_segmented` 显式转发确保 Prompt Caching 优化。
+实现 `LLMProvider` trait。`chat_stream_segmented` 显式转发确保 Prompt Caching 优化。
 
 ### 9.4 窗口状态持久化
 
@@ -547,13 +533,13 @@ base64(payload)-base64(signature)
 
 ### 11.1 架构
 
-- **源码**: `ui/src/*.js` (59 个 ES Module，V3.1 新增 disk-space.js；S95 精简后模块合并)
-- **构建产物**: `ui/index.html` (单文件内联，由 `scripts/build-ui.mjs` esbuild 打包生成)
-- **类型检查**: `tsconfig.json` (checkJs: true) + `types/*.d.ts` (dom-ext / tauri / vendor 全局声明)，`npx tsc --noEmit` 检查
-- **样式**: `ui/styles/*.css` (tokens.css + typography.css + components.css)
+- **源码**: `ui/src/*.js` (56 个 ES Module, ~27,709 行)
+- **构建产物**: `ui/index.html` (单文件内联，由 `scripts/build-ui.mjs` esbuild 打包生成，~1,584 行 prod)
+- **类型检查**: `tsconfig.json` (checkJs: true) + `types/*.d.ts` (dom-ext / tauri / vendor 全局声明)，`npx tsc --noEmit` 检查（0 errors）
+- **样式**: `ui/styles/*.css` (tokens.css + typography.css + components.css, ~118 KB)
 - **i18n**: `ui/locales/{en,zh-CN,ja}.json`（V3.1 起三语言 100% key 对齐）
 - **无框架**: 原生 Vanilla JS，无 CDN 依赖
-- **第三方库**: Tailwind CSS (本地 JIT), marked.js, DOMPurify, highlight.js, KaTeX, Mermaid — 全部本地 vendored
+- **第三方库**: Tailwind CSS (本地预构建), marked.js, DOMPurify, highlight.js, KaTeX, Mermaid — 全部本地 vendored
 
 ### 11.2 模块清单
 
@@ -658,7 +644,7 @@ esbuild 自动解析 ES module import/export，tree-shake 无用导出，无需�
 | 格式检查 | `cargo fmt --check` |
 | 前端构建 | `node scripts/build-ui.mjs` (esbuild 打包 IIFE 生产) / `--dev` (外部引用开发) |
 | UI 类型检查 | `npx tsc --noEmit` (tsconfig.json + types/*.d.ts) |
-| UI 单元测试 | `cd e2e-tests && npm install && npm run test:unit` (Vitest, 389 tests) |
+| UI 单元测试 | `cd e2e-tests && npm install && npm run test:unit` (Vitest, 1821 tests, 92 files) |
 | E2E 桥接 | `cd e2e-tests && npm install && npm run test:bridge` (Playwright) |
 | E2E 真实 GUI | `cd e2e-tests && npm run test:e2e` (WebdriverIO, macOS 不支持) |
 | Chaos 测试 | `python3 tests/fixtures/generate_corpus.py && cargo test --workspace -- --nocapture --include-ignored` |
@@ -686,11 +672,12 @@ opt-level = 3  # ML 依赖以 opt-level 3 编译
 
 | 层级 | 工具 | 数量 | 覆盖范围 |
 |---|---|---|---|
-| Rust 单元测试 | `cargo test` | 718 (Free) / 1003 (Pro) | 全部 crate 模块 |
-| Rust 集成测试 | `crates/tauri-app/tests/integration.rs` | 125 | IPC 命令端到端 |
-| 前端单元测试 | Vitest | 419 (27 files) | `ui/src/*.js` 模块（Session 3 修复 3 失败） |
-| E2E 桥接测试 | Playwright + tauri-stub.js | 986 | 前端 + Mock 后端 |
+| Rust 单元+集成测试 | `cargo test` | 1351 (Free) | 全部 crate 模块 + IPC 集成 |
+| Rust 集成测试 | `crates/tauri-app/tests/integration.rs` | 65+ | IPC 命令端到端 + 跨模块协作 |
+| 前端单元测试 | Vitest | 1821 (92 files) | `ui/src/*.js` 模块 |
+| E2E 桥接测试 | Playwright + tauri-stub.js | 1355 | 前端 + Mock 后端 |
 | E2E 真实 GUI | WebdriverIO + tauri-driver | - | 全栈（macOS 不支持） |
+| axe-core 无障碍测试 | @axe-core/playwright | 多场景 | WCAG 2.0 AA 对比度/ARIA/标签/区域 |
 | 性能基准 | `#[ignore]` 测试 | 5 | TC-BENCH-001~005 |
 | Chaos 测试 | `tests/fixtures/` | - | 边界/异常场景 |
 
@@ -708,15 +695,51 @@ opt-level = 3  # ML 依赖以 opt-level 3 编译
 | TC-BENCH-004 | 缓存命中率 | L0/L1/L3 三级统计 |
 | TC-BENCH-005 | 总延迟 | Progressive Injection 注入统计 |
 
+### 13.4 代码质量指标
+
+#### cargo-mutants 变异测试
+
+| 指标 | 数值 | 说明 |
+|---|---|---|
+| 总变异体 | 204 | 基于当前源码生成 |
+| Caught (被测试发现) | 70 | 被现有测试捕获 |
+| Missed (未捕获) | 97 | 未被测试发现的变异 |
+| Timeout | 0 | 无超时 |
+| Unviable (不可编译) | 37 | 变异后无法编译 |
+| **Caught 率** | **34.3%** | 70/204 (排除 Unviable 后 70/167 = 41.9%) |
+
+> 注：Mutants 结果位于 `mutants.out/`，可通过 `cargo mutants --list` 生成。
+
+#### axe-core 无障碍测试
+
+- **配置**: `e2e-tests/axe.config.json` — WCAG 2.0 A + AA + 2.1 AA + best-practice
+- **阈值**: critical=0, serious=0, moderate≤2, minor≤5
+- **覆盖场景**: 浅色主题对比度 (TC-UI-LIGHT-005)、ARIA 角色/标签/区域、按钮名称、链接名称、图片 alt 文本
+- **测试文件**: `e2e-tests/tests/accessibility.spec.ts`, `e2e-tests/tests/keyboard-a11y.spec.ts`, `e2e-tests/tests/interaction-keyboard-a11y.spec.ts`
+
+#### 测试覆盖率汇总
+
+| 层级 | 数量 | 状态 |
+|---|---|---|
+| Rust Free | 1351 passed | ✅ 零失败 |
+| Rust 集成测试 | 65+ (含跨模块协作测试) | ✅ 零失败 |
+| 前端 Vitest | 1821 passed (92 files) | ✅ 零失败 |
+| E2E 桥接 | 1355 passed (10 skipped) | ✅ 零回归 |
+| axe-core 无障碍 | WCAG AA 合规 | ✅ 零 critical/serious |
+| Clippy | 零警告 | ✅ `-D warnings` 强制 |
+| cargo fmt | 通过 | ✅ CI 强制 |
+| TypeScript | 0 errors | ✅ checkJs 模式 |
+
 ---
 
 ## 14. 数据库 Schema
 
-### 14.1 表结构（23 张表）
+### 14.1 表结构（27 张表，含 2 个 FTS5 虚拟表）
 
 ```sql
--- 核心表（6 张）
+-- 核心表（7 张）
 CREATE TABLE documents (id, file_path, file_hash, status, status_reason, created_at, original_path, domain, summary, tags);
+CREATE TABLE workspaces (id, name, created_at, updated_at);  -- 多知识库（REQ-WS-001）
 CREATE TABLE chunks (id, doc_id, content, token_count, sequence);  -- ON DELETE CASCADE
 CREATE TABLE embeddings (chunk_id, vector BLOB);  -- ON DELETE CASCADE
 CREATE TABLE settings (key, value);
@@ -752,13 +775,12 @@ CREATE TABLE scratch_logs (id, date, content, created_at);  -- (Q01 Scratch-Prom
 CREATE TABLE idempotency_records (key, timestamp);  -- (Q03 幂等性)
 CREATE TABLE budget_records (id AUTOINCREMENT, principal, timestamp, input_tokens, output_tokens, cost_usd, model_name);  -- (Q08 预算追踪)
 
+-- 导入与书签（2 张）
+CREATE TABLE import_logs (id, file_path, status, created_at);  -- 导入历史记录
+CREATE TABLE conversation_bookmarks (conversation_id, created_at);  -- 会话书签
+
 -- 审计表（1 张）
 CREATE TABLE audit_log (id, action, details, pii_count, timestamp, prev_hash, curr_hash);  -- 哈希链 (REQ-SEC-015)
-
--- 缓存表（3 张，SqliteCache 独立表）
-CREATE TABLE exact_cache (query_hash, response, created_at);
-CREATE TABLE semantic_cache (query_hash, query_embedding BLOB, response, created_at);
-CREATE TABLE retrieval_cache (query_hash, query_embedding BLOB, results_json, created_at);
 ```
 
 ### 14.2 索引
@@ -785,7 +807,7 @@ PRAGMA temp_store = MEMORY;
 
 ## 15. IPC 命令清单
 
-### 15.1 命令分类 (187 个)
+### 15.1 命令分类 (~179 个唯一命令 = ~181 Debug / ~171 Release)
 
 | 分类 | 命令数 | 代表命令 |
 |---|---|---|
@@ -794,11 +816,8 @@ PRAGMA temp_store = MEMORY;
 | 消息分页 | 2 | get_conversations_paginated, get_messages_paginated |
 | 中断 | 2 | abort_chat, abort_import |
 | LLM 配置 | 3 | test_llm_connection, update_llm_config, get_settings |
-| 检索增强 | 5 | set_hybrid_search, set_rerank_enabled, set_hyde_enabled, set_agent_enabled, set_coordinator_mode |
+| 检索增强 | 2 | update_setting, get_setting |
 | 嵌入模型 | 2 | set_embedding_model, set_context_token_limit |
-| 本地 LLM (Pro) | 8 | list_local_models, get_recommended_models, download_model, delete_model, set_llm_mode, get_llm_mode, set_local_model, set_kernel_mode, get_kernel_mode |
-| KV Cache (Pro) | 5 | save_kv_cache, load_kv_cache, clear_kv_cache, get_kv_cache_status, set_kv_cache_enabled |
-| 采样参数 (Pro) | 3 | get_local_llm_device_kind, set_paged_attn, set_sampling_params |
 | 文档管理 | 4 | get_documents, delete_document, retry_index, reclassify_document |
 | 授权 | 4 | activate_pro, deactivate_pro, get_pro_status, audit_document |
 | 模型缓存 | 3 | init_embedder, get_model_cache_info, clear_model_cache |
@@ -810,11 +829,6 @@ PRAGMA temp_store = MEMORY;
 | 可观测性 | 4 | get_log_level, set_log_level, export_logs, export_diagnostics |
 | 数据目录 | 1 | open_data_dir |
 | Token 预算 | 2 | get_conversation_cost, set_token_budget |
-| 语义缓存 | 4 | get_cache_stats, clear_cache, set_cache_settings, get_cache_settings |
-| Prompt 压缩 | 2 | set_compression_ratio, get_compression_ratio |
-| 性能优化 | 4 | rebuild_bm25_index, rebuild_proposition_index, build_summary_tree, set_embedder_model (Pro) |
-| Auto Dream | 3 | trigger_dream, get_dream_suggestions, abort_dream |
-| 检索记忆 | 3 | set_retrieval_memory_enabled, get_retrieval_memory_stats, reset_retrieval_memory |
 | 知识图谱 | 7 | set_graph_retriever_enabled, get_graph_data, get_entity_relations, get_graph_stats, get_entity_types, get_shortest_path, get_communities, get_graph_layout |
 
 ### 15.2 Tauri 事件清单
@@ -827,8 +841,6 @@ PRAGMA temp_store = MEMORY;
 | `chat_error` | String | 流错误 |
 | `chat_sources` | Vec<RetrievalResult> | 引用来源 |
 | `chat_phase` | ChatPhasePayload | 进度阶段（preparing/retrieving/generating） |
-| `agent_step` | AgentStepPayload | Agent 步骤 |
-| `coordinator_phase` | CoordinatorPhaseInfo | Coordinator 阶段 |
 | `doc_status_changed` | DocStatusPayload | 文档状态变更 |
 | `embedding_progress` | EmbeddingProgressPayload | 嵌入进度 |
 | `import_progress` | ImportProgressPayload | 导入进度 |
@@ -848,27 +860,13 @@ PRAGMA temp_store = MEMORY;
 | `llm.base_url` | String | - | LLM API base URL |
 | `llm.model` | String | - | LLM 模型名 |
 | `llm.proxy_url` | String | - | HTTP/HTTPS 代理 |
-| `llm.mode` | String | "remote" | 推理模式 (remote/local) |
-| `llm.local_model` | String | - | 本地模型文件名 |
-| `llm.kernel_mode` | String | "mistral" | 推理内核模式 |
-| `llm.paged_attn` | String | "false" | PagedAttention 开关 |
-| `llm.block_size` | String | "128" | PagedAttention 块大小 |
-| `llm.gpu_memory_ctx` | String | - | GPU 显存上下文 |
-| `llm.sampling` | JSON | - | 采样参数 |
-| `llm.kv_cache_enabled` | String | "false" | KV cache 跨会话复用 |
 | `rag.hybrid_search` | String | "true" | 混合检索开关 |
 | `rag.rerank_enabled` | String | "false" | 重排序开关 |
 | `rag.hyde_enabled` | String | "false" | HyDE 查询改写开关 |
-| `rag.agent_enabled` | String | "false" | Agent 模式开关 |
-| `rag.coordinator_mode` | String | "false" | Coordinator 模式开关 |
-| `rag.progressive_injection` | String | "false" | 渐进式注入开关 |
-| `rag.speculative_enabled` | String | "false" | Speculative RAG 开关 |
-| `rag.retrieval_memory_enabled` | String | "false" | 检索记忆开关 |
 | `rag.graph_retriever_enabled` | String | "false" | 知识图谱图遍历检索开关 |
 | `rag.context_token_limit` | String | "8000" | 上下文 token 上限 |
 | `rag.embedding_model` | String | default | 嵌入模型名 |
 | `mm.vlm_enabled` | String | "false" | VLM 图片理解开关 |
-| `compression.ratio` | String | "1.0" | Prompt 压缩比 |
 | `cache.enabled` | String | "true" | 缓存开关 |
 | `cache.ttl_secs` | String | "3600" | 缓存 TTL |
 | `cache.semantic_threshold` | String | "0.92" | 语义相似度阈值 |
@@ -884,8 +882,6 @@ PRAGMA temp_store = MEMORY;
 | `rag.contextual_retrieval` | String | "true" | Contextual Retrieval 开关 (REQ-RAG-041) |
 | `rag.quality_gate_enabled` | String | "false" | RAG 质量门控开关 |
 | `rag.web_search_enabled` | String | "false" | 网页搜索集成开关 |
-| `rag.sub_agent_enabled` | String | "false" | 子代理舰队开关 |
-| `memory.enabled` | String | "false" | 持久化记忆系统开关 |
 | `security.posture` | String | "auto" | 安全态势分层 (Q05) |
 | `security.auto_lock_enabled` | String | "true" | 自动锁定开关 |
 | `security.lock_on_sleep` | String | "true" | 休眠时自动锁定 |
@@ -952,8 +948,8 @@ entry_hash = SHA256(prev_hash || entry_data)
 | 层 | Pro 模块 |
 |---|---|
 | Core | `audit` (文档一致性审计), `vlm_prompt` (VLM 分级提示词) |
-| Infra | `local_llm`, `hnsw_index`, `ocrs_engine`, `openai_vision`, `pdfium_renderer`, `colbert_embedder`, `onnx_compressor`, `gguf_reader`, `quant_blocks`, `gemv_kernel`, `weight_repack`, `layer_prefetch`, `memory_budget`, `kv_cache` |
-| Tauri-app | `get_local_llm_device_kind`, `set_paged_attn`, `set_sampling_params`, `set_kernel_mode`, `get_kernel_mode`, `save_kv_cache`, `load_kv_cache`, `clear_kv_cache`, `get_kv_cache_status`, `set_kv_cache_enabled`, `set_embedder_model` |
+| Infra | `ocrs_engine`, `openai_vision`, `pdfium_renderer` |
+| Tauri-app | `rebuild_symbol_index`, `execute_code_snippet` |
 
 ### 18.2 GPU Feature Flags
 
@@ -971,13 +967,8 @@ entry_hash = SHA256(prev_hash || entry_data)
 |---|---|---|
 | 文档数 | 50 个上限 | 无限制 |
 | PDF 导入 | 禁止 | 允许（含多模态 OCR + VLM） |
-| 本地 LLM | 禁止 | mistral.rs GGUF 推理 |
 | HNSW 索引 | 允许（Free 默认，REQ-PERF-013） | 允许 |
-| ColBERT 多向量 | 禁止 | 允许 |
-| ONNX 压缩 | 禁止 | 允许 |
 | 文档审计 | 禁止 | 允许 |
-| 自研 GEMV 内核 | 禁止 | 允许 |
-| KV Cache 跨会话 | 禁止 | 允许 |
 
 ---
 
@@ -1012,8 +1003,6 @@ chat IPC → chat_inner()
       → rrf_fuse() merge
     → threshold filter (score > 0.1)
     → chunk expansion: expand to adjacent chunks (±1)
-    → (可选) PromptCompressor.compress() each chunk
-    → (可选) ProgressiveInjector: inject initial subset
     → build_rag_prompt_segmented() → LLMProvider.chat_stream_segmented(SSE)
   → chat_sources event → frontend shows references
   → chat_phase "generating" event
@@ -1025,18 +1014,7 @@ chat IPC → chat_inner()
   → auto-extract title on first exchange (first 24 chars + …)
 ```
 
-### 19.3 Agent RAG (ReAct)
-
-```
-AgentEngine.chat() — ReAct loop:
-  → LLM generates Thought + Action(s) (or Final Answer)
-  → parallel tool execution (search_kb / list_documents) via join_all
-  → Observation(s) feed next round; max 5 iterations
-  → parse failure → degrade to standard RAG single retrieval
-  → each step emits agent_step event
-```
-
-### 19.4 Stream Cancellation
+### 19.3 Stream Cancellation
 
 ```
 abort_chat IPC → AppState.abort_chat()
@@ -1047,7 +1025,7 @@ abort_chat IPC → AppState.abort_chat()
   → clear_abort() cleans up token
 ```
 
-### 19.5 Security & Encryption
+### 19.4 Security & Encryption
 
 ```
 encrypt_database IPC → SecurityManager.encrypt_database(password)
@@ -1066,7 +1044,7 @@ Auto-lock (idle) → SecurityManager.check_auto_lock()
   → emit security_state_changed event → frontend lock overlay
 ```
 
-### 19.6 知识图谱（实体关系抽取 → 图遍历检索 → 可视化）
+### 19.5 知识图谱（实体关系抽取 → 图遍历检索 → 可视化）
 
 ```
 导入管线集成:
@@ -1098,24 +1076,6 @@ openGraphViewer → get_graph_data() → D3 forceSimulation
   → 布局切换（force/hierarchical/radial）
   → 路径分析（BFS 最短路径 + 高亮）
   → 社区检测（Label Propagation + 10 色着色）
-```
-
-### 19.7 Local LLM (Pro)
-
-```
-set_llm_mode IPC → AppState.set_llm_mode("local")
-  → persist to settings table (llm.mode = "local")
-  → Free user: reject with PRO_REQUIRED error
-  → tokio::spawn(engine.warm_up()) 后台预热模型
-
-chat IPC (LlmMode::Local) → chat_inner()
-  → load selected model filename from settings (llm.local_model)
-  → AppState.local_llm() → LocalLlmEngine::new(model_path)
-    → emit model_load_progress { status: "loading" }
-    → mistral.rs load GGUF (spawn_blocking, first call only)
-    → emit model_load_progress { status: "ready" | "error" }
-  → LocalLlmEngine.chat_stream() → BoxStream<Result<String>>
-    → same forward_stream() loop as OpenAIProvider
 ```
 
 ---
@@ -1155,14 +1115,10 @@ chat IPC (LlmMode::Local) → chat_inner()
 
 | 依赖 | 版本 | 用途 |
 |---|---|---|
-| `mistral.rs` | v0.9.0 | 本地 LLM 推理 |
 | `pdfium-render` | - | PDF 页面渲染 |
 | `ocrs` + `rten` | - | 本地 OCR |
 | `image` | - | 图像处理 |
 | `hnsw_rs` | - | HNSW 近似最近邻 |
-| `memmap2` | - | mmap GGUF |
-| `half` | - | f16 支持 |
-| `libc` | - | sysconf / madvise |
 
 ### 20.3 前端依赖
 
@@ -1263,6 +1219,8 @@ v1.1 是 v1.0.0 发布后的第一个功能迭代版本。通过 ROI 评估（�
 详见 `docs/architecture/V1.1_ATOMIC_PLAN.md`（S44-S48，含变更清单 + TDD 测试用例 + 验收标准 + 衔接提示词）。
 
 > **v1.1.0 发布状态**（2026-08-06）：✅ 全部 5 个功能 Implemented + ✅ 全量回归通过（Free 749 / Pro 1034 / E2E 999）+ ✅ Release build exit_code 0 + ✅ git tag v1.1.0。
+>
+> **v3.0.0+ 发布状态**（2026-08-27）：✅ Phase 1 大简化重构完成（R1+R2+R3），删除 ~37,862 行（-28.9%），context crate + 10 个本地 LLM 模块已移除。测试 1,326 passed (Free)，Vitest 1,821 passed，E2E 1,355 passed。
 
 ---
 
@@ -1323,6 +1281,8 @@ v1.1（11 项）→ v1.2 S50（12 项）→ v1.2 S51（13 项）：新增 "pptx"
 
 ## 附录 A: 关键文件索引
 
+> **注**: 以下文件列表适用于 v3.1.0，context crate 已在 v3.1.0 Phase 1 重构中移除。
+
 | 文件 | 行数 | 用途 |
 |---|---|---|
 | `crates/models/src/lib.rs` | ~1095 | 数据模型定义 |
@@ -1331,8 +1291,6 @@ v1.1（11 项）→ v1.2 S50（12 项）→ v1.2 S51（13 项）：新增 "pptx"
 | `crates/compact/src/lib.rs` | - | 上下文压缩 |
 | `crates/core/src/lib.rs` | - | 15 个端口 Trait 定义 |
 | `crates/core/src/chat.rs` | - | ChatEngine RAG 编排 |
-| `crates/core/src/agent.rs` | - | ReAct Agent |
-| `crates/core/src/coordinator.rs` | ~420 | 多代理协调 |
 | `crates/core/src/import.rs` | - | 导入管线 |
 | `crates/core/src/security.rs` | ~696 | 安全状态机 |
 | `crates/core/src/encryption.rs` | ~891 | Argon2id + 密码强度 |
@@ -1342,26 +1300,25 @@ v1.1（11 项）→ v1.2 S50（12 项）→ v1.2 S51（13 项）：新增 "pptx"
 | `crates/core/src/stream_parse.rs` | ~139 | SSE 流式解析 |
 | `crates/core/src/loader.rs` | ~278 | 文件加载器 |
 | `crates/core/src/splitter.rs` | ~179 | Token 窗口分块 |
+| `crates/core/src/web_search.rs` | - | 网页搜索聚合 |
+| `crates/core/src/trace.rs` | - | RAG 链路追踪 |
 | `crates/infra/src/sqlite_storage.rs` | ~2830 | SQLite 持久化 |
 | `crates/infra/src/openai_provider.rs` | ~458 | OpenAI 兼容 LLM |
 | `crates/infra/src/local_embedder.rs` | ~574 | fastembed ONNX 嵌入 |
-| `crates/infra/src/local_llm.rs` | ~991 | mistral.rs 本地 LLM (Pro) |
-| `crates/infra/src/model_manager.rs` | ~372 | GGUF 模型管理 |
-| `crates/tauri-app/src/lib.rs` | ~400 | Tauri 入口 + 99 命令注册 |
-| `crates/tauri-app/src/commands.rs` | ~5097 | IPC 命令实现 |
+| `crates/tauri-app/src/lib.rs` | ~623 | Tauri 入口 + 命令注册 |
+| `crates/tauri-app/src/commands/mod.rs` | - | IPC 命令模块入口 + LlmProvider 枚举 |
 | `crates/tauri-app/src/state.rs` | ~492 | AppState (Store 模式) |
 | `crates/license-issuer/src/lib.rs` | ~388 | License 签发库 |
 | `crates/license-issuer/src/main.rs` | ~81 | CLI 入口 |
 | `ui/src/main.js` | ~706 | 前端入口 |
 | `ui/src/state.js` | ~223 | 状态容器 |
-| `ui/src/chat.js` | ~594 | 对话流核心（拆分后） |
-| `ui/src/chat-render.js` | ~310 | 对话渲染（从 chat.js 拆出） |
-| `ui/src/settings-local-llm.js` | ~180 | 本地 LLM 设置（从 settings.js 拆出） |
+| `ui/src/chat.js` | ~594 | 对话流核心 |
+| `ui/src/chat-render.js` | ~310 | 对话渲染 |
 | `ui/src/ipc.js` | ~175 | IPC 封装 |
 | `scripts/build-ui.mjs` | ~223 | 前端构建脚本（esbuild 打包） |
 | `tsconfig.json` | ~33 | TypeScript checkJs 配置 |
 | `types/dom-ext.d.ts` | ~78 | DOM 类型扩展（Element/HTMLElement/Node/Event） |
-| `Cargo.toml` | ~28 | Workspace 配置 |
+| `Cargo.toml` | ~37 | Workspace 配置 |
 
 ---
 
@@ -1370,7 +1327,6 @@ v1.1（11 项）→ v1.2 S50（12 项）→ v1.2 S51（13 项）：新增 "pptx"
 | ADR | 标题 | 状态 |
 |---|---|---|
 | ADR-010 | 多模态 PDF 安全审查 | Accepted |
-| ADR-011 | 本地 LLM 引擎 (mistral.rs 选型) | Accepted (Phase 1-4 完成) |
 | ADR-012 | 极致性能优化架构 | Accepted |
 
 ---

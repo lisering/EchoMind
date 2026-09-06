@@ -1,0 +1,34 @@
+--- crates/models/src/lib.rs
++++ replace BatchResult::from_results -> Self with Default::default()
+@@ -3012,30 +3012,17 @@
+             success_count: count,
+             failed_count: 0,
+             failed_ids: Vec::new(),
+         }
+     }
+ 
+     /// 从结果列表构建 BatchResult。
+     pub fn from_results(results: Vec<(String, Result<(), String>)>) -> Self {
+-        let mut success_count = 0;
+-        let mut failed_ids = Vec::new();
+-        for (id, result) in results {
+-            match result {
+-                Ok(()) => success_count += 1,
+-                Err(_) => failed_ids.push(id),
+-            }
+-        }
+-        let failed_count = failed_ids.len();
+-        Self {
+-            success_count,
+-            failed_count,
+-            failed_ids,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ // 缓存设置新增到 SettingsPayload（REQ-PERF-001）。
+ //
+ // 通过 `get_settings` 返回给前端，前端据此渲染缓存设置 UI。
+ // 通过 `save_settings` 持久化到 settings 表。
+ // ============================================================

@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace StripPreview::empty -> Self with Default::default()
+@@ -2914,21 +2914,17 @@
+     pub total_messages: usize,
+     /// 估算的 token 节省量
+     pub estimated_tokens_saved: usize,
+ }
+ 
+ impl StripPreview {
+     /// 创建空预览。
+     pub fn empty(total_messages: usize) -> Self {
+-        Self {
+-            messages: Vec::new(),
+-            total_messages,
+-            estimated_tokens_saved: 0,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 对话书签（REQ-RAG-047）。
+ ///
+ /// 用户可将重要对话或特定消息标记为书签，支持自定义备注。
+ /// 持久化到 `conversation_bookmarks` 表。
+ ///

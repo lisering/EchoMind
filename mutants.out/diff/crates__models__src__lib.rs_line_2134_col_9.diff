@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace CodeExecutorConfig::safe_new -> Self with Default::default()
+@@ -2126,21 +2126,17 @@
+     /// 超时硬编码上限（秒），即使用户配置也不能超过此值。
+     pub const MAX_TIMEOUT_SECS: u64 = 30;
+ 
+     /// 内存硬编码上限（MB），即使用户配置也不能超过此值。
+     pub const MAX_MEMORY_MB: usize = 256;
+ 
+     /// 创建配置并应用安全限制（超时/内存不超过上限，网络永远禁用）。
+     pub fn safe_new(timeout_secs: u64, memory_limit_mb: usize, _allow_network: bool) -> Self {
+-        Self {
+-            timeout_secs: timeout_secs.min(Self::MAX_TIMEOUT_SECS),
+-            memory_limit_mb: memory_limit_mb.min(Self::MAX_MEMORY_MB),
+-            allow_network: false,
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ // ============================================================
+ // 对话记忆系统（REQ-RAG-032 持久化记忆系统增强）
+ // ============================================================
+ 
+ /// 记忆层级（借鉴 IfAI Wing/Hall/Room 空间隐喻）。

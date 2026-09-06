@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_paged_attn_block_size -> usize with 1
+@@ -1341,17 +1341,17 @@
+ 
+ /// serde 默认值辅助：返回 `true`（用于 `#[serde(default = "default_true")]`）。
+ pub fn default_true() -> bool {
+     true
+ }
+ 
+ /// 默认 PagedAttention 块大小（REQ-LLM-003 扩展）
+ pub fn default_paged_attn_block_size() -> usize {
+-    32
++    1 /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 默认 PagedAttention GPU 上下文 token 数（REQ-LLM-003 扩展）
+ pub fn default_paged_attn_gpu_memory() -> usize {
+     4096
+ }
+ 
+ /// 默认缓存启用开关（REQ-PERF-001）

@@ -1,0 +1,22 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalDataset::with_description -> Self with Default::default()
+@@ -3117,18 +3117,17 @@
+             name,
+             description: String::new(),
+             samples,
+         }
+     }
+ 
+     /// 设置数据集描述。
+     pub fn with_description(mut self, description: String) -> Self {
+-        self.description = description;
+-        self
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 获取样本数量。
+     pub fn len(&self) -> usize {
+         self.samples.len()
+     }
+ 
+     /// 是否为空数据集。

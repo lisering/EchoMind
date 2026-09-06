@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalMetric::with_details -> Self with Default::default()
+@@ -2708,21 +2708,17 @@
+             metric_type,
+             score: score.clamp(0.0, 1.0),
+             details: None,
+         }
+     }
+ 
+     /// 创建带详细信息的指标结果。
+     pub fn with_details(metric_type: RagMetricType, score: f32, details: String) -> Self {
+-        Self {
+-            metric_type,
+-            score: score.clamp(0.0, 1.0),
+-            details: Some(details),
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// RAG 评估报告（REQ-RAG-045）。
+ ///
+ /// 批量评估多个样本后的聚合报告，包含每个样本的指标和整体平均值。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct RagEvalReport {

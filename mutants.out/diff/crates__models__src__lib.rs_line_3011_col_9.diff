@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace BatchResult::all_success -> Self with Default::default()
+@@ -3003,21 +3003,17 @@
+     pub failed_count: usize,
+     /// 失败的文档 ID 列表
+     pub failed_ids: Vec<String>,
+ }
+ 
+ impl BatchResult {
+     /// 创建全成功的 BatchResult。
+     pub fn all_success(count: usize) -> Self {
+-        Self {
+-            success_count: count,
+-            failed_count: 0,
+-            failed_ids: Vec::new(),
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 从结果列表构建 BatchResult。
+     pub fn from_results(results: Vec<(String, Result<(), String>)>) -> Self {
+         let mut success_count = 0;
+         let mut failed_ids = Vec::new();
+         for (id, result) in results {
+             match result {

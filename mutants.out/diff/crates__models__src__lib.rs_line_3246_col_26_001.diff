@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace / with * in EmbedMetricScores::from_metrics_avg
+@@ -3238,17 +3238,17 @@
+                 0.0
+             },
+             mrr: if mrr_count > 0 {
+                 mrr_sum / mrr_count as f32
+             } else {
+                 0.0
+             },
+             ndcg: if ndcg_count > 0 {
+-                ndcg_sum / ndcg_count as f32
++                ndcg_sum * /* ~ changed by cargo-mutants ~ */ ndcg_count as f32
+             } else {
+                 0.0
+             },
+         }
+     }
+ }
+ 
+ /// 单个嵌入模型的对比评估结果（REQ-VEC-018）。

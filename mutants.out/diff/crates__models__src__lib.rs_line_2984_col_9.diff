@@ -1,0 +1,22 @@
+--- crates/models/src/lib.rs
++++ replace ConversationBookmark::with_note -> Self with Default::default()
+@@ -2976,18 +2976,17 @@
+             created_at: chrono::Utc::now().timestamp(),
+             message_id: Some(message_id),
+             summary: Some(summary),
+         }
+     }
+ 
+     /// 设置备注。
+     pub fn with_note(mut self, note: String) -> Self {
+-        self.note = Some(note);
+-        self
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 是否为消息级书签。
+     pub fn is_message_bookmark(&self) -> bool {
+         self.message_id.is_some()
+     }
+ }
+ 

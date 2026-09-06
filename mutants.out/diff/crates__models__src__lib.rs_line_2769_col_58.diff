@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace / with % in RagEvalReport::from_samples
+@@ -2761,17 +2761,17 @@
+             }
+         }
+ 
+         // 计算平均值
+         let aggregate: Vec<RagEvalMetric> = type_scores
+             .iter()
+             .filter_map(|(name, scores)| {
+                 RagMetricType::parse_str(name).map(|mt| {
+-                    let avg = scores.iter().sum::<f32>() / scores.len() as f32;
++                    let avg = scores.iter().sum::<f32>() % /* ~ changed by cargo-mutants ~ */ scores.len() as f32;
+                     RagEvalMetric::new(mt, avg)
+                 })
+             })
+             .collect();
+ 
+         Self {
+             sample_count,
+             aggregate_metrics: aggregate,

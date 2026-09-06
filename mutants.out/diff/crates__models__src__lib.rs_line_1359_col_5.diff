@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_cache_enabled -> bool with false
+@@ -1351,17 +1351,17 @@
+ 
+ /// 默认 PagedAttention GPU 上下文 token 数（REQ-LLM-003 扩展）
+ pub fn default_paged_attn_gpu_memory() -> usize {
+     4096
+ }
+ 
+ /// 默认缓存启用开关（REQ-PERF-001）
+ pub fn default_cache_enabled() -> bool {
+-    true
++    false /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 默认缓存存活时间（秒，REQ-PERF-001）
+ pub fn default_cache_ttl() -> u64 {
+     86400
+ }
+ 
+ /// 默认语义匹配阈值（REQ-PERF-001）

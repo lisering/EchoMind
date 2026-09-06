@@ -1,0 +1,24 @@
+--- crates/models/src/lib.rs
++++ replace CompactionKind::as_str -> &'static str with "xyzzy"
+@@ -1232,20 +1232,17 @@
+     Background,
+     /// 同步压缩（Hard 阈值触发）
+     Synchronous,
+ }
+ 
+ impl CompactionKind {
+     /// 转为字符串标识。
+     pub fn as_str(&self) -> &'static str {
+-        match self {
+-            Self::Background => "background",
+-            Self::Synchronous => "synchronous",
+-        }
++        "xyzzy" /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// 对话历史压缩信息（压缩后推送 `chat_context_compacted` 事件，
+ /// 前端显示「部分历史已压缩为摘要」提示，替代旧的纯截断策略）。
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct CompactionInfo {
+     /// 被压缩的消息数量（这些消息被 LLM 生成的摘要替代）

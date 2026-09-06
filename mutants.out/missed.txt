@@ -1,0 +1,97 @@
+crates/models/src/lib.rs:12:5: replace default_workspace_id -> String with String::new()
+crates/models/src/lib.rs:12:5: replace default_workspace_id -> String with "xyzzy".into()
+crates/models/src/lib.rs:497:9: replace SymbolKind::as_str -> &'static str with "xyzzy"
+crates/models/src/lib.rs:514:13: delete match arm "function" in SymbolKind::parse_str
+crates/models/src/lib.rs:515:13: delete match arm "method" in SymbolKind::parse_str
+crates/models/src/lib.rs:516:13: delete match arm "class" in SymbolKind::parse_str
+crates/models/src/lib.rs:517:13: delete match arm "struct" in SymbolKind::parse_str
+crates/models/src/lib.rs:518:13: delete match arm "interface" in SymbolKind::parse_str
+crates/models/src/lib.rs:519:13: delete match arm "enum" in SymbolKind::parse_str
+crates/models/src/lib.rs:520:13: delete match arm "constant" in SymbolKind::parse_str
+crates/models/src/lib.rs:521:13: delete match arm "module" in SymbolKind::parse_str
+crates/models/src/lib.rs:1240:9: replace CompactionKind::as_str -> &'static str with "xyzzy"
+crates/models/src/lib.rs:1311:9: replace TokenBudgetConfig::compaction_trigger -> usize with 0
+crates/models/src/lib.rs:1311:9: replace TokenBudgetConfig::compaction_trigger -> usize with 1
+crates/models/src/lib.rs:1311:33: replace * with + in TokenBudgetConfig::compaction_trigger
+crates/models/src/lib.rs:1311:33: replace * with / in TokenBudgetConfig::compaction_trigger
+crates/models/src/lib.rs:1316:9: replace TokenBudgetConfig::recent_budget -> usize with 0
+crates/models/src/lib.rs:1316:9: replace TokenBudgetConfig::recent_budget -> usize with 1
+crates/models/src/lib.rs:1316:33: replace * with + in TokenBudgetConfig::recent_budget
+crates/models/src/lib.rs:1316:33: replace * with / in TokenBudgetConfig::recent_budget
+crates/models/src/lib.rs:1321:9: replace TokenBudgetConfig::should_compact -> bool with true
+crates/models/src/lib.rs:1321:9: replace TokenBudgetConfig::should_compact -> bool with false
+crates/models/src/lib.rs:1321:55: replace && with || in TokenBudgetConfig::should_compact
+crates/models/src/lib.rs:1321:23: replace >= with < in TokenBudgetConfig::should_compact
+crates/models/src/lib.rs:1321:71: replace >= with < in TokenBudgetConfig::should_compact
+crates/models/src/lib.rs:1326:5: replace default_compaction_threshold -> f32 with 0.0
+crates/models/src/lib.rs:1326:5: replace default_compaction_threshold -> f32 with 1.0
+crates/models/src/lib.rs:1326:5: replace default_compaction_threshold -> f32 with -1.0
+crates/models/src/lib.rs:1330:5: replace default_recent_keep_ratio -> f32 with 0.0
+crates/models/src/lib.rs:1330:5: replace default_recent_keep_ratio -> f32 with 1.0
+crates/models/src/lib.rs:1330:5: replace default_recent_keep_ratio -> f32 with -1.0
+crates/models/src/lib.rs:1334:5: replace default_min_messages_to_compact -> usize with 0
+crates/models/src/lib.rs:1334:5: replace default_min_messages_to_compact -> usize with 1
+crates/models/src/lib.rs:1339:5: replace default_context_token_limit -> usize with 0
+crates/models/src/lib.rs:1339:5: replace default_context_token_limit -> usize with 1
+crates/models/src/lib.rs:1344:5: replace default_true -> bool with false
+crates/models/src/lib.rs:1612:9: replace ConversationTreeNode::is_root -> bool with true
+crates/models/src/lib.rs:1617:9: replace ConversationTreeNode::is_leaf -> bool with true
+crates/models/src/lib.rs:1655:9: replace ConversationTree::children_of -> Vec<&ConversationTreeNode> with vec![]
+crates/models/src/lib.rs:1657:56: replace == with != in ConversationTree::children_of
+crates/models/src/lib.rs:1915:5: replace default_status_str -> String with String::new()
+crates/models/src/lib.rs:1915:5: replace default_status_str -> String with "xyzzy".into()
+crates/models/src/lib.rs:2134:9: replace CodeExecutorConfig::safe_new -> Self with Default::default()
+crates/models/src/lib.rs:2166:9: replace MemoryTier::parse_str -> Option<Self> with None
+crates/models/src/lib.rs:2167:13: delete match arm "wing" in MemoryTier::parse_str
+crates/models/src/lib.rs:2168:13: delete match arm "hall" in MemoryTier::parse_str
+crates/models/src/lib.rs:2169:13: delete match arm "room" in MemoryTier::parse_str
+crates/models/src/lib.rs:2176:9: replace MemoryTier::as_str -> &'static str with "xyzzy"
+crates/models/src/lib.rs:2201:9: replace MemorySource::parse_str -> Option<Self> with None
+crates/models/src/lib.rs:2202:13: delete match arm "user_statement" in MemorySource::parse_str
+crates/models/src/lib.rs:2203:13: delete match arm "assistant_answer" in MemorySource::parse_str
+crates/models/src/lib.rs:2204:13: delete match arm "auto_extracted" in MemorySource::parse_str
+crates/models/src/lib.rs:2205:13: delete match arm "user_pinned" in MemorySource::parse_str
+crates/models/src/lib.rs:2212:9: replace MemorySource::as_str -> &'static str with "xyzzy"
+crates/models/src/lib.rs:2565:9: replace RagMetricType::as_str -> &'static str with "xyzzy"
+crates/models/src/lib.rs:2580:9: replace RagMetricType::parse_str -> Option<Self> with None
+crates/models/src/lib.rs:2581:13: delete match arm "faithfulness" in RagMetricType::parse_str
+crates/models/src/lib.rs:2582:13: delete match arm "answer_relevance" in RagMetricType::parse_str
+crates/models/src/lib.rs:2583:13: delete match arm "context_precision" in RagMetricType::parse_str
+crates/models/src/lib.rs:2584:13: delete match arm "context_recall" in RagMetricType::parse_str
+crates/models/src/lib.rs:2585:13: delete match arm "hit_rate" in RagMetricType::parse_str
+crates/models/src/lib.rs:2586:13: delete match arm "mrr" in RagMetricType::parse_str
+crates/models/src/lib.rs:2587:13: delete match arm "ndcg" in RagMetricType::parse_str
+crates/models/src/lib.rs:2588:13: delete match arm "context_similarity" in RagMetricType::parse_str
+crates/models/src/lib.rs:2589:13: delete match arm "keyword_overlap" in RagMetricType::parse_str
+crates/models/src/lib.rs:2596:9: replace RagMetricType::needs_llm -> bool with true
+crates/models/src/lib.rs:2596:9: replace RagMetricType::needs_llm -> bool with false
+crates/models/src/lib.rs:2607:9: replace RagMetricType::needs_ground_truth -> bool with true
+crates/models/src/lib.rs:2607:9: replace RagMetricType::needs_ground_truth -> bool with false
+crates/models/src/lib.rs:2612:9: replace RagMetricType::needs_embedding -> bool with true
+crates/models/src/lib.rs:2612:9: replace RagMetricType::needs_embedding -> bool with false
+crates/models/src/lib.rs:2750:25: replace == with != in RagEvalReport::from_samples
+crates/models/src/lib.rs:2769:58: replace / with % in RagEvalReport::from_samples
+crates/models/src/lib.rs:2769:58: replace / with * in RagEvalReport::from_samples
+crates/models/src/lib.rs:2784:9: replace RagEvalReport::get_metric -> Option<f32> with None
+crates/models/src/lib.rs:2784:9: replace RagEvalReport::get_metric -> Option<f32> with Some(0.0)
+crates/models/src/lib.rs:2784:9: replace RagEvalReport::get_metric -> Option<f32> with Some(1.0)
+crates/models/src/lib.rs:2784:9: replace RagEvalReport::get_metric -> Option<f32> with Some(-1.0)
+crates/models/src/lib.rs:2786:38: replace == with != in RagEvalReport::get_metric
+crates/models/src/lib.rs:2990:9: replace ConversationBookmark::is_message_bookmark -> bool with true
+crates/models/src/lib.rs:2990:9: replace ConversationBookmark::is_message_bookmark -> bool with false
+crates/models/src/lib.rs:3024:41: replace += with -= in BatchResult::from_results
+crates/models/src/lib.rs:3024:41: replace += with *= in BatchResult::from_results
+crates/models/src/lib.rs:3131:9: replace RagEvalDataset::len -> usize with 0
+crates/models/src/lib.rs:3131:9: replace RagEvalDataset::len -> usize with 1
+crates/models/src/lib.rs:3136:9: replace RagEvalDataset::is_empty -> bool with true
+crates/models/src/lib.rs:3136:9: replace RagEvalDataset::is_empty -> bool with false
+crates/models/src/lib.rs:3141:9: replace RagEvalDataset::to_json -> Result<String, serde_json::Error> with Ok(String::new())
+crates/models/src/lib.rs:3141:9: replace RagEvalDataset::to_json -> Result<String, serde_json::Error> with Ok("xyzzy".into())
+crates/models/src/lib.rs:3175:5: replace default_top_k -> usize with 0
+crates/models/src/lib.rs:3175:5: replace default_top_k -> usize with 1
+crates/models/src/lib.rs:3290:9: replace McpTransportType::as_str -> &'static str with "xyzzy"
+crates/models/src/lib.rs:3298:9: replace McpTransportType::parse_str -> Option<Self> with None
+crates/models/src/lib.rs:3298:9: replace McpTransportType::parse_str -> Option<Self> with Some(Default::default())
+crates/models/src/lib.rs:3299:13: delete match arm "stdio" in McpTransportType::parse_str
+crates/models/src/lib.rs:3300:13: delete match arm "sse" in McpTransportType::parse_str
+crates/models/src/lib.rs:3457:9: replace McpConnectionStatus::as_str -> &'static str with "xyzzy"

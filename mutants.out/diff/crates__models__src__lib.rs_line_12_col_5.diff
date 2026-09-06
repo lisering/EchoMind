@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_workspace_id -> String with String::new()
+@@ -4,17 +4,17 @@
+ //! 本 crate 只定义纯数据结构，不含任何业务逻辑与外部服务依赖。
+ 
+ use serde::{Deserialize, Serialize};
+ 
+ /// 默认工作空间 ID（REQ-WS-001）。
+ ///
+ /// 旧文档和未指定工作空间的文档自动归属此工作空间。
+ fn default_workspace_id() -> String {
+-    "default".to_string()
++    String::new() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 文档索引状态机：`Pending → Processing → Indexed / Failed(reason)`
+ /// 对应 REQ-VEC-004 的生命周期定义。
+ #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+ pub enum DocStatus {
+     /// 待索引
+     Pending,

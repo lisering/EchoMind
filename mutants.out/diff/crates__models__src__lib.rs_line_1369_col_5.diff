@@ -1,0 +1,21 @@
+--- crates/models/src/lib.rs
++++ replace default_cache_semantic_threshold -> f32 with 0.0
+@@ -1361,17 +1361,17 @@
+ 
+ /// 默认缓存存活时间（秒，REQ-PERF-001）
+ pub fn default_cache_ttl() -> u64 {
+     86400
+ }
+ 
+ /// 默认语义匹配阈值（REQ-PERF-001）
+ pub fn default_cache_semantic_threshold() -> f32 {
+-    0.92
++    0.0 /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// 对话成本统计（累计 token 用量追踪）。
+ ///
+ /// 由 `get_conversation_cost` IPC 命令返回，前端据此展示累计 token 消耗与预算使用进度条。
+ /// 数据来源于 settings 表中的累计计数器（`usage.total_prompt_tokens` 等），
+ /// 每次 `chat_done` 事件携带 `TokenUsage` 后由后端自动累加。
+ #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

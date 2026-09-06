@@ -1,0 +1,25 @@
+--- crates/models/src/lib.rs
++++ replace RagEvalReport::empty -> Self with Default::default()
+@@ -2732,21 +2732,17 @@
+     pub aggregate_metrics: Vec<RagEvalMetric>,
+     /// 每个样本的指标列表
+     pub per_sample_metrics: Vec<Vec<RagEvalMetric>>,
+ }
+ 
+ impl RagEvalReport {
+     /// 创建空报告。
+     pub fn empty() -> Self {
+-        Self {
+-            sample_count: 0,
+-            aggregate_metrics: Vec::new(),
+-            per_sample_metrics: Vec::new(),
+-        }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// 从多个样本的指标列表构建报告（自动计算平均值）。
+     pub fn from_samples(per_sample: Vec<Vec<RagEvalMetric>>) -> Self {
+         let sample_count = per_sample.len();
+         if sample_count == 0 {
+             return Self::empty();
+         }
